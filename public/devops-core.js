@@ -66,7 +66,7 @@ export function cleanDevops(d,db={}){
       // Set by the agent inbox: when it last wrote this card (see inbox-core.js).
       inbox:typeof c.inbox?.at==='string'?{at:c.inbox.at}:undefined};
   });
-  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,namesCustomized:!!d.namesCustomized};
+  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
 }
 
 export function newCard(dv,over={}){

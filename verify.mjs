@@ -175,8 +175,14 @@ try{
   assert(Date.parse(moved.start)-Date.parse(item.start)===7*864e5,'dragging a milestone in month view reschedules it by days');
   for(const [k,vk,cls] of [['2',50,'.cal'],['3',51,'.lst'],['1',49,'.g']]){await key(k,vk,0,k);assert(await js(`!!document.querySelector('${cls}')`),`view ${k} renders`)}
   // Styled tooltip: hover shows it after a short delay, inside the viewport, linked by aria-describedby.
-  [x,y]=await center('[data-tl=today]');await call('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,buttons:0});await sleep(600);
-  assert(await js(`(()=>{const t=document.querySelector('.tip.on'),b=document.querySelector('[data-tl=today]'),r=t?.getBoundingClientRect();return !!t&&t.textContent.startsWith('Jump to today')&&b.getAttribute('aria-describedby')===t.id&&r.left>=0&&r.right<=innerWidth})()`),'hovering shows the styled tooltip, linked with aria-describedby');
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:500,buttons:0});
+  [x,y]=await center('[data-tl=today]');await call('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,buttons:0});
+  let tooltipReady=false;
+  for(let attempt=0;attempt<20&&!tooltipReady;attempt++){
+    await sleep(100);
+    tooltipReady=await js(`(()=>{const t=document.querySelector('.tip.on'),b=document.querySelector('[data-tl=today]'),r=t?.getBoundingClientRect();return !!t&&t.textContent.startsWith('Jump to today')&&b.getAttribute('aria-describedby')===t.id&&r.left>=0&&r.right<=innerWidth})()`);
+  }
+  assert(tooltipReady,'hovering shows the styled tooltip, linked with aria-describedby');
   await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:5,y:500,buttons:0});await sleep(50);
   // Single selects: the native select is replaced by a styled listbox but keeps its value and change event.
   assert(await js(`(()=>{const s=document.querySelector('[data-set-select=groupBy]'),b=s?.nextElementSibling;return s.classList.contains('sel-native')&&b?.classList.contains('sel-btn')&&b.textContent.includes('By project')&&b.getAttribute('aria-haspopup')==='listbox'})()`),'selects render as a styled trigger with the native select kept');
@@ -213,7 +219,14 @@ try{
   assert(await js(`/needs testing/i.test(document.querySelector('[data-dcol=uat] .dcol-h .nm').dataset.tip)&&/completed/i.test(document.querySelector('[data-dcol=done] .dcol-h .nm').dataset.tip)`),'column headers explain UAT (needs testing) and Done (completed)');
   assert(await js(`document.querySelector('[data-dcol=done]').getBoundingClientRect().right<=innerWidth&&document.documentElement.scrollWidth<=innerWidth`),'the five working columns fit a 1440px window and the page never scrolls sideways');
   assert(await js(`(()=>{const m=document.querySelector('[data-dcol=must]').getBoundingClientRect(),n=document.querySelector('[data-dcol=nice]').getBoundingClientRect(),b=document.querySelector('.dv-board').getBoundingClientRect();return m.left===n.left&&m.bottom<=n.top&&Math.abs(b.width-document.querySelector('.dv-scroll').clientWidth)<2})()`),'the two backlogs share one slot (Must Have above Nice to Have) and the board fills the width');
-  for(const t of ['QA Card A','QA Card B']){await key('n',78,0,'n');await call('Input.insertText',{text:t});await key('Escape',27);await key('Escape',27);}
+  for(const t of ['QA Card A','QA Card B']){
+    await key('n',78,0,'n');
+    let focused=false;for(let attempt=0;attempt<20&&!focused;attempt++){focused=await js(`document.activeElement?.id==='dc-title'`);if(!focused)await sleep(50)}
+    assert(focused,'new card title receives focus');
+    await call('Input.insertText',{text:t});await key('Escape',27);
+    for(let attempt=0;attempt<20&&await js(`!!document.querySelector('dialog.card-modal[open]')`);attempt++)await sleep(50);
+    assert(!(await js(`!!document.querySelector('dialog.card-modal[open]')`)),'card modal closes after saving');
+  }
   db=await saved();
   const A=db.devops.cards.find(c=>c.title==='QA Card A'),B=db.devops.cards.find(c=>c.title==='QA Card B');
   assert(A&&B&&A.column==='requests'&&B.number===A.number+1&&await js(`document.querySelectorAll('[data-dcol=requests] .dcard').length`)===2,'N adds cards to Requests / Sprinted with increasing numbers');
