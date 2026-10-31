@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -166,4 +166,35 @@ test('canvas: pinning saves what is drawn; agents without a position go under th
 test('canvas: positions are kept through cleaning, clamped, and dropped when not numbers',()=>{
   const af=cleanAgentflow({agents:[{id:'a',name:'A',x:10.4,y:-3},{id:'b',name:'B',x:'5',y:1},{id:'c',name:'C',x:9e9,y:0}]},base());
   assert.deepEqual(af.agents.map(a=>[a.x,a.y]),[[10,-3],[undefined,undefined],[1e5,0]]);
+});
+
+test('delegating a card: replaces the set of agents, and changes nothing when an agent is full',()=>{
+  const db=base();db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{name:'A'}),b=newAgent(db.agentflow,{name:'B'});
+  assert.equal(delegate(db.agentflow,'k1',[a.id,b.id]),null);
+  assert.deepEqual([a.cards,b.cards],[['k1'],['k1']]);
+  assert.equal(delegate(db.agentflow,'k1',[b.id]),null);
+  assert.deepEqual([a.cards,b.cards],[[],['k1']]);
+  a.cards=Array.from({length:LIMITS.refs},(_,i)=>'sh.x'+i);
+  assert.equal(delegate(db.agentflow,'k3',[a.id,b.id]),a,'a full agent is reported');
+  assert.deepEqual(b.cards,['k1'],'and nothing else changed');
+});
+
+test('the work queue: open delegated cards, active work first, then due date and number',()=>{
+  const db=base();
+  db.devops.cards.push({id:'k4',number:4,title:'New, due soon',column:'requests',due:'2026-11-01'},{id:'k5',number:5,title:'New, no date',column:'requests',due:''},
+    {id:'k6',number:6,title:'Waiting',column:'uat',due:'2026-10-01'},{id:'k7',number:7,title:'Later',column:'nice',due:''});
+  db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{cards:['k7','k6','k5','k4','k2','k1'],projects:['p1']});
+  assert.deepEqual(workQueue(db,a.id).map(c=>c.number),[1,4,5,6,7],'Done (#2) is left out; project cards are not queued');
+  assert.deepEqual(workQueue(db,'ghost'),[]);
+});
+
+test('the DevOps board filters cards by delegated agent',async()=>{
+  const {filterCards}=await import('../public/devops-core.js');
+  const db=base();db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{cards:['k3']}),b=newAgent(db.agentflow,{cards:['k1']});
+  assert.deepEqual(filterCards(db,{agents:[a.id]}).map(c=>c.id),['k3']);
+  assert.deepEqual(filterCards(db,{agents:[a.id,b.id]}).map(c=>c.id),['k1','k3']);
+  assert.equal(filterCards(db,{agents:[]}).length,3);
 });

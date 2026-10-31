@@ -115,6 +115,22 @@ export function removeAgent(af,agentId){
 }
 export const workflowsFor=(af,agentId)=>af.workflows.filter(w=>w.steps.some(s=>s.agent===agentId));
 export const agentsForCard=(af,cardId)=>(af?.agents||[]).filter(a=>a.cards.includes(cardId));
+// Delegate a card to exactly these agents (the link lives on each agent's cards list). Checks room
+// first: returns the first agent that is full and changes nothing, else null.
+export function delegate(af,cardId,agentIds){
+  const want=new Set(agentIds),now=new Date().toISOString();
+  const over=af.agents.find(a=>want.has(a.id)&&!a.cards.includes(cardId)&&a.cards.length>=LIMITS.refs);if(over)return over;
+  for(const a of af.agents){const has=a.cards.includes(cardId);if(has!==want.has(a.id)){a.cards=has?a.cards.filter(x=>x!==cardId):[...a.cards,cardId];a.updated=now}}
+  return null;
+}
+// An agent's work queue: open cards delegated to it. Work in progress first, then new requests,
+// then cards waiting on others (Blocked, UAT), then the backlogs; within each, soonest due, then #number.
+export const QUEUE_ORDER=['doing','requests','blocked','uat','must','nice'];
+export function workQueue(db,agentId){
+  const a=agentOf(db.agentflow,agentId);if(!a)return [];
+  const ids=new Set(a.cards),rank=c=>{const i=QUEUE_ORDER.indexOf(c.column);return i<0?QUEUE_ORDER.length:i};
+  return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done').sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
+}
 
 // ---------- canvas layout ----------
 // Card size on the canvas and the spacing of the automatic tree.

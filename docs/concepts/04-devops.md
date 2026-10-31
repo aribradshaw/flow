@@ -4,7 +4,7 @@ The DevOps board is a card board. Each card has an auto-incrementing `#number`.
 
 Columns, in order: `requests` (Requests / Sprinted, where new cards land), `doing`, `blocked`, `uat`, `done`, then the two backlogs `must` (Must Have) and `nice` (Nice to Have).
 
-A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item.
+A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item. Responses also list `agents`, the AgentFlow agents the card is delegated to (see AgentFlow: delegation and the work queue).
 
 ## Gates
 

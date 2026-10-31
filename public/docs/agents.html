@@ -5,8 +5,8 @@
 </head><body>
 <header class="top"><a class="brand" href="index.html">Flygon Flow <span>docs</span></a><span class="ver">Version 0.10.38 (2026-10-29)</span><span class="sp"></span>
 <input id="q" type="search" placeholder="Search docs and operations" aria-label="Search docs and operations" autocomplete="off"><a class="txt" href="../llms.txt">llms.txt</a><a class="txt" href="../">Open app</a></header>
-<div class="wrap"><nav class="side" aria-label="Docs"><a href="index.html">Overview</a><h2>Concepts</h2><a href="index.html#environments">Environments</a><a href="index.html#mindmap-charts">MindMap (charts)</a><a href="index.html#timeline">Timeline</a><a href="index.html#devops-board-and-gates">DevOps board and gates</a><a href="index.html#agent-inbox">Agent inbox</a><a href="index.html#sync">Sync</a><a href="index.html#sharing">Sharing</a><a href="index.html#versioning">Versioning</a><a href="index.html#agentflow">AgentFlow</a><h2>API</h2><a href="envs.html">Environments <span class="n">2</span></a><a href="charts.html">MindMap charts <span class="n">1</span></a><a href="nodes.html">Nodes <span class="n">5</span></a><a href="edges.html">Edges <span class="n">3</span></a><a href="projects.html">Projects <span class="n">3</span></a><a href="timeline.html">Timeline <span class="n">4</span></a><a href="cards.html">DevOps cards <span class="n">5</span></a><a href="labels.html">Labels <span class="n">2</span></a><a href="agents.html" aria-current="page">AgentFlow agents <span class="n">5</span></a><a href="workflows.html">AgentFlow workflows <span class="n">4</span></a><a href="search.html">Search <span class="n">1</span></a></nav>
-<main id="main"><ol id="results" hidden></ol><div id="content"><h1>AgentFlow agents</h1><ul class="toc"><li><a href="#op-agents-list"><code>agents.list</code></a> List AgentFlow agents</li><li><a href="#op-agents-get"><code>agents.get</code></a> Get an AgentFlow agent and its brief</li><li><a href="#op-agents-create"><code>agents.create</code></a> Create an AgentFlow agent</li><li><a href="#op-agents-update"><code>agents.update</code></a> Update an AgentFlow agent</li><li><a href="#op-agents-delete"><code>agents.delete</code></a> Delete an AgentFlow agent</li></ul><section class="op" id="op-agents-list"><h3><code>agents.list</code> <span class="scope s-read">read</span></h3>
+<div class="wrap"><nav class="side" aria-label="Docs"><a href="index.html">Overview</a><h2>Concepts</h2><a href="index.html#environments">Environments</a><a href="index.html#mindmap-charts">MindMap (charts)</a><a href="index.html#timeline">Timeline</a><a href="index.html#devops-board-and-gates">DevOps board and gates</a><a href="index.html#agent-inbox">Agent inbox</a><a href="index.html#sync">Sync</a><a href="index.html#sharing">Sharing</a><a href="index.html#versioning">Versioning</a><a href="index.html#agentflow">AgentFlow</a><h2>API</h2><a href="envs.html">Environments <span class="n">2</span></a><a href="charts.html">MindMap charts <span class="n">1</span></a><a href="nodes.html">Nodes <span class="n">5</span></a><a href="edges.html">Edges <span class="n">3</span></a><a href="projects.html">Projects <span class="n">3</span></a><a href="timeline.html">Timeline <span class="n">4</span></a><a href="cards.html">DevOps cards <span class="n">5</span></a><a href="labels.html">Labels <span class="n">2</span></a><a href="agents.html" aria-current="page">AgentFlow agents <span class="n">6</span></a><a href="workflows.html">AgentFlow workflows <span class="n">4</span></a><a href="search.html">Search <span class="n">1</span></a></nav>
+<main id="main"><ol id="results" hidden></ol><div id="content"><h1>AgentFlow agents</h1><ul class="toc"><li><a href="#op-agents-list"><code>agents.list</code></a> List AgentFlow agents</li><li><a href="#op-agents-get"><code>agents.get</code></a> Get an AgentFlow agent and its brief</li><li><a href="#op-agents-work"><code>agents.work</code></a> Get an agent&#39;s work queue</li><li><a href="#op-agents-create"><code>agents.create</code></a> Create an AgentFlow agent</li><li><a href="#op-agents-update"><code>agents.update</code></a> Update an AgentFlow agent</li><li><a href="#op-agents-delete"><code>agents.delete</code></a> Delete an AgentFlow agent</li></ul><section class="op" id="op-agents-list"><h3><code>agents.list</code> <span class="scope s-read">read</span></h3>
 <p class="route"><span class="m m-get">GET</span> <code>/api/v1/envs/{env}/agents</code> <span class="muted">MCP <code>agents_list</code></span></p>
 <p class="summary">List AgentFlow agents</p><p>Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order. Filters: status, kind, project (id or name) and q (name, role, purpose, inputs, outputs, tools).</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>status</code></td><td>enum</td><td></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>kind</code></td><td>enum</td><td></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>project</code></td><td>string</td><td></td><td>Project id or name.</td></tr><tr><td><code>q</code></td><td>string</td><td></td><td></td></tr><tr><td><code>limit</code></td><td>integer</td><td></td><td>Page size (1-200, default 50).</td></tr><tr><td><code>cursor</code></td><td>string</td><td></td><td>nextCursor from the previous page.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
@@ -413,6 +413,401 @@
     &quot;updated&quot;: &quot;2026-10-29T17:00:00.000Z&quot;
   },
   &quot;brief&quot;: &quot;# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n&quot;
+}</code></pre></section>
+<section class="op" id="op-agents-work"><h3><code>agents.work</code> <span class="scope s-read">read</span></h3>
+<p class="route"><span class="m m-get">GET</span> <code>/api/v1/envs/{env}/agents/{agent}/work</code> <span class="muted">MCP <code>agents_work</code></span></p>
+<p class="summary">Get an agent&#39;s work queue</p><p>What a runner needs to work as this agent: its <code>brief</code> and its queue, the open DevOps cards delegated to it (cards.update agents, or the card&#39;s Delegated to picker). Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. <code>columns</code> narrows the queue, e.g. [&quot;doing&quot;,&quot;requests&quot;] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>agent</code></td><td>string</td><td><span class="req">required</span></td><td>Agent id or name.</td></tr><tr><td><code>columns</code></td><td>string[]</td><td></td><td>Only these columns (comma-separated in a query string).</td></tr><tr><td><code>limit</code></td><td>integer</td><td></td><td>Page size (1-200, default 50).</td></tr><tr><td><code>cursor</code></td><td>string</td><td></td><td>nextCursor from the previous page.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;env&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;pattern&quot;: &quot;^[A-Za-z0-9-]{1,64}$&quot;,
+      &quot;description&quot;: &quot;Environment id (see envs.list).&quot;
+    },
+    &quot;agent&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 200,
+      &quot;description&quot;: &quot;Agent id or name.&quot;
+    },
+    &quot;columns&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;enum&quot;: [
+          &quot;requests&quot;,
+          &quot;doing&quot;,
+          &quot;blocked&quot;,
+          &quot;uat&quot;,
+          &quot;done&quot;,
+          &quot;must&quot;,
+          &quot;nice&quot;
+        ],
+        &quot;description&quot;: &quot;Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have).&quot;
+      },
+      &quot;description&quot;: &quot;Only these columns (comma-separated in a query string).&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 200,
+      &quot;default&quot;: 50,
+      &quot;description&quot;: &quot;Page size (1-200, default 50).&quot;
+    },
+    &quot;cursor&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 200,
+      &quot;description&quot;: &quot;nextCursor from the previous page.&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;env&quot;,
+    &quot;agent&quot;
+  ],
+  &quot;additionalProperties&quot;: false
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>brief</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>items[].due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;rev&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;description&quot;: &quot;Workspace revision after (or at) this call.&quot;
+    },
+    &quot;agent&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;id&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;name&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;kind&quot;: {
+          &quot;enum&quot;: [
+            &quot;agent&quot;,
+            &quot;human&quot;,
+            &quot;team&quot;
+          ]
+        },
+        &quot;title&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;status&quot;: {
+          &quot;enum&quot;: [
+            &quot;draft&quot;,
+            &quot;active&quot;,
+            &quot;paused&quot;,
+            &quot;retired&quot;
+          ]
+        },
+        &quot;reportsTo&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;supervisor&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;purpose&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;instructions&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;runtime&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;model&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;inputs&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;outputs&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;tools&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;projects&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;cards&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;items&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;created&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;updated&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;x&quot;: {
+          &quot;type&quot;: &quot;number&quot;
+        },
+        &quot;y&quot;: {
+          &quot;type&quot;: &quot;number&quot;
+        }
+      },
+      &quot;required&quot;: [
+        &quot;id&quot;,
+        &quot;name&quot;,
+        &quot;kind&quot;,
+        &quot;status&quot;,
+        &quot;reportsTo&quot;,
+        &quot;supervisor&quot;,
+        &quot;inputs&quot;,
+        &quot;outputs&quot;,
+        &quot;tools&quot;,
+        &quot;projects&quot;,
+        &quot;cards&quot;,
+        &quot;items&quot;
+      ]
+    },
+    &quot;brief&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;items&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+          &quot;id&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;number&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;title&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;description&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;column&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;project&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;labels&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          },
+          &quot;points&quot;: {
+            &quot;type&quot;: [
+              &quot;number&quot;,
+              &quot;null&quot;
+            ]
+          },
+          &quot;due&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;assignees&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;properties&quot;: {
+                &quot;node&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;role&quot;: {
+                  &quot;enum&quot;: [
+                    &quot;developer&quot;,
+                    &quot;tester&quot;,
+                    &quot;requester&quot;
+                  ]
+                }
+              },
+              &quot;required&quot;: [
+                &quot;node&quot;,
+                &quot;role&quot;
+              ]
+            }
+          },
+          &quot;checklist&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;properties&quot;: {
+                &quot;id&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;text&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;done&quot;: {
+                  &quot;type&quot;: &quot;boolean&quot;
+                }
+              },
+              &quot;required&quot;: [
+                &quot;id&quot;,
+                &quot;text&quot;,
+                &quot;done&quot;
+              ]
+            }
+          },
+          &quot;links&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;properties&quot;: {
+                &quot;id&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;kind&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;url&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                }
+              },
+              &quot;required&quot;: [
+                &quot;id&quot;,
+                &quot;kind&quot;,
+                &quot;url&quot;
+              ]
+            }
+          },
+          &quot;item&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;created&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;updated&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;moved&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;agents&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            },
+            &quot;description&quot;: &quot;AgentFlow agents the card is delegated to (ids).&quot;
+          }
+        },
+        &quot;required&quot;: [
+          &quot;id&quot;,
+          &quot;number&quot;,
+          &quot;title&quot;,
+          &quot;column&quot;,
+          &quot;labels&quot;,
+          &quot;assignees&quot;,
+          &quot;checklist&quot;,
+          &quot;links&quot;
+        ]
+      }
+    },
+    &quot;nextCursor&quot;: {
+      &quot;type&quot;: [
+        &quot;string&quot;,
+        &quot;null&quot;
+      ]
+    }
+  },
+  &quot;required&quot;: [
+    &quot;rev&quot;,
+    &quot;agent&quot;,
+    &quot;brief&quot;,
+    &quot;items&quot;,
+    &quot;nextCursor&quot;
+  ]
+}</code></pre></details><h4>Example: What should the researcher do now?</h4><pre><code>curl -sS -X GET &quot;$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=%5B%22doing%22%2C%22requests%22%5D&quot; \
+  -H &quot;Authorization: Bearer $FLOW_API_KEY&quot;</code></pre><pre class="out"><code>{
+  &quot;rev&quot;: 42,
+  &quot;agent&quot;: {
+    &quot;id&quot;: &quot;a1&quot;,
+    &quot;name&quot;: &quot;Researcher&quot;,
+    &quot;kind&quot;: &quot;agent&quot;,
+    &quot;title&quot;: &quot;Research&quot;,
+    &quot;status&quot;: &quot;active&quot;,
+    &quot;reportsTo&quot;: &quot;a0&quot;,
+    &quot;supervisor&quot;: &quot;cleo&quot;,
+    &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
+    &quot;instructions&quot;: &quot;&quot;,
+    &quot;runtime&quot;: &quot;T3&quot;,
+    &quot;model&quot;: &quot;&quot;,
+    &quot;inputs&quot;: [
+      &quot;A card that needs research&quot;
+    ],
+    &quot;outputs&quot;: [
+      &quot;Research notes on the card&quot;
+    ],
+    &quot;tools&quot;: [
+      &quot;Web search&quot;
+    ],
+    &quot;projects&quot;: [
+      &quot;p1&quot;
+    ],
+    &quot;cards&quot;: [
+      &quot;k1&quot;
+    ],
+    &quot;items&quot;: [
+      &quot;i1&quot;
+    ],
+    &quot;created&quot;: &quot;2026-10-29T17:00:00.000Z&quot;,
+    &quot;updated&quot;: &quot;2026-10-29T17:00:00.000Z&quot;
+  },
+  &quot;brief&quot;: &quot;# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;k1&quot;,
+      &quot;number&quot;: 12,
+      &quot;title&quot;: &quot;Build sign-up form&quot;,
+      &quot;description&quot;: &quot;&quot;,
+      &quot;column&quot;: &quot;requests&quot;,
+      &quot;project&quot;: &quot;p1&quot;,
+      &quot;labels&quot;: [
+        &quot;l-high&quot;
+      ],
+      &quot;points&quot;: 3,
+      &quot;due&quot;: &quot;2026-11-15&quot;,
+      &quot;assignees&quot;: [
+        {
+          &quot;node&quot;: &quot;cleo&quot;,
+          &quot;role&quot;: &quot;developer&quot;
+        }
+      ],
+      &quot;checklist&quot;: [
+        {
+          &quot;id&quot;: &quot;x1&quot;,
+          &quot;text&quot;: &quot;Email field&quot;,
+          &quot;done&quot;: false
+        }
+      ],
+      &quot;links&quot;: [],
+      &quot;item&quot;: &quot;i1&quot;,
+      &quot;created&quot;: &quot;2026-10-29T17:00:00.000Z&quot;,
+      &quot;updated&quot;: &quot;2026-10-29T17:00:00.000Z&quot;,
+      &quot;moved&quot;: &quot;2026-10-29T17:00:00.000Z&quot;,
+      &quot;agents&quot;: [
+        &quot;a1&quot;
+      ]
+    }
+  ],
+  &quot;nextCursor&quot;: null
 }</code></pre></section>
 <section class="op" id="op-agents-create"><h3><code>agents.create</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/agents</code> <span class="muted">MCP <code>agents_create</code></span></p>
@@ -1070,6 +1465,6 @@
   &quot;rev&quot;: 58,
   &quot;deleted&quot;: &quot;a1&quot;
 }</code></pre></section></div></main></div>
-<script type="application/json" id="search-index">[{"t":"Environments","k":"Concept","u":"index.html#environments","s":"An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it."},{"t":"MindMap (charts)","k":"Concept","u":"index.html#mindmap-charts","s":"The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**."},{"t":"Timeline","k":"Concept","u":"index.html#timeline","s":"The timeline holds dated **items** that are tagged with **projects**."},{"t":"DevOps board and gates","k":"Concept","u":"index.html#devops-board-and-gates","s":"The DevOps board is a card board."},{"t":"Agent inbox","k":"Concept","u":"index.html#agent-inbox","s":"Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox."},{"t":"Sync","k":"Concept","u":"index.html#sync","s":"The server is the source of truth."},{"t":"Sharing","k":"Concept","u":"index.html#sharing","s":"The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment."},{"t":"Versioning","k":"Concept","u":"index.html#versioning","s":"Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md)."},{"t":"AgentFlow","k":"Concept","u":"index.html#agentflow","s":"AgentFlow is an org chart for agentic work."},{"t":"envs.list","k":"GET /api/v1/envs","u":"envs.html#op-envs-list","s":"List environments"},{"t":"envs.get","k":"GET /api/v1/envs/{env}","u":"envs.html#op-envs-get","s":"Get an environment"},{"t":"charts.list","k":"GET /api/v1/envs/{env}/charts","u":"charts.html#op-charts-list","s":"List charts"},{"t":"nodes.list","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-list","s":"List nodes"},{"t":"nodes.get","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-get","s":"Get a node"},{"t":"nodes.create","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-create","s":"Create a node"},{"t":"nodes.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-update","s":"Update a node"},{"t":"nodes.move","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move","u":"nodes.html#op-nodes-move","s":"Move a node"},{"t":"edges.list","k":"GET /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-list","s":"List edges"},{"t":"edges.create","k":"POST /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-create","s":"Create an edge"},{"t":"edges.delete","k":"DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-delete","s":"Delete an edge"},{"t":"projects.list","k":"GET /api/v1/envs/{env}/projects","u":"projects.html#op-projects-list","s":"List projects"},{"t":"projects.create","k":"POST /api/v1/envs/{env}/projects","u":"projects.html#op-projects-create","s":"Create a project"},{"t":"projects.update","k":"PATCH /api/v1/envs/{env}/projects/{project}","u":"projects.html#op-projects-update","s":"Update a project"},{"t":"items.list","k":"GET /api/v1/envs/{env}/items","u":"timeline.html#op-items-list","s":"List timeline items"},{"t":"items.get","k":"GET /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-get","s":"Get a timeline item"},{"t":"items.create","k":"POST /api/v1/envs/{env}/items","u":"timeline.html#op-items-create","s":"Create a timeline item"},{"t":"items.update","k":"PATCH /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-update","s":"Update a timeline item"},{"t":"cards.list","k":"GET /api/v1/envs/{env}/cards","u":"cards.html#op-cards-list","s":"List DevOps cards"},{"t":"cards.get","k":"GET /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-get","s":"Get a DevOps card"},{"t":"cards.create","k":"POST /api/v1/envs/{env}/cards","u":"cards.html#op-cards-create","s":"Create a DevOps card"},{"t":"cards.update","k":"PATCH /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-update","s":"Update a DevOps card"},{"t":"cards.move","k":"POST /api/v1/envs/{env}/cards/{card}/move","u":"cards.html#op-cards-move","s":"Move a DevOps card"},{"t":"labels.list","k":"GET /api/v1/envs/{env}/labels","u":"labels.html#op-labels-list","s":"List DevOps labels"},{"t":"labels.create","k":"POST /api/v1/envs/{env}/labels","u":"labels.html#op-labels-create","s":"Create a DevOps label"},{"t":"agents.list","k":"GET /api/v1/envs/{env}/agents","u":"agents.html#op-agents-list","s":"List AgentFlow agents"},{"t":"agents.get","k":"GET /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-get","s":"Get an AgentFlow agent and its brief"},{"t":"agents.create","k":"POST /api/v1/envs/{env}/agents","u":"agents.html#op-agents-create","s":"Create an AgentFlow agent"},{"t":"agents.update","k":"PATCH /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-update","s":"Update an AgentFlow agent"},{"t":"agents.delete","k":"DELETE /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-delete","s":"Delete an AgentFlow agent"},{"t":"workflows.list","k":"GET /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-list","s":"List AgentFlow workflows"},{"t":"workflows.get","k":"GET /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-get","s":"Get an AgentFlow workflow and its brief"},{"t":"workflows.create","k":"POST /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-create","s":"Create an AgentFlow workflow"},{"t":"workflows.update","k":"PATCH /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-update","s":"Update an AgentFlow workflow"},{"t":"search","k":"GET /api/v1/envs/{env}/search","u":"search.html#op-search","s":"Search an environment"}]</script>
+<script type="application/json" id="search-index">[{"t":"Environments","k":"Concept","u":"index.html#environments","s":"An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it."},{"t":"MindMap (charts)","k":"Concept","u":"index.html#mindmap-charts","s":"The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**."},{"t":"Timeline","k":"Concept","u":"index.html#timeline","s":"The timeline holds dated **items** that are tagged with **projects**."},{"t":"DevOps board and gates","k":"Concept","u":"index.html#devops-board-and-gates","s":"The DevOps board is a card board."},{"t":"Agent inbox","k":"Concept","u":"index.html#agent-inbox","s":"Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox."},{"t":"Sync","k":"Concept","u":"index.html#sync","s":"The server is the source of truth."},{"t":"Sharing","k":"Concept","u":"index.html#sharing","s":"The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment."},{"t":"Versioning","k":"Concept","u":"index.html#versioning","s":"Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md)."},{"t":"AgentFlow","k":"Concept","u":"index.html#agentflow","s":"AgentFlow is an org chart for agentic work."},{"t":"envs.list","k":"GET /api/v1/envs","u":"envs.html#op-envs-list","s":"List environments"},{"t":"envs.get","k":"GET /api/v1/envs/{env}","u":"envs.html#op-envs-get","s":"Get an environment"},{"t":"charts.list","k":"GET /api/v1/envs/{env}/charts","u":"charts.html#op-charts-list","s":"List charts"},{"t":"nodes.list","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-list","s":"List nodes"},{"t":"nodes.get","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-get","s":"Get a node"},{"t":"nodes.create","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-create","s":"Create a node"},{"t":"nodes.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-update","s":"Update a node"},{"t":"nodes.move","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move","u":"nodes.html#op-nodes-move","s":"Move a node"},{"t":"edges.list","k":"GET /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-list","s":"List edges"},{"t":"edges.create","k":"POST /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-create","s":"Create an edge"},{"t":"edges.delete","k":"DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-delete","s":"Delete an edge"},{"t":"projects.list","k":"GET /api/v1/envs/{env}/projects","u":"projects.html#op-projects-list","s":"List projects"},{"t":"projects.create","k":"POST /api/v1/envs/{env}/projects","u":"projects.html#op-projects-create","s":"Create a project"},{"t":"projects.update","k":"PATCH /api/v1/envs/{env}/projects/{project}","u":"projects.html#op-projects-update","s":"Update a project"},{"t":"items.list","k":"GET /api/v1/envs/{env}/items","u":"timeline.html#op-items-list","s":"List timeline items"},{"t":"items.get","k":"GET /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-get","s":"Get a timeline item"},{"t":"items.create","k":"POST /api/v1/envs/{env}/items","u":"timeline.html#op-items-create","s":"Create a timeline item"},{"t":"items.update","k":"PATCH /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-update","s":"Update a timeline item"},{"t":"cards.list","k":"GET /api/v1/envs/{env}/cards","u":"cards.html#op-cards-list","s":"List DevOps cards"},{"t":"cards.get","k":"GET /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-get","s":"Get a DevOps card"},{"t":"cards.create","k":"POST /api/v1/envs/{env}/cards","u":"cards.html#op-cards-create","s":"Create a DevOps card"},{"t":"cards.update","k":"PATCH /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-update","s":"Update a DevOps card"},{"t":"cards.move","k":"POST /api/v1/envs/{env}/cards/{card}/move","u":"cards.html#op-cards-move","s":"Move a DevOps card"},{"t":"labels.list","k":"GET /api/v1/envs/{env}/labels","u":"labels.html#op-labels-list","s":"List DevOps labels"},{"t":"labels.create","k":"POST /api/v1/envs/{env}/labels","u":"labels.html#op-labels-create","s":"Create a DevOps label"},{"t":"agents.list","k":"GET /api/v1/envs/{env}/agents","u":"agents.html#op-agents-list","s":"List AgentFlow agents"},{"t":"agents.get","k":"GET /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-get","s":"Get an AgentFlow agent and its brief"},{"t":"agents.work","k":"GET /api/v1/envs/{env}/agents/{agent}/work","u":"agents.html#op-agents-work","s":"Get an agent's work queue"},{"t":"agents.create","k":"POST /api/v1/envs/{env}/agents","u":"agents.html#op-agents-create","s":"Create an AgentFlow agent"},{"t":"agents.update","k":"PATCH /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-update","s":"Update an AgentFlow agent"},{"t":"agents.delete","k":"DELETE /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-delete","s":"Delete an AgentFlow agent"},{"t":"workflows.list","k":"GET /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-list","s":"List AgentFlow workflows"},{"t":"workflows.get","k":"GET /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-get","s":"Get an AgentFlow workflow and its brief"},{"t":"workflows.create","k":"POST /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-create","s":"Create an AgentFlow workflow"},{"t":"workflows.update","k":"PATCH /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-update","s":"Update an AgentFlow workflow"},{"t":"search","k":"GET /api/v1/envs/{env}/search","u":"search.html#op-search","s":"Search an environment"}]</script>
 <script src="docs.js"></script>
 </body></html>

@@ -82,7 +82,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.create','agents.update','agents.delete','workflows.list','workflows.get','workflows.create','workflows.update'];
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','workflows.list','workflows.get','workflows.create','workflows.update'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -293,6 +293,27 @@ test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
   const af=(await store.get(ENV)).data.agentflow;
   assert.deepEqual([af.agents.map(a=>[a.name,a.reportsTo]),af.workflows[0].steps.map(s=>s.agent)],[[['Researcher','']],[res.id,'']]);
   assert.equal((await op('agents.get',{env:ENV,agent:'Chief of staff'})).body.code,'unknown_agent');
+});
+
+test('AgentFlow: delegating cards to agents and the work queue a runner reads',async()=>{
+  const bot=(await op('agents.create',{env:ENV,name:'Runner bot'})).body.agent;
+  let r=await op('cards.create',{env:ENV,title:'Queue me',column:'requests',due:'2026-11-20',agents:['Runner bot']});
+  assert.deepEqual(r.body.card.agents,[bot.id]);const later=r.body.card.number;
+  const sooner=(await op('cards.create',{env:ENV,title:'Do me first',column:'requests',due:'2026-11-10',agents:[bot.id]})).body.card.number;
+  r=await op('cards.update',{env:ENV,card:1,agents:['Runner bot','Researcher']});
+  assert.equal(r.body.card.agents.length,2);assert.ok(r.body.card.agents.includes(bot.id));
+  assert.equal((await op('cards.update',{env:ENV,card:1,agents:['Nobody']})).body.code,'unknown_agent');
+  r=await op('agents.work',{env:ENV,agent:'Runner bot'});
+  assert.deepEqual(r.body.items.map(c=>c.number),[1,sooner,later],'work in progress first, then by due date');
+  assert.equal(r.body.agent.id,bot.id);assert.match(r.body.brief,/^# Runner bot/);
+  r=await op('agents.work',{env:ENV,agent:bot.id,columns:['requests']});
+  assert.deepEqual(r.body.items.map(c=>c.number),[sooner,later]);
+  r=await op('cards.list',{env:ENV,agent:'Runner bot'});
+  assert.deepEqual(r.body.items.map(c=>c.number).sort((x,y)=>x-y),[1,later,sooner].sort((x,y)=>x-y));
+  await op('cards.update',{env:ENV,card:later,agents:[]});
+  r=await op('agents.work',{env:ENV,agent:'Runner bot',limit:1});
+  assert.deepEqual([r.body.items.map(c=>c.number),!!r.body.nextCursor],[[1],true],'the queue pages like other lists');
+  assert.equal((await op('agents.work',{env:ENV,agent:'Nobody'})).body.code,'unknown_agent');
 });
 
 test('AgentFlow: a full workspace refuses new agents and workflows instead of dropping them',async()=>{

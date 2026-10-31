@@ -54,7 +54,7 @@ The DevOps board is a card board. Each card has an auto-incrementing `#number`.
 
 Columns, in order: `requests` (Requests / Sprinted, where new cards land), `doing`, `blocked`, `uat`, `done`, then the two backlogs `must` (Must Have) and `nice` (Nice to Have).
 
-A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item.
+A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item. Responses also list `agents`, the AgentFlow agents the card is delegated to (see AgentFlow: delegation and the work queue).
 
 ### Gates
 
@@ -141,6 +141,24 @@ An agent has `name, kind, title, status, reportsTo, supervisor, purpose, instruc
 ### Workflows
 
 A workflow has `name, description, status, trigger, schedule, steps[{agent, action, output}]` and the same links. `trigger` is `manual`, `schedule` or `event`. `schedule` says when or on what in plain words, e.g. "Weekdays at 09:00" or "A card enters UAT". Steps run in order, and each one names the agent that handles it.
+
+### Delegation and the work queue
+
+Delegating a DevOps card to an agent puts it in that agent's **work queue**. The person on the card stays accountable; the agent does the work. Delegate in the card's **Delegated to** picker, from the agent's side panel (Cards), or with `cards.update` (`agents: ["Researcher"]`; `[]` clears it). Cards show their agents as square badges, and the board's **Agents** filter shows one agent's cards. A card can be delegated to several agents.
+
+`agents.work` returns everything a runner needs in one call: the agent, its brief, and its queue, which holds the open delegated cards. The queue is ordered Doing, Requests / Sprinted, Blocked, UAT, then the backlogs, and by soonest due date and `#number` within each. `columns: ["doing","requests"]` keeps only the cards it can act on now. A runner loop on any machine looks like this:
+
+1. `agents.work` with the agent's name and `columns: ["doing","requests"]`.
+2. Take the first card. Move it to Doing with `cards.move` if it is new.
+3. Do the work, following the brief and the card's description and checklist.
+4. Report back with `cards.update` (tick the checklist, add the pull request under `links`), then `cards.move` to `uat` for a human to approve.
+
+```sh
+curl -H "Authorization: Bearer $FLOW_TOKEN" "$FLOW_URL/api/v1/envs/$FLOW_ENV/agents/Researcher/work?columns=doing,requests"
+flow agents work --input '{"agent":"Researcher","columns":["doing","requests"]}'   # or the agents_work MCP tool
+```
+
+The runner only calls out to Flow and never needs to be reachable itself, so it works from a home server behind a router.
 
 ### Briefs
 
@@ -1204,7 +1222,7 @@ List DevOps cards
 
 `GET /api/v1/envs/{env}/cards` · scope `read` · MCP tool `cards_list`
 
-Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), q ("#12" or title text), hideDone.
+Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), agent (AgentFlow agent: cards delegated to it), q ("#12" or title text), hideDone.
 
 **Input**
 
@@ -1215,6 +1233,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `project` | string |  | Project id or name, or "none". |
 | `label` | string |  | Label id or name. |
 | `assignee` | string |  | Person node id or name. |
+| `agent` | string |  | AgentFlow agent id or name: cards delegated to it. |
 | `q` | string |  |  |
 | `hideDone` | boolean |  |  |
 | `limit` | integer |  | Page size (1-200, default 50). |
@@ -1241,6 +1260,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `items[].created` | string |  |  |
 | `items[].updated` | string |  |  |
 | `items[].moved` | string |  |  |
+| `items[].agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -1283,7 +1303,10 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards?project=Lantern&h
       "item": "i1",
       "created": "2026-10-29T17:00:00.000Z",
       "updated": "2026-10-29T17:00:00.000Z",
-      "moved": "2026-10-29T17:00:00.000Z"
+      "moved": "2026-10-29T17:00:00.000Z",
+      "agents": [
+        "a1"
+      ]
     }
   ],
   "nextCursor": null,
@@ -1328,6 +1351,7 @@ One card by number ("12" or "#12") or id.
 | `card.created` | string |  |  |
 | `card.updated` | string |  |  |
 | `card.moved` | string |  |  |
+| `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
 
 **Example: Card #12**
 
@@ -1368,7 +1392,10 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
     "item": "i1",
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
-    "moved": "2026-10-29T17:00:00.000Z"
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
   }
 }
 ```
@@ -1405,6 +1432,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `links[].kind` | enum |  | One of `pr`, `commit`, `url`. |
 | `links[].url` | string | yes |  |
 | `item` | string |  | Timeline item id or title; "" for none. |
+| `agents` | string[] |  | Delegate the card to these agents (replaces the list; [] for none). It joins each one's work queue (agents.work). |
 
 **Output**
 
@@ -1428,6 +1456,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `card.created` | string |  |  |
 | `card.updated` | string |  |  |
 | `card.moved` | string |  |  |
+| `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
 
 **Example: New card**
 
@@ -1470,7 +1499,10 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards" \
     "item": "i1",
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
-    "moved": "2026-10-29T17:00:00.000Z"
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
   }
 }
 ```
@@ -1507,6 +1539,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `links[].kind` | enum |  | One of `pr`, `commit`, `url`. |
 | `links[].url` | string | yes |  |
 | `item` | string |  | Timeline item id or title; "" for none. |
+| `agents` | string[] |  | Delegate the card to these agents (replaces the list; [] for none). It joins each one's work queue (agents.work). |
 
 **Output**
 
@@ -1530,6 +1563,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `card.created` | string |  |  |
 | `card.updated` | string |  |  |
 | `card.moved` | string |  |  |
+| `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
 
 **Example: Tick the checklist**
 
@@ -1572,7 +1606,10 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
     "item": "i1",
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
-    "moved": "2026-10-29T17:00:00.000Z"
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
   }
 }
 ```
@@ -1619,6 +1656,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `card.created` | string |  |  |
 | `card.updated` | string |  |  |
 | `card.moved` | string |  |  |
+| `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
 
 **Example: Approve from UAT**
 
@@ -1661,7 +1699,10 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
     "item": "i1",
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
-    "moved": "2026-10-29T17:00:00.000Z"
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
   }
 }
 ```
@@ -1707,7 +1748,10 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
     "item": "i1",
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
-    "moved": "2026-10-29T17:00:00.000Z"
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
   }
 }
 ```
@@ -2003,6 +2047,156 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "updated": "2026-10-29T17:00:00.000Z"
   },
   "brief": "# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n"
+}
+```
+
+### `agents.work`
+
+Get an agent's work queue
+
+`GET /api/v1/envs/{env}/agents/{agent}/work` · scope `read` · MCP tool `agents_work`
+
+What a runner needs to work as this agent: its `brief` and its queue, the open DevOps cards delegated to it (cards.update agents, or the card's Delegated to picker). Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. `columns` narrows the queue, e.g. ["doing","requests"] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `agent` | string | yes | Agent id or name. |
+| `columns` | string[] |  | Only these columns (comma-separated in a query string). |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `agent` | object | yes |  |
+| `agent.id` | string | yes |  |
+| `agent.name` | string | yes |  |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.title` | string |  |  |
+| `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.reportsTo` | string | yes |  |
+| `agent.supervisor` | string | yes |  |
+| `agent.purpose` | string |  |  |
+| `agent.instructions` | string |  |  |
+| `agent.runtime` | string |  |  |
+| `agent.model` | string |  |  |
+| `agent.inputs` | string[] | yes |  |
+| `agent.outputs` | string[] | yes |  |
+| `agent.tools` | string[] | yes |  |
+| `agent.projects` | string[] | yes |  |
+| `agent.cards` | string[] | yes |  |
+| `agent.items` | string[] | yes |  |
+| `agent.created` | string |  |  |
+| `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
+| `brief` | string | yes |  |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].number` | integer | yes |  |
+| `items[].title` | string | yes |  |
+| `items[].description` | string |  |  |
+| `items[].column` | string | yes |  |
+| `items[].project` | string |  |  |
+| `items[].labels` | string[] | yes |  |
+| `items[].points` | number | null |  |  |
+| `items[].due` | string |  |  |
+| `items[].assignees` | object[] | yes |  |
+| `items[].checklist` | object[] | yes |  |
+| `items[].links` | object[] | yes |  |
+| `items[].item` | string |  |  |
+| `items[].created` | string |  |  |
+| `items[].updated` | string |  |  |
+| `items[].moved` | string |  |  |
+| `items[].agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
+| `nextCursor` | string | null | yes |  |
+
+**Example: What should the researcher do now?**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=%5B%22doing%22%2C%22requests%22%5D" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "agent": {
+    "id": "a1",
+    "name": "Researcher",
+    "kind": "agent",
+    "title": "Research",
+    "status": "active",
+    "reportsTo": "a0",
+    "supervisor": "cleo",
+    "purpose": "Gathers context before work starts.",
+    "instructions": "",
+    "runtime": "T3",
+    "model": "",
+    "inputs": [
+      "A card that needs research"
+    ],
+    "outputs": [
+      "Research notes on the card"
+    ],
+    "tools": [
+      "Web search"
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [
+      "k1"
+    ],
+    "items": [
+      "i1"
+    ],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  },
+  "brief": "# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n",
+  "items": [
+    {
+      "id": "k1",
+      "number": 12,
+      "title": "Build sign-up form",
+      "description": "",
+      "column": "requests",
+      "project": "p1",
+      "labels": [
+        "l-high"
+      ],
+      "points": 3,
+      "due": "2026-11-15",
+      "assignees": [
+        {
+          "node": "cleo",
+          "role": "developer"
+        }
+      ],
+      "checklist": [
+        {
+          "id": "x1",
+          "text": "Email field",
+          "done": false
+        }
+      ],
+      "links": [],
+      "item": "i1",
+      "created": "2026-10-29T17:00:00.000Z",
+      "updated": "2026-10-29T17:00:00.000Z",
+      "moved": "2026-10-29T17:00:00.000Z",
+      "agents": [
+        "a1"
+      ]
+    }
+  ],
+  "nextCursor": null
 }
 ```
 

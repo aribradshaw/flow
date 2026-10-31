@@ -372,6 +372,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .dc-foot>.bubs{display:flex;padding-left:6px}
 .bub{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;margin-left:-6px;border:2px solid #fff;border-radius:50%;font-size:9px;font-weight:700;letter-spacing:.02em}
 .bub.extra{background:var(--hover);color:var(--muted)}
+/* AgentFlow agents a card is delegated to: square badges, so they never read as people. */
+.bub.agent{border-radius:6px}
+.bub.agent .i{width:11px;height:11px}
+.bubs+.bubs{margin-left:6px}
 .dv-modal{position:absolute;inset:0;z-index:30;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;background:#141e1c26}
 .pop.dv-pick{position:relative;width:300px;max-height:420px;padding:12px}
 .dv-pick strong{display:block;font-size:13px}

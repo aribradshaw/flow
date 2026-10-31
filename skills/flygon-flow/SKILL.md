@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (35)
+## Operations (36)
 
 ### Environments
 
@@ -98,6 +98,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `agents.list` | `agents_list` | `GET /api/v1/envs/{env}/agents` | read | List AgentFlow agents |
 | `agents.get` | `agents_get` | `GET /api/v1/envs/{env}/agents/{agent}` | read | Get an AgentFlow agent and its brief |
+| `agents.work` | `agents_work` | `GET /api/v1/envs/{env}/agents/{agent}/work` | read | Get an agent's work queue |
 | `agents.create` | `agents_create` | `POST /api/v1/envs/{env}/agents` | write | Create an AgentFlow agent |
 | `agents.update` | `agents_update` | `PATCH /api/v1/envs/{env}/agents/{agent}` | write | Update an AgentFlow agent |
 | `agents.delete` | `agents_delete` | `DELETE /api/v1/envs/{env}/agents/{agent}` | write | Delete an AgentFlow agent |
@@ -437,6 +438,17 @@ MCP: call `agents_get` with `{"env":"default-workspace","agent":"Researcher"}`
 flow agents get --input '{"env":"default-workspace","agent":"Researcher"}'
 
 curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### What should the researcher do now?
+
+MCP: call `agents_work` with `{"env":"default-workspace","agent":"Researcher","columns":["doing","requests"]}`
+
+```sh
+flow agents work --input '{"env":"default-workspace","agent":"Researcher","columns":["doing","requests"]}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=%5B%22doing%22%2C%22requests%22%5D" \
   -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 

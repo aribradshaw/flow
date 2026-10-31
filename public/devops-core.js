@@ -101,15 +101,18 @@ export function entityProjects(db,nodeId){
 }
 export const isOpen=c=>c.column!=='done';
 
-// f = {projects:[ids|'none'], entity, assignees[], labels[], q, hideDone} (assignee / label: single-value forms). q matches "#12"/"12" or the title.
+// f = {projects:[ids|'none'], entity, assignees[], agents[], labels[], q, hideDone} (assignee / label: single-value forms).
+// agents: AgentFlow agent ids; matches cards delegated to any of them. q matches "#12"/"12" or the title.
 export function filterCards(db,f={}){
   const q=(f.q||'').trim().toLowerCase(),num=/^#?\d+$/.test(q)?Number(q.replace('#','')):null;
   const ent=f.entity?new Set(entityProjects(db,f.entity).map(p=>p.id)):null;
+  const delegated=f.agents?.length?new Set((db.agentflow?.agents||[]).filter(a=>f.agents.includes(a.id)).flatMap(a=>a.cards)):null;
   return db.devops.cards.filter(c=>(!f.hideDone||isOpen(c))
     &&(!f.projects?.length||f.projects.some(p=>p==='none'?!c.project:c.project===p))
     &&(!ent||ent.has(c.project))
     &&(!f.assignee||c.assignees.some(a=>a.node===f.assignee))
     &&(!f.assignees?.length||c.assignees.some(a=>f.assignees.includes(a.node)))
+    &&(!delegated||delegated.has(c.id))
     &&(!f.label||c.labels.includes(f.label))
     &&(!f.labels?.length||f.labels.some(l=>c.labels.includes(l)))
     &&(!q||c.number===num||c.title.toLowerCase().includes(q)));

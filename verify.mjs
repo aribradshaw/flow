@@ -505,6 +505,12 @@ try{
   await js(`document.querySelector('#inspector [data-afi=addStep]').click()`);await sleep(100);
   assert((await saved()).agentflow.workflows[0].steps.length===5&&/^af-act-/.test(await js('document.activeElement.id')),'a step can be added to a workflow');
   await js(`document.activeElement.blur()`);await key('Escape',27);
+  await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(200);
+  assert(await js(`!!document.querySelector('[data-card="${afCard.id}"] .bub.agent')`),'a delegated card shows its agent badge on the board');
+  await js(`document.querySelector('[data-picker=dv-agents]').click()`);await sleep(100);
+  await js(`[...document.querySelectorAll('.picker .pk-opt')].find(o=>o.textContent.includes('Ops lead'))?.click()`);await key('Escape',27);await sleep(150);
+  assert(await js(`[...document.querySelectorAll('.dcard')].map(c=>c.dataset.card).join()`)===afCard.id,'the Agents filter shows the cards delegated to that agent');
+  await js(`document.querySelector('[data-dv=clear]').click()`);await sleep(100);
   await js(`history.pushState(null,'','#devops/card/${afCard.number}');dispatchEvent(new PopStateEvent('popstate'))`);await sleep(300);
   assert(/Ops lead/.test(await js(`document.querySelector('dialog.card-modal[open] [data-picker=dc-agents]')?.textContent||''`)),'the card shows the agents linked to it');
   await js(`document.querySelector('dialog.card-modal[open] [data-dc-agent]').click()`);await sleep(400);

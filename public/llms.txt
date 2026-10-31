@@ -69,6 +69,7 @@ Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: 
 
 - [agents.list](/docs/agents.html#op-agents-list): `GET /api/v1/envs/{env}/agents` (read). List AgentFlow agents
 - [agents.get](/docs/agents.html#op-agents-get): `GET /api/v1/envs/{env}/agents/{agent}` (read). Get an AgentFlow agent and its brief
+- [agents.work](/docs/agents.html#op-agents-work): `GET /api/v1/envs/{env}/agents/{agent}/work` (read). Get an agent's work queue
 - [agents.create](/docs/agents.html#op-agents-create): `POST /api/v1/envs/{env}/agents` (write). Create an AgentFlow agent
 - [agents.update](/docs/agents.html#op-agents-update): `PATCH /api/v1/envs/{env}/agents/{agent}` (write). Update an AgentFlow agent
 - [agents.delete](/docs/agents.html#op-agents-delete): `DELETE /api/v1/envs/{env}/agents/{agent}` (write). Delete an AgentFlow agent

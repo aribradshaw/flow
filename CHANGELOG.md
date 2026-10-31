@@ -12,4 +12,5 @@ User-facing release notes will be recorded here when release tags are published.
 - Self-hosting guide and example environment file.
 - AgentFlow tab: an org chart of AI agents, people and teams with purposes, inputs, outputs, tools and instructions, plus workflows of agent steps. Agents and workflows link to projects, DevOps cards and timeline deadlines, and runners get Markdown briefs through new `agents.*` and `workflows.*` API and MCP operations.
 - AgentFlow's org chart is a pan-and-zoom canvas: drag agents, drag between agents to set who reports to whom, Tidy up to re-arrange as a tree.
+- Delegate DevOps cards to AgentFlow agents: agent badges on cards, an Agents board filter, `agents` on card API calls, and `agents.work` for runners (brief plus the queue of open delegated cards).
 - The Chart tab is now called MindMap. The API keeps the `charts` name.

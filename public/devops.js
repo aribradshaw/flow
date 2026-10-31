@@ -4,8 +4,8 @@ import {busy,skeletonAppend,panel,flipList} from './motion.js';
 import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
-import {store,change,checkpoint,save} from './store.js';
-import {agentsForCard,full} from './agentflow-core.js';
+import {store,change,checkpoint,commit,save} from './store.js';
+import {agentsForCard,delegate} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor} from './devops-core.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
@@ -13,13 +13,13 @@ import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard
 const UIKEY='flygon-flow-devops-ui',MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ITEM_KINDS={feature:'Feature',milestone:'Milestone',release:'Release',deadline:'Deadline',project:'Project',phase:'Phase',event:'Event'};
 const LINK_ICONS={pr:'pr',commit:'commit',url:'link'};
-const FILTERS=()=>({projects:[],entity:'',assignees:[],labels:[],q:'',hideDone:false});
+const FILTERS=()=>({projects:[],entity:'',assignees:[],agents:[],labels:[],q:'',hideDone:false});
 let ui=FILTERS();
 try{const saved=JSON.parse(localStorage.getItem(UIKEY))||{};
   // Earlier versions stored a single assignee / label.
   if(saved.assignee&&!saved.assignees)saved.assignees=[saved.assignee];if(saved.label&&!saved.labels)saved.labels=[saved.label];delete saved.assignee;delete saved.label;
   Object.assign(ui,saved)}catch{}
-for(const k of ['projects','assignees','labels'])if(!Array.isArray(ui[k]))ui[k]=[];
+for(const k of ['projects','assignees','agents','labels'])if(!Array.isArray(ui[k]))ui[k]=[];
 // Paging: each column renders its first 20 cards, "Load more" adds 20. Reset whenever filters change.
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
@@ -127,24 +127,26 @@ function sanitize(){
   ui.projects=ui.projects.filter(p=>p==='none'||project(p));
   if(ui.entity&&!nodeById(ui.entity))ui.entity='';
   ui.assignees=ui.assignees.filter(nodeById);ui.labels=ui.labels.filter(label);
+  ui.agents=ui.agents.filter(id=>db().agentflow?.agents.some(a=>a.id===id));
 }
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
 const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
 const personItems=()=>people().map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg}}});
 const labelItems=()=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
-const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-labels':['labels',labelItems,'Labels']};
+const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
 function openFilter(b){
   const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
   openPicker(b,{items:items(),selected:ui[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){ui[k]=v;keepUi();render()}});
 }
 function toolbar(n){
-  const active=ui.projects.length||ui.entity||ui.assignees.length||ui.labels.length||ui.q||ui.hideDone;
+  const active=ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone;
   const ents=nodesOf(['entity','area']).filter(e=>e.id===ui.entity||entityProjects(db(),e.id).length);
   return `<div class="tl-bar dv-bar">
     ${pickerButton('dv-projects','Projects',projectItems(),ui.projects,{tip:'Filter by project'})}
     <select data-dsel="entity" data-tip="Entity · cards in the projects under it" aria-label="Filter by entity">${opt('','All entities',ui.entity)}${ents.map(e=>opt(e.id,e.name,ui.entity)).join('')}</select>
     ${pickerButton('dv-assignees','Assignees',personItems(),ui.assignees,{tip:'Filter by assignee'})}
+    ${db().agentflow?.agents.length?pickerButton('dv-agents','Agents',agentItems(),ui.agents,{tip:'Filter by AgentFlow agent: cards delegated to it'}):''}
     ${pickerButton('dv-labels','Labels',labelItems(),ui.labels,{tip:'Filter by label'})}
     <input id="dv-q" type="search" placeholder="Search # or title" value="${esc(ui.q)}" aria-label="Search cards by number or title">
     ${ib('check',ui.hideDone?'Show Done':'Hide Done',{cls:ui.hideDone?'on':'',attrs:'data-dv="hideDone"'})}
@@ -152,8 +154,11 @@ function toolbar(n){
     ${active?`<button type="button" class="txt" data-dv="clear">Clear</button>`:''}<span class="sp"></span>
     ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>`;
 }
+// Agents a card is delegated to, built once per board render (cardAgents).
+let cardAgents=new Map();
+const agentBub=a=>{const [bg,fg]=memberColor(a.id);return `<span class="bub agent" style="background:${bg};color:${fg}" data-tip="Agent: ${esc(a.name)}${a.title?` · ${esc(a.title)}`:''}">${icon('bot',11)}</span>`};
 function cardHtml(c){
-  const ls=c.labels.map(label).filter(Boolean),p=project(c.project),tone=dueTone(c,today()),done=c.checklist.filter(x=>x.done).length,ppl=byPerson(c);
+  const ags=cardAgents.get(c.id)||[],ls=c.labels.map(label).filter(Boolean),p=project(c.project),tone=dueTone(c,today()),done=c.checklist.filter(x=>x.done).length,ppl=byPerson(c);
   return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}`)}"${p?` style="--pc:${p.color}"`:''}>
     ${ls.length?`<div class="dc-labels">${ls.slice(0,3).map(pill).join('')}${ls.length>3?`<span class="dc-more" data-tip="${esc(ls.slice(3).map(l=>l.name).join(', '))}">+${ls.length-3}</span>`:''}</div>`:''}
     <div class="dc-title" data-tip="${c.title.length>90?esc(c.title):''}" data-tip-delay="700">${esc(c.title)}</div>
@@ -162,7 +167,7 @@ function cardHtml(c){
       ${c.checklist.length?`<span class="dc-chk${done===c.checklist.length?' all':''}" data-tip="Checklist">${icon('checkSq',12)}${done}/${c.checklist.length}</span>`:''}
       ${c.links.length?`<span class="dc-ico" data-tip="${esc(c.links.map(l=>`${LINK_KINDS[l.kind]}: ${l.url}`).join('\n'))}">${icon('link',12)}</span>`:''}
       ${c.item?`<span class="dc-ico" data-tip="Linked to a timeline item">${icon('gantt',12)}</span>`:''}</span>
-      <span class="dc-r">${p?`<i class="dc-proj" style="background:${p.color}" data-tip="${esc(p.name)}"></i>`:''}${ppl.length?`<span class="bubs">${ppl.slice(0,2).map(([id,roles])=>bubble(id,roles)).join('')}${ppl.length>2?`<span class="bub extra" data-tip="${esc(ppl.slice(2).map(([id])=>nodeById(id).name).join('\n'))}">+${ppl.length-2}</span>`:''}</span>`:''}</span></div></div>`;
+      <span class="dc-r">${p?`<i class="dc-proj" style="background:${p.color}" data-tip="${esc(p.name)}"></i>`:''}${ags.length?`<span class="bubs">${ags.slice(0,2).map(agentBub).join('')}${ags.length>2?`<span class="bub extra" data-tip="${esc(ags.slice(2).map(a=>a.name).join('\n'))}">+${ags.length-2}</span>`:''}</span>`:''}${ppl.length?`<span class="bubs">${ppl.slice(0,2).map(([id,roles])=>bubble(id,roles)).join('')}${ppl.length>2?`<span class="bub extra" data-tip="${esc(ppl.slice(2).map(([id])=>nodeById(id).name).join('\n'))}">+${ppl.length-2}</span>`:''}</span>`:''}</span></div></div>`;
 }
 // Six slots: four working columns, Done, then the two backlogs stacked in one slot.
 // Done lists the most recently moved cards first so paging hides the old ones.
@@ -195,6 +200,7 @@ export function render(){
   sanitize();
   const el=$('#devopsView'),old=el.querySelector('.dv-scroll'),keep=old&&[old.scrollLeft,old.scrollTop,new Map([...el.querySelectorAll('[data-dcol]')].map(c=>[c.dataset.dcol,c.querySelector('.dcol-b')?.scrollTop||0]))];
   const cards=filterCards(db(),ui);
+  cardAgents=new Map();for(const a of db().agentflow?.agents||[])for(const id of a.cards)cardAgents.set(id,[...(cardAgents.get(id)||[]),a]);
   // Cards that stay glide to their new place; added ones fade in, removed ones fade out.
   flipList(el,'.dcard',c=>c.dataset.card,()=>{el.innerHTML=toolbar(cards.length)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'')});
   const sc=el.querySelector('.dv-scroll');
@@ -217,7 +223,8 @@ function action(name,b){
 function addCard(column){
   const proj=ui.projects.find(p=>p!=='none')||(ui.entity&&entityProjects(db(),ui.entity)[0]?.id)||'';
   ui.q='';keepUi();
-  change(()=>{const c=newCard(dv(),{column,project:proj,labels:[...ui.labels],assignees:ui.assignees.map(node=>({node,role:'requester'}))});selected=c.id});
+  change(()=>{const c=newCard(dv(),{column,project:proj,labels:[...ui.labels],assignees:ui.assignees.map(node=>({node,role:'requester'}))});selected=c.id;
+    if(ui.agents.length&&delegate(db().agentflow,c.id,ui.agents)){ui.agents=[];keepUi()}});
   const t=$('#dc-title');t?.focus();t?.select();
 }
 function rename(colId){
@@ -316,7 +323,7 @@ const agentItems=()=>[...(db().agentflow?.agents||[])].sort((a,b)=>a.name.locale
 function agentRow(c){
   if(!db().agentflow?.agents.length)return '';
   const on=agentsForCard(db().agentflow,c.id);
-  return `<label>Agents <em>AgentFlow</em></label>${pickerButton('dc-agents',on.length?on.map(a=>a.name).join(', '):'None',agentItems(),on.map(a=>a.id),{cls:'mini wide'})}
+  return `<label>Delegated to <em>AgentFlow agents · their work queue</em></label>${pickerButton('dc-agents',on.length?on.map(a=>a.name).join(', '):'None',agentItems(),on.map(a=>a.id),{cls:'mini wide'})}
     ${on.length?`<ul class="links">${on.map(a=>`<li><button type="button" data-dc-agent="${esc(a.id)}" data-tip="Open in AgentFlow">${icon('bot',12)}<span>${esc(a.name)}</span><em>${esc(a.title)}</em></button></li>`).join('')}</ul>`:''}`;
 }
 function addLabel(){
@@ -340,10 +347,10 @@ export function inspectorClick(e){
       onChange(v){change(()=>{c.assignees=[...c.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(c)})}});return}
   if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
     onChange(v){
-      const over=db().agentflow.agents.find(a=>v.includes(a.id)&&!a.cards.includes(c.id)&&full(db().agentflow,'refs',a,'cards'));
-      if(over){toast(`${over.name} already has the most linked cards it can hold.`,true);rerender();return}
-      change(()=>{const now=new Date().toISOString();for(const a of db().agentflow.agents){const has=a.cards.includes(c.id),want=v.includes(a.id);
-      if(has!==want){a.cards=want?[...a.cards,c.id]:a.cards.filter(x=>x!==c.id);a.updated=now}}})}});return}
+      // Check room before recording an undo step: delegate() changes nothing when an agent is full.
+      const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,v);
+      if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}
+      touch(c);commit(before);rerender()}});return}
   if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
   if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
