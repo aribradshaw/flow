@@ -4,6 +4,8 @@
 
 Create charts of people, organizations, projects, and notes; connect them to plans on a timeline and cards on a work board. Flow runs locally without an account, or can be hosted with sign-in and separate private workspaces. It uses browser JavaScript and Node.js, with no frontend build step.
 
+![Flow starter workspace showing connected cards](seed-canvas.png)
+
 ## Start locally
 
 With Node.js 22 or newer:
@@ -17,6 +19,8 @@ npm start
 
 Open the URL printed by the server. In local mode it binds to `127.0.0.1`, tries port 4317, and advances to a free port if occupied. The exact URL is also written to `running.json`. No hosted service or account is needed. To use a particular port, set `PORT=4317` in your environment; an occupied explicit port produces an error.
 
+For persistent storage, branding, and public hosting, see [Self-hosting](docs/self-hosting.md) and the commented [.env.example](.env.example).
+
 On Windows, for a hidden background launch:
 
 ```powershell
@@ -28,6 +32,8 @@ Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -ArgumentList 'server
 Hover any icon for a tooltip; the **?** in the top bar lists shortcuts for the current tab.
 
 Use **Chart** to map an organization, team, or idea; **Timeline** to plan projects and releases; and **DevOps** to move work from requests through completion. The three views share projects, people, and links, so you can start with whichever one fits your work.
+
+In **Settings → Environment → Workflow**, choose Delivery, Simple, or Planning, then edit timeline status names and DevOps column names for your workspace. Stage IDs stay stable so saved items and automation continue to work. A self-hosted instance can also set its display name, accent, and logo through environment variables.
 
 ### Chart
 - Floating palette (left): add entity / person / project area / note (E · P · A · N), connect (C), undo / redo. Double-click empty canvas to add an entity there.
@@ -80,6 +86,8 @@ Sign-in sessions survive deploys: with `DATABASE_URL` they are stored in the add
 `node verify.mjs` tests all of this against a loopback mock of OneProfileID with synthetic users; it never contacts the real service or database.
 
 ## Versions and DevLog
+Public release tags use [Semantic Versioning](https://semver.org/) (`vMAJOR.MINOR.PATCH`) and user-facing notes in [CHANGELOG.md](CHANGELOG.md). The source CLI currently runs from a clone with `node tools/flow.mjs`; the npm package is private and has not been published. See [Release process](docs/releases.md).
+
 Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) (draft 1.0): every commit that reaches `main` gets the next `YEAR.MONTH.UPDATE`, with a zero-based project year (year = calendar year − 2026), calendar months, and the America/Phoenix timezone. The public source history starts at the clean baseline recorded in `public/devlog.json`; earlier releases are historical metadata.
 
 - The registry is `public/devlog.json`: [DevLog](https://github.com/aribradshaw/devlog) entries (validated in `verify.mjs` with `@aribradshaw/devlog`, a dev dependency) plus `sequence`, `admittedAt`, `compatibility` (compatible, action-required or breaking) with the required `action`, and `deployments`, which stays empty until a deployment is verified. Version identity says nothing about deployment.

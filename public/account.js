@@ -10,7 +10,8 @@
 // re-fetches its data as the new user. The shared OneProfileID button module is loaded only in
 // OneProfileID mode. Styles are in account.css, linked once on import.
 
-import {store} from './store.js';
+import {store,change} from './store.js';
+import {STATUS_DEFAULTS,WORKFLOW_PRESETS,cleanWorkflow} from './workflow.js';
 import {esc} from './ui.js';
 import {popIn,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
@@ -208,6 +209,8 @@ async function fillInvites(panel){
 function envPane(){
   const u=user(),e=env();if(!e)return '<p class="acct-muted">No environment loaded.</p>';
   const owner=e.ownerEmail?(e.ownerEmail===u?.email?'You':e.ownerEmail):'Not set';
+  const editable=!opid()||e.ownerEmail===u?.email;
+  const workflow=cleanWorkflow(store.db.workflow);
   return `<dl class="acct-dl"><dt>Name</dt><dd>${esc(e.name)}</dd><dt>Owner</dt><dd>${esc(owner)}</dd>
     <dt>Visibility</dt><dd><span class="acct-vis ${e.visibility==='public'?'pub':''}">${svg(e.visibility==='public'?'globe':'lock',11)}${e.visibility==='public'?'Public':'Private'}</span>
       <span class="acct-muted">${e.visibility==='public'?'Anyone signed in can view it; only the owner can edit.':'Only the owner can see it.'}</span></dd></dl>
@@ -215,7 +218,18 @@ function envPane(){
     <h3 class="acct-sub">Your environments</h3>
     <ul class="env-list" data-env-list><li class="acct-muted">Loading…</li></ul>
     <form class="env-row" data-env-new><input id="envNew" maxlength="80" placeholder="New environment name" aria-label="New environment name"><button type="submit" class="txt">Create</button></form>
-    <p class="acct-err" data-env-err hidden></p>`;
+    <p class="acct-err" data-env-err hidden></p>
+    <h3 class="acct-sub">Workflow</h3>
+    <p class="acct-muted">Choose a starting layout, then name the timeline statuses and DevOps columns for this workspace. Existing cards keep their stage.</p>
+    <form data-workflow-form>
+      <label for="workflowPreset">Preset</label>
+      <select id="workflowPreset" data-workflow-preset${editable?'':' disabled'}>${Object.entries(WORKFLOW_PRESETS).map(([id,p])=>`<option value="${id}"${workflow.preset===id?' selected':''}>${esc(p.name)}</option>`).join('')}</select>
+      <h4>Timeline statuses</h4>
+      <div class="workflow-fields">${Object.entries(STATUS_DEFAULTS).map(([id,label])=>`<label>${esc(label)}<input name="status:${id}" maxlength="40" value="${esc(workflow.statuses[id])}"${editable?'':' disabled'}></label>`).join('')}</div>
+      <h4>DevOps columns</h4>
+      <div class="workflow-fields">${store.db.devops.columns.map(c=>`<label>${esc(WORKFLOW_PRESETS.delivery.columns[c.id])}<input name="column:${c.id}" maxlength="80" value="${esc(c.name)}"${editable?'':' disabled'}></label>`).join('')}</div>
+      ${editable?'<button type="submit" class="txt">Save workflow</button>':''}
+    </form>`;
 }
 let renamingEnv=null;
 async function fillEnvList(panel){
@@ -304,7 +318,15 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     const sw=t.closest?.('[data-sc-swap]');if(sw&&scMsg){const res=rebind(scMsg.id,sw.dataset.scSwap,{swap:true});scMsg=res.error?{id:scMsg.id,text:res.error}:null;drawTab('shortcuts');return}
     if(t.closest?.('[data-sc-cancel]')){scMsg=null;drawTab('shortcuts');return}
   });
-  d.addEventListener('change',ev=>{if(ev.target.matches?.('[data-photo-file]')&&ev.target.files?.[0])savePhoto(d.querySelector('[role=tabpanel]'),ev.target.files[0])});
+  d.addEventListener('change',ev=>{
+    if(ev.target.matches?.('[data-photo-file]')&&ev.target.files?.[0])savePhoto(d.querySelector('[role=tabpanel]'),ev.target.files[0]);
+    if(ev.target.matches?.('[data-workflow-preset]')){
+      const preset=WORKFLOW_PRESETS[ev.target.value];if(!preset)return;
+      const form=ev.target.closest('form');
+      for(const [id,name] of Object.entries(preset.statuses))form.elements.namedItem(`status:${id}`).value=name;
+      for(const [id,name] of Object.entries(preset.columns))form.elements.namedItem(`column:${id}`).value=name;
+    }
+  });
   d.addEventListener('keydown',ev=>ev.stopPropagation());
   d.addEventListener('change',ev=>{
     const p=ev.target.closest?.('[data-sh-perm]');
@@ -314,7 +336,14 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     ev.preventDefault();const f=ev.target,panel=d.querySelector('[role=tabpanel]');
     const err=(sel,m)=>{const p=panel.querySelector(sel);if(p){p.textContent=m||'';p.hidden=!m}};
     try{
-      if(f.matches('[data-env-new]')){const name=f.querySelector('input').value.trim();if(!name)return;const id=await createEnvironment(name);await switchEnvironment(id);await drawTab('environment')}
+      if(f.matches('[data-workflow-form]')){
+        const preset=f.elements.namedItem('workflowPreset').value;
+        const statuses=Object.fromEntries(Object.keys(STATUS_DEFAULTS).map(id=>[id,f.elements.namedItem(`status:${id}`).value]));
+        const names=Object.fromEntries(store.db.devops.columns.map(c=>[c.id,f.elements.namedItem(`column:${c.id}`).value.trim().slice(0,80)]));
+        change(()=>{store.db.workflow=cleanWorkflow({preset,statuses});for(const c of store.db.devops.columns)c.name=names[c.id]||WORKFLOW_PRESETS[preset].columns[c.id];store.db.devops.namesCustomized=true});
+        await drawTab('environment');alertBox('Workflow saved','ok');
+      }
+      else if(f.matches('[data-env-new]')){const name=f.querySelector('input').value.trim();if(!name)return;const id=await createEnvironment(name);await switchEnvironment(id);await drawTab('environment')}
       else if(f.matches('[data-env-rename-form]')){const name=f.querySelector('input').value.trim();if(!name)return;await renameEnvironment(f.dataset.envRenameForm,name);renamingEnv=null;await drawTab('environment')}
       else if(f.matches('[data-sh-ask]')){
         await shareApi.request(f.dataset.shAsk,{toEmail:f.querySelector('input').value.trim()});alertBox('Asked the owner. They approve or deny it.','ok');await drawTab('sharing');

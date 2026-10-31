@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `flow`: the Flygon Flow command line (also `npx flygon-flow`). Guide: docs/mcp-cli.md.
+// `flow`: the Flow command line, currently run from a checkout. Guide: docs/mcp-cli.md.
 //   flow login --url <server> --key <flow_…>   (or --key-stdin, or FLOW_API_KEY)  save the server and key
 //   flow env use <id> | flow env                choose (or show) the default environment
 //   flow <group> <command> [args] [--flags]     generated from the server's OpenAPI, e.g.

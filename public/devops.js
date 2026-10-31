@@ -221,7 +221,7 @@ function addCard(column){
 }
 function rename(colId){
   const v=prompt('Column name',colName(colId))?.trim();
-  if(v&&v!==colName(colId))change(()=>dv().columns.find(c=>c.id===colId).name=v.slice(0,80));
+  if(v&&v!==colName(colId))change(()=>{dv().columns.find(c=>c.id===colId).name=v.slice(0,80);dv().namesCustomized=true});
 }
 function remove(id){change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null})}
 

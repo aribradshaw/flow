@@ -1,6 +1,7 @@
 import {uid,clone} from './ui.js';
 import {cleanDevops} from './devops-core.js';
 import {starterChart} from './demo-seed.js';
+import {cleanWorkflow} from './workflow.js';
 // Persistence, validation and whole-database undo. Charts keep the original v1 schema;
 // projects, timeline and devops are additive fields, so older saves load unchanged.
 // The app is now "Flygon Flow", but the storage key keeps its original name on purpose:
@@ -42,6 +43,7 @@ export function cleanEnvironment(e){
 }
 function normalize(db){
   db.environment=cleanEnvironment(db.environment);
+  db.workflow=cleanWorkflow(db.workflow);
   db.projects=(Array.isArray(db.projects)?db.projects:[]).map(cleanProject).filter(Boolean);
   db.timeline=(Array.isArray(db.timeline)?db.timeline:[]).map(i=>cleanItem(i,db.projects)).filter(Boolean);
   // DevOps board: databases saved before it existed get the default columns and labels.

@@ -681,6 +681,12 @@ function resolveStatic(url){
   return file;
 }
 const server=http.createServer(async(req,res)=>{
+  if(req.url.split('?')[0]==='/api/instance'&&req.method==='GET'){
+    const name=String(process.env.FLOW_INSTANCE_NAME||'Flow').trim().slice(0,80)||'Flow';
+    const accent=/^#[0-9a-fA-F]{6}$/.test(process.env.FLOW_ACCENT_COLOR||'')?process.env.FLOW_ACCENT_COLOR:'#7cb980';
+    const logo=String(process.env.FLOW_LOGO_PATH||'');
+    json(res,200,{name,accent,logo:/^\/(?!\/)[A-Za-z0-9/_-]+\.(?:svg|png|webp)$/.test(logo)&&!logo.includes('..')?logo:''});return;
+  }
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}

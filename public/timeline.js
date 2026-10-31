@@ -17,6 +17,8 @@ const STATUS={
   planned:{icon:'planned',label:'Planned'},active:{icon:'active',label:'In progress'},risk:{icon:'alert',label:'At risk'},
   blocked:{icon:'blocked',label:'Blocked'},done:{icon:'check',label:'Done'},cancelled:{icon:'ban',label:'Cancelled'},
 };
+const statusInfo=id=>({...STATUS[id],label:store.db.workflow?.statuses?.[id]||STATUS[id].label});
+const statusEntries=()=>Object.keys(STATUS).map(id=>[id,statusInfo(id)]);
 const PRIORITY={high:{icon:'pHigh',label:'High priority'},medium:{icon:'pMed',label:'Medium priority'},low:{icon:'pLow',label:'Low priority'}};
 const SCALES={week:{ppd:32,label:'Week'},month:{ppd:9,label:'Month'},quarter:{ppd:3,label:'Quarter'}};
 const VIEWS=['gantt','calendar','list','board'];
@@ -55,7 +57,7 @@ const tag=p=>p?`<span class="tag" style="--c:${p.color}">${esc(p.name)}</span>`:
 const releaseOf=i=>i.kind!=='release'&&i.release?item(i.release):null;
 function itemTip(i){
   const names=i.projects.map(p=>project(p)?.name).filter(Boolean),days=dated(i)?span(i)[1]-span(i)[0]+1:0,rel=releaseOf(i);
-  return [i.title,`${KINDS[i.kind].label} · ${dateLabel(i)}${days>1?` · ${days} days`:''}`,STATUS[i.status].label+(late(i)?' · overdue':'')+(i.priority?` · ${PRIORITY[i.priority].label}`:''),
+  return [i.title,`${KINDS[i.kind].label} · ${dateLabel(i)}${days>1?` · ${days} days`:''}`,statusInfo(i.status).label+(late(i)?' · overdue':'')+(i.priority?` · ${PRIORITY[i.priority].label}`:''),
     rel&&`Target: ${rel.title}${dated(rel)?` (${fmt(rel.start)})`:''}`,names.join(', '),i.owner&&`Owner: ${i.owner}`].filter(Boolean).join('\n');
 }
 const statusMark=i=>['risk','blocked','done'].includes(i.status)?`<span class="smark ${i.status}">${icon(STATUS[i.status].icon,11)}</span>`:'';
@@ -197,8 +199,8 @@ function lanes(items,cards=[]){
     if(none.length||!out.length)out.push({key:'none',label:'Untagged',swatch:'<i class="sw none"></i>',items:none});
     return out;
   }
-  const map=ui.groupBy==='kind'?KINDS:STATUS;
-  return [...Object.entries(map).map(([k,v])=>({key:k,label:v.label,swatch:icon(v.icon,13),items:items.filter(i=>i[ui.groupBy]===k)})).filter(l=>l.items.length),
+  const entries=ui.groupBy==='kind'?Object.entries(KINDS):statusEntries();
+  return [...entries.map(([k,v])=>({key:k,label:v.label,swatch:icon(v.icon,13),items:items.filter(i=>i[ui.groupBy]===k)})).filter(l=>l.items.length),
     ...(cards.length?[{key:'devops',label:'DevOps cards',swatch:icon('branch',13),items:cards}]:[])];
 }
 // Greedy row packing so items in a lane never overlap (labels included).
@@ -324,7 +326,7 @@ function list(){
   if(!all.length)return `<div class="empty">${ib('plus','Add the first item',{key:keyLabel('timeline.add'),cls:'primary',attrs:'data-tl="add"'})}</div>`;
   const row=i=>`<div class="lr s-${i.status}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" tabindex="0" role="button">
       <span class="d"${late(i)?' data-tip="Overdue"':''}>${esc(dated(i)?dateLabel(i):releaseOf(i)?'→ '+releaseOf(i).title:'')}</span><span class="k" data-tip="${KINDS[i.kind].label}" style="color:${color(i)}">${icon(KINDS[i.kind].icon,13)}</span>
-      <span class="t">${i.priority?`<span class="pr ${i.priority}" data-tip="${PRIORITY[i.priority].label}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}${esc(i.title)}</span><span class="tags">${i.projects.map(p=>tag(project(p))).join('')}</span><span class="o">${esc(i.owner)}</span><span class="s" data-tip="${STATUS[i.status].label}">${icon(STATUS[i.status].icon,13)}</span></div>`;
+      <span class="t">${i.priority?`<span class="pr ${i.priority}" data-tip="${PRIORITY[i.priority].label}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}${esc(i.title)}</span><span class="tags">${i.projects.map(p=>tag(project(p))).join('')}</span><span class="o">${esc(i.owner)}</span><span class="s" data-tip="${esc(statusInfo(i.status).label)}">${icon(STATUS[i.status].icon,13)}</span></div>`;
   const now=today().slice(0,7);let html='',cur='',marked=false;
   for(const i of items){
     const ym=i.start.slice(0,7);
@@ -336,7 +338,7 @@ function list(){
 }
 // Kanban: one column per status. Cards sort by priority, then date.
 function board(){
-  const items=visible(),cols=Object.entries(STATUS).filter(([k])=>!ui.hideDone||(k!=='done'&&k!=='cancelled'));
+  const items=visible(),cols=statusEntries().filter(([k])=>!ui.hideDone||(k!=='done'&&k!=='cancelled'));
   const sort=(a,b)=>PRANK[a.priority]-PRANK[b.priority]||(a.start||'9999').localeCompare(b.start||'9999')||a.title.localeCompare(b.title);
   const card=i=>{
     const rel=releaseOf(i),when=dated(i)?dateLabel(i):rel?`→ ${rel.title}${dated(rel)?' · '+fmt(rel.start):''}`:'';
@@ -345,7 +347,7 @@ function board(){
       <div class="cm">${i.projects.slice(0,2).map(p=>tag(project(p))).join('')}${when?`<span class="cd">${esc(when)}</span>`:''}${i.owner?`<span class="ow">${esc(i.owner)}</span>`:''}</div></div>`;
   };
   return `<div class="board">${cols.map(([k,s])=>{const list=items.filter(i=>i.status===k).sort(sort);
-    return `<section class="col" data-col="${k}"><div class="col-h">${icon(s.icon,13)}<span>${s.label}</span><em>${list.length||''}</em><span class="sp"></span>${ib('plus',`Add to ${s.label}`,{attrs:`data-tl="colAdd" data-status="${k}"`})}</div>
+    return `<section class="col" data-col="${k}"><div class="col-h">${icon(s.icon,13)}<span>${esc(s.label)}</span><em>${list.length||''}</em><span class="sp"></span>${ib('plus',`Add to ${s.label}`,{attrs:`data-tl="colAdd" data-status="${k}"`})}</div>
       <div class="col-b">${list.map(card).join('')}</div></section>`}).join('')}</div>`;
 }
 
@@ -373,7 +375,7 @@ function addTag(input){
   $('#ti-proj')?.focus();
 }
 
-const segBtn=(field,v,x,on)=>`<button type="button" class="ib${on?' on':''}" data-tset="${field}:${v}" data-tip="${x.label}" aria-label="${x.label}" aria-pressed="${on}">${icon(x.icon)}</button>`;
+const segBtn=(field,v,x,on)=>`<button type="button" class="ib${on?' on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}">${icon(x.icon)}</button>`;
 // An item opens as a modal growing from its bar or card (modal.js); the Projects panel stays a side panel.
 let modal=null,modalFor=null;
 const itemEl=id=>document.querySelector(`#timelineView [data-item="${CSS.escape(id)}"]`);
@@ -407,7 +409,7 @@ function itemHtml(i){
     <form id="tedit" class="ibody ti-body" autocomplete="off">
     <label for="ti-title">Title</label><input id="ti-title" maxlength="200" required value="${esc(i.title)}">
     <label>Type</label><div class="seg">${Object.entries(KINDS).map(([v,x])=>segBtn('kind',v,x,i.kind===v)).join('')}</div>
-    <label>Status</label><div class="seg">${Object.entries(STATUS).map(([v,x])=>segBtn('status',v,x,i.status===v)).join('')}</div>
+    <label>Status</label><div class="seg">${statusEntries().map(([v,x])=>segBtn('status',v,x,i.status===v)).join('')}</div>
     <label>Priority</label><div class="seg">${Object.entries(PRIORITY).map(([v,x])=>segBtn('priority',v,x,i.priority===v)).join('')}</div>
     <div class="two"><div><label for="ti-start">${k.range?'Start':'Date'} <em>${dated(i)?'':'unscheduled'}</em></label><input id="ti-start" type="date" value="${i.start}"></div>
     <div><label for="ti-end">End <em>optional</em></label><input id="ti-end" type="date" min="${i.start}" value="${i.end}"${dated(i)?'':' disabled'}></div></div>
@@ -415,7 +417,7 @@ function itemHtml(i){
     <label for="ti-proj">Projects</label><div class="tags-edit">${i.projects.map(id=>{const p=project(id);return p?`<span class="tag" style="--c:${p.color}">${esc(p.name)}<button type="button" data-untag="${esc(id)}" data-tip="Remove" aria-label="Remove ${esc(p.name)}">${icon('x',10)}</button></span>`:''}).join('')}
       <input id="ti-proj" list="ti-proj-list" placeholder="${i.projects.length?'':'Add project…'}" aria-label="Add project"></div>
     <datalist id="ti-proj-list">${sugg.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
-    ${inRelease.length?`<label>In this release · ${inRelease.filter(closed).length}/${inRelease.length} done</label><ul class="links">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(STATUS[x.status].label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
+    ${inRelease.length?`<label>In this release · ${inRelease.filter(closed).length}/${inRelease.length} done</label><ul class="links">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(statusInfo(x.status).label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
     ${linked.length?`<label>DevOps cards · ${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</label><ul class="links">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="Open card in DevOps">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
     <label for="ti-owner">Owner</label><input id="ti-owner" list="ti-people" maxlength="120" value="${esc(i.owner)}"><datalist id="ti-people">${people.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
     <label for="ti-link">Link</label><div class="linkrow"><input id="ti-link" type="url" maxlength="500" placeholder="https://" value="${esc(i.link)}">${link}</div>
@@ -500,7 +502,7 @@ function ics(){
   const out=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Flygon Flow//Timeline//EN','CALSCALE:GREGORIAN','X-WR-CALNAME:Release calendar'];
   for(const i of scheduled()){
     const [s,e]=span(i),names=i.projects.map(p=>project(p)?.name).filter(Boolean);
-    const desc=[`${KINDS[i.kind].label} · ${STATUS[i.status].label}`,i.owner&&`Owner: ${i.owner}`,i.link,i.notes].filter(Boolean).join('\n');
+    const desc=[`${KINDS[i.kind].label} · ${statusInfo(i.status).label}`,i.owner&&`Owner: ${i.owner}`,i.link,i.notes].filter(Boolean).join('\n');
     out.push('BEGIN:VEVENT',`UID:${i.id}@flygon-flow`,`DTSTAMP:${stamp}`,`DTSTART;VALUE=DATE:${d(s)}`,`DTEND;VALUE=DATE:${d(e+1)}`,
       `SUMMARY:${tx((names.length?`[${names.join(', ')}] `:'')+i.title)}`,`CATEGORIES:${[KINDS[i.kind].label,...names].map(tx).join(',')}`,
       `STATUS:${i.status==='cancelled'?'CANCELLED':'CONFIRMED'}`,`DESCRIPTION:${tx(desc)}`,...(/^https?:\/\//i.test(i.link)?[`URL:${i.link}`]:[]),'END:VEVENT');

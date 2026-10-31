@@ -44,7 +44,7 @@ export function seedDevops(){
 // defaults; references to deleted projects, labels or timeline items are dropped.
 export function cleanDevops(d,db={}){
   if(!d||typeof d!=='object')return seedDevops();
-  const names=new Map((Array.isArray(d.columns)?d.columns:[]).filter(c=>c&&typeof c.id==='string'&&!MERGED[c.id]&&typeof c.name==='string'&&c.name.trim()&&!OLD_NAMES.has(c.name)).map(c=>[c.id,c.name.slice(0,80)]));
+  const names=new Map((Array.isArray(d.columns)?d.columns:[]).filter(c=>c&&typeof c.id==='string'&&!MERGED[c.id]&&typeof c.name==='string'&&c.name.trim()&&(d.namesCustomized||!OLD_NAMES.has(c.name))).map(c=>[c.id,c.name.slice(0,80)]));
   const columns=COLUMNS.map(([id,name])=>({id,name:names.get(id)||name}));
   const seenL=new Set(),labels=(Array.isArray(d.labels)?d.labels:seedDevops().labels).filter(l=>l&&typeof l.id==='string'&&typeof l.name==='string'&&!seenL.has(l.id)&&seenL.add(l.id))
     .map(l=>({id:l.id,name:l.name.slice(0,40),section:SECTIONS.some(([s])=>s===l.section)?l.section:'other',color:COLORS[l.color]?l.color:'black'}));
@@ -66,7 +66,7 @@ export function cleanDevops(d,db={}){
       // Set by the agent inbox: when it last wrote this card (see inbox-core.js).
       inbox:typeof c.inbox?.at==='string'?{at:c.inbox.at}:undefined};
   });
-  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels};
+  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,namesCustomized:!!d.namesCustomized};
 }
 
 export function newCard(dv,over={}){

@@ -15,6 +15,15 @@ import {onPrefs,syncPrefs} from './prefs.js';
 import {ask} from './modal.js';
 import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog} from './share.js';
 
+let instanceName='Flow',instanceLogo='';
+fetch('/api/instance').then(r=>r.ok?r.json():null).then(v=>{
+  if(!v)return;
+  instanceName=v.name||'Flow';instanceLogo=v.logo||'';
+  document.title=instanceName;
+  document.documentElement.style.setProperty('--flygon-green',v.accent);
+  renderTop();
+}).catch(()=>{});
+
 const GRID=16;
 const KINDS={
   entity:{icon:'building',label:'Entity',sc:'chart.addEntity',size:[176,48]},
@@ -46,7 +55,7 @@ function renderTop(){
       +(db.charts.length>1?ib('trash','Delete this chart',{cls:'danger',attrs:'data-act="dropChart"'}):'')
       +`<span class="meta" data-tip="${c.nodes.length} cards · ${c.edges.length} connections">${c.nodes.length} · ${c.edges.length}</span>`
     :tab==='timeline'?tl.headerHtml():dv.headerHtml();
-  $('#top').innerHTML=`<span class="logo" data-tip="Flygon Flow">${logoMark(20)}</span>
+  $('#top').innerHTML=`<span class="logo" data-tip="${esc(instanceName)}">${instanceLogo?`<img src="${esc(instanceLogo)}" alt="" width="20" height="20">`:logoMark(20)}</span>
     <nav class="tabs" role="tablist">${tabBtn('chart','network','Chart')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}</nav>
     <div class="ctx">${ctx}</div><span class="sp"></span>
     ${ib('save','Save\nTo this computer and the Flygon cloud',{key:keyLabel('global.save'),attrs:'data-act="saveNow"'})}${ib('open','Load a save',{cls:loadPop?'on':'',attrs:'data-act="load"'})}

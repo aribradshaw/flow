@@ -151,6 +151,11 @@ button.sc-k:hover{border-color:var(--line2);background:#fff}
 .env-row.grow{flex:1}
 .env-row input{flex:1;min-width:0;height:28px;padding:0 9px;border-radius:6px;font-size:12.5px}
 .env-row .txt.primary{border-color:var(--primary);background:var(--primary);color:#fff}
+.workflow-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin:8px 0 14px}
+.workflow-fields label{display:grid;gap:3px;color:var(--muted);font-size:11px}
+.workflow-fields input{width:100%;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line2);border-radius:6px;color:var(--ink)}
+[data-workflow-form]>select{height:30px;margin-left:8px}
+[data-workflow-form]>h4{margin:16px 0 4px;font-size:12px}
 .acct-photo-actions{display:flex;align-items:center;gap:8px;margin:10px 0}
 [data-photo-status]{min-height:1.4em;font-size:12px;color:var(--muted)}
 [data-photo-status][aria-busy=true]{animation:photo-saving 1s ease-in-out infinite alternate}
