@@ -10,3 +10,4 @@ User-facing release notes will be recorded here when release tags are published.
 - Workspace workflow presets and editable status and board column names.
 - Instance display name, accent, and logo configuration for self-hosters.
 - Self-hosting guide and example environment file.
+- AgentFlow tab: an org chart of AI agents, people and teams with purposes, inputs, outputs, tools and instructions, plus workflows of agent steps. Agents and workflows link to projects, DevOps cards and timeline deadlines, and runners get Markdown briefs through new `agents.*` and `workflows.*` API and MCP operations.

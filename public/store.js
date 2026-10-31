@@ -2,8 +2,9 @@ import {uid,clone} from './ui.js';
 import {cleanDevops} from './devops-core.js';
 import {starterChart} from './demo-seed.js';
 import {cleanWorkflow} from './workflow.js';
+import {cleanAgentflow} from './agentflow-core.js';
 // Persistence, validation and whole-database undo. Charts keep the original v1 schema;
-// projects, timeline and devops are additive fields, so older saves load unchanged.
+// projects, timeline, devops and agentflow are additive fields, so older saves load unchanged.
 // The app is now "Flygon Flow", but the storage key keeps its original name on purpose:
 // renaming it would orphan every chart already saved in this browser.
 const KEY='org-chart-studio-v1',DATE=/^\d{4}-\d{2}-\d{2}$/,COLOR=/^#[0-9a-f]{6}$/i;
@@ -48,6 +49,8 @@ function normalize(db){
   db.timeline=(Array.isArray(db.timeline)?db.timeline:[]).map(i=>cleanItem(i,db.projects)).filter(Boolean);
   // DevOps board: databases saved before it existed get the default columns and labels.
   db.devops=cleanDevops(db.devops,db);
+  // AgentFlow: after the board, so links to deleted cards are dropped.
+  db.agentflow=cleanAgentflow(db.agentflow,db);
   return db;
 }
 

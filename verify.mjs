@@ -393,7 +393,7 @@ try{
   assert(await js(`document.querySelector('dialog.acct-dlg[open] .hp-pager [aria-current=page]')?.textContent==='2'&&document.querySelector('dialog.acct-dlg[open] .hp-list .hp-v')?.textContent==='${JSON.parse(readFileSync(new URL('./public/devlog.json',import.meta.url),'utf8')).releases[10].version}'`),'the next page loads the next releases');
   // Shortcuts: rebinding, reserved keys, conflicts with swap, reset; persisted locally and on the server.
   await js(`document.querySelector('[role=tab][data-tab=shortcuts]').click()`);await sleep(150);
-  assert(await js(`document.querySelectorAll('.sc-scope').length===4&&!!document.querySelector('[data-sc="chart.addEntity"]')`),'the Shortcuts tab lists every scope');
+  assert(await js(`document.querySelectorAll('.sc-scope').length===5&&!!document.querySelector('[data-sc="chart.addEntity"]')`),'the Shortcuts tab lists every scope');
   const rec=async(id,k,vk,mods=0,text)=>{await js(`document.querySelector('[data-sc="${id}"]').click()`);await sleep(80);await key(k,vk,mods,text);await sleep(120)};
   await rec('chart.addEntity','w',87,2);
   assert(await js(`document.querySelector('[data-row="chart.addEntity"] .sc-msg.err')?.textContent.includes('reserved')`),'browser-reserved combos are refused');
@@ -450,6 +450,42 @@ try{
   await sleep(400);
   assert(await js(`document.querySelectorAll('.acct-menu').length===0&&document.querySelectorAll('.picker,.ghost-out').length===0`),'rapid menu toggling leaves no ghost elements');
   await motion(false);
+  // AgentFlow: an org of agents and workflows, linked to DevOps cards.
+  await js(`document.activeElement?.blur();document.querySelector('[data-tab=agentflow]').click()`);await sleep(150);
+  assert(await js('location.hash')==='#agentflow'&&await js(`!!document.querySelector('#agentflowView .af-empty [data-af=starter]')`),'AgentFlow starts empty with a template offer');
+  await js(`document.querySelector('[data-af=starter]').click()`);await sleep(150);
+  db=await saved();const lead=db.agentflow.agents[0];
+  assert(db.agentflow.agents.length===4&&db.agentflow.workflows.length===1&&await js(`document.querySelectorAll('.af-node').length`)===4,'the template adds a small org and a workflow');
+  assert(await js(`!document.querySelector('#inspector').hidden&&document.querySelector('#af-name')?.value`)==='Chief of staff','the new org lead opens in the side panel');
+  assert(await js(`[...document.querySelectorAll('#af-reports option')].map(o=>o.value).join()`)==='','an agent cannot report to its own reports');
+  await js(`(()=>{const i=document.querySelector('#af-name');i.focus();i.select();return 1})()`);await call('Input.insertText',{text:'Ops lead'});
+  await js(`document.querySelector('#af-new-inputs').focus()`);await call('Input.insertText',{text:'Customer email'});await key('Enter',13);
+  db=await saved();
+  assert(db.agentflow.agents[0].name==='Ops lead'&&db.agentflow.agents[0].inputs.includes('Customer email')&&await js(`document.activeElement.id`)==='af-new-inputs','agent fields autosave and list inputs add on Enter');
+  await js(`document.activeElement.blur()`);await key('n',78,0,'n');await sleep(100);
+  db=await saved();
+  assert(db.agentflow.agents.length===5&&db.agentflow.agents[4].reportsTo===lead.id&&await js('document.activeElement.id')==='af-name','N adds an agent under the selected one');
+  await js(`document.activeElement.blur()`);await key('Delete',46);await answer(true);
+  assert((await saved()).agentflow.agents.length===4,'Delete removes the selected agent after a confirmation');
+  await key('z',90,2);
+  assert((await saved()).agentflow.agents.length===5,'undo brings the agent back');
+  // Link a card from the agent, then follow the link back from the card.
+  await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);
+  await js(`document.querySelector('#inspector [data-picker=af-cards]').click()`);await sleep(100);
+  await js(`[...document.querySelectorAll('.picker .pk-opt')].find(o=>o.textContent.includes('QA Card A'))?.click()`);await key('Escape',27);await sleep(100);
+  const afCard=(await saved()).devops.cards.find(c=>c.title==='QA Card A');
+  assert((await saved()).agentflow.agents[0].cards.includes(afCard.id)&&await js(`[...document.querySelectorAll('#inspector [data-af-card]')].some(b=>b.textContent.includes('QA Card A'))`),'an agent links to a DevOps card from the picker');
+  await key('2',50,0,'2');await sleep(100);
+  assert(await js(`document.querySelectorAll('.af-flow').length===1&&document.querySelectorAll('.af-flow .af-step-chip').length===4`),'2 shows the workflow as a pipeline of steps');
+  await js(`document.querySelector('[data-flow]').click()`);await sleep(100);
+  await js(`document.querySelector('#inspector [data-afi=addStep]').click()`);await sleep(100);
+  assert((await saved()).agentflow.workflows[0].steps.length===5&&/^af-act-/.test(await js('document.activeElement.id')),'a step can be added to a workflow');
+  await js(`document.activeElement.blur()`);await key('Escape',27);
+  await js(`history.pushState(null,'','#devops/card/${afCard.number}');dispatchEvent(new PopStateEvent('popstate'))`);await sleep(300);
+  assert(/Ops lead/.test(await js(`document.querySelector('dialog.card-modal[open] [data-picker=dc-agents]')?.textContent||''`)),'the card shows the agents linked to it');
+  await js(`document.querySelector('dialog.card-modal[open] [data-dc-agent]').click()`);await sleep(400);
+  assert(await js('location.hash')==='#agentflow'&&await js(`document.querySelector('#af-name')?.value`)==='Ops lead'&&!await js(`!!document.querySelector('dialog.card-modal[open]')`),'a card opens its agent in AgentFlow');
+  await key('Escape',27);await js(`document.querySelector('[data-tab=chart]').click()`);await sleep(100);
   // Static files: anything under public/, nothing outside it.
   const raw=p=>new Promise(res=>http.get({host:'127.0.0.1',port:PORT,path:p},r=>{r.resume();res(r.statusCode)}).on('error',()=>res(0)));
   assert(await raw('/motion.js')===200&&await raw('/favicon.svg')===200&&(await Promise.all(['/../server.mjs','/%2e%2e/server.mjs','/..%5cserver.mjs','/.env','/%2e%2e%2fverify.mjs'].map(raw))).every(c=>c===404),'static serving covers public/ and refuses paths outside it');

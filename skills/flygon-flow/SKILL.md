@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (26)
+## Operations (35)
 
 ### Environments
 
@@ -91,6 +91,25 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `labels.list` | `labels_list` | `GET /api/v1/envs/{env}/labels` | read | List DevOps labels |
 | `labels.create` | `labels_create` | `POST /api/v1/envs/{env}/labels` | write | Create a DevOps label |
+
+### AgentFlow agents
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `agents.list` | `agents_list` | `GET /api/v1/envs/{env}/agents` | read | List AgentFlow agents |
+| `agents.get` | `agents_get` | `GET /api/v1/envs/{env}/agents/{agent}` | read | Get an AgentFlow agent and its brief |
+| `agents.create` | `agents_create` | `POST /api/v1/envs/{env}/agents` | write | Create an AgentFlow agent |
+| `agents.update` | `agents_update` | `PATCH /api/v1/envs/{env}/agents/{agent}` | write | Update an AgentFlow agent |
+| `agents.delete` | `agents_delete` | `DELETE /api/v1/envs/{env}/agents/{agent}` | write | Delete an AgentFlow agent |
+
+### AgentFlow workflows
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `workflows.list` | `workflows_list` | `GET /api/v1/envs/{env}/workflows` | read | List AgentFlow workflows |
+| `workflows.get` | `workflows_get` | `GET /api/v1/envs/{env}/workflows/{workflow}` | read | Get an AgentFlow workflow and its brief |
+| `workflows.create` | `workflows_create` | `POST /api/v1/envs/{env}/workflows` | write | Create an AgentFlow workflow |
+| `workflows.update` | `workflows_update` | `PATCH /api/v1/envs/{env}/workflows/{workflow}` | write | Update an AgentFlow workflow |
 
 ### Search
 
@@ -397,6 +416,113 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/labels" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"id":"l-research","name":"Research","section":"area","color":"teal"}'
+```
+
+### Active agents
+
+MCP: call `agents_list` with `{"env":"default-workspace","status":"active"}`
+
+```sh
+flow agents list --input '{"env":"default-workspace","status":"active"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents?status=active" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Researcher
+
+MCP: call `agents_get` with `{"env":"default-workspace","agent":"Researcher"}`
+
+```sh
+flow agents get --input '{"env":"default-workspace","agent":"Researcher"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### New research agent
+
+MCP: call `agents_create` with `{"env":"default-workspace","name":"Researcher","title":"Research","status":"active","reportsTo":"Chief of staff","supervisor":"Cleo Park","inputs":["A card that needs research"],"outputs":["Research notes on the card"],"cards":["#12"]}`
+
+```sh
+flow agents create --input '{"env":"default-workspace","name":"Researcher","title":"Research","status":"active","reportsTo":"Chief of staff","supervisor":"Cleo Park","inputs":["A card that needs research"],"outputs":["Research notes on the card"],"cards":["#12"]}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Researcher","title":"Research","status":"active","reportsTo":"Chief of staff","supervisor":"Cleo Park","inputs":["A card that needs research"],"outputs":["Research notes on the card"],"cards":["#12"]}'
+```
+
+### Activate and link a card
+
+MCP: call `agents_update` with `{"env":"default-workspace","agent":"Researcher","status":"active","cards":["#12"]}`
+
+```sh
+flow agents update --input '{"env":"default-workspace","agent":"Researcher","status":"active","cards":["#12"]}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"active","cards":["#12"]}'
+```
+
+### Remove the researcher
+
+MCP: call `agents_delete` with `{"env":"default-workspace","agent":"Researcher"}`
+
+```sh
+flow agents delete --input '{"env":"default-workspace","agent":"Researcher"}'
+
+curl -sS -X DELETE "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Workflows the researcher is in
+
+MCP: call `workflows_list` with `{"env":"default-workspace","agent":"Researcher"}`
+
+```sh
+flow workflows list --input '{"env":"default-workspace","agent":"Researcher"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/workflows?agent=Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Ship a card
+
+MCP: call `workflows_get` with `{"env":"default-workspace","workflow":"Ship a card"}`
+
+```sh
+flow workflows get --input '{"env":"default-workspace","workflow":"Ship a card"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/workflows/Ship%20a%20card" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Ship a card
+
+MCP: call `workflows_create` with `{"env":"default-workspace","name":"Ship a card","status":"active","trigger":"event","schedule":"A card enters Doing","steps":[{"agent":"Researcher","action":"Research the approach","output":"Notes on the card"}],"projects":["Lantern"]}`
+
+```sh
+flow workflows create --input '{"env":"default-workspace","name":"Ship a card","status":"active","trigger":"event","schedule":"A card enters Doing","steps":[{"agent":"Researcher","action":"Research the approach","output":"Notes on the card"}],"projects":["Lantern"]}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/workflows" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Ship a card","status":"active","trigger":"event","schedule":"A card enters Doing","steps":[{"agent":"Researcher","action":"Research the approach","output":"Notes on the card"}],"projects":["Lantern"]}'
+```
+
+### Pause it
+
+MCP: call `workflows_update` with `{"env":"default-workspace","workflow":"Ship a card","status":"paused"}`
+
+```sh
+flow workflows update --input '{"env":"default-workspace","workflow":"Ship a card","status":"paused"}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/workflows/Ship%20a%20card" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"paused"}'
 ```
 
 ### Sign-up

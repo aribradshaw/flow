@@ -1,0 +1,137 @@
+// AgentFlow data rules (public/agentflow-core.js): validation, the org tree, removal and briefs.
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
+  workFor,openWork,full,LIMITS,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
+import {normalize} from '../lib/cleaners.mjs';
+import {size,isSeed} from '../public/sync-core.js';
+import {starterChart} from '../public/demo-seed.js';
+
+const T='2026-10-30T12:00:00.000Z';
+const base=()=>({charts:[{id:'c',name:'C',nodes:[{id:'pat',name:'Pat Lee',type:'person',x:0,y:0},{id:'acme',name:'Acme',type:'entity',x:0,y:0}],edges:[]}],
+  projects:[{id:'p1',name:'Launch'}],timeline:[{id:'i1',title:'Go live',kind:'deadline',status:'planned',start:'2026-12-01',end:''}],
+  devops:{columns:[{id:'doing',name:'Doing'},{id:'done',name:'Done'}],cards:[{id:'k1',number:1,title:'Write copy',column:'doing',project:'p1',due:'2026-11-20'},{id:'k2',number:2,title:'Old',column:'done',project:'p1'},{id:'k3',number:3,title:'Other',column:'doing',project:''}]}});
+
+test('a missing or broken AgentFlow becomes an empty one',()=>{
+  assert.deepEqual(cleanAgentflow(undefined,base()),seedAgentflow());
+  assert.deepEqual(cleanAgentflow('nope',base()),{agents:[],workflows:[]});
+  assert.deepEqual(normalize({charts:[]}).agentflow,{agents:[],workflows:[]},'the server normalizer adds it to older saves');
+});
+
+test('validation: defaults, limits, dangling links and duplicate ids',()=>{
+  const db=base();
+  const af=cleanAgentflow({agents:[
+    {id:'a',name:'  Lead  ',kind:'robot',status:'busy',supervisor:'acme',projects:['p1','gone','p1'],cards:['k1','zz'],items:['i1','x'],inputs:[' In ','In','',5],created:'bad'},
+    {id:'a',name:'Duplicate'},{name:'No id'},null,
+    {id:'b',name:'B',reportsTo:'a',supervisor:'pat'},
+  ],workflows:[{id:'w',name:'W',trigger:'cron',steps:[{id:'s',agent:'a',action:'Go'},{id:'s',agent:'ghost'},'junk'],cards:['k1','k9']}]},db);
+  assert.equal(af.agents.length,2);
+  const [a,b]=af.agents;
+  assert.deepEqual([a.name,a.kind,a.status,a.supervisor,a.projects,a.cards,a.items,a.inputs],['Lead','agent','draft','',['p1'],['k1'],['i1'],['In']]);
+  assert.ok(!Number.isNaN(Date.parse(a.created)));
+  assert.deepEqual([b.reportsTo,b.supervisor],['a','pat'],'supervisors must be people; entities are dropped');
+  const w=af.workflows[0];
+  assert.equal(w.trigger,'manual');assert.equal(w.steps.length,2);
+  assert.notEqual(w.steps[0].id,w.steps[1].id,'duplicate step ids are replaced');
+  assert.deepEqual(w.steps.map(s=>s.agent),['a',''],'steps for unknown agents become unassigned');
+  assert.deepEqual(w.cards,['k1']);
+  assert.deepEqual(cleanAgentflow(JSON.parse(JSON.stringify(af)),db),af,'cleaning is idempotent');
+});
+
+test('links to records shared in from another workspace survive cleaning without them',()=>{
+  // Stored data has shared (sh.*) records stripped; they are projected in on read.
+  const af=cleanAgentflow({agents:[{id:'a',name:'A',supervisor:'sh.s1.bo',cards:['sh.s1.k9','gone'],projects:['sh.s1.p'],items:['sh.s1.i']}],workflows:[{id:'w',name:'W',cards:['sh.s1.k9']}]},base());
+  const [a]=af.agents;
+  assert.deepEqual([a.supervisor,a.cards,a.projects,a.items,af.workflows[0].cards],['sh.s1.bo',['sh.s1.k9'],['sh.s1.p'],['sh.s1.i'],['sh.s1.k9']]);
+});
+
+test('limits are checked before adding, never by silently dropping',()=>{
+  const af=seedAgentflow();
+  for(let i=0;i<LIMITS.agents;i++)newAgent(af,{name:'A'+i});
+  assert.match(full(af,'agents'),/up to 500 agents/);assert.equal(full(af,'workflows'),'');
+  const a=af.agents[0];a.inputs=Array.from({length:LIMITS.list},(_,i)=>'in'+i);
+  assert.match(full(af,'list',a,'inputs'),/Up to 50 inputs/);assert.equal(full(af,'list',a,'outputs'),'');
+  const w=newWorkflow(af,{steps:Array.from({length:LIMITS.steps},()=>newStep())});
+  assert.match(full(af,'steps',w),/up to 100 steps/);
+  a.cards=Array.from({length:LIMITS.refs},(_,i)=>'sh.k'+i);
+  assert.match(full(af,'refs',a,'cards'),/Up to 100 linked cards/);assert.equal(full(af,'refs',a,'items'),'');
+  assert.equal(cleanAgentflow(JSON.parse(JSON.stringify(af)),{}).agents.length,LIMITS.agents,'a full workspace keeps every agent');
+});
+
+test('reporting loops are broken and missing managers dropped',()=>{
+  const af=cleanAgentflow({agents:[{id:'a',name:'A',reportsTo:'c'},{id:'b',name:'B',reportsTo:'a'},{id:'c',name:'C',reportsTo:'b'},{id:'d',name:'D',reportsTo:'d'},{id:'e',name:'E',reportsTo:'nobody'}]},base());
+  assert.deepEqual(af.agents.map(a=>a.reportsTo),['','a','b','','']);
+});
+
+test('the org tree: descendants, chains and who may report to whom',()=>{
+  const af=seedAgentflow();
+  const a=newAgent(af,{name:'A'}),b=newAgent(af,{name:'B',reportsTo:a.id}),c=newAgent(af,{name:'C',reportsTo:b.id}),d=newAgent(af,{name:'D'});
+  assert.deepEqual([...descendants(af,a.id)].sort(),[b.id,c.id].sort());
+  assert.deepEqual(chainOf(af,c.id).map(x=>x.name),['B','A']);
+  assert.equal(canReportTo(af,a.id,c.id),false);assert.equal(canReportTo(af,a.id,a.id),false);
+  assert.equal(canReportTo(af,c.id,d.id),true);assert.equal(canReportTo(af,a.id,''),true);assert.equal(canReportTo(af,a.id,'ghost'),false);
+});
+
+test('removing an agent moves its reports up and unassigns its steps',()=>{
+  const af=seedAgentflow();
+  const a=newAgent(af,{name:'A'}),b=newAgent(af,{name:'B',reportsTo:a.id}),c=newAgent(af,{name:'C',reportsTo:b.id});
+  const w=newWorkflow(af,{steps:[newStep({agent:b.id}),newStep({agent:c.id})]});
+  assert.deepEqual(workflowsFor(af,b.id).map(x=>x.id),[w.id]);
+  assert.equal(removeAgent(af,b.id),true);assert.equal(removeAgent(af,'ghost'),false);
+  assert.equal(af.agents.find(x=>x.id===c.id).reportsTo,a.id);
+  assert.deepEqual(w.steps.map(s=>s.agent),['',c.id]);
+});
+
+test('linked work: direct cards, then open cards in linked projects',()=>{
+  const db=base();db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{cards:['k3'],projects:['p1'],items:['i1']});
+  const w=workFor(db,a);
+  assert.deepEqual(w.cards.map(c=>c.id),['k3','k1'],'done cards from projects are left out');
+  assert.equal(openWork(db,a),2);
+  assert.deepEqual(agentsForCard(db.agentflow,'k3').map(x=>x.id),[a.id]);
+  assert.deepEqual(agentsForCard(undefined,'k3'),[]);
+});
+
+test('filters match text fields, status, kind and project',()=>{
+  const af=seedAgentflow();
+  newAgent(af,{name:'Writer',status:'active',tools:['Docs'],projects:['p1']});newAgent(af,{name:'Lead',kind:'human',purpose:'Approves docs'});
+  assert.deepEqual(filterAgents(af,{q:'docs'}).map(a=>a.name),['Writer','Lead']);
+  assert.deepEqual(filterAgents(af,{q:'docs',kind:'human'}).map(a=>a.name),['Lead']);
+  assert.deepEqual(filterAgents(af,{status:'active',project:'p1'}).map(a=>a.name),['Writer']);
+  const w=newWorkflow(af,{name:'Weekly',schedule:'Mondays',steps:[newStep({agent:af.agents[0].id,action:'Draft notes'})]});
+  assert.deepEqual(filterWorkflows(af,{q:'notes'}).map(x=>x.id),[w.id]);
+  assert.deepEqual(filterWorkflows(af,{agent:af.agents[1].id}),[]);
+});
+
+test('briefs describe the agent, its workflows and its Flow work',()=>{
+  const db=base();db.agentflow=seedAgentflow();
+  const lead=newAgent(db.agentflow,{name:'Lead',title:'Ops'});
+  const a=newAgent(db.agentflow,{name:'Writer',kind:'agent',status:'active',title:'Content',reportsTo:lead.id,supervisor:'pat',purpose:'Writes copy.',inputs:['Brief'],outputs:['Draft'],
+    tools:[],runtime:'Home server',instructions:'Be brief.',cards:['k1'],items:['i1']});
+  newWorkflow(db.agentflow,{name:'Publish',trigger:'schedule',schedule:'Fridays',steps:[newStep({agent:lead.id,action:'Plan'}),newStep({agent:a.id,action:'Write',output:'Draft'})]});
+  const brief=agentBrief(db,a.id);
+  for(const s of ['# Writer','AI agent · Content · Active','Writes copy.','Reports to: Lead (Ops)','Supervised by: Pat Lee','## Inputs\n\n- Brief','## Tools\n\n- None','Runs on: Home server',
+    'Publish: step 2: Write','#1 Write copy (Doing, due 2026-11-20)','Go live (deadline, 2026-12-01, planned)','## Instructions\n\nBe brief.'])assert.ok(brief.includes(s),`brief has "${s}"`);
+  assert.ok(agentBrief(db,lead.id).includes('Direct reports: Writer (Content)'));
+  assert.equal(agentBrief(db,'ghost'),'');
+  const wb=workflowBrief(db,db.agentflow.workflows[0].id);
+  assert.match(wb,/Workflow · Draft · Schedule: Fridays/);
+  assert.match(wb,/1\. \*\*Lead\*\*: Plan\n2\. \*\*Writer\*\*: Write → Draft/);
+});
+
+test('the starter template is a small, valid org with a workflow',()=>{
+  const db=base();db.agentflow=seedAgentflow();
+  const lead=starterAgentflow(db.agentflow);
+  assert.equal(db.agentflow.agents.length,4);
+  assert.deepEqual(db.agentflow.agents.filter(a=>a.reportsTo===lead.id).length,3);
+  assert.ok(db.agentflow.workflows[0].steps.every(s=>db.agentflow.agents.some(a=>a.id===s.agent)));
+  assert.deepEqual(cleanAgentflow(JSON.parse(JSON.stringify(db.agentflow)),db),db.agentflow);
+});
+
+test('sync counts AgentFlow content, so a workspace with only agents is not mistaken for the sample',()=>{
+  const d={charts:[starterChart('seed')],projects:[],timeline:[],devops:{cards:[]}};
+  assert.equal(isSeed(d),true);
+  const withAgents={...d,agentflow:{agents:[{id:'a',name:'A'}],workflows:[]}};
+  assert.equal(isSeed(withAgents),false);
+  assert.equal(size(withAgents),size(d)+1);
+});

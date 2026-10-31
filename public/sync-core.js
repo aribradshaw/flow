@@ -52,10 +52,10 @@ function mergeById(b,l,r){
   });
   return out;
 }
-// How much a workspace holds (cards, connections, projects, items, DevOps cards).
+// How much a workspace holds (cards, connections, projects, items, DevOps cards, AgentFlow agents and workflows).
 export function size(d){
   if(!d)return 0;
-  return (d.charts||[]).reduce((s,c)=>s+(c.nodes?.length||0)+(c.edges?.length||0),0)+(d.projects?.length||0)+(d.timeline?.length||0)+(d.devops?.cards?.length||0);
+  return (d.charts||[]).reduce((s,c)=>s+(c.nodes?.length||0)+(c.edges?.length||0),0)+(d.projects?.length||0)+(d.timeline?.length||0)+(d.devops?.cards?.length||0)+(d.agentflow?.agents?.length||0)+(d.agentflow?.workflows?.length||0);
 }
 // A save that would drop most of a large workspace is refused unless explicitly allowed.
 export const shrinks=(current,incoming)=>size(current)>=50&&size(incoming)<size(current)*0.2;
@@ -67,5 +67,5 @@ const SEED=starterChart('seed'),SEED_NODES=new Set(SEED.nodes.map(n=>n.id)),SEED
 export function isSeed(d){
   if(!d||!Array.isArray(d.charts)||d.charts.length!==1)return false;
   const c=d.charts[0];
-  return c.name===SEED.name&&c.nodes.every(n=>SEED_NODES.has(n.id))&&c.edges.every(e=>SEED_EDGES.has(e.id))&&!d.projects?.length&&!d.timeline?.length&&!d.devops?.cards?.length;
+  return c.name===SEED.name&&c.nodes.every(n=>SEED_NODES.has(n.id))&&c.edges.every(e=>SEED_EDGES.has(e.id))&&!d.projects?.length&&!d.timeline?.length&&!d.devops?.cards?.length&&!d.agentflow?.agents?.length&&!d.agentflow?.workflows?.length;
 }

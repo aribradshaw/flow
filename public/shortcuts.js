@@ -3,7 +3,7 @@
 // several combos (keys); users can rebind editable ones (stored in prefs.shortcuts by id).
 import {getPref,setPref} from './prefs.js';
 
-export const SCOPES=[['global','Global'],['chart','Chart'],['timeline','Timeline'],['devops','DevOps']];
+export const SCOPES=[['global','Global'],['chart','Chart'],['timeline','Timeline'],['devops','DevOps'],['agentflow','AgentFlow']];
 export const SHORTCUTS=[
   {id:'global.save',scope:'global',keys:['Mod+S'],desc:'Save a snapshot to this computer and the cloud'},
   {id:'global.undo',scope:'global',keys:['Mod+Z'],desc:'Undo'},
@@ -33,6 +33,12 @@ export const SHORTCUTS=[
   {id:'devops.delete',scope:'devops',keys:['Delete','Backspace'],desc:'Delete the open card'},
   {id:'devops.prevCard',scope:'devops',keys:['ArrowLeft','K'],desc:'Previous card in the column (card open)'},
   {id:'devops.nextCard',scope:'devops',keys:['ArrowRight','J'],desc:'Next card in the column (card open)'},
+  {id:'agentflow.addAgent',scope:'agentflow',keys:['N'],desc:'New agent (under the selected one)'},
+  {id:'agentflow.addWorkflow',scope:'agentflow',keys:['W'],desc:'New workflow'},
+  {id:'agentflow.search',scope:'agentflow',keys:['/'],desc:'Search agents and workflows'},
+  {id:'agentflow.view1',scope:'agentflow',keys:['1'],desc:'Org chart view'},
+  {id:'agentflow.view2',scope:'agentflow',keys:['2'],desc:'Workflows view'},
+  {id:'agentflow.delete',scope:'agentflow',keys:['Delete','Backspace'],desc:'Delete the selected agent or workflow'},
   {id:'devops.drag',scope:'devops',keys:['Space'],desc:'Pick up a focused card; arrows move it, Space drops',fixed:true},
 ];
 const byId=new Map(SHORTCUTS.map(s=>[s.id,s]));
