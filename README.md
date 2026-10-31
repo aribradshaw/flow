@@ -33,6 +33,28 @@ Hover any icon for a tooltip; the **?** in the top bar lists shortcuts for the c
 
 Use **Chart** to map an organization, team, or idea; **Timeline** to plan projects and releases; and **DevOps** to move work from requests through completion. The three views share projects, people, and links, so you can start with whichever one fits your work.
 
+**Timeline:** see projects, milestones, deadlines, and work at risk across time.
+
+![Flow timeline showing fictional projects and milestones across several months](docs/media/timeline.png)
+
+<details>
+<summary>Watch Timeline switch between the timeline, calendar, status board, and list</summary>
+
+![Animated walkthrough of four Flow timeline views using fictional projects](docs/media/timeline-views.gif)
+
+</details>
+
+**DevOps:** track requests, active work, blockers, testing, completed cards, and backlogs.
+
+![Flow DevOps board showing fictional cards across delivery columns](docs/media/devops.png)
+
+<details>
+<summary>Watch a DevOps card open to show its checklist, assignees, and linked timeline item</summary>
+
+![Animated walkthrough of opening a fictional Flow DevOps card and returning to the board](docs/media/devops-card.gif)
+
+</details>
+
 In **Settings → Environment → Workflow**, choose Delivery, Simple, or Planning, then edit timeline status names and DevOps column names for your workspace. Stage IDs stay stable so saved items and automation continue to work. A self-hosted instance can also set its display name, accent, and logo through environment variables.
 
 ### Chart
@@ -175,7 +197,7 @@ Code lives in ES modules under `public/`: `app.js` (shell, canvas, inspector), `
 
 ## Verification
 
-`npm run check` checks syntax. `node verify.mjs` runs end-to-end checks in headless Edge against its own server on port 4399 with a throwaway profile, so it never touches the live instance or your saved data. It covers snapping, resizing, undo, port connections, inspector autosave, keyboard adding, timeline items/projects/drag-rescheduling, all three timeline views, reload persistence and the disk backup. `seed-canvas.png` is captured during the run.
+`npm run check` checks syntax. `node verify.mjs` runs end-to-end checks in headless Edge against its own server on port 4399 with a throwaway profile, so it never touches the live instance or your saved data. It covers snapping, resizing, undo, port connections, inspector autosave, keyboard adding, timeline items/projects/drag-rescheduling, all three timeline views, reload persistence and the disk backup. `seed-canvas.png` is captured during the run. The Timeline and DevOps README media can be regenerated from fictional demo data with `node tools/capture-readme.mjs` (Chromium; set `BROWSER` if needed) and `python3 tools/build-readme-gifs.py` (Pillow 10.1 or newer).
 
 ## Autosave
 Inspector fields autosave valid edits as you type. The coloured dot in the top bar shows save state; hover it for details. Browser storage saves immediately; disk backups follow after 400 ms. Backups live in data/<browser-id>.json with the prior snapshot in <browser-id>.previous.json. Each browser gets a separate ID so an older chart in another browser cannot overwrite yours. The status indicator confirms disk writes and reports retries.

@@ -10,3 +10,6 @@ node_modules/
 .env
 saves/
 inbox/
+docs/media/frames/
+__pycache__/
+*.pyc
