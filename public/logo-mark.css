@@ -1,0 +1,35 @@
+/* Animated Flygon Flow mark (logo-mark.js). Loop phase comes from --lm-t, core shade from --lm-core. */
+.logo{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.lm{display:block;overflow:visible;transform-box:view-box;transform-origin:12px 12px;
+  animation:lm-breathe 3.2s ease-in-out var(--lm-t,0ms) infinite;transition:filter .35s ease}
+.lm *{transform-box:view-box;transform-origin:12px 12px}
+.lm-d{stroke-linejoin:round;vector-effect:non-scaling-stroke}
+
+.lm-outer{fill:var(--flygon-green);stroke:var(--flygon-green);stroke-width:2;
+  animation:lm-outer 3.2s ease-in-out calc(var(--lm-t,0ms) + 520ms) infinite}
+.lm-mid{fill:var(--flygon-dark);stroke:var(--flygon-dark);stroke-width:2;
+  animation:lm-mid 3.2s ease-in-out calc(var(--lm-t,0ms) + 260ms) infinite}
+.lm-core{fill:var(--lm-core,var(--flygon-green));stroke:none;transition:fill .45s ease;
+  animation:lm-core 3.2s ease-in-out var(--lm-t,0ms) infinite}
+.lm-ring{fill:none;stroke:var(--flygon-green);pointer-events:none}
+
+/* hover: lean toward the pointer, counter-rotate a quarter turn, glow */
+.lm-p{transition:transform .3s cubic-bezier(.2,.7,.2,1)}
+.lm-p1{transform:translate(calc(var(--px,0) * 2.2px),calc(var(--py,0) * 2.2px))}
+.lm-p2{transform:translate(calc(var(--px,0) * 1.2px),calc(var(--py,0) * 1.2px))}
+.lm-p3{transform:translate(calc(var(--px,0) * .5px),calc(var(--py,0) * .5px))}
+.lm-spin{transition:transform .8s cubic-bezier(.34,1.56,.64,1)}
+.logo:hover .lm-spin-mid{transform:rotate(90deg)}
+.logo:hover .lm-spin-out{transform:rotate(-90deg)}
+.logo:hover .lm{filter:drop-shadow(0 0 3px rgb(124 185 128 / .75))}
+
+@keyframes lm-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+@keyframes lm-outer{0%,100%{fill-opacity:0;stroke-opacity:.45}50%{fill-opacity:.22;stroke-opacity:1}}
+@keyframes lm-mid{0%,100%{fill-opacity:0;stroke:var(--flygon-dark);stroke-opacity:.8}
+  50%{fill-opacity:.14;stroke:var(--flygon-olive);stroke-opacity:1}}
+@keyframes lm-core{0%,100%{transform:scale(.8);opacity:.7}50%{transform:scale(1.15);opacity:1}}
+
+@media (prefers-reduced-motion:reduce){
+  .lm,.lm *{animation:none!important;transition:none!important}
+  .logo:hover .lm-spin{transform:none}
+}

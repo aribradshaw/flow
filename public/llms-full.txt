@@ -1,0 +1,1855 @@
+# Flygon Flow
+
+> Flygon Flow keeps an org chart, a product timeline and a DevOps board in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
+
+Version 0.10.38 (2026-10-29)
+
+# Concepts
+
+## Environments
+
+An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it.
+
+```json
+{"id": "acme-hq", "name": "Acme HQ", "ownerEmail": "owner@example.com", "visibility": "private", "members": []}
+```
+
+- Every user starts in a new, empty, private environment. They can create more, rename them and archive them from Settings › Environment. Archiving hides an environment and keeps its data.
+- **Isolation.** A private environment can only be seen by its owner and its members. Anyone else gets `404`, so the server does not even confirm that it exists. Anyone signed in can read a public environment, but only its owner can write to it.
+- Every API operation that touches workspace data is scoped to one environment through the `{env}` path segment. The server runs the read or write check before it touches any data.
+- Data saved before environments existed belongs to the instance's default environment.
+
+## Chart
+
+The chart is a free-form canvas of **cards** joined by **edges**. A workspace can hold several charts; one of them is active.
+
+- Card types: `entity` (a company or organisation), `person`, `area` (a project area that groups cards inside it) and `note`.
+- Edge types: `ownership` is a solid arrow that can carry a percentage from 0 to 100, or `""` when the percentage is unknown. `group` is a dashed line that means grouping only.
+- Cards snap to a 16px grid and can be resized. Moving an area also moves every card that sits fully inside it.
+- Selecting an entity or area shows its **project strip**: the projects placed under it, their next timeline item, backlog counts and open DevOps cards.
+
+```json
+{"id": "c1", "name": "Acme · structure",
+ "nodes": [{"id": "acme", "name": "Acme Holdings", "type": "entity", "x": 400, "y": 0},
+           {"id": "rivera", "name": "Sam Rivera", "type": "person", "x": 320, "y": 144}],
+ "edges": [{"id": "o1", "from": "rivera", "to": "acme", "type": "ownership", "percent": "60"}]}
+```
+
+Validation is strict: ids must be unique, every edge must join two existing cards, and a card cannot connect to itself.
+
+## Timeline
+
+The timeline holds dated **items** that are tagged with **projects**.
+
+- Item kinds: `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`.
+- Status: `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. Priority (`high`, `medium`, `low`) is optional.
+- `start` is `YYYY-MM-DD`, or empty for an unscheduled backlog item that appears only on the Board and List views. `end` is optional and never earlier than `start`.
+- A feature can target a **release** by title. The release then lists the items that target it and how many of them are done.
+- **Projects** are coloured tags `{id, name, color, entity}`. A project can sit under a chart entity or area through `entity`.
+- Views: Timeline (Gantt), Calendar, List and Board (a kanban by status). Filtered items can be exported as `.ics`.
+
+## DevOps board and gates
+
+The DevOps board is a card board. Each card has an auto-incrementing `#number`.
+
+Columns, in order: `requests` (Requests / Sprinted, where new cards land), `doing`, `blocked`, `uat`, `done`, then the two backlogs `must` (Must Have) and `nice` (Nice to Have).
+
+A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item.
+
+### Gates
+
+Some moves need a confirmation or a decision. The app asks for it, and API callers must provide it explicitly:
+
+| Move | Gate |
+| --- | --- |
+| UAT → Done with **Approve** | none (approval is the gate) |
+| anything else → `done` | `confirm-done` |
+| `done` → anything | `confirm-reopen` (reopen) |
+| → `doing` with no developer | `pick-dev`: choose who develops it |
+
+Labels have a section (`priority`, `urgency`, `area`, `topic`, `other`) and a colour key. Due dates turn amber two days before they are due and red once they are overdue.
+
+## Agent inbox
+
+Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox. The open app picks the patch up within about 20 seconds and merges it as **one undoable step**.
+
+```json
+{"source": "Claude", "env": "acme-hq", "ops": [
+  {"op": "upsertProject", "name": "Launch", "color": "#7cb980"},
+  {"op": "upsertCard", "title": "Write release notes", "project": "Launch", "column": "requests", "labels": ["High"]},
+  {"op": "patchCard", "number": 12, "column": "uat"}
+]}
+```
+
+- Ops: `upsertProject`, `upsertLabel`, `upsertItem`, `upsertCard`, `patchCard`.
+- References use names: a project by name, an assignee by the name of a person card, an item or release by title, and a label by id or name.
+- **Safety:** ops only add or update and never delete. Lists only grow. A field a human changed after the patch was written is kept, and the merge notes it. Applying the same patch again changes nothing.
+- CLI: `node tools/inbox.mjs add|check|list|requeue`.
+
+The token API is the direct way to make changes. The inbox suits agents that cannot hold a token, or changes a human should be able to undo in one click.
+
+## Sync
+
+The server is the source of truth. Each environment's workspace is stored with a **revision** number, and the browser keeps an offline cache.
+
+- `GET /api/workspace?env=<id>` returns `{rev, data}`. `PUT` with `{baseRev, data}` saves the workspace when `baseRev` is still current.
+- If the workspace has moved on, the save gets `409` along with the newer copy. The client then merges per entity and field and retries. When both sides changed the same field, the local change wins. A deletion only applies to an entity the other side has not touched.
+- A save that would drop most of a large workspace is refused with `422`, unless it is a deliberate load or replace.
+- Every write first keeps the previous revision in the history. Postgres keeps it in `flygon_flow_workspace_history`; without Postgres it goes to `BACKUP_DIR/workspaces/history/`.
+- Open tabs pick up remote changes every 20 seconds, and offline edits upload when the connection comes back.
+
+API writes go through the same revision check, so an agent's change and a human's edit never silently overwrite each other.
+
+## Sharing
+
+The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment. The Share dialog (a card's **Share…** button, or Settings › Environment › *Share this environment…*) shows a live preview of exactly what the other person will see. Permissions are **view**, **comment** or **edit**.
+
+The recipient finds it under Settings › Sharing › *Shared with you* and adds it to one of their own environments. The shared cards appear there as linked boxes with their own layout. Direct co-owners of a shared card show as read-only name stubs, and nothing else of theirs is shared. Edits travel both ways as the permission allows. Revoking a share removes everything from the recipient's environment. Recipients cannot share further; instead they ask the owner, who approves or denies the request.
+
+The server enforces all of this: linked copies are computed from the owner's data on every read and are never stored in the recipient's environment. The API, the CLI and MCP see each environment's own data only. Details: `docs/sharing.md`.
+
+The owner can also invite people to the app itself (Settings › Account › *Invite to Flow*). The invited person signs in with that email and gets their own empty environment.
+
+## Versioning
+
+Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md). Every commit that reaches `main` gets the next `YEAR.MONTH.UPDATE`:
+
+- The year is zero-based from 2026, so October 2026 is `0.10.x` and January 2027 is `1.1.x`. Months are calendar months, in the America/Phoenix timezone.
+- The registry is `public/devlog.json`. Each release records its version, commit, admission time and `compatibility` (`compatible`, `action-required` or `breaking`, with the required `action`), plus any verified deployments.
+- A version identifies source code only. It says nothing about whether that code is deployed.
+
+These docs are generated from the same registry, so the version in the header is the newest recorded release.
+
+# Using the API
+
+Every operation is an HTTP call under the base URL of your Flow server:
+
+```sh
+curl -sS "$FLOW_URL/api/v1/envs/$FLOW_ENV/cards" -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+Keys look like `flow_…` and carry a scope: `read` (list and get), `write` (create, update and move) or `admin` (keys, sharing and environments). The OpenAPI document is at `/api/v1/openapi.json`. Errors come back with an HTTP status plus a `code` and a `message`. Path parameters such as `{env}` are filled from the input. Any other input is sent as the query string for GET and DELETE, or as the JSON body otherwise.
+
+## Environments
+
+### `envs.list`
+
+List environments
+
+`GET /api/v1/envs` · scope `read` · MCP tool `envs_list`
+
+Environments (workspaces) you own, newest first. Use an id from here as {env} in every other call.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].visibility` | enum | yes | One of `private`, `public`. |
+| `items[].owner` | string |  |  |
+| `items[].rev` | integer | yes |  |
+| `items[].updatedAt` | string | null |  |  |
+| `nextCursor` | string | null | yes |  |
+
+**Example: Your environments**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "default-workspace",
+      "name": "Default workspace",
+      "visibility": "private",
+      "owner": "owner@example.test",
+      "rev": 42,
+      "updatedAt": "2026-10-29T17:00:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+### `envs.get`
+
+Get an environment
+
+`GET /api/v1/envs/{env}` · scope `read` · MCP tool `envs_get`
+
+One environment: name, visibility, owner, revision and how much it holds.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `environment` | object | yes |  |
+| `environment.id` | string | yes |  |
+| `environment.name` | string | yes |  |
+| `environment.visibility` | enum | yes | One of `private`, `public`. |
+| `environment.owner` | string |  |  |
+| `environment.rev` | integer | yes |  |
+| `environment.updatedAt` | string | null |  |  |
+| `environment.counts` | object |  |  |
+
+**Example: Default workspace**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "environment": {
+    "id": "default-workspace",
+    "name": "Default workspace",
+    "visibility": "private",
+    "owner": "owner@example.test",
+    "rev": 42,
+    "updatedAt": "2026-10-29T17:00:00.000Z",
+    "counts": {
+      "charts": 1,
+      "nodes": 7,
+      "edges": 7,
+      "projects": 3,
+      "items": 12,
+      "cards": 40
+    }
+  }
+}
+```
+
+## Charts
+
+### `charts.list`
+
+List charts
+
+`GET /api/v1/envs/{env}/charts` · scope `read` · MCP tool `charts_list`
+
+The org charts in an environment, with node and edge counts. `active` marks the chart open in the app.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].active` | boolean | yes |  |
+| `items[].nodes` | integer | yes |  |
+| `items[].edges` | integer | yes |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Charts**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/charts" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "c1",
+      "name": "Flygon · brainstorm",
+      "active": true,
+      "nodes": 7,
+      "edges": 7
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+## Nodes
+
+### `nodes.list`
+
+List nodes
+
+`GET /api/v1/envs/{env}/charts/{chart}/nodes` · scope `read` · MCP tool `nodes_list`
+
+Cards on a chart (entities, people, areas, notes). Filter by `type`, or by `q` (name contains).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `type` | enum |  | One of `entity`, `person`, `area`, `note`. |
+| `q` | string |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `items[].x` | number | yes |  |
+| `items[].y` | number | yes |  |
+| `items[].w` | number |  |  |
+| `items[].h` | number |  |  |
+| `items[].notes` | string |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: People on the active chart**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/charts/active/nodes?type=person" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "cleo",
+      "name": "Cleo Park",
+      "type": "person",
+      "x": 320,
+      "y": 144,
+      "notes": ""
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `nodes.get`
+
+Get a node
+
+`GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}` · scope `read` · MCP tool `nodes_get`
+
+One chart card by id.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `node` | string | yes | Node id. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `node` | object | yes |  |
+| `node.id` | string | yes |  |
+| `node.name` | string | yes |  |
+| `node.type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `node.x` | number | yes |  |
+| `node.y` | number | yes |  |
+| `node.w` | number |  |  |
+| `node.h` | number |  |  |
+| `node.notes` | string |  |  |
+
+**Example: Kestrel Group**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/charts/active/nodes/flygon" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "node": {
+    "id": "flygon",
+    "name": "Kestrel Group",
+    "type": "entity",
+    "x": 400,
+    "y": 0,
+    "notes": ""
+  }
+}
+```
+
+### `nodes.create`
+
+Create a node
+
+`POST /api/v1/envs/{env}/charts/{chart}/nodes` · scope `write` · MCP tool `nodes_create`
+
+Add a card to a chart. Without x/y it is placed at the origin, stepping 32px diagonally past occupied spots (as the app does).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `name` | string | yes |  |
+| `notes` | string |  |  |
+| `w` | number |  |  |
+| `h` | number |  |  |
+| `x` | number |  |  |
+| `y` | number |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `node` | object | yes |  |
+| `node.id` | string | yes |  |
+| `node.name` | string | yes |  |
+| `node.type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `node.x` | number | yes |  |
+| `node.y` | number | yes |  |
+| `node.w` | number |  |  |
+| `node.h` | number |  |  |
+| `node.notes` | string |  |  |
+
+**Example: Add a person**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/nodes" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"person","name":"Cleo Park","x":320,"y":144}'
+```
+
+```json
+{
+  "rev": 43,
+  "node": {
+    "id": "cleo",
+    "name": "Cleo Park",
+    "type": "person",
+    "x": 320,
+    "y": 144,
+    "notes": ""
+  }
+}
+```
+
+### `nodes.update`
+
+Update a node
+
+`PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}` · scope `write` · MCP tool `nodes_update`
+
+Change a chart card's name, type, notes or size. Fields left out stay as they are. Use nodes.move for position.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `node` | string | yes | Node id. |
+| `type` | enum |  | One of `entity`, `person`, `area`, `note`. |
+| `name` | string |  |  |
+| `notes` | string |  |  |
+| `w` | number |  |  |
+| `h` | number |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `node` | object | yes |  |
+| `node.id` | string | yes |  |
+| `node.name` | string | yes |  |
+| `node.type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `node.x` | number | yes |  |
+| `node.y` | number | yes |  |
+| `node.w` | number |  |  |
+| `node.h` | number |  |  |
+| `node.notes` | string |  |  |
+
+**Example: Rename**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/charts/active/nodes/flygon" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Kestrel Group"}'
+```
+
+```json
+{
+  "rev": 43,
+  "node": {
+    "id": "flygon",
+    "name": "Kestrel Group",
+    "type": "entity",
+    "x": 400,
+    "y": 0,
+    "notes": ""
+  }
+}
+```
+
+### `nodes.move`
+
+Move a node
+
+`POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move` · scope `write` · MCP tool `nodes_move`
+
+Set a chart card's position (canvas pixels; the app snaps to a 16px grid when dragging, the API does not).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `node` | string | yes | Node id. |
+| `x` | number | yes |  |
+| `y` | number | yes |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `node` | object | yes |  |
+| `node.id` | string | yes |  |
+| `node.name` | string | yes |  |
+| `node.type` | enum | yes | One of `entity`, `person`, `area`, `note`. |
+| `node.x` | number | yes |  |
+| `node.y` | number | yes |  |
+| `node.w` | number |  |  |
+| `node.h` | number |  |  |
+| `node.notes` | string |  |  |
+
+**Example: Move**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/nodes/flygon/move" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"x":400,"y":0}'
+```
+
+```json
+{
+  "rev": 44,
+  "node": {
+    "id": "flygon",
+    "name": "Kestrel Group",
+    "type": "entity",
+    "x": 400,
+    "y": 0,
+    "notes": ""
+  }
+}
+```
+
+## Edges
+
+### `edges.list`
+
+List edges
+
+`GET /api/v1/envs/{env}/charts/{chart}/edges` · scope `read` · MCP tool `edges_list`
+
+Connections on a chart. Ownership edges carry a percent ("" when unspecified); group edges are grouping only.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `node` | string |  | Only edges touching this node id. |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].from` | string | yes |  |
+| `items[].to` | string | yes |  |
+| `items[].type` | enum | yes | One of `ownership`, `group`. |
+| `items[].percent` | string | yes |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Edges**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "o1",
+      "from": "cleo",
+      "to": "quill",
+      "type": "ownership",
+      "percent": "50"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `edges.create`
+
+Create an edge
+
+`POST /api/v1/envs/{env}/charts/{chart}/edges` · scope `write` · MCP tool `edges_create`
+
+Connect two cards on the same chart. A second edge between the same pair (same direction) is refused with 409.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `from` | string | yes | Node id. |
+| `to` | string | yes | Node id. |
+| `type` | enum |  | One of `ownership`, `group`. |
+| `percent` | string | number |  | 0-100, or "" for unspecified. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `edge` | object | yes |  |
+| `edge.id` | string | yes |  |
+| `edge.from` | string | yes |  |
+| `edge.to` | string | yes |  |
+| `edge.type` | enum | yes | One of `ownership`, `group`. |
+| `edge.percent` | string | yes |  |
+
+**Example: 50% ownership**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"from":"cleo","to":"quill","percent":"50"}'
+```
+
+```json
+{
+  "rev": 45,
+  "edge": {
+    "id": "o1",
+    "from": "cleo",
+    "to": "quill",
+    "type": "ownership",
+    "percent": "50"
+  }
+}
+```
+
+### `edges.delete`
+
+Delete an edge
+
+`DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` · scope `write` · MCP tool `edges_delete`
+
+Remove one connection. The cards it joined stay. Earlier revisions are kept in the workspace history.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `edge` | string | yes | Edge id. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `deleted` | string | yes |  |
+
+**Example: Delete**
+
+```sh
+curl -sS -X DELETE "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges/o1" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 46,
+  "deleted": "o1"
+}
+```
+
+## Projects
+
+### `projects.list`
+
+List projects
+
+`GET /api/v1/envs/{env}/projects` · scope `read` · MCP tool `projects_list`
+
+Timeline/board projects (coloured tags), optionally only those under one chart entity or area.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `entity` | string |  | Node id. |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].color` | string | yes |  |
+| `items[].entity` | string | yes |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Projects**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/projects" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "p1",
+      "name": "Lantern",
+      "color": "#7cb980",
+      "entity": "flygon"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `projects.create`
+
+Create a project
+
+`POST /api/v1/envs/{env}/projects` · scope `write` · MCP tool `projects_create`
+
+Add a project. Names are unique (case-insensitive); a duplicate gets 409. Without a colour the next palette colour is used.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `name` | string | yes |  |
+| `color` | string |  | Hex colour, e.g. #7cb980. |
+| `entity` | string |  | The chart entity or area it sits under: node id or name; "" for none. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `project` | object | yes |  |
+| `project.id` | string | yes |  |
+| `project.name` | string | yes |  |
+| `project.color` | string | yes |  |
+| `project.entity` | string | yes |  |
+
+**Example: Under Kestrel Group**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/projects" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Lantern","color":"#7cb980","entity":"Kestrel Group"}'
+```
+
+```json
+{
+  "rev": 47,
+  "project": {
+    "id": "p1",
+    "name": "Lantern",
+    "color": "#7cb980",
+    "entity": "flygon"
+  }
+}
+```
+
+### `projects.update`
+
+Update a project
+
+`PATCH /api/v1/envs/{env}/projects/{project}` · scope `write` · MCP tool `projects_update`
+
+Rename, recolour or re-parent a project. {project} is its id or name.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `project` | string | yes | Project id or name. |
+| `name` | string |  |  |
+| `color` | string |  | Hex colour, e.g. #7cb980. |
+| `entity` | string |  | The chart entity or area it sits under: node id or name; "" for none. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `project` | object | yes |  |
+| `project.id` | string | yes |  |
+| `project.name` | string | yes |  |
+| `project.color` | string | yes |  |
+| `project.entity` | string | yes |  |
+
+**Example: Recolour**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/projects/Lantern" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"color":"#3d6fb6"}'
+```
+
+```json
+{
+  "rev": 48,
+  "project": {
+    "id": "p1",
+    "name": "Lantern",
+    "color": "#3d6fb6",
+    "entity": "flygon"
+  }
+}
+```
+
+## Timeline
+
+### `items.list`
+
+List timeline items
+
+`GET /api/v1/envs/{env}/items` · scope `read` · MCP tool `items_list`
+
+Timeline items (milestones, releases, features...). Filter by project (id or name), kind, status or `q` (title contains). Items with start "" are backlog.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `project` | string |  | Project id or name. |
+| `kind` | enum |  | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `status` | enum |  | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `q` | string |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].title` | string | yes |  |
+| `items[].kind` | enum | yes | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `items[].status` | enum | yes | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `items[].start` | string | yes |  |
+| `items[].end` | string | yes |  |
+| `items[].priority` | string |  |  |
+| `items[].release` | string |  |  |
+| `items[].projects` | string[] | yes |  |
+| `items[].owner` | string |  |  |
+| `items[].link` | string |  |  |
+| `items[].notes` | string |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Releases**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/items?kind=release" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "i1",
+      "title": "Public beta",
+      "kind": "release",
+      "status": "planned",
+      "start": "2026-12-01",
+      "end": "",
+      "priority": "",
+      "release": "",
+      "projects": [
+        "p1"
+      ],
+      "owner": "",
+      "link": "",
+      "notes": ""
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `items.get`
+
+Get a timeline item
+
+`GET /api/v1/envs/{env}/items/{item}` · scope `read` · MCP tool `items_get`
+
+One timeline item by id (or exact title).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `item` | string | yes | Item id or title. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `item` | object | yes |  |
+| `item.id` | string | yes |  |
+| `item.title` | string | yes |  |
+| `item.kind` | enum | yes | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `item.status` | enum | yes | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `item.start` | string | yes |  |
+| `item.end` | string | yes |  |
+| `item.priority` | string |  |  |
+| `item.release` | string |  |  |
+| `item.projects` | string[] | yes |  |
+| `item.owner` | string |  |  |
+| `item.link` | string |  |  |
+| `item.notes` | string |  |  |
+
+**Example: Public beta**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/items/Public%20beta" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "item": {
+    "id": "i1",
+    "title": "Public beta",
+    "kind": "release",
+    "status": "planned",
+    "start": "2026-12-01",
+    "end": "",
+    "priority": "",
+    "release": "",
+    "projects": [
+      "p1"
+    ],
+    "owner": "",
+    "link": "",
+    "notes": ""
+  }
+}
+```
+
+### `items.create`
+
+Create a timeline item
+
+`POST /api/v1/envs/{env}/items` · scope `write` · MCP tool `items_create`
+
+Add a timeline item. Without a start date it is backlog (Board and List only). Kind defaults to milestone when dated, feature otherwise.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `title` | string | yes |  |
+| `kind` | enum |  | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `status` | enum |  | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `start` | string |  | YYYY-MM-DD, or "" for none. |
+| `end` | string |  | YYYY-MM-DD, or "" for none. |
+| `priority` | enum |  | One of `high`, `medium`, `low`, ``. |
+| `release` | string |  | A release item: id or title; "" for none. |
+| `projects` | string[] |  |  |
+| `owner` | string |  |  |
+| `link` | string |  |  |
+| `notes` | string |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `item` | object | yes |  |
+| `item.id` | string | yes |  |
+| `item.title` | string | yes |  |
+| `item.kind` | enum | yes | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `item.status` | enum | yes | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `item.start` | string | yes |  |
+| `item.end` | string | yes |  |
+| `item.priority` | string |  |  |
+| `item.release` | string |  |  |
+| `item.projects` | string[] | yes |  |
+| `item.owner` | string |  |  |
+| `item.link` | string |  |  |
+| `item.notes` | string |  |  |
+
+**Example: A release**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/items" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Public beta","kind":"release","start":"2026-12-01","projects":["Lantern"]}'
+```
+
+```json
+{
+  "rev": 49,
+  "item": {
+    "id": "i1",
+    "title": "Public beta",
+    "kind": "release",
+    "status": "planned",
+    "start": "2026-12-01",
+    "end": "",
+    "priority": "",
+    "release": "",
+    "projects": [
+      "p1"
+    ],
+    "owner": "",
+    "link": "",
+    "notes": ""
+  }
+}
+```
+
+### `items.update`
+
+Update a timeline item
+
+`PATCH /api/v1/envs/{env}/items/{item}` · scope `write` · MCP tool `items_update`
+
+Change any field of a timeline item. Fields left out stay; `projects` replaces the list.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `item` | string | yes | Item id or title. |
+| `title` | string |  |  |
+| `kind` | enum |  | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `status` | enum |  | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `start` | string |  | YYYY-MM-DD, or "" for none. |
+| `end` | string |  | YYYY-MM-DD, or "" for none. |
+| `priority` | enum |  | One of `high`, `medium`, `low`, ``. |
+| `release` | string |  | A release item: id or title; "" for none. |
+| `projects` | string[] |  |  |
+| `owner` | string |  |  |
+| `link` | string |  |  |
+| `notes` | string |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `item` | object | yes |  |
+| `item.id` | string | yes |  |
+| `item.title` | string | yes |  |
+| `item.kind` | enum | yes | One of `feature`, `milestone`, `release`, `deadline`, `project`, `phase`, `event`. |
+| `item.status` | enum | yes | One of `planned`, `active`, `risk`, `blocked`, `done`, `cancelled`. |
+| `item.start` | string | yes |  |
+| `item.end` | string | yes |  |
+| `item.priority` | string |  |  |
+| `item.release` | string |  |  |
+| `item.projects` | string[] | yes |  |
+| `item.owner` | string |  |  |
+| `item.link` | string |  |  |
+| `item.notes` | string |  |  |
+
+**Example: Mark done**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/items/i1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"done"}'
+```
+
+```json
+{
+  "rev": 50,
+  "item": {
+    "id": "i1",
+    "title": "Public beta",
+    "kind": "release",
+    "status": "done",
+    "start": "2026-12-01",
+    "end": "",
+    "priority": "",
+    "release": "",
+    "projects": [
+      "p1"
+    ],
+    "owner": "",
+    "link": "",
+    "notes": ""
+  }
+}
+```
+
+## DevOps cards
+
+### `cards.list`
+
+List DevOps cards
+
+`GET /api/v1/envs/{env}/cards` · scope `read` · MCP tool `cards_list`
+
+Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), q ("#12" or title text), hideDone.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `column` | string |  | Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of `requests`, `doing`, `blocked`, `uat`, `done`, `must`, `nice`. |
+| `project` | string |  | Project id or name, or "none". |
+| `label` | string |  | Label id or name. |
+| `assignee` | string |  | Person node id or name. |
+| `q` | string |  |  |
+| `hideDone` | boolean |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].number` | integer | yes |  |
+| `items[].title` | string | yes |  |
+| `items[].description` | string |  |  |
+| `items[].column` | string | yes |  |
+| `items[].project` | string |  |  |
+| `items[].labels` | string[] | yes |  |
+| `items[].points` | number | null |  |  |
+| `items[].due` | string |  |  |
+| `items[].assignees` | object[] | yes |  |
+| `items[].checklist` | object[] | yes |  |
+| `items[].links` | object[] | yes |  |
+| `items[].item` | string |  |  |
+| `items[].created` | string |  |  |
+| `items[].updated` | string |  |  |
+| `items[].moved` | string |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Open cards for a project**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards?project=Lantern&hideDone=true" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "k1",
+      "number": 12,
+      "title": "Build sign-up form",
+      "description": "",
+      "column": "requests",
+      "project": "p1",
+      "labels": [
+        "l-high"
+      ],
+      "points": 3,
+      "due": "2026-11-15",
+      "assignees": [
+        {
+          "node": "cleo",
+          "role": "developer"
+        }
+      ],
+      "checklist": [
+        {
+          "id": "x1",
+          "text": "Email field",
+          "done": false
+        }
+      ],
+      "links": [],
+      "item": "i1",
+      "created": "2026-10-29T17:00:00.000Z",
+      "updated": "2026-10-29T17:00:00.000Z",
+      "moved": "2026-10-29T17:00:00.000Z"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `cards.get`
+
+Get a DevOps card
+
+`GET /api/v1/envs/{env}/cards/{card}` · scope `read` · MCP tool `cards_get`
+
+One card by number ("12" or "#12") or id.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `card` | string | integer | yes | Card number or id. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `card` | object | yes |  |
+| `card.id` | string | yes |  |
+| `card.number` | integer | yes |  |
+| `card.title` | string | yes |  |
+| `card.description` | string |  |  |
+| `card.column` | string | yes |  |
+| `card.project` | string |  |  |
+| `card.labels` | string[] | yes |  |
+| `card.points` | number | null |  |  |
+| `card.due` | string |  |  |
+| `card.assignees` | object[] | yes |  |
+| `card.checklist` | object[] | yes |  |
+| `card.links` | object[] | yes |  |
+| `card.item` | string |  |  |
+| `card.created` | string |  |  |
+| `card.updated` | string |  |  |
+| `card.moved` | string |  |  |
+
+**Example: Card #12**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `cards.create`
+
+Create a DevOps card
+
+`POST /api/v1/envs/{env}/cards` · scope `write` · MCP tool `cards_create`
+
+Add a card (it gets the next #number). Lands in Requests / Sprinted unless `column` says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `column` | string |  | Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of `requests`, `doing`, `blocked`, `uat`, `done`, `must`, `nice`. |
+| `title` | string | yes |  |
+| `description` | string |  |  |
+| `project` | string |  | Project id or name; "" for none. |
+| `labels` | string[] |  |  |
+| `points` | number | null |  |  |
+| `due` | string |  | YYYY-MM-DD, or "" for none. |
+| `assignees` | object[] |  |  |
+| `assignees[].node` | string | yes | A person on a chart: node id or name. |
+| `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
+| `checklist` | object[] |  |  |
+| `checklist[].id` | string |  |  |
+| `checklist[].text` | string | yes |  |
+| `checklist[].done` | boolean |  |  |
+| `links` | object[] |  |  |
+| `links[].id` | string |  |  |
+| `links[].kind` | enum |  | One of `pr`, `commit`, `url`. |
+| `links[].url` | string | yes |  |
+| `item` | string |  | Timeline item id or title; "" for none. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `card` | object | yes |  |
+| `card.id` | string | yes |  |
+| `card.number` | integer | yes |  |
+| `card.title` | string | yes |  |
+| `card.description` | string |  |  |
+| `card.column` | string | yes |  |
+| `card.project` | string |  |  |
+| `card.labels` | string[] | yes |  |
+| `card.points` | number | null |  |  |
+| `card.due` | string |  |  |
+| `card.assignees` | object[] | yes |  |
+| `card.checklist` | object[] | yes |  |
+| `card.links` | object[] | yes |  |
+| `card.item` | string |  |  |
+| `card.created` | string |  |  |
+| `card.updated` | string |  |  |
+| `card.moved` | string |  |  |
+
+**Example: New card**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Build sign-up form","project":"Lantern","labels":["High"],"points":3,"due":"2026-11-15","assignees":[{"node":"Cleo Park","role":"developer"}],"checklist":[{"text":"Email field"}],"item":"Public beta"}'
+```
+
+```json
+{
+  "rev": 51,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `cards.update`
+
+Update a DevOps card
+
+`PATCH /api/v1/envs/{env}/cards/{card}` · scope `write` · MCP tool `cards_update`
+
+Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. The column only changes through cards.move, which applies the board's gates.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `card` | string | integer | yes | Card number or id. |
+| `title` | string |  |  |
+| `description` | string |  |  |
+| `project` | string |  | Project id or name; "" for none. |
+| `labels` | string[] |  |  |
+| `points` | number | null |  |  |
+| `due` | string |  | YYYY-MM-DD, or "" for none. |
+| `assignees` | object[] |  |  |
+| `assignees[].node` | string | yes | A person on a chart: node id or name. |
+| `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
+| `checklist` | object[] |  |  |
+| `checklist[].id` | string |  |  |
+| `checklist[].text` | string | yes |  |
+| `checklist[].done` | boolean |  |  |
+| `links` | object[] |  |  |
+| `links[].id` | string |  |  |
+| `links[].kind` | enum |  | One of `pr`, `commit`, `url`. |
+| `links[].url` | string | yes |  |
+| `item` | string |  | Timeline item id or title; "" for none. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `card` | object | yes |  |
+| `card.id` | string | yes |  |
+| `card.number` | integer | yes |  |
+| `card.title` | string | yes |  |
+| `card.description` | string |  |  |
+| `card.column` | string | yes |  |
+| `card.project` | string |  |  |
+| `card.labels` | string[] | yes |  |
+| `card.points` | number | null |  |  |
+| `card.due` | string |  |  |
+| `card.assignees` | object[] | yes |  |
+| `card.checklist` | object[] | yes |  |
+| `card.links` | object[] | yes |  |
+| `card.item` | string |  |  |
+| `card.created` | string |  |  |
+| `card.updated` | string |  |  |
+| `card.moved` | string |  |  |
+
+**Example: Tick the checklist**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"checklist":[{"id":"x1","text":"Email field","done":true}]}'
+```
+
+```json
+{
+  "rev": 52,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": true
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `cards.move`
+
+Move a DevOps card
+
+`POST /api/v1/envs/{env}/cards/{card}/move` · scope `write` · MCP tool `cards_move`
+
+Move a card to a column (and position: `index` among that column's other cards; end if left out). The board's gates apply: into Done needs `confirm: true`, or `approve: true` from UAT (the Approve button); out of Done needs `confirm: true`; into Doing without a developer needs `developer` (a person, who is assigned) or `confirm: true` to leave it unassigned. A refused gate is 409 with code confirm_done, confirm_reopen or pick_developer.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `card` | string | integer | yes | Card number or id. |
+| `column` | string | yes | Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of `requests`, `doing`, `blocked`, `uat`, `done`, `must`, `nice`. |
+| `index` | integer |  |  |
+| `confirm` | boolean |  |  |
+| `approve` | boolean |  |  |
+| `developer` | string |  | Person node id or name. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `card` | object | yes |  |
+| `card.id` | string | yes |  |
+| `card.number` | integer | yes |  |
+| `card.title` | string | yes |  |
+| `card.description` | string |  |  |
+| `card.column` | string | yes |  |
+| `card.project` | string |  |  |
+| `card.labels` | string[] | yes |  |
+| `card.points` | number | null |  |  |
+| `card.due` | string |  |  |
+| `card.assignees` | object[] | yes |  |
+| `card.checklist` | object[] | yes |  |
+| `card.links` | object[] | yes |  |
+| `card.item` | string |  |  |
+| `card.created` | string |  |  |
+| `card.updated` | string |  |  |
+| `card.moved` | string |  |  |
+
+**Example: Approve from UAT**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"column":"done","approve":true}'
+```
+
+```json
+{
+  "rev": 53,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "done",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+**Example: Start work**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"column":"doing","developer":"Cleo Park"}'
+```
+
+```json
+{
+  "rev": 54,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "doing",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+## Labels
+
+### `labels.list`
+
+List DevOps labels
+
+`GET /api/v1/envs/{env}/labels` · scope `read` · MCP tool `labels_list`
+
+Board labels with their section (priority, urgency, area, topic, other) and colour token.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `section` | enum |  | One of `priority`, `urgency`, `area`, `topic`, `other`. |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].section` | enum | yes | One of `priority`, `urgency`, `area`, `topic`, `other`. |
+| `items[].color` | string | yes |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Labels**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/labels" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "l-research",
+      "name": "Research",
+      "section": "area",
+      "color": "teal"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `labels.create`
+
+Create a DevOps label
+
+`POST /api/v1/envs/{env}/labels` · scope `write` · MCP tool `labels_create`
+
+Add a label. `id` defaults to "l-" plus the name in lower case; a taken id or name gets 409. Colours: red, orange, yellow, green, blue, sky, purple, pink, lime, black, teal, indigo, rose, amber, brown, slate, red-deep.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `id` | string |  |  |
+| `name` | string | yes |  |
+| `section` | enum |  | One of `priority`, `urgency`, `area`, `topic`, `other`. |
+| `color` | enum |  | One of `red`, `orange`, `yellow`, `green`, `blue`, `sky`, `purple`, `pink`, `lime`, `black`, `teal`, `indigo`, `rose`, `amber`, `brown`, `slate`, `red-deep`. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `label` | object | yes |  |
+| `label.id` | string | yes |  |
+| `label.name` | string | yes |  |
+| `label.section` | enum | yes | One of `priority`, `urgency`, `area`, `topic`, `other`. |
+| `label.color` | string | yes |  |
+
+**Example: Research**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/labels" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"l-research","name":"Research","section":"area","color":"teal"}'
+```
+
+```json
+{
+  "rev": 55,
+  "label": {
+    "id": "l-research",
+    "name": "Research",
+    "section": "area",
+    "color": "teal"
+  }
+}
+```
+
+## Search
+
+### `search`
+
+Search an environment
+
+`GET /api/v1/envs/{env}/search` · scope `read` · MCP tool `search`
+
+Case-insensitive search over chart nodes (name, notes), projects, timeline items (title, notes) and cards (#number, title, description). `types` narrows it (comma-separated in a query string).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `q` | string | yes |  |
+| `types` | enum[] |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].type` | enum | yes | One of `node`, `project`, `item`, `card`. |
+| `items[].id` | string | yes |  |
+| `items[].title` | string | yes |  |
+| `items[].chart` | string |  |  |
+| `items[].number` | integer |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Sign-up**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "type": "card",
+      "id": "k1",
+      "title": "Build sign-up form",
+      "number": 12
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+
+# Recent releases
+
+- 0.10.38 (2026-10-29): DevLog: 0.10.30-0.10.35 and three production deployments
+- 0.10.37 (2026-10-29): Docs live at /docs, /llms.txt and /skill.md, generated from the registry; CI
+- 0.10.36 (2026-10-29): Integrate docs: self-updating docs, llms.txt, agent skill, demo seed and open-source prep
+- 0.10.35 (2026-10-29): Public API v1, API keys and MCP mounted: Settings › API keys, /api/v1, /mcp
+- 0.10.34 (2026-10-29): Integrate mcp: MCP server (remote + stdio) and the flow CLI
+- 0.10.33 (2026-10-29): Integrate keys: hashed per-environment API keys, Settings tab and routes
+- 0.10.32 (2026-10-29): Integrate api: operation registry, REST API v1 and OpenAPI
+- 0.10.31 (2026-10-29): Sharing: hand-picked cards from the CLI (repeat --node); clearer labels
+- 0.10.30 (2026-10-29): DevLog: 0.10.27-0.10.29 (invite emails, sharing)
+- 0.10.29 (2026-10-29): Sharing end to end: share a person, card, project, label or environment

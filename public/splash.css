@@ -1,0 +1,29 @@
+/* Loading splash (splash.js). Hidden until .on; each stroke draws via pathLength=1 dashes. */
+#splash{position:fixed;inset:0;z-index:300;display:grid;place-items:center;background:#fff;
+  opacity:0;visibility:hidden;pointer-events:none}
+#splash.on{opacity:1;visibility:visible;pointer-events:auto}
+#splash.on.late{animation:sp-in .18s ease}
+#splash svg{width:min(320px,68vw);height:auto;overflow:visible;transform-origin:50% 60%}
+#splash svg path{transform:skewX(-9deg);transform-origin:106px 92px;transform-box:view-box}
+#splash .sp-s{fill:none;stroke:url(#spInk);stroke-width:7;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:1 2;stroke-dashoffset:1;opacity:0}
+#splash.draw .sp-s{animation:sp-draw var(--t) cubic-bezier(.55,.08,.3,1) var(--d) forwards}
+
+/* still loading after the word is written: it breathes */
+#splash.wait svg{animation:sp-breathe 1.6s ease-in-out infinite}
+
+/* fade out "into the screen": the word grows and dissolves, then the white lifts */
+#splash.out{opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .4s ease .15s,visibility 0s linear .55s}
+#splash.out svg{transform:scale(1.14);filter:blur(5px);opacity:0;
+  transition:transform .55s cubic-bezier(.4,0,.2,1),filter .55s ease,opacity .45s ease}
+
+@keyframes sp-in{from{opacity:0}}
+@keyframes sp-draw{0%{stroke-dashoffset:1;opacity:0}1%{opacity:1}100%{stroke-dashoffset:0;opacity:1}}
+@keyframes sp-breathe{0%,100%{opacity:1}50%{opacity:.55}}
+
+@media (prefers-reduced-motion:reduce){
+  #splash.on,#splash.wait svg{animation:none}
+  #splash.draw .sp-s{animation:none;stroke-dashoffset:0;opacity:1}
+  #splash.out,#splash.out svg{transition:opacity .15s linear;transform:none;filter:none}
+}

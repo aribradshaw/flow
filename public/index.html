@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Flygon Flow</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/splash.css"></head>
+<body data-tab="chart" aria-busy="true">
+<div id="splash" role="status" aria-label="Loading Flygon Flow" aria-hidden="true"><svg viewBox="6 2 200 100" aria-hidden="true"><defs><linearGradient id="spInk" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="200" y2="95"><stop offset="0" style="stop-color:var(--flygon-green)"/><stop offset="1" style="stop-color:var(--flygon-dark)"/></linearGradient></defs><path class="sp-s" pathLength="1" style="--d:0s;--t:.34s" d="M52 20C49 12 42 8 35 10C29 12 27 19 27 27L27 92"/><path class="sp-s" pathLength="1" style="--d:.3s;--t:.14s" d="M13 46L45 46"/><path class="sp-s" pathLength="1" style="--d:.42s;--t:.26s" d="M66 10L66 78C66 87 70 92 78 92"/><path class="sp-s" pathLength="1" style="--d:.64s;--t:.36s" d="M104 44C91 44 82 54 82 68C82 82 91 92 104 92C117 92 126 82 126 68C126 54 117 44 104 44"/><path class="sp-s" pathLength="1" style="--d:.96s;--t:.42s" d="M140 46C143 62 147 78 152 92C158 78 163 63 168 54C173 63 178 78 184 92C189 78 194 62 198 46"/></svg></div><script src="/splash.js"></script>
+<header id="top"></header>
+<main>
+  <section id="chartView" class="view" aria-label="Chart">
+    <div id="canvas" aria-label="Organization chart canvas"><div id="world"><div id="areas"></div><svg id="edges" aria-label="Connections"></svg><div id="nodes"></div></div></div>
+    <div id="tools" class="float" role="toolbar" aria-label="Chart tools"></div>
+    <div id="zoom" class="float" role="toolbar" aria-label="Zoom"></div>
+    <div id="modeHint" class="mode-hint" role="status" hidden></div>
+    <div id="strip" aria-label="Project timeline" hidden></div>
+  </section>
+  <section id="timelineView" class="view" aria-label="Timeline"></section>
+  <section id="devopsView" class="view" aria-label="DevOps board"></section>
+  <aside id="inspector" hidden></aside>
+</main>
+<input id="file" type="file" accept=".json,application/json" hidden>
+<script type="module" src="/app.js"></script></body></html>

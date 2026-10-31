@@ -1,0 +1,28 @@
+# Checks only: no deploys, no secrets, read-only token. Deploys happen elsewhere (push to main → Railway).
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+      - name: Generated docs are up to date
+        run: node tools/docs.mjs --check

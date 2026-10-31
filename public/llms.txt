@@ -1,0 +1,74 @@
+# Flygon Flow
+
+> Flygon Flow keeps an org chart, a product timeline and a DevOps board in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
+
+Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /api/v1/openapi.json.
+
+## Concepts
+
+- [Environments](/docs/index.html#environments): An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it.
+- [Chart](/docs/index.html#chart): The chart is a free-form canvas of **cards** joined by **edges**.
+- [Timeline](/docs/index.html#timeline): The timeline holds dated **items** that are tagged with **projects**.
+- [DevOps board and gates](/docs/index.html#devops-board-and-gates): The DevOps board is a card board.
+- [Agent inbox](/docs/index.html#agent-inbox): Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox.
+- [Sync](/docs/index.html#sync): The server is the source of truth.
+- [Sharing](/docs/index.html#sharing): The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment.
+- [Versioning](/docs/index.html#versioning): Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md).
+
+## API: Environments
+
+- [envs.list](/docs/envs.html#op-envs-list): `GET /api/v1/envs` (read). List environments
+- [envs.get](/docs/envs.html#op-envs-get): `GET /api/v1/envs/{env}` (read). Get an environment
+
+## API: Charts
+
+- [charts.list](/docs/charts.html#op-charts-list): `GET /api/v1/envs/{env}/charts` (read). List charts
+
+## API: Nodes
+
+- [nodes.list](/docs/nodes.html#op-nodes-list): `GET /api/v1/envs/{env}/charts/{chart}/nodes` (read). List nodes
+- [nodes.get](/docs/nodes.html#op-nodes-get): `GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}` (read). Get a node
+- [nodes.create](/docs/nodes.html#op-nodes-create): `POST /api/v1/envs/{env}/charts/{chart}/nodes` (write). Create a node
+- [nodes.update](/docs/nodes.html#op-nodes-update): `PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}` (write). Update a node
+- [nodes.move](/docs/nodes.html#op-nodes-move): `POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move` (write). Move a node
+
+## API: Edges
+
+- [edges.list](/docs/edges.html#op-edges-list): `GET /api/v1/envs/{env}/charts/{chart}/edges` (read). List edges
+- [edges.create](/docs/edges.html#op-edges-create): `POST /api/v1/envs/{env}/charts/{chart}/edges` (write). Create an edge
+- [edges.delete](/docs/edges.html#op-edges-delete): `DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` (write). Delete an edge
+
+## API: Projects
+
+- [projects.list](/docs/projects.html#op-projects-list): `GET /api/v1/envs/{env}/projects` (read). List projects
+- [projects.create](/docs/projects.html#op-projects-create): `POST /api/v1/envs/{env}/projects` (write). Create a project
+- [projects.update](/docs/projects.html#op-projects-update): `PATCH /api/v1/envs/{env}/projects/{project}` (write). Update a project
+
+## API: Timeline
+
+- [items.list](/docs/timeline.html#op-items-list): `GET /api/v1/envs/{env}/items` (read). List timeline items
+- [items.get](/docs/timeline.html#op-items-get): `GET /api/v1/envs/{env}/items/{item}` (read). Get a timeline item
+- [items.create](/docs/timeline.html#op-items-create): `POST /api/v1/envs/{env}/items` (write). Create a timeline item
+- [items.update](/docs/timeline.html#op-items-update): `PATCH /api/v1/envs/{env}/items/{item}` (write). Update a timeline item
+
+## API: DevOps cards
+
+- [cards.list](/docs/cards.html#op-cards-list): `GET /api/v1/envs/{env}/cards` (read). List DevOps cards
+- [cards.get](/docs/cards.html#op-cards-get): `GET /api/v1/envs/{env}/cards/{card}` (read). Get a DevOps card
+- [cards.create](/docs/cards.html#op-cards-create): `POST /api/v1/envs/{env}/cards` (write). Create a DevOps card
+- [cards.update](/docs/cards.html#op-cards-update): `PATCH /api/v1/envs/{env}/cards/{card}` (write). Update a DevOps card
+- [cards.move](/docs/cards.html#op-cards-move): `POST /api/v1/envs/{env}/cards/{card}/move` (write). Move a DevOps card
+
+## API: Labels
+
+- [labels.list](/docs/labels.html#op-labels-list): `GET /api/v1/envs/{env}/labels` (read). List DevOps labels
+- [labels.create](/docs/labels.html#op-labels-create): `POST /api/v1/envs/{env}/labels` (write). Create a DevOps label
+
+## API: Search
+
+- [search](/docs/search.html#op-search): `GET /api/v1/envs/{env}/search` (read). Search an environment
+
+## Optional
+
+- [Full text for LLMs](/llms-full.txt): every concept and the whole API reference in one file
+- [OpenAPI](/api/v1/openapi.json): machine-readable schema

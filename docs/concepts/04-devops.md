@@ -1,0 +1,20 @@
+# DevOps board and gates
+
+The DevOps board is a card board. Each card has an auto-incrementing `#number`.
+
+Columns, in order: `requests` (Requests / Sprinted, where new cards land), `doing`, `blocked`, `uat`, `done`, then the two backlogs `must` (Must Have) and `nice` (Nice to Have).
+
+A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item.
+
+## Gates
+
+Some moves need a confirmation or a decision. The app asks for it, and API callers must provide it explicitly:
+
+| Move | Gate |
+| --- | --- |
+| UAT → Done with **Approve** | none (approval is the gate) |
+| anything else → `done` | `confirm-done` |
+| `done` → anything | `confirm-reopen` (reopen) |
+| → `doing` with no developer | `pick-dev`: choose who develops it |
+
+Labels have a section (`priority`, `urgency`, `area`, `topic`, `other`) and a colour key. Due dates turn amber two days before they are due and red once they are overdue.

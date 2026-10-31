@@ -1,0 +1,2 @@
+# Synthetic fixture secret in the loopback authentication mock.
+verify-auth.mjs:generic-api-key:11

@@ -1,0 +1,12 @@
+# Live chart data and local backups stay out of git
+data/
+*-chart.json
+restored-full-chart.png
+running.json
+*.log
+*.tmp
+node_modules/
+.verify-profile/
+.env
+saves/
+inbox/

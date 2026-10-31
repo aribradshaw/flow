@@ -1,0 +1,843 @@
+{
+  "scheme": {
+    "name": "Bradshaw Versioning",
+    "specification": "1.0 draft (October 12, 2026)",
+    "yearMode": "zero-based",
+    "originYear": 2026,
+    "timeZone": "America/Phoenix",
+    "productionBranch": "main",
+    "repository": "",
+    "baselineCommit": "57392f67dee46dccb847850b4fab046ea871c590",
+    "cutover": "2026-10-29T15:03:38-07:00",
+    "cutoverNote": "Earlier private development releases are retained as metadata only. Public source starts at the clean baseline commit.",
+    "admission": "Admission time is when a push first brought the commit to origin/main. Commits in one push are numbered parent before child.",
+    "registryCommits": "Every commit on main gets a number, including commits that only update this registry. A registry update cannot know its own commit SHA, so it is recorded by the next update; until then the newest commit on main is assigned but not yet listed.",
+    "deployment": "Versions identify source commits only. Deployment records in this public registry begin with public source.",
+    "conformance": "Single-writer registry kept in Git by the release coordinator (not an atomic service); admission times come from the coordinator's push log.",
+    "revisions": [
+      {
+        "at": "2026-10-29T16:15:00-07:00",
+        "change": "Year mode changed from one-based to zero-based (origin year 2026, America/Phoenix, calendar months unchanged).",
+        "note": "The one-based numbers 1.10.1 to 1.10.11 assigned earlier on 2026-10-29 were superseded by 0.10.1 to 0.10.11 for the same commits, before any deployment. Recorded here rather than changed silently, as the specification requires."
+      }
+    ],
+    "historicalReleaseCount": 38
+  },
+  "releases": [
+    {
+      "version": "0.10.38",
+      "date": "2026-10-29",
+      "title": "DevLog: 0.10.30-0.10.35 and three production deployments",
+      "notes": [
+        "DevLog: versions 0.10.30 to 0.10.35 and three production deployments recorded."
+      ],
+      "summary": "DevLog: versions 0.10.30 to 0.10.35 and three production deployments recorded.",
+      "sourceSubject": "DevLog: 0.10.30-0.10.35 and three production deployments",
+      "commit": "bdf08d44288e5ca38446302a54467637905b10ff",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 38,
+      "admittedAt": "2026-10-29T18:51:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.37",
+      "date": "2026-10-29",
+      "title": "Docs live at /docs, /llms.txt and /skill.md, generated from the registry; CI",
+      "notes": [
+        "Docs at /docs, /llms.txt and /skill.md, generated from the API registry; CI checks every push."
+      ],
+      "summary": "Docs at /docs, /llms.txt and /skill.md, generated from the API registry; CI checks every push.",
+      "sourceSubject": "Docs live at /docs, /llms.txt and /skill.md, generated from the registry; CI",
+      "commit": "82cf77b0a68a630056dfc7189dad5935967183da",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 37,
+      "admittedAt": "2026-10-29T18:51:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.36",
+      "date": "2026-10-29",
+      "title": "Integrate docs: self-updating docs, llms.txt, agent skill, demo seed and open-source prep",
+      "notes": [
+        "Self-updating docs, llms.txt, agent skill, demo workspace and open-source prep files."
+      ],
+      "summary": "Self-updating docs, llms.txt, agent skill, demo workspace and open-source prep files.",
+      "sourceSubject": "Integrate docs: self-updating docs, llms.txt, agent skill, demo seed and open-source prep",
+      "commit": "d24350860fed1d724abbad9934ba78ca4bcd20b4",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 36,
+      "admittedAt": "2026-10-29T18:51:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.35",
+      "date": "2026-10-29",
+      "title": "Public API v1, API keys and MCP mounted: Settings \u203a API keys, /api/v1, /mcp",
+      "notes": [
+        "Settings \u203a API keys: create, copy once, list and revoke keys.",
+        "Public API at /api/v1 and MCP at /mcp, limited to each key's environment and scopes."
+      ],
+      "summary": "Settings \u203a API keys: create, copy once, list and revoke keys.",
+      "sourceSubject": "Public API v1, API keys and MCP mounted: Settings \u203a API keys, /api/v1, /mcp",
+      "commit": "f7032c281f0404f0ad984afaac8346fbcbeb4330",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 35,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.34",
+      "date": "2026-10-29",
+      "title": "Integrate mcp: MCP server (remote + stdio) and the flow CLI",
+      "notes": [
+        "MCP server and the flow command line."
+      ],
+      "summary": "MCP server and the flow command line.",
+      "sourceSubject": "Integrate mcp: MCP server (remote + stdio) and the flow CLI",
+      "commit": "1cc5ce82227d8bacfba4e41227372bc64df9338b",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 34,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.33",
+      "date": "2026-10-29",
+      "title": "Integrate keys: hashed per-environment API keys, Settings tab and routes",
+      "notes": [
+        "API keys: hashed, per environment, with scopes, expiry, rate limits and an audit trail."
+      ],
+      "summary": "API keys: hashed, per environment, with scopes, expiry, rate limits and an audit trail.",
+      "sourceSubject": "Integrate keys: hashed per-environment API keys, Settings tab and routes",
+      "commit": "c8d01bc27e7d774b4e34923abb553ef4c994143a",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 33,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.32",
+      "date": "2026-10-29",
+      "title": "Integrate api: operation registry, REST API v1 and OpenAPI",
+      "notes": [
+        "Operation registry and REST API v1 with an OpenAPI 3.1 description."
+      ],
+      "summary": "Operation registry and REST API v1 with an OpenAPI 3.1 description.",
+      "sourceSubject": "Integrate api: operation registry, REST API v1 and OpenAPI",
+      "commit": "1b929da13f9ccb386d8ffb3ef829754467f81347",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 32,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.31",
+      "date": "2026-10-29",
+      "title": "Sharing: hand-picked cards from the CLI (repeat --node); clearer labels",
+      "notes": [
+        "Share exactly the cards you pick from the CLI (repeat --node), with clearer share labels."
+      ],
+      "summary": "Share exactly the cards you pick from the CLI (repeat --node), with clearer share labels.",
+      "sourceSubject": "Sharing: hand-picked cards from the CLI (repeat --node); clearer labels",
+      "commit": "92d2c34246d2b8148532b5230cbd368323f8a61d",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 31,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.30",
+      "date": "2026-10-29",
+      "title": "DevLog: 0.10.27-0.10.29 (invite emails, sharing)",
+      "notes": [
+        "DevLog: versions 0.10.27 to 0.10.29 recorded."
+      ],
+      "summary": "DevLog: versions 0.10.27 to 0.10.29 recorded.",
+      "sourceSubject": "DevLog: 0.10.27-0.10.29 (invite emails, sharing)",
+      "commit": "a9626a5eb947e38827cec5f58b30f1cfa8d1849e",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 30,
+      "admittedAt": "2026-10-29T18:45:43-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.29",
+      "date": "2026-10-29",
+      "title": "Sharing end to end: share a person, card, project, label or environment",
+      "notes": [
+        "Share a person (and everything below), a card, a project, a label or a whole environment with another Flow user, with a live preview of exactly what they will see.",
+        "Shared with you: add a share to your own environment as linked boxes with your own layout; co-owners show as read-only stubs.",
+        "Edits sync both ways per permission (view, comment, edit); revoking removes everything; recipients ask the owner to share further.",
+        "Owner CLI: env.mjs share | shares | unshare."
+      ],
+      "summary": "Share a person (and everything below), a card, a project, a label or a whole environment with another Flow user, with a live preview of exactly what they will see.",
+      "sourceSubject": "Sharing end to end: share a person, card, project, label or environment",
+      "commit": "00ad0732c6458c19d77e4ad433aa171d4a6d922f",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 29,
+      "admittedAt": "2026-10-29T18:34:50-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.28",
+      "date": "2026-10-29",
+      "title": "Integrate sharing: sharing core, storage and tests",
+      "notes": [
+        "Sharing core: scopes, co-owner stubs, projections, recipient edits, revoke and storage (tests included)."
+      ],
+      "summary": "Sharing core: scopes, co-owner stubs, projections, recipient edits, revoke and storage (tests included).",
+      "sourceSubject": "Integrate sharing: sharing core, storage and tests",
+      "commit": "3368f47ab708aca741647ab2d5aa6feade8e0225",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 28,
+      "admittedAt": "2026-10-29T18:34:50-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.27",
+      "date": "2026-10-29",
+      "title": "Invite emails through Resend; owner-token environments list/archive",
+      "notes": [
+        "Invite emails through Resend (branded, rate-limited); Settings \u203a Resend and env.mjs invite --resend.",
+        "Owner CLI: env.mjs environments | archive."
+      ],
+      "summary": "Invite emails through Resend (branded, rate-limited); Settings \u203a Resend and env.mjs invite --resend.",
+      "sourceSubject": "Invite emails through Resend; owner-token environments list/archive",
+      "commit": "9d10ad800992fcf3a98aa278c495090321d1222c",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 27,
+      "admittedAt": "2026-10-29T18:12:50-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.26",
+      "date": "2026-10-29",
+      "title": "Invites match verified email aliases",
+      "notes": [
+        "Invites accept any verified email alias of the invited person."
+      ],
+      "summary": "Invites accept any verified email alias of the invited person.",
+      "sourceSubject": "Invites match verified email aliases",
+      "commit": "e625c7cd54190632108107b0b08caa52b1cf5f83",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 26,
+      "admittedAt": "2026-10-29T18:07:04-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.25",
+      "date": "2026-10-29",
+      "title": "Owner-token invites from the CLI: env.mjs invite|invites|revoke",
+      "notes": [
+        "The owner can invite, list and revoke from the command line with the owner token."
+      ],
+      "summary": "The owner can invite, list and revoke from the command line with the owner token.",
+      "sourceSubject": "Owner-token invites from the CLI: env.mjs invite|invites|revoke",
+      "commit": "edae87cfb61beeca7df789729a9dcc241b463323",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 25,
+      "admittedAt": "2026-10-29T18:01:04-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.24",
+      "date": "2026-10-29",
+      "title": "No snapping: panels, menus, popovers and board lists animate in and out",
+      "notes": [
+        "Panels, menus, popovers and board lists animate in and out instead of snapping."
+      ],
+      "summary": "Panels, menus, popovers and board lists animate in and out instead of snapping.",
+      "sourceSubject": "No snapping: panels, menus, popovers and board lists animate in and out",
+      "commit": "c15ed06cc0800168d39d920d94cad81b7d89e9b2",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 24,
+      "admittedAt": "2026-10-29T17:56:53-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.23",
+      "date": "2026-10-29",
+      "title": "Fix: a browser with the sample chart opens the user's own workspace",
+      "notes": [
+        "Fix: a browser holding the sample chart now opens your own workspace instead of uploading the sample."
+      ],
+      "summary": "Fix: a browser holding the sample chart now opens your own workspace instead of uploading the sample.",
+      "sourceSubject": "Fix: a browser with the sample chart opens the user's own workspace",
+      "commit": "8c861890f007181e83bc91751f806f86c4b42c2b",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 23,
+      "admittedAt": "2026-10-29T17:50:05-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.22",
+      "date": "2026-10-29",
+      "title": "App invites and own environments; tests never relay to production",
+      "notes": [
+        "Invite people to Flow; everyone gets their own private environments to create, rename, switch and archive.",
+        "Test servers can never relay to production."
+      ],
+      "summary": "Invite people to Flow; everyone gets their own private environments to create, rename, switch and archive.",
+      "sourceSubject": "App invites and own environments; tests never relay to production",
+      "commit": "953f7c928a254ef935fbc15dc2036f215c26c981",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 22,
+      "admittedAt": "2026-10-29T17:39:00-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.21",
+      "date": "2026-10-29",
+      "title": "Persistent sign-in sessions that survive deploys",
+      "notes": [
+        "Sign-in sessions survive deploys (stored hashed in Postgres)."
+      ],
+      "summary": "Sign-in sessions survive deploys (stored hashed in Postgres).",
+      "sourceSubject": "Persistent sign-in sessions that survive deploys",
+      "commit": "a14370247ef1431b1b564df29c36b403fb9b8f61",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 21,
+      "admittedAt": "2026-10-29T17:22:20-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.20",
+      "date": "2026-10-29",
+      "title": "Server is the source of truth: workspaces sync with revisions",
+      "notes": [
+        "The server is the source of truth: workspaces sync with revisions, merge on conflict and work offline."
+      ],
+      "summary": "The server is the source of truth: workspaces sync with revisions, merge on conflict and work offline.",
+      "sourceSubject": "Server is the source of truth: workspaces sync with revisions",
+      "commit": "b7d48535b67a9105a490448143cdfe49e74c8647",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 20,
+      "admittedAt": "2026-10-29T17:18:13-07:00",
+      "compatibility": "action-required",
+      "action": "Set FLOW_SYNC_TOKEN on the server and import existing data once with tools/env.mjs push. Postgres gets two additive tables on first use.",
+      "deployments": []
+    },
+    {
+      "version": "0.10.19",
+      "date": "2026-10-29",
+      "title": "verify: DevLog page-2 check follows the registry instead of a fixed version",
+      "notes": [
+        "Test-only fix: the DevLog paging check follows the registry."
+      ],
+      "summary": "Test-only fix: the DevLog paging check follows the registry.",
+      "sourceSubject": "verify: DevLog page-2 check follows the registry instead of a fixed version",
+      "commit": "2fa09526e78864ac64b183217f1bb7fdd1ac90f9",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 19,
+      "admittedAt": "2026-10-29T17:00:35-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.18",
+      "date": "2026-10-29",
+      "title": "Card and timeline-item details open as animated modals",
+      "notes": [
+        "Cards and timeline items open as animated modals with deep links; confirmations are small dialogs."
+      ],
+      "summary": "Cards and timeline items open as animated modals with deep links; confirmations are small dialogs.",
+      "sourceSubject": "Card and timeline-item details open as animated modals",
+      "commit": "f439c03a7ecb313b3776fedd75ff111246e1a3fc",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 18,
+      "admittedAt": "2026-10-29T16:59:05-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.17",
+      "date": "2026-10-29",
+      "title": "Sign in with passkeys and biometrics through OneProfileID SSO",
+      "notes": [
+        "Sign in with passkeys and biometrics through OneProfileID SSO."
+      ],
+      "summary": "Sign in with passkeys and biometrics through OneProfileID SSO.",
+      "sourceSubject": "Sign in with passkeys and biometrics through OneProfileID SSO",
+      "commit": "a39038f9d77ec3ece53e618840aba994dee833df",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 17,
+      "admittedAt": "2026-10-29T16:44:13-07:00",
+      "compatibility": "action-required",
+      "action": "Passkey/biometric sign-in needs the OneProfileID SSO client configured (OPID_SSO_ISSUER, OPID_SSO_CLIENT_ID, OPID_SSO_CLIENT_SECRET); without them the app keeps working as before.",
+      "deployments": []
+    },
+    {
+      "version": "0.10.16",
+      "date": "2026-10-29",
+      "title": "Tabbed Settings with editable shortcuts, synced preferences and a paged DevLog",
+      "notes": [
+        "Settings with tabs: Account, Environment, Shortcuts (rebindable) and DevLog.",
+        "Preferences sync per user; the version shows next to Settings."
+      ],
+      "summary": "Settings with tabs: Account, Environment, Shortcuts (rebindable) and DevLog.",
+      "sourceSubject": "Tabbed Settings with editable shortcuts, synced preferences and a paged DevLog",
+      "commit": "bbda18e33485aa38070ee883b54463b31d4c6dc2",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 16,
+      "admittedAt": "2026-10-29T16:44:13-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.15",
+      "date": "2026-10-29",
+      "title": "Denser DevOps cards with no overflow; header never pushes out the avatar",
+      "notes": [
+        "Denser DevOps cards that never overflow; the header keeps the avatar in view."
+      ],
+      "summary": "Denser DevOps cards that never overflow; the header keeps the avatar in view.",
+      "sourceSubject": "Denser DevOps cards with no overflow; header never pushes out the avatar",
+      "commit": "0a72199db5ccdb02cae8bd79ebb2a64cb679e02d",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 15,
+      "admittedAt": "2026-10-29T16:18:16-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.14",
+      "date": "2026-10-29",
+      "title": "Switch to zero-based Bradshaw versions; record 0.10.11-0.10.12",
+      "notes": [
+        "Versions switch to a zero-based project year (0.10.x for October 2026); the repository used for private development has been archived."
+      ],
+      "summary": "Versions switch to a zero-based project year (0.10.x for October 2026); the repository used for private development has been archived.",
+      "sourceSubject": "Switch to zero-based Bradshaw versions; record 0.10.11-0.10.12",
+      "commit": "3e579a28db259b66abe747d32e883ba54b22d7d0",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 14,
+      "admittedAt": "2026-10-29T16:18:16-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.13",
+      "date": "2026-10-29",
+      "title": "Tactile DevOps drag and drop; pixel bar on cards",
+      "notes": [
+        "Tactile drag and drop on the DevOps board (mouse, touch, pen, keyboard).",
+        "Cards get a crisp Flygon pixel bar."
+      ],
+      "summary": "Tactile drag and drop on the DevOps board (mouse, touch, pen, keyboard).",
+      "sourceSubject": "Tactile DevOps drag and drop; pixel bar on cards",
+      "commit": "0480847b0bd64d9d2cf63f2d01e15330e69750a4",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 13,
+      "admittedAt": "2026-10-29T16:12:53-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.12",
+      "date": "2026-10-29",
+      "title": "Add MIT license",
+      "notes": [
+        "MIT license (Copyright Flygon LC)."
+      ],
+      "summary": "MIT license (Copyright Flygon LC).",
+      "sourceSubject": "Add MIT license",
+      "commit": "58bad2097dca103be3cb3cd06d545c02c081f175",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 12,
+      "admittedAt": "2026-10-29T16:09:24-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.11",
+      "date": "2026-10-29",
+      "title": "Add DevLog with Bradshaw Versioning",
+      "notes": [
+        "DevLog with Bradshaw versions in the app, and the release registry."
+      ],
+      "summary": "DevLog with Bradshaw versions in the app, and the release registry.",
+      "sourceSubject": "Add DevLog with Bradshaw Versioning",
+      "commit": "11f34351e724f320faf6eb20b6fd7876201c174c",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 11,
+      "admittedAt": "2026-10-29T15:56:36-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.10",
+      "date": "2026-10-29",
+      "title": "Prepare for deployment: bind address, owner bootstrap, storage dirs",
+      "notes": [
+        "Ready to deploy: listens on 0.0.0.0 with sign-in, owner membership bootstrap, configurable storage folders, TLS for hosted Postgres."
+      ],
+      "summary": "Ready to deploy: listens on 0.0.0.0 with sign-in, owner membership bootstrap, configurable storage folders, TLS for hosted Postgres.",
+      "sourceSubject": "Prepare for deployment: bind address, owner bootstrap, storage dirs",
+      "commit": "523eacdfcbf310daf1c97b1bb89f4c739aca73e2",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 10,
+      "admittedAt": "2026-10-29T15:40:39-07:00",
+      "compatibility": "action-required",
+      "action": "A public deploy needs OneProfileID configured (local mode now refuses a non-loopback HOST); Node 22 or newer. Optional: BACKUP_DIR, SAVES_DIR, INBOX_DIR, DATABASE_SSL, OWNER_EMAIL.",
+      "deployments": []
+    },
+    {
+      "version": "0.10.9",
+      "date": "2026-10-29",
+      "title": "Add agent inbox: server-side patches merge into the open app",
+      "notes": [
+        "Agent inbox: cards and timeline items that agents queue merge into the open app as one undoable step."
+      ],
+      "summary": "Agent inbox: cards and timeline items that agents queue merge into the open app as one undoable step.",
+      "sourceSubject": "Add agent inbox: server-side patches merge into the open app",
+      "commit": "31e6b1325c01ff1dfb2b39892d2c7d6f5731b895",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 9,
+      "admittedAt": "2026-10-29T15:33:49-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.8",
+      "date": "2026-10-29",
+      "title": "Add handwritten flow loading splash",
+      "notes": [
+        "A handwritten \"flow\" loading splash."
+      ],
+      "summary": "A handwritten \"flow\" loading splash.",
+      "sourceSubject": "Add handwritten flow loading splash",
+      "commit": "9ba2be0f357462d7a88a633cb2952cda433cfb5b",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 8,
+      "admittedAt": "2026-10-29T15:23:56-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.7",
+      "date": "2026-10-29",
+      "title": "Explain DevOps columns: UAT needs testing, Done is completed",
+      "notes": [
+        "DevOps column headers explain each column: UAT needs testing, Done means completed."
+      ],
+      "summary": "DevOps column headers explain each column: UAT needs testing, Done means completed.",
+      "sourceSubject": "Explain DevOps columns: UAT needs testing, Done is completed",
+      "commit": "5990f724c268b3585c8b228f04f629ae6df7a2be",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 7,
+      "admittedAt": "2026-10-29T15:23:56-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.6",
+      "date": "2026-10-29",
+      "title": "Default new workspaces to their owner",
+      "notes": [
+        "New workspaces get their owner: Default workspace locally, the signed-in user otherwise."
+      ],
+      "summary": "New workspaces get their owner: Default workspace locally, the signed-in user otherwise.",
+      "sourceSubject": "Default new workspaces to their owner",
+      "commit": "ba90fc8fd4594cfb7337d19b27804d02c43d5bcb",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 6,
+      "admittedAt": "2026-10-29T15:19:58-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.5",
+      "date": "2026-10-29",
+      "title": "Add account menu, settings dialog and OneProfileID sign-in gate",
+      "notes": [
+        "Account menu, settings dialog and the OneProfileID sign-in screen."
+      ],
+      "summary": "Account menu, settings dialog and the OneProfileID sign-in screen.",
+      "sourceSubject": "Add account menu, settings dialog and OneProfileID sign-in gate",
+      "commit": "54535859a7c6ffaec6a5dd60966b76829b36c30c",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 5,
+      "admittedAt": "2026-10-29T15:19:58-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.4",
+      "date": "2026-10-29",
+      "title": "Styled tooltips with aria-describedby; custom single-select listbox",
+      "notes": [
+        "Themed tooltips linked with aria-describedby.",
+        "Every dropdown opens a styled, keyboard-friendly list."
+      ],
+      "summary": "Themed tooltips linked with aria-describedby.",
+      "sourceSubject": "Styled tooltips with aria-describedby; custom single-select listbox",
+      "commit": "1bc3176e5b43d09a2da35d1175d0cfbdd8c04c0d",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 4,
+      "admittedAt": "2026-10-29T15:19:58-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.3",
+      "date": "2026-10-29",
+      "title": "Add OneProfileID native sign-in and environments (server side)",
+      "notes": [
+        "OneProfileID native sign-in on the server, with local single-user mode when it is not configured.",
+        "Environments with an owner and visibility; existing data belongs to Default workspace (private)."
+      ],
+      "summary": "OneProfileID native sign-in on the server, with local single-user mode when it is not configured.",
+      "sourceSubject": "Add OneProfileID native sign-in and environments (server side)",
+      "commit": "ec44d62dc524d1f0833f762790870e583351176f",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 3,
+      "admittedAt": "2026-10-29T15:11:07-07:00",
+      "compatibility": "action-required",
+      "action": "To turn on sign-in, set OPID_BASE_URL, OPID_APP_ID, OPID_APP_SECRET and OPID_APP_ORIGIN (without them the app stays in local mode). On first cloud use the server adds environment columns and a flygon_flow_environments table to Postgres (additive, idempotent).",
+      "deployments": []
+    },
+    {
+      "version": "0.10.2",
+      "date": "2026-10-29",
+      "title": "Add animated diamond logo mark and diamond favicon badge",
+      "notes": [
+        "Animated diamond logo mark and a diamond favicon badge."
+      ],
+      "summary": "Animated diamond logo mark and a diamond favicon badge.",
+      "sourceSubject": "Add animated diamond logo mark and diamond favicon badge",
+      "commit": "27d1dc68897c5022c29d6236dcfd53eb841c154c",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 2,
+      "admittedAt": "2026-10-29T15:03:38-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.1",
+      "date": "2026-10-29",
+      "title": "Rename to Flygon Flow; add DevOps board, brand accents, pickers, motion",
+      "notes": [
+        "Renamed the app to Flygon Flow; saved data, storage keys and the cloud table are unchanged.",
+        "Flygon brand colours as accents on the grey base.",
+        "New DevOps board: columns, cards, drag and drop, Approve gate, filters, paging; linked to the chart and timeline.",
+        "Searchable pickers, styled selects, view transitions and loading skeletons."
+      ],
+      "summary": "Renamed the app to Flygon Flow; saved data, storage keys and the cloud table are unchanged.",
+      "sourceSubject": "Rename to Flygon Flow; add DevOps board, brand accents, pickers, motion",
+      "commit": "333697fbf2deaffce9e6d0d088ca5fd7e01746f8",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 1,
+      "admittedAt": "2026-10-29T15:03:38-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    }
+  ]
+}
