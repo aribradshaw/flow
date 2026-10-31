@@ -1,6 +1,6 @@
-# Chart
+# MindMap (charts)
 
-The chart is a free-form canvas of **cards** joined by **edges**. A workspace can hold several charts; one of them is active.
+The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**. The API calls each mind map a **chart** (`charts.list`, `nodes.*`, `edges.*`). A workspace can hold several charts; one of them is active.
 
 - Card types: `entity` (a company or organisation), `person`, `area` (a project area that groups cards inside it) and `note`.
 - Edge types: `ownership` is a solid arrow that can carry a percentage from 0 to 100, or `""` when the percentage is unknown. `group` is a dashed line that means grouping only.

@@ -119,7 +119,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace" \
 }
 ```
 
-## Charts
+## MindMap charts
 
 ### `charts.list`
 
@@ -1712,6 +1712,8 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items[].items` | string[] | yes |  |
 | `items[].created` | string |  |  |
 | `items[].updated` | string |  |  |
+| `items[].x` | number |  |  |
+| `items[].y` | number |  |  |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -1804,6 +1806,8 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 | `brief` | string | yes |  |
 
 **Example: Researcher**
@@ -1882,6 +1886,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `projects` | string[] |  |  |
 | `cards` | string | integer[] |  |  |
 | `items` | string[] |  |  |
+| `x` | number |  | Canvas position (with y). Leave out to place it under its manager. |
+| `y` | number |  |  |
 
 **Output**
 
@@ -1908,6 +1914,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 
 **Example: New research agent**
 
@@ -1987,6 +1995,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `projects` | string[] |  |  |
 | `cards` | string | integer[] |  |  |
 | `items` | string[] |  |  |
+| `x` | number |  | Canvas position (with y). Leave out to place it under its manager. |
+| `y` | number |  |  |
 
 **Output**
 
@@ -2013,6 +2023,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 
 **Example: Activate and link a card**
 

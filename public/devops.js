@@ -306,7 +306,7 @@ function cardDetailHtml(c){
       <div><label for="dc-due">Due date</label><input id="dc-due" type="date" value="${c.due}"></div></div>
     <label>Assignees</label>${ppl.length?`<div class="dc-roles">${ROLES.map(role=>{const ids=c.assignees.filter(a=>a.role===role).map(a=>a.node);
       return `<div class="dc-role"><small>${role[0].toUpperCase()+role.slice(1)}</small>${pickerButton('dc-role-'+role,ids.length?ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', '):'None',personItems(),ids,{cls:'mini wide'})}</div>`}).join('')}</div>`
-      :`<div class="dc-hint">Add people to the org chart to assign them.</div>`}
+      :`<div class="dc-hint">Add people to a mind map to assign them.</div>`}
     <label for="dc-item">Timeline item</label><div class="linkrow"><select id="dc-item">${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}</div>
     ${agentRow(c)}
     <div class="dc-meta">Created ${esc(when(c.created))}<br>Updated ${esc(when(c.updated))}</div></aside></form>`;

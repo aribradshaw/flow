@@ -4,7 +4,8 @@
 //
 // db.agentflow = {agents:[agent], workflows:[workflow]}
 // agent    = {id,name,kind,title,status,reportsTo,supervisor,purpose,instructions,runtime,model,
-//             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated}
+//             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated, x?,y?}
+//   x, y: where the card sits on the AgentFlow canvas (optional; see positions()).
 //   reportsTo: another agent (the AgentFlow org chart); supervisor: a person card on a Flow chart.
 // workflow = {id,name,description,status,trigger,schedule,steps:[{id,agent,action,output}],
 //             projects[],cards[],items[],created,updated}
@@ -30,6 +31,8 @@ const strs=(v,n=LIMITS.list,len=200)=>[...new Set((Array.isArray(v)?v:[]).filter
 const refs=(v,ok)=>[...new Set((Array.isArray(v)?v:[]).filter(x=>typeof x==='string'&&(ok.has(x)||shared(x))))].slice(0,LIMITS.refs);
 
 export const seedAgentflow=()=>({agents:[],workflows:[]});
+const clampXY=v=>Math.max(-1e5,Math.min(1e5,Math.round(v)));
+export const placed=a=>Number.isFinite(a?.x)&&Number.isFinite(a?.y);
 
 // Every person card across the workspace's charts (supervisors are people).
 export function peopleOf(db){
@@ -51,7 +54,8 @@ export function cleanAgentflow(d,db={}){
     id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind:pick(a.kind,AGENT_KINDS,'agent'),title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),
     reportsTo:typeof a.reportsTo==='string'?a.reportsTo:'',supervisor:typeof a.supervisor==='string'&&(people.has(a.supervisor)||shared(a.supervisor))?a.supervisor:'',
     purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),model:str(a.model,120),
-    inputs:strs(a.inputs),outputs:strs(a.outputs),tools:strs(a.tools),...links(a),created:iso(a.created,now),updated:iso(a.updated,now)}));
+    inputs:strs(a.inputs),outputs:strs(a.outputs),tools:strs(a.tools),...links(a),created:iso(a.created,now),updated:iso(a.updated,now),
+    ...(placed(a)?{x:clampXY(a.x),y:clampXY(a.y)}:{})}));
   const byId=new Map(agents.map(a=>[a.id,a]));
   for(const a of agents){
     if(!byId.has(a.reportsTo)||a.reportsTo===a.id){a.reportsTo='';continue}
@@ -111,6 +115,50 @@ export function removeAgent(af,agentId){
 }
 export const workflowsFor=(af,agentId)=>af.workflows.filter(w=>w.steps.some(s=>s.agent===agentId));
 export const agentsForCard=(af,cardId)=>(af?.agents||[]).filter(a=>a.cards.includes(cardId));
+
+// ---------- canvas layout ----------
+// Card size on the canvas and the spacing of the automatic tree.
+export const CARD={w:188,h:76},STEP={x:212,y:128};
+// A tidy tree: leaves side by side, each manager centred over its reports, root trees side by side.
+export function treeLayout(af){
+  const out=new Map(),kids=new Map(af.agents.map(a=>[a.id,[]]));
+  for(const a of af.agents)if(a.reportsTo&&kids.has(a.reportsTo)&&a.reportsTo!==a.id)kids.get(a.reportsTo).push(a);
+  let slot=0;
+  const place=(a,depth)=>{
+    if(out.has(a.id))return out.get(a.id).x;
+    out.set(a.id,{x:0,y:depth*STEP.y});
+    const xs=kids.get(a.id).map(k=>place(k,depth+1)).filter(x=>x!==undefined);
+    const x=xs.length?(xs[0]+xs.at(-1))/2:slot++*STEP.x;
+    out.get(a.id).x=x;return x;
+  };
+  for(const a of af.agents)if(!a.reportsTo||!kids.has(a.reportsTo))place(a,0);
+  for(const a of af.agents)if(!out.has(a.id))place(a,0); // only reachable through a loop
+  return out;
+}
+// Where each agent is drawn: the tree until someone arranges the canvas; after that, saved
+// positions, and agents without one (added through the API) go under their manager, else to
+// the right, in the first free spot.
+export function positions(af){
+  if(!af.agents.some(placed))return treeLayout(af);
+  const out=new Map(),taken=[];
+  const free=(x,y)=>!taken.some(p=>Math.abs(p.x-x)<CARD.w+8&&Math.abs(p.y-y)<CARD.h+8);
+  for(const a of af.agents)if(placed(a)){const p={x:a.x,y:a.y};out.set(a.id,p);taken.push(p)}
+  const todo=af.agents.filter(a=>!out.has(a.id)),ids=new Set(af.agents.map(a=>a.id));
+  while(todo.length){
+    const i=Math.max(0,todo.findIndex(a=>!ids.has(a.reportsTo)||out.has(a.reportsTo))),a=todo.splice(i,1)[0],m=out.get(a.reportsTo);
+    let x=m?m.x:Math.max(...taken.map(p=>p.x))+STEP.x,y=m?m.y+STEP.y:Math.min(...taken.map(p=>p.y));
+    while(!free(x,y))x+=STEP.x;
+    const p={x,y};out.set(a.id,p);taken.push(p);
+  }
+  return out;
+}
+// Save the drawn position of every agent that has none (before the first manual move), so
+// arranging one card never makes the others jump.
+export function pin(af){
+  const p=positions(af);
+  for(const a of af.agents)if(!placed(a)){const q=p.get(a.id);a.x=clampXY(q.x);a.y=clampXY(q.y)}
+}
+export function unpin(af){for(const a of af.agents){delete a.x;delete a.y}}
 
 // ---------- linked Flow work ----------
 // Cards linked directly, then open cards in linked projects (most urgent due date first).

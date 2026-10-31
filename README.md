@@ -2,7 +2,7 @@
 
 **An open-source organization tool for mapping people and ideas, planning work, and tracking delivery.** Built by [Flygon LC](https://flygonlc.com) for anyone to use as a mind map, timeline, DevOps board, and agent org chart in one workspace.
 
-Create charts of people, organizations, projects, and notes; connect them to plans on a timeline and cards on a work board. Flow runs locally without an account, or can be hosted with sign-in and separate private workspaces. It uses browser JavaScript and Node.js, with no frontend build step.
+Create mind maps of people, organizations, projects, and notes; connect them to plans on a timeline and cards on a work board. Flow runs locally without an account, or can be hosted with sign-in and separate private workspaces. It uses browser JavaScript and Node.js, with no frontend build step.
 
 ![Flow starter workspace showing connected cards](seed-canvas.png)
 
@@ -31,7 +31,7 @@ Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -ArgumentList 'server
 
 Hover any icon for a tooltip; the **?** in the top bar lists shortcuts for the current tab.
 
-Use **Chart** to map an organization, team, or idea; **Timeline** to plan projects and releases; and **DevOps** to move work from requests through completion. The three views share projects, people, and links, so you can start with whichever one fits your work.
+Use **MindMap** to map an organization, team, or idea; **Timeline** to plan projects and releases; and **DevOps** to move work from requests through completion. The three views share projects, people, and links, so you can start with whichever one fits your work.
 
 **Timeline:** see projects, milestones, deadlines, and work at risk across time.
 
@@ -57,24 +57,25 @@ Use **Chart** to map an organization, team, or idea; **Timeline** to plan projec
 
 In **Settings → Environment → Workflow**, choose Delivery, Simple, or Planning, then edit timeline status names and DevOps column names for your workspace. Stage IDs stay stable so saved items and automation continue to work. A self-hosted instance can also set its display name, accent, and logo through environment variables.
 
-### Chart
+### MindMap
+The free-form canvas of cards and connections (the API calls each mind map a *chart*).
 - Floating palette (left): add entity / person / project area / note (E · P · A · N), connect (C), undo / redo. Double-click empty canvas to add an entity there.
 - Cards snap to a 16px grid (hold Alt to place freely) and resize from the bottom-right corner. Moving an area carries every card fully inside it.
 - Connect by dragging the dot on a card's right edge onto another card, or with connect mode. Edges sharing a card side spread out along it.
 - Solid arrows are ownership (labelled with the %); dashed lines are grouping only. Unspecified percentages show "?" only when selected.
 - The inspector opens only for a selection and autosaves as you type. It lists a card's connections; click one to jump to it.
 - Selecting an entity or area opens its project timeline along the bottom: items from the Timeline project with the same name, fitted to the width. Click an item to open it in the Timeline; + adds an item tagged with that project (creating it if needed); → opens the Timeline filtered to it. Toggle the strip from the inspector's timeline icon.
-- Top bar: switch / rename / create / delete charts, plus Save and Load (below).
+- Top bar: switch / rename / create / delete mind maps, plus Save and Load (below).
 
 ### Timeline
 - Items: milestone, release, deadline, project, phase/sprint, event. Status: planned, in progress, at risk, blocked, done, cancelled. Each has a start date, optional end date, project tags, owner, link and notes.
-- Projects are coloured tags managed from the tag icon. Chart entity and area names are offered as suggestions.
+- Projects are coloured tags managed from the tag icon. MindMap entity and area names are offered as suggestions.
 - Views (1 · 2 · 3): **Timeline** (Gantt always spanning at least ~15 months ahead, rows grouped by project, type or status; week / month / quarter zoom), **Calendar** (month grid), **List** (by month, overdue in red).
 - Drag items to reschedule; drag a bar's right end to change its length. Double-click a row or calendar day to add an item there. N adds, T jumps to today.
 - Filter by project and hide done items from the toolbar. Export .ics (respects filters) for Google/Outlook/Apple Calendar.
-- **Product management.** Projects can sit under a chart entity or area (Projects panel › "Under …", or the folder+ button in the chart strip). Features are an item type with priority (high / medium / low) and a target release; a release lists the items targeting it and how many are done. Items may be left without a date: they are backlog and appear only on the Board and List.
+- **Product management.** Projects can sit under a mind map entity or area (Projects panel › "Under …", or the folder+ button in the MindMap strip). Features are an item type with priority (high / medium / low) and a target release; a release lists the items targeting it and how many are done. Items may be left without a date: they are backlog and appear only on the Board and List.
 - **Board** (4): a kanban with one column per status; drag cards between columns to change status, + on a column (or double-click it) to add a feature there. Cards sort by priority, then date.
-- Selecting an entity on the chart shows every project under it in the strip: project chips (open that project), next-up item, backlog count (opens the Board), new project, add item, Board and Timeline shortcuts.
+- Selecting an entity on the MindMap shows every project under it in the strip: project chips (open that project), next-up item, backlog count (opens the Board), new project, add item, Board and Timeline shortcuts.
 - Undo/redo (Ctrl+Z / Ctrl+Shift+Z) covers charts and the timeline together; history resets on reload.
 
 ### DevOps
@@ -85,13 +86,13 @@ A card board for tracking work from requests through completion.
 - Column headers explain each column on hover: **UAT** needs testing before it can go to Done; **Done** means completed.
 - Drag cards within and between columns. Gates: **Approve** on a UAT card moves it to Done; dragging straight into Done, or out of Done, asks first; moving an unassigned card into Doing asks who is developing it (cancel leaves it unassigned).
 - Filters (remembered in this browser): projects (including "No project"), entity (cards in the projects under a chart entity or area), assignees, labels, search by `#number` or title, hide Done, Clear. The count shows visible cards.
-- On the chart, a selected person, entity or area shows "N open cards" in the inspector; click it to open the board filtered to them. The chart's project strip shows open-card counts per project.
+- On the MindMap, a selected person, entity or area shows "N open cards" in the inspector; click it to open the board filtered to them. The MindMap's project strip shows open-card counts per project.
 - On the timeline, a card can be linked to an item; the item's panel lists its cards. "Show DevOps cards" (Timeline view) draws cards that have a due date and a project as read-only markers; click one to open the card.
 
 ### AgentFlow
 An org chart for agentic work: the agents (and people and teams) that run a business, what each one does, and the workflows they hand work through. Flow stores the design. Your own runner (an agent harness, a home server, cron) reads it through the API or MCP and does the work.
-- **Org chart** (1): agents laid out as a tree by who they report to. Each card shows its kind (AI agent, human, team), status, role, input/output counts, workflows and open cards. Search dims everything that does not match. **Start from a template** adds a small example org and workflow to edit.
-- Click an agent for its side panel: name, kind, role, status, reports to (never one of its own reports), supervisor (a person on your chart), purpose, inputs, outputs, tools, where it runs and the model, instructions (system prompt or runbook), and linked projects, DevOps cards and timeline items. The panel lists its linked work, direct reports and workflow steps; `+` adds a direct report.
+- **Org chart** (1): a canvas like the MindMap. Agents start laid out as a tree by who they report to; drag them anywhere (Shift: with their reports), pan and zoom, drag the dot under a card onto another agent to change who reports to whom (or onto empty space to add a report), double-click to add an agent, and **Tidy up** to return to the tree. Each card shows its kind (AI agent, human, team), status, role, input/output counts, workflows and open cards. Search dims everything that does not match. **Start from a template** adds a small example org and workflow to edit.
+- Click an agent for its side panel: name, kind, role, status, reports to (never one of its own reports), supervisor (a person on your MindMap), purpose, inputs, outputs, tools, where it runs and the model, instructions (system prompt or runbook), and linked projects, DevOps cards and timeline items. The panel lists its linked work, direct reports and workflow steps; `+` adds a direct report.
 - **Workflows** (2): each workflow is a pipeline of steps, each one handled by an agent, started by hand, on a schedule or by an event. Edit, reorder and assign steps in the side panel.
 - **Copy brief** puts a Markdown brief for the agent or workflow on the clipboard: purpose, reporting line, inputs, outputs, tools, steps and linked cards and deadlines. `agents.get` and `workflows.get` return the same brief over the API and MCP. See [docs/concepts/09-agentflow.md](docs/concepts/09-agentflow.md).
 - A DevOps card's detail shows the agents on it, and you can assign agents from there. Deleting an agent moves its reports up to its manager.
@@ -195,7 +196,7 @@ Charts automatically save in browser localStorage on this exact origin. Keep usi
 
 **Save / Load.** Save (Ctrl+S) snapshots the whole workspace (charts, projects, timeline and DevOps) to `saves/` on this computer (newest 200 kept) and, when `DATABASE_URL` is set, to Postgres in the `org_chart_studio_saves` table. Without Postgres, saves are local only. Load lists snapshots from both places, newest first; loading replaces the workspace and is undoable with Ctrl+Z. "From a file…" in the Load menu accepts a saved workspace or an old single-chart JSON export.
 
-New installations load a fictional starter chart. Replace its people and organizations with your own before using it as a record of a real structure.
+New installations load a fictional starter mind map. Replace its people and organizations with your own before using it as a record of a real structure.
 
 ## Extend
 

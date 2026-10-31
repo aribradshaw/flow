@@ -324,7 +324,7 @@ try{
   assert(await fetch(`${BASE}api/backups/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(await saved())}).then(r=>r.ok),'disk backup accepts the database with timeline fields');
   // Top bar chart actions
   await js(`document.querySelector('[data-act=new]').click()`);
-  assert((await js('window.orgChartStudio.getChart()')).name==='Untitled chart','New chart button creates a chart');
+  assert((await js('window.orgChartStudio.getChart()')).name==='Untitled mind map','New mind map button creates a mind map');
   await key('z',90,2);
 
   // Save / load: Ctrl+S snapshots the workspace; loading a save restores it (and is undoable).
@@ -469,6 +469,30 @@ try{
   assert((await saved()).agentflow.agents.length===4,'Delete removes the selected agent after a confirmation');
   await key('z',90,2);
   assert((await saved()).agentflow.agents.length===5,'undo brings the agent back');
+  // The org is a canvas: drag cards, drag the dot under a card to change who reports to whom, tidy back into a tree.
+  {const ag=n=>saved().then(d=>d.agentflow.agents.find(x=>x.name===n)),build=await ag('Builder'),qa=await ag('Reviewer'),res=await ag('Researcher');
+    let [x,y]=await center(`[data-agent="${build.id}"] .nm`);await drag(x,y,x+120,y+150);await sleep(100);
+    db=await saved();const b2=db.agentflow.agents.find(a=>a.id===build.id);
+    assert(Number.isFinite(b2.x)&&db.agentflow.agents.every(a=>Number.isFinite(a.x)&&Number.isFinite(a.y))&&b2.x%16===0,'dragging an agent moves it on the grid and pins the rest in place');
+    [x,y]=await center(`[data-agent="${qa.id}"] [data-port]`);const [X,Y]=await center(`[data-agent="${res.id}"] .nm`);await drag(x,y,X,Y);await sleep(100);
+    assert((await ag('Researcher')).reportsTo===qa.id,'dragging the dot under a card onto another agent makes that agent report to it');
+    [x,y]=await center(`[data-agent="${res.id}"] [data-port]`);const [RX,RY]=await center(`[data-agent="${qa.id}"] .nm`);await drag(x,y,RX,RY);await sleep(100);
+    assert((await ag('Reviewer')).reportsTo!==res.id&&/cannot report/.test(await js(`document.querySelector('#toast')?.textContent||''`)),'a reporting loop is refused with a message');
+    const n0=(await saved()).agentflow.agents.length;[x,y]=await center(`[data-agent="${qa.id}"] [data-port]`);await drag(x,y,x+40,y+260);await sleep(100);
+    db=await saved();assert(db.agentflow.agents.length===n0+1&&db.agentflow.agents.at(-1).reportsTo===qa.id,'dropping the dot on empty space adds a new report there');
+    const n1=(await saved()).agentflow.agents.length;[x,y]=await center(`[data-agent="${qa.id}"] [data-port]`);const [SX,SY]=await center(`[data-agent="${qa.id}"] .nm`);await drag(x,y,SX,SY);await sleep(100);
+    assert((await saved()).agentflow.agents.length===n1,'dropping the dot back on its own card changes nothing');
+    [x,y]=await center(`[data-agent="${qa.id}"] [data-port]`);await mouse('mousePressed',x,y);for(let i=1;i<=4;i++)await mouse('mouseMoved',x+20*i,y+60*i);
+    await js(`document.querySelector('#afCanvas').dispatchEvent(new PointerEvent('pointercancel',{pointerId:1,bubbles:true}))`);await mouse('mouseReleased',x+80,y+240);await sleep(100);
+    assert((await saved()).agentflow.agents.length===n1,'a cancelled port drag adds nothing');
+    await js(`document.activeElement?.blur()`);await key('z',90,2);await key('z',90,2);
+    assert((await ag('Researcher')).reportsTo!==qa.id&&(await saved()).agentflow.agents.length===n0,'canvas changes undo one step at a time');
+    const z0=await js(`document.querySelector('.af-world').style.transform`);await js(`document.querySelector('[data-afz=in]').click()`);
+    assert(await js(`document.querySelector('.af-world').style.transform`)!==z0,'the zoom buttons zoom the canvas');
+    await js(`document.querySelector('[data-afz=tidy]').click()`);await sleep(100);
+    assert(!(await saved()).agentflow.agents.some(a=>'x' in a),'Tidy up returns to the automatic tree');
+    await js(`document.querySelector('[data-agent="${build.id}"]').click()`);await sleep(50);await js(`document.activeElement?.blur()`);await key('ArrowRight',39);
+    assert(Number.isFinite((await ag('Builder')).x),'arrow keys nudge the selected agent');}
   // Link a card from the agent, then follow the link back from the card.
   await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);
   await js(`document.querySelector('#inspector [data-picker=af-cards]').click()`);await sleep(100);

@@ -50,14 +50,14 @@ const tabBtn=(id,ic,label)=>`<button type="button" class="tab" role="tab" data-t
 function renderTop(){
   const c=chart(),db=store.db;
   const ctx=tab==='chart'
-    ?(renaming?`<input id="chartName" class="chart-name" maxlength="120" value="${esc(c.name)}" aria-label="Chart name">`
-      :`<select id="charts" data-tip="Switch chart" aria-label="Chart">${db.charts.map(x=>`<option value="${esc(x.id)}"${x.id===db.active?' selected':''}>${esc(x.name)}</option>`).join('')}</select>`)
-      +ib('pencil','Rename chart',{attrs:'data-act="rename"'})+ib('filePlus','New chart',{attrs:'data-act="new"'})
-      +(db.charts.length>1?ib('trash','Delete this chart',{cls:'danger',attrs:'data-act="dropChart"'}):'')
+    ?(renaming?`<input id="chartName" class="chart-name" maxlength="120" value="${esc(c.name)}" aria-label="Mind map name">`
+      :`<select id="charts" data-tip="Switch mind map" aria-label="Mind map">${db.charts.map(x=>`<option value="${esc(x.id)}"${x.id===db.active?' selected':''}>${esc(x.name)}</option>`).join('')}</select>`)
+      +ib('pencil','Rename mind map',{attrs:'data-act="rename"'})+ib('filePlus','New mind map',{attrs:'data-act="new"'})
+      +(db.charts.length>1?ib('trash','Delete this mind map',{cls:'danger',attrs:'data-act="dropChart"'}):'')
       +`<span class="meta" data-tip="${c.nodes.length} cards · ${c.edges.length} connections">${c.nodes.length} · ${c.edges.length}</span>`
     :tab==='timeline'?tl.headerHtml():tab==='devops'?dv.headerHtml():af.headerHtml();
   $('#top').innerHTML=`<span class="logo" data-tip="${esc(instanceName)}">${instanceLogo?`<img src="${esc(instanceLogo)}" alt="" width="20" height="20">`:logoMark(20)}</span>
-    <nav class="tabs" role="tablist">${tabBtn('chart','network','Chart')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}${tabBtn('agentflow','bot','AgentFlow')}</nav>
+    <nav class="tabs" role="tablist">${tabBtn('chart','network','MindMap')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}${tabBtn('agentflow','bot','AgentFlow')}</nav>
     <div class="ctx">${ctx}</div><span class="sp"></span>
     ${ib('save','Save\nTo this computer and the Flygon cloud',{key:keyLabel('global.save'),attrs:'data-act="saveNow"'})}${ib('open','Load a save',{cls:loadPop?'on':'',attrs:'data-act="load"'})}
     <span id="status" class="dot ${statusState}" data-tip="${esc(statusText)}" role="status" aria-label="${esc(statusText)}"></span>
@@ -67,7 +67,7 @@ store.onStatus=(s,text)=>{statusState=s;statusText=text;const el=$('#status');if
 
 const VIEWS={chart:'#chartView',timeline:'#timelineView',devops:'#devopsView',agentflow:'#agentflowView'};
 // Entrance order per view: toolbar, then panels, then columns / rows / cards.
-const ENTER={chart:['#canvas','#tools,#zoom','#strip'],timeline:['.tl-bar','.tl-scroll','.lane,.board .col,.lr'],devops:['.dv-bar','.dcol'],agentflow:['.af-bar','.af-org,.af-flows,.af-empty']};
+const ENTER={chart:['#canvas','#tools,#zoom','#strip'],timeline:['.tl-bar','.tl-scroll','.lane,.board .col,.lr'],devops:['.dv-bar','.dcol'],agentflow:['.af-bar','.af-canvas,.af-flows']};
 function setTab(t){
   if(t===tab)return;
   const from=$(VIEWS[tab]);
@@ -81,7 +81,7 @@ $('#top').addEventListener('click',e=>{
   const b=e.target.closest('[data-act],[data-tl]');if(!b)return;
   if(b.dataset.tl)return tl.action(b.dataset.tl,b);
   ({rename(){renaming=true;renderTop();const i=$('#chartName');i.focus();i.select()},
-    new(){change(()=>{const c={id:uid(),name:'Untitled chart',nodes:[],edges:[]};store.db.charts.push(c);store.db.active=c.id;selected=null});fit()},
+    new(){change(()=>{const c={id:uid(),name:'Untitled mind map',nodes:[],edges:[]};store.db.charts.push(c);store.db.active=c.id;selected=null});fit()},
     saveNow,load:()=>loadPop?closeLoad():openLoad(b),
     dropChart(){ask(`Delete "${chart().name}"?
 You can undo this.`,{ok:'Delete',danger:true}).then(ok=>{if(ok){change(()=>{store.db.charts=store.db.charts.filter(c=>c.id!==store.db.active);store.db.active=store.db.charts[0].id;selected=null});fit()}})},
@@ -100,7 +100,7 @@ $('#file').onchange=async e=>{
     if(file.size>5_000_000)throw Error('File is too large (5 MB maximum)');
     const data=JSON.parse(await file.text()),c=data.chart||data;
     if(validDb(data)){replaceDb(data);toast('Loaded '+file.name+' · Ctrl Z to undo');if(tab==='chart')fit();e.target.value='';return}
-    if(!validChart(c))throw Error('Invalid chart: check entities, connections and percentages');
+    if(!validChart(c))throw Error('Invalid mind map: check entities, connections and percentages');
     change(()=>{c.id=uid();c.name+=' (imported)';store.db.charts.push(c);store.db.active=c.id;selected=null});fit();
   }catch(err){alert(err.message)}
   e.target.value='';
@@ -136,7 +136,7 @@ async function openLoad(btn){
   const where=s=>`${s.local?`<span data-tip="On this computer">${icon('laptop',13)}</span>`:''}${s.cloud?`<span data-tip="In the cloud">${icon('cloud',13)}</span>`:''}`;
   const cloud=res.cloud==='ok'?'':`<div class="lp-msg warn">${icon('alert',13)}<span>${res.cloud==='off'?'Cloud not configured · local saves only':esc('Cloud unavailable · '+res.cloud.replace(/^error: /,''))}</span></div>`;
   el.innerHTML=cloud+(res.saves.length?`<div class="lp-list">${res.saves.map(s=>`<button type="button" data-load="${esc(s.id)}" data-tip="${esc(s.label)}
-${s.charts} chart${s.charts===1?'':'s'} · ${s.items} timeline item${s.items===1?'':'s'}" data-tip-delay="500"><span class="lp-when">${esc(when(s.at))}</span><span class="lp-label">${esc(s.label)}</span><span class="lp-where">${where(s)}</span></button>`).join('')}</div>`:`<div class="lp-msg">No saves yet</div>`)
+${s.charts} mind map${s.charts===1?'':'s'} · ${s.items} timeline item${s.items===1?'':'s'}" data-tip-delay="500"><span class="lp-when">${esc(when(s.at))}</span><span class="lp-label">${esc(s.label)}</span><span class="lp-where">${where(s)}</span></button>`).join('')}</div>`:`<div class="lp-msg">No saves yet</div>`)
     +`<button type="button" class="txt lp-file" data-load-file>${icon('upload',13)}From a file…</button>`;
 }
 document.addEventListener('pointerdown',e=>{if(loadPop&&!e.target.closest('#loadPop,[data-act="load"]'))closeLoad()},true);
@@ -225,7 +225,7 @@ function renderTools(){
     +'<i class="sep"></i>'+ib('undo','Undo',{key:keyLabel('global.undo'),attrs:`data-act="undo" ${r}${store.undo.length?'':' disabled'}`})+ib('redo','Redo',{key:keyLabel('global.redo'),attrs:`data-act="redo" ${r}${store.redo.length?'':' disabled'}`})
     +(tools.length?'<i class="sep"></i>'+tools.map((t,i)=>t.icon?ib(t.icon,t.label,{attrs:`data-tool="${i}" ${r}`}):`<button type="button" class="ib txt-tool" data-tool="${i}" data-tip="${esc(t.label)}" ${r}>${esc(t.label.slice(0,2))}</button>`).join(''):'');
 }
-const renderZoom=()=>{$('#zoom').innerHTML=ib('minus','Zoom out',{key:keyLabel('chart.zoomOut'),attrs:'data-z="out" data-tip-pos="top"'})+`<button type="button" id="scale" data-z="reset" data-tip="Reset to 100%" data-tip-pos="top">100%</button>`+ib('plus','Zoom in',{key:keyLabel('chart.zoomIn'),attrs:'data-z="in" data-tip-pos="top"'})+ib('fit','Fit chart',{key:keyLabel('chart.fit'),attrs:'data-z="fit" data-tip-pos="top"'})
+const renderZoom=()=>{$('#zoom').innerHTML=ib('minus','Zoom out',{key:keyLabel('chart.zoomOut'),attrs:'data-z="out" data-tip-pos="top"'})+`<button type="button" id="scale" data-z="reset" data-tip="Reset to 100%" data-tip-pos="top">100%</button>`+ib('plus','Zoom in',{key:keyLabel('chart.zoomIn'),attrs:'data-z="in" data-tip-pos="top"'})+ib('fit','Fit mind map',{key:keyLabel('chart.fit'),attrs:'data-z="fit" data-tip-pos="top"'})
   +'<i class="sep"></i>'+ib('info','Solid arrow: ownership, labelled with %\n? = percentage not specified\nDashed line: grouping only, no ownership\nA brainstorm, not a verified legal structure',{label:'Legend',attrs:'data-tip-pos="top"'});};renderZoom();
 $('#zoom').addEventListener('click',e=>{const z=e.target.closest('[data-z]')?.dataset.z;if(z==='out')zoom(1/1.2);if(z==='in')zoom(1.2);if(z==='fit')fit();if(z==='reset')zoom(1/view.z)});
 

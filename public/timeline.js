@@ -428,9 +428,9 @@ function projectsHtml(){
   return `<div class="ihead"><span class="k">${icon('tag')}</span><strong>Projects</strong><span class="sp"></span>${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
     <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length;
       return `<div class="prow"><input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"><em data-tip="${n} item${n===1?'':'s'}">${n}</em>${ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
-        <select class="under" data-punder="${esc(p.id)}" data-tip="The chart entity this project sits under" aria-label="Under entity"><option value="">Not under an entity</option>${cs.map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select></div>`}).join('')}
+        <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"><option value="">Not under an entity</option>${cs.map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select></div>`}).join('')}
     <div class="prow"><input id="pnew" maxlength="80" placeholder="New project" aria-label="New project name">${ib('plus','Add project',{attrs:'data-ti="padd"'})}</div>
-    ${sugg.length?`<label>From your charts</label><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
+    ${sugg.length?`<label>From your mind maps</label><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
 }
 export function inspectorClick(e){
   const b=e.target.closest('button');if(!b)return;

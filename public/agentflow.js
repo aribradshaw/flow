@@ -3,15 +3,17 @@ import {$,esc,ib,pickerButton,openPicker} from './ui.js';
 import {panel,flipList} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask} from './modal.js';
-import {store,change,checkpoint,save} from './store.js';
-import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,rootsOf,descendants,chainOf,
-  removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf} from './agentflow-core.js';
+import {store,change,checkpoint,commit,save} from './store.js';
+import {clone} from './ui.js';
+import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
+  removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
+  canReportTo,CARD,positions,placed,pin,unpin} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
 // tied to Flow projects, DevOps cards and timeline items. Data rules live in agentflow-core.js;
-// this module draws the org tree and workflow list, and edits the selection in the shared
-// #inspector side panel.
+// this module draws the org as a pan-and-zoom canvas (like the MindMap) and the workflow list,
+// and edits the selection in the shared #inspector side panel.
 const UIKEY='flygon-flow-agentflow-ui';
 const KIND_ICON={agent:'bot',human:'user',team:'users'},TRIGGER_ICON={manual:'play',schedule:'clock',event:'zap'};
 const STATUS_TONE={draft:'slate',active:'green',paused:'amber',retired:'black'};
@@ -22,6 +24,9 @@ const keepUi=()=>{try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
 // selected = {type:'agent'|'workflow', id}
 let selected=null,rerender=()=>{},openCard=()=>{},openItem=()=>{},toast=()=>{};
 const edited=new WeakSet();
+// Canvas: view = pan and zoom (this session only); drag = the gesture in progress.
+const GRID=16,snap=(v,on=true)=>on?Math.round(v/GRID)*GRID:Math.round(v);
+let view={x:60,y:60,z:1},fitted=false,drag=null,centerOn=null;
 
 const db=()=>store.db,af=()=>store.db.agentflow;
 const agent=id=>agentOf(af(),id),flow=id=>af().workflows.find(w=>w.id===id)||null;
@@ -37,10 +42,22 @@ export function mount(opts){
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
+    const z=e.target.closest('[data-afz]')?.dataset.afz;
+    if(z){({out:()=>zoom(1/1.2),in:()=>zoom(1.2),reset:()=>zoom(1/view.z),fit,tidy(){if(af().agents.some(placed))change(()=>unpin(af()));requestAnimationFrame(fit)}})[z]?.();return}
     const b=e.target.closest('[data-af]');if(b){action(b.dataset.af,b);return}
     const a=e.target.closest('[data-agent]');if(a){select('agent',a.dataset.agent);return}
     const w=e.target.closest('[data-flow]');if(w){select('workflow',w.dataset.flow);return}
     if(e.target.closest('.af-scroll')&&!e.target.closest('button,a,input')&&selected)select(null);
+  });
+  el.addEventListener('pointerdown',canvasDown);
+  el.addEventListener('pointermove',canvasMove);
+  el.addEventListener('pointerup',canvasUp);
+  // A cancelled gesture (touch interrupted, capture lost) changes nothing.
+  el.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.pid)return;drag=null;$('#afCanvas')?.classList.remove('panning');paint()});
+  el.addEventListener('wheel',e=>{const cv=e.target.closest('#afCanvas');if(!cv)return;e.preventDefault();const r=cv.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+  el.addEventListener('dblclick',e=>{
+    const cv=e.target.closest('#afCanvas');if(!cv||e.target.closest('[data-agent],button'))return;
+    const p=toWorld(e);addAgent('',{x:snap(p.x-CARD.w/2),y:snap(p.y-CARD.h/2)});
   });
   el.addEventListener('keydown',e=>{
     const t=e.target.closest('[data-agent],[data-flow]');
@@ -56,7 +73,7 @@ function select(type,id){selected=type?{type,id}:null;rerender()}
 
 // Opened from elsewhere (a DevOps card's agent list).
 export function focus({agentId,workflowId}={}){
-  if(agentId&&agent(agentId)){ui.view='org';selected={type:'agent',id:agentId}}
+  if(agentId&&agent(agentId)){ui.view='org';selected={type:'agent',id:agentId};centerOn=agentId}
   else if(workflowId&&flow(workflowId)){ui.view='workflows';selected={type:'workflow',id:workflowId}}
   ui.q='';keepUi();
 }
@@ -75,25 +92,133 @@ function toolbar(){
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
-function nodeHtml(a,hits){
-  const reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
-  const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id);
+function nodeHtml(a,p,hits){
+  const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
+  const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
   const [bg,fg]=sup?memberColor(sup.id):[];
-  return `<li><div class="af-node k-${a.kind} st-${a.status}${isSel?' sel':''}${dim?' dim':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${AGENT_KINDS[a.kind]}: ${a.name}`)}">
+  return `<div class="af-node k-${a.kind} st-${a.status}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${AGENT_KINDS[a.kind]}: ${a.name}`)}" style="left:${p.x}px;top:${p.y}px">
     <div class="af-n-top"><span class="af-k" data-tip="${AGENT_KINDS[a.kind]}">${icon(KIND_ICON[a.kind],14)}</span><span class="nm">${esc(a.name)}</span><i class="af-st" data-tip="${AGENT_STATUS[a.status]}"></i></div>
-    ${a.title?`<div class="af-n-title">${esc(a.title)}</div>`:''}
+    <div class="af-n-title">${esc(a.title)}</div>
     <div class="af-n-foot"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
-      ${sup?`<span class="sp"></span><span class="bub mini" style="background:${bg};color:${fg}" data-tip="Supervised by ${esc(sup.name)}">${esc(initials(sup.name))}</span>`:''}</div></div>
-    ${reps.length?`<ul>${reps.map(r=>nodeHtml(r,hits)).join('')}</ul>`:''}</li>`;
+      ${sup?`<span class="sp"></span><span class="bub mini" style="background:${bg};color:${fg}" data-tip="Supervised by ${esc(sup.name)}">${esc(initials(sup.name))}</span>`:''}</div>
+    <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
 }
-function orgHtml(){
-  const roots=rootsOf(af());
-  if(!roots.length)return `<div class="af-empty">${icon('bot',28)}<strong>Build your agent org</strong><p>Add agents with a purpose, inputs and outputs, arrange who reports to whom, and link them to projects, cards and deadlines.</p>
-    <div class="af-empty-b"><button type="button" class="txt" data-af="starter">Start from a template</button><button type="button" class="txt primary-txt" data-af="addAgent">${icon('plus',13)}Add an agent</button></div></div>`;
-  const hits=ui.q.trim()?new Set(filterAgents(af(),{q:ui.q}).map(a=>a.id)):null;
-  return `<div class="af-org"><ul class="af-tree">${roots.map(r=>nodeHtml(r,hits)).join('')}</ul></div>`;
+// Manager to report: a rounded elbow down from the manager when the report sits below, else a curve.
+function linkPath(m,r){
+  const x1=m.x+CARD.w/2,y1=m.y+CARD.h,x2=r.x+CARD.w/2,y2=r.y;
+  if(y2-y1>=24){
+    const ym=y1+Math.min(28,(y2-y1)/2),dx=x2-x1,rad=Math.min(8,Math.abs(dx)/2,(y2-ym)/2),sx=Math.sign(dx);
+    return dx===0?`M${x1} ${y1}V${y2}`:`M${x1} ${y1}V${ym-rad}Q${x1} ${ym} ${x1+sx*rad} ${ym}H${x2-sx*rad}Q${x2} ${ym} ${x2} ${ym+rad}V${y2}`;
+  }
+  const k=Math.max(40,Math.abs(y2-y1)/2);
+  return `M${x1} ${y1}C${x1} ${y1+k} ${x2} ${y2-k} ${x2} ${y2}`;
+}
+const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
+  <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div>`;
+function paintZoom(){
+  const z=$('#agentflowView .af-zoom');if(!z)return;
+  z.innerHTML=ib('minus','Zoom out',{key:keyLabel('agentflow.zoomOut'),attrs:'data-afz="out" data-tip-pos="top"'})+`<button type="button" class="af-scale" data-afz="reset" data-tip="Reset to 100%" data-tip-pos="top">${Math.round(view.z*100)}%</button>`
+    +ib('plus','Zoom in',{key:keyLabel('agentflow.zoomIn'),attrs:'data-afz="in" data-tip-pos="top"'})+ib('fit','Fit the org',{key:keyLabel('agentflow.fit'),attrs:'data-afz="fit" data-tip-pos="top"'})
+    +'<i class="sep"></i>'+ib('network','Tidy up\nArrange as a tree again',{attrs:'data-afz="tidy" data-tip-pos="top"'})
+    +ib('info','Drag a card to move it (Shift: with its reports, Alt: off the grid)\nDrag the dot under a card onto another agent to make that agent report to it,\nor onto empty space to add a new report\nDouble-click empty space to add an agent\nArrow keys nudge the selected agent',{label:'How the canvas works',attrs:'data-tip-pos="top"'});
+}
+// Draw the agents and their reporting lines (also on every frame of a drag).
+function paint(){
+  const cv=$('#afCanvas');if(!cv)return;
+  const pos=positions(af()),hits=ui.q.trim()?new Set(filterAgents(af(),{q:ui.q}).map(a=>a.id)):null;
+  if(drag?.mode==='move')for(const [id,p] of drag.live)pos.set(id,p);
+  cv.querySelector('.af-world').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.z})`;
+  const g=GRID*view.z*(view.z<.45?4:view.z<.8?2:1);cv.style.backgroundSize=`${g}px ${g}px`;cv.style.backgroundPosition=`${view.x}px ${view.y}px`;
+  cv.querySelector('.af-nodes').innerHTML=af().agents.map(a=>nodeHtml(a,pos.get(a.id),hits)).join('');
+  const lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>`<path class="af-ln${hits&&!(hits.has(a.id)&&hits.has(a.reportsTo))?' dim':''}" d="${linkPath(pos.get(a.reportsTo),pos.get(a.id))}"/>`).join('');
+  const m=drag?.mode==='link'&&pos.get(drag.id),ghost=m&&drag.px!=null?`<path class="ghost" d="M${m.x+CARD.w/2} ${m.y+CARD.h}L${drag.px} ${drag.py}"/>`:'';
+  cv.querySelector('.af-edges').innerHTML=lines+ghost;
+  const sc=$('#agentflowView .af-scale');if(sc)sc.textContent=Math.round(view.z*100)+'%';
+  const empty=$('#agentflowView .af-empty-wrap');
+  if(empty){empty.hidden=!!af().agents.length;if(!af().agents.length&&!empty.firstChild)empty.innerHTML=`<div class="af-empty">${icon('bot',28)}<strong>Build your agent org</strong><p>Add agents with a purpose, inputs and outputs, arrange who reports to whom, and link them to projects, cards and deadlines. Double-click the canvas to drop one anywhere.</p>
+    <div class="af-empty-b"><button type="button" class="txt" data-af="starter">Start from a template</button><button type="button" class="txt primary-txt" data-af="addAgent">${icon('plus',13)}Add an agent</button></div></div>`}
+}
+function fit(){
+  const cv=$('#afCanvas');if(!cv?.clientWidth)return;fitted=true;
+  const ps=[...positions(af()).values()];
+  if(!ps.length){view={x:60,y:60,z:1};paint();return}
+  const x0=Math.min(...ps.map(p=>p.x)),y0=Math.min(...ps.map(p=>p.y)),w=Math.max(...ps.map(p=>p.x))+CARD.w-x0,h=Math.max(...ps.map(p=>p.y))+CARD.h-y0,pad=56;
+  view.z=Math.max(.2,Math.min(1,(cv.clientWidth-pad*2)/w,(cv.clientHeight-pad*2)/h));
+  view.x=(cv.clientWidth-w*view.z)/2-x0*view.z;view.y=(cv.clientHeight-h*view.z)/2-y0*view.z;
+  paint();
+}
+function zoom(f,x,y){
+  const cv=$('#afCanvas');if(!cv)return;x??=cv.clientWidth/2;y??=cv.clientHeight/2;
+  const z=Math.max(.2,Math.min(2.5,view.z*f));
+  view.x=x-(x-view.x)*z/view.z;view.y=y-(y-view.y)*z/view.z;view.z=z;paint();
+}
+// Bring an agent into view (opened from a DevOps card) without changing the zoom.
+function center(id){
+  const cv=$('#afCanvas'),p=positions(af()).get(id);if(!cv?.clientWidth||!p)return;
+  view.x=cv.clientWidth/2-(p.x+CARD.w/2)*view.z;view.y=cv.clientHeight/2-(p.y+CARD.h/2)*view.z;paint();
+}
+const toWorld=e=>{const r=$('#afCanvas').getBoundingClientRect();return {x:(e.clientX-r.left-view.x)/view.z,y:(e.clientY-r.top-view.y)/view.z}};
+
+// ---------- canvas gestures ----------
+// Card: move (Shift carries its reports along). Dot under a card: link to a new manager's report.
+// Empty space: pan. Every finished change is one undo step.
+function canvasDown(e){
+  const cv=e.target.closest('#afCanvas');if(!cv||(e.button!==0&&e.button!==1)||e.target.closest('button,input,a'))return;
+  const el=e.target.closest('[data-agent]'),start={sx:e.clientX,sy:e.clientY,pid:e.pointerId};
+  if(el&&e.button===0){
+    const id=el.dataset.agent,pos=positions(af());
+    if(e.target.closest('[data-port]'))drag={mode:'link',id,...start};
+    else{
+      const ids=[id,...(e.shiftKey?descendants(af(),id):[])];
+      drag={mode:'move',id,...start,from:new Map(ids.map(x=>[x,{...pos.get(x)}])),live:new Map(),alt:false};
+    }
+    if(selected?.type!=='agent'||selected.id!==id){selected={type:'agent',id};rerender()}
+  }else{
+    if(selected&&e.button===0){selected=null;rerender()}
+    drag={mode:'pan',...start,x:view.x,y:view.y};$('#afCanvas').classList.add('panning');
+  }
+  $('#afCanvas').setPointerCapture(e.pointerId);
+}
+function canvasMove(e){
+  if(!drag||e.pointerId!==drag.pid)return;
+  const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
+  if(drag.mode==='pan'){view.x=drag.x+dx;view.y=drag.y+dy}
+  else if(drag.mode==='move'){
+    if(!drag.moved&&Math.abs(dx)+Math.abs(dy)<=3)return;
+    drag.moved=true;const lead=drag.from.get(drag.id),nx=snap(lead.x+dx/view.z,!e.altKey),ny=snap(lead.y+dy/view.z,!e.altKey);
+    for(const [id,p] of drag.from)drag.live.set(id,{x:p.x+nx-lead.x,y:p.y+ny-lead.y});
+  }else{
+    const p=toWorld(e);drag.px=p.x;drag.py=p.y;drag.moved=drag.moved||Math.abs(dx)+Math.abs(dy)>6;
+    const over=document.elementFromPoint(e.clientX,e.clientY)?.closest('#afCanvas [data-agent]')?.dataset.agent;drag.over=over!==drag.id?over:null;drag.self=over===drag.id;
+  }
+  paint();
+}
+function canvasUp(e){
+  if(!drag||e.pointerId!==drag.pid)return;
+  const d=drag;drag=null;$('#afCanvas')?.classList.remove('panning');
+  if(d.mode==='move'&&d.moved){
+    const before=clone(store.db);pin(af());
+    for(const [id,p] of d.live){const a=agent(id);if(a){a.x=p.x;a.y=p.y;touch(a)}}
+    commit(before);rerender();return;
+  }
+  if(d.mode==='link'){
+    if(d.over){
+      const r=agent(d.over),m=agent(d.id);
+      if(r.reportsTo===m.id){paint();return}
+      if(!canReportTo(af(),r.id,m.id)){toast(`${r.name} cannot report to ${m.name}: ${m.name} reports to ${r.name}.`,true);paint();return}
+      change(()=>{r.reportsTo=m.id;touch(r);selected={type:'agent',id:r.id}});return;
+    }
+    // Back on its own card: nothing. On empty space: a new report there.
+    if(d.moved&&!d.self&&d.px!=null){addAgent(d.id,{x:snap(d.px-CARD.w/2),y:snap(d.py)});return}
+  }
+  paint();
+}
+function nudge(e){
+  const a=sel();if(!a||selected.type!=='agent')return false;
+  const step=e.altKey?1:GRID,dx=e.key==='ArrowRight'?step:e.key==='ArrowLeft'?-step:0,dy=e.key==='ArrowDown'?step:e.key==='ArrowUp'?-step:0;
+  change(()=>{pin(af());a.x+=dx;a.y+=dy;touch(a)});return true;
 }
 function flowHtml(w){
   const isSel=selected?.type==='workflow'&&selected.id===w.id,open=openWork(db(),w);
@@ -113,10 +238,20 @@ function flowsHtml(){
   return `<div class="af-flows">${list.map(flowHtml).join('')||'<p class="af-none">No workflows match.</p>'}</div>`;
 }
 export function render(){
-  const el=$('#agentflowView'),old=el.querySelector('.af-scroll'),keep=old&&[old.scrollLeft,old.scrollTop];
+  const el=$('#agentflowView');
   // Clear a selection whose agent or workflow is gone (undo, sync).
   if(selected&&!sel())selected=null;
-  flipList(el,'.af-node,.af-flow',x=>x.dataset.agent||x.dataset.flow,()=>{el.innerHTML=toolbar()+`<div class="af-scroll" data-view="${ui.view}">${ui.view==='org'?orgHtml():flowsHtml()}</div>`});
+  if(ui.view==='org'){
+    // Keep the canvas element between renders, so a gesture or the zoom is never interrupted.
+    if(!el.querySelector('#afCanvas'))el.innerHTML=toolbar()+canvasHtml();
+    else el.querySelector('.af-bar').outerHTML=toolbar();
+    paintZoom();paint();
+    if(!fitted)requestAnimationFrame(()=>{if(!fitted)fit()});
+    if(centerOn){const id=centerOn;centerOn=null;requestAnimationFrame(()=>center(id))}
+    return;
+  }
+  const old=el.querySelector('.af-scroll'),keep=old&&[old.scrollLeft,old.scrollTop];
+  flipList(el,'.af-flow',x=>x.dataset.flow,()=>{el.innerHTML=toolbar()+`<div class="af-scroll" data-view="workflows">${flowsHtml()}</div>`});
   const sc=el.querySelector('.af-scroll');if(keep)[sc.scrollLeft,sc.scrollTop]=keep;
 }
 function action(name,b){
@@ -125,14 +260,14 @@ function action(name,b){
     clear(){ui.q='';keepUi();render()},
     addAgent:()=>addAgent(),
     addWorkflow,
-    starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
+    starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
   })[name]?.();
 }
-// A new agent goes under the selected one (if an agent is selected).
-function addAgent(reportsTo=selected?.type==='agent'?selected.id:''){
+// A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
+function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){
   const no=full(af(),'agents');if(no){toast(no,true);return}
   if(ui.view!=='org'){ui.view='org';keepUi()}
-  change(()=>{const a=newAgent(af(),{reportsTo});selected={type:'agent',id:a.id}});
+  change(()=>{if(at)pin(af());const a=newAgent(af(),{reportsTo,...(at||{})});selected={type:'agent',id:a.id}});
   focusName();
 }
 function addWorkflow(){
@@ -189,7 +324,7 @@ function agentHtml(a){
       <div><label for="af-status">Status</label><select id="af-status">${Object.entries(AGENT_STATUS).map(([k,n])=>opt(k,n,a.status)).join('')}</select></div></div>
     <label for="af-reports">Reports to</label><select id="af-reports">${opt('','Nobody (top level)',a.reportsTo)}${others.map(x=>opt(x.id,x.name+(x.title?` · ${x.title}`:''),a.reportsTo)).join('')}</select>
     ${chain.length>1?`<div class="dc-hint">${esc(chain.map(x=>x.name).reverse().join(' › '))} › ${esc(a.name)}</div>`:''}
-    <label for="af-sup">Supervisor <em>a person on your chart</em></label>${ppl.length?`<select id="af-sup">${opt('','None',a.supervisor)}${ppl.map(p=>opt(p.id,p.name,a.supervisor)).join('')}</select>`:`<div class="dc-hint">Add people to the org chart to pick a supervisor.</div>`}
+    <label for="af-sup">Supervisor <em>a person on your MindMap</em></label>${ppl.length?`<select id="af-sup">${opt('','None',a.supervisor)}${ppl.map(p=>opt(p.id,p.name,a.supervisor)).join('')}</select>`:`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`}
     <label for="af-purpose">Purpose</label><textarea id="af-purpose" rows="3" maxlength="2000" placeholder="What this agent is responsible for">${esc(a.purpose)}</textarea>
     ${listEditor('inputs','Inputs','what it takes in',a.inputs)}
     ${listEditor('outputs','Outputs','what it produces',a.outputs)}
@@ -294,6 +429,10 @@ export function key(e){
   if(matches(e,'agentflow.addAgent')){e.preventDefault();addAgent()}
   else if(matches(e,'agentflow.addWorkflow')){e.preventDefault();addWorkflow()}
   else if(matches(e,'agentflow.search')){e.preventDefault();$('#af-q')?.focus()}
+  else if(ui.view==='org'&&e.key.startsWith('Arrow')&&!e.ctrlKey&&!e.metaKey){if(nudge(e))e.preventDefault()}
+  else if(ui.view==='org'&&matches(e,'agentflow.fit')){e.preventDefault();fit()}
+  else if(ui.view==='org'&&matches(e,'agentflow.zoomIn')){e.preventDefault();zoom(1.2)}
+  else if(ui.view==='org'&&matches(e,'agentflow.zoomOut')){e.preventDefault();zoom(1/1.2)}
   else if(matches(e,'agentflow.view1')||matches(e,'agentflow.view2')){
     const v=matches(e,'agentflow.view1')?'org':'workflows';if(ui.view===v)return;
     e.preventDefault();ui.view=v;keepUi();if(selected&&(selected.type==='agent')!==(v==='org'))selected=null;rerender();

@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -134,4 +134,36 @@ test('sync counts AgentFlow content, so a workspace with only agents is not mist
   const withAgents={...d,agentflow:{agents:[{id:'a',name:'A'}],workflows:[]}};
   assert.equal(isSeed(withAgents),false);
   assert.equal(size(withAgents),size(d)+1);
+});
+
+test('canvas: the automatic tree centres managers over their reports',()=>{
+  const af=seedAgentflow();
+  const a=newAgent(af,{name:'A'}),b=newAgent(af,{name:'B',reportsTo:a.id}),c=newAgent(af,{name:'C',reportsTo:a.id}),d=newAgent(af,{name:'D'});
+  const p=treeLayout(af);
+  assert.deepEqual([p.get(b.id),p.get(c.id)],[{x:0,y:STEP.y},{x:STEP.x,y:STEP.y}]);
+  assert.deepEqual(p.get(a.id),{x:STEP.x/2,y:0});
+  assert.deepEqual(p.get(d.id),{x:2*STEP.x,y:0},'a second root tree sits to the right');
+  assert.deepEqual([...positions(af)],[...p],'no saved positions: the tree');
+});
+
+test('canvas: pinning saves what is drawn; agents without a position go under their manager',()=>{
+  const af=seedAgentflow();
+  const a=newAgent(af,{name:'A'}),b=newAgent(af,{name:'B',reportsTo:a.id});
+  const drawn=positions(af);pin(af);
+  assert.ok(placed(a)&&placed(b));assert.deepEqual({x:b.x,y:b.y},drawn.get(b.id));
+  a.x=400;a.y=96;
+  const c=newAgent(af,{name:'C',reportsTo:a.id}),d=newAgent(af,{name:'D',reportsTo:a.id}),e=newAgent(af,{name:'E'});
+  const p=positions(af);
+  assert.deepEqual(p.get(c.id),{x:400,y:96+STEP.y},'below the manager');
+  assert.deepEqual(p.get(d.id),{x:400+STEP.x,y:96+STEP.y},'next free spot beside a sibling');
+  assert.equal(p.get(e.id).y,Math.min(a.y,b.y),'a new root goes to the right, at the top');
+  assert.ok(p.get(e.id).x>Math.max(a.x,b.x,p.get(d.id).x-1));
+  const ps=[...p.values()];
+  for(const q of ps)for(const r of ps)if(q!==r)assert.ok(Math.abs(q.x-r.x)>=CARD.w||Math.abs(q.y-r.y)>=CARD.h,'no two cards overlap');
+  unpin(af);assert.ok(!af.agents.some(placed));
+});
+
+test('canvas: positions are kept through cleaning, clamped, and dropped when not numbers',()=>{
+  const af=cleanAgentflow({agents:[{id:'a',name:'A',x:10.4,y:-3},{id:'b',name:'B',x:'5',y:1},{id:'c',name:'C',x:9e9,y:0}]},base());
+  assert.deepEqual(af.agents.map(a=>[a.x,a.y]),[[10,-3],[undefined,undefined],[1e5,0]]);
 });

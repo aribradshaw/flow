@@ -3,7 +3,7 @@
 // several combos (keys); users can rebind editable ones (stored in prefs.shortcuts by id).
 import {getPref,setPref} from './prefs.js';
 
-export const SCOPES=[['global','Global'],['chart','Chart'],['timeline','Timeline'],['devops','DevOps'],['agentflow','AgentFlow']];
+export const SCOPES=[['global','Global'],['chart','MindMap'],['timeline','Timeline'],['devops','DevOps'],['agentflow','AgentFlow']];
 export const SHORTCUTS=[
   {id:'global.save',scope:'global',keys:['Mod+S'],desc:'Save a snapshot to this computer and the cloud'},
   {id:'global.undo',scope:'global',keys:['Mod+Z'],desc:'Undo'},
@@ -14,7 +14,7 @@ export const SHORTCUTS=[
   {id:'chart.addArea',scope:'chart',keys:['A'],desc:'Add a project area'},
   {id:'chart.addNote',scope:'chart',keys:['N'],desc:'Add a note'},
   {id:'chart.connect',scope:'chart',keys:['C'],desc:'Connect two cards'},
-  {id:'chart.fit',scope:'chart',keys:['F'],desc:'Fit the chart to the window'},
+  {id:'chart.fit',scope:'chart',keys:['F'],desc:'Fit the mind map to the window'},
   {id:'chart.zoomIn',scope:'chart',keys:['+','='],desc:'Zoom in'},
   {id:'chart.zoomOut',scope:'chart',keys:['-'],desc:'Zoom out'},
   {id:'chart.duplicate',scope:'chart',keys:['Mod+D'],desc:'Duplicate the selected card'},
@@ -38,6 +38,10 @@ export const SHORTCUTS=[
   {id:'agentflow.search',scope:'agentflow',keys:['/'],desc:'Search agents and workflows'},
   {id:'agentflow.view1',scope:'agentflow',keys:['1'],desc:'Org chart view'},
   {id:'agentflow.view2',scope:'agentflow',keys:['2'],desc:'Workflows view'},
+  {id:'agentflow.fit',scope:'agentflow',keys:['F'],desc:'Fit the org to the window'},
+  {id:'agentflow.zoomIn',scope:'agentflow',keys:['+','='],desc:'Zoom in'},
+  {id:'agentflow.zoomOut',scope:'agentflow',keys:['-'],desc:'Zoom out'},
+  {id:'agentflow.nudge',scope:'agentflow',keys:['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'],desc:'Nudge the selected agent (Alt: 1px)',fixed:true},
   {id:'agentflow.delete',scope:'agentflow',keys:['Delete','Backspace'],desc:'Delete the selected agent or workflow'},
   {id:'devops.drag',scope:'devops',keys:['Space'],desc:'Pick up a focused card; arrows move it, Space drops',fixed:true},
 ];

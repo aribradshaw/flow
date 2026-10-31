@@ -1,13 +1,13 @@
 # Flygon Flow
 
-> Flygon Flow keeps an org chart, a product timeline and a DevOps board in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
+> Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
 Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /api/v1/openapi.json.
 
 ## Concepts
 
 - [Environments](/docs/index.html#environments): An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it.
-- [Chart](/docs/index.html#chart): The chart is a free-form canvas of **cards** joined by **edges**.
+- [MindMap (charts)](/docs/index.html#mindmap-charts): The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**.
 - [Timeline](/docs/index.html#timeline): The timeline holds dated **items** that are tagged with **projects**.
 - [DevOps board and gates](/docs/index.html#devops-board-and-gates): The DevOps board is a card board.
 - [Agent inbox](/docs/index.html#agent-inbox): Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox.
@@ -21,7 +21,7 @@ Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: 
 - [envs.list](/docs/envs.html#op-envs-list): `GET /api/v1/envs` (read). List environments
 - [envs.get](/docs/envs.html#op-envs-get): `GET /api/v1/envs/{env}` (read). Get an environment
 
-## API: Charts
+## API: MindMap charts
 
 - [charts.list](/docs/charts.html#op-charts-list): `GET /api/v1/envs/{env}/charts` (read). List charts
 

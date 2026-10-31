@@ -1,6 +1,6 @@
 # Flygon Flow
 
-> Flygon Flow keeps an org chart, a product timeline and a DevOps board in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
+> Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
 Version 0.10.38 (2026-10-29)
 
@@ -19,9 +19,9 @@ An **environment** is one workspace: its charts, projects, timeline and DevOps b
 - Every API operation that touches workspace data is scoped to one environment through the `{env}` path segment. The server runs the read or write check before it touches any data.
 - Data saved before environments existed belongs to the instance's default environment.
 
-## Chart
+## MindMap (charts)
 
-The chart is a free-form canvas of **cards** joined by **edges**. A workspace can hold several charts; one of them is active.
+The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**. The API calls each mind map a **chart** (`charts.list`, `nodes.*`, `edges.*`). A workspace can hold several charts; one of them is active.
 
 - Card types: `entity` (a company or organisation), `person`, `area` (a project area that groups cards inside it) and `note`.
 - Edge types: `ownership` is a solid arrow that can carry a percentage from 0 to 100, or `""` when the percentage is unknown. `group` is a dashed line that means grouping only.
@@ -133,7 +133,7 @@ An agent has `name, kind, title, status, reportsTo, supervisor, purpose, instruc
 - `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
-- `supervisor` is a person card on one of your charts: the human accountable for the agent.
+- `supervisor` is a person card on one of your mind maps: the human accountable for the agent.
 - `inputs`, `outputs` and `tools` are short text lists, such as "A card in Doing" or "Pull request linked on the card".
 - `instructions` holds the system prompt or runbook. `runtime` says where it runs and `model` which model, if any.
 - Deleting an agent moves its direct reports up to its manager, and its workflow steps become unassigned.
@@ -148,7 +148,7 @@ A workflow has `name, description, status, trigger, schedule, steps[{agent, acti
 
 ### In the app
 
-The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). `N` adds an agent under the selected one, `W` adds a workflow, `/` searches. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.
+The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). The org chart is a canvas like the MindMap: drag empty space to pan, scroll to zoom, drag a card to move it (Shift: with its reports), and drag the dot under a card onto another agent to make that agent report to it, or onto empty space to add a new report. Double-click empty space to add an agent. **Tidy up** returns to the automatic tree. Positions are saved as the agent's optional `x` and `y`. An agent without them, such as one added through the API, is placed under its manager. `N` adds an agent under the selected one, `W` adds a workflow, `/` searches, `F` fits the org, arrow keys nudge the selected agent. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.
 
 # Using the API
 
@@ -268,7 +268,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace" \
 }
 ```
 
-## Charts
+## MindMap charts
 
 ### `charts.list`
 
@@ -1861,6 +1861,8 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items[].items` | string[] | yes |  |
 | `items[].created` | string |  |  |
 | `items[].updated` | string |  |  |
+| `items[].x` | number |  |  |
+| `items[].y` | number |  |  |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -1953,6 +1955,8 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 | `brief` | string | yes |  |
 
 **Example: Researcher**
@@ -2031,6 +2035,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `projects` | string[] |  |  |
 | `cards` | string | integer[] |  |  |
 | `items` | string[] |  |  |
+| `x` | number |  | Canvas position (with y). Leave out to place it under its manager. |
+| `y` | number |  |  |
 
 **Output**
 
@@ -2057,6 +2063,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 
 **Example: New research agent**
 
@@ -2136,6 +2144,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `projects` | string[] |  |  |
 | `cards` | string | integer[] |  |  |
 | `items` | string[] |  |  |
+| `x` | number |  | Canvas position (with y). Leave out to place it under its manager. |
+| `y` | number |  |  |
 
 **Output**
 
@@ -2162,6 +2172,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent.items` | string[] | yes |  |
 | `agent.created` | string |  |  |
 | `agent.updated` | string |  |  |
+| `agent.x` | number |  |  |
+| `agent.y` | number |  |  |
 
 **Example: Activate and link a card**
 

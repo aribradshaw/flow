@@ -247,6 +247,10 @@ test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
   // No loops in the org.
   assert.equal((await op('agents.update',{env:ENV,agent:lead.id,reportsTo:'Researcher'})).body.code,'reports_loop');
   assert.equal((await op('agents.update',{env:ENV,agent:'Researcher',reportsTo:'Researcher'})).body.code,'reports_loop');
+  assert.equal((await op('agents.update',{env:ENV,agent:'Researcher',x:10})).body.code,'invalid_position');
+  r=await op('agents.update',{env:ENV,agent:'Researcher',x:480,y:320});
+  assert.deepEqual([r.body.agent.x,r.body.agent.y],[480,320]);
+  assert.ok(Number.isFinite((await op('agents.get',{env:ENV,agent:lead.id})).body.agent.x),'placing one agent pins the rest where they were drawn');
   r=await op('agents.update',{env:ENV,agent:'Researcher',kind:'agent',status:'active',tools:['Web search'],runtime:'T3'});
   assert.deepEqual([r.body.agent.status,r.body.agent.tools,r.body.agent.runtime],['active',['Web search'],'T3']);
   r=await op('agents.list',{env:ENV,status:'active',q:'research'});
