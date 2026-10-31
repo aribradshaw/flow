@@ -81,7 +81,8 @@ test('registry: every operation is documented, has examples and schemas, and the
     assert.doesNotThrow(()=>JSON.stringify(o),`${o.id}: plain data`);
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
-    'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','labels.list','labels.create','search'];
+    'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','labels.list','labels.create','search',
+    'agents.list','agents.get','agents.create','agents.update','agents.delete','workflows.list','workflows.get','workflows.create','workflows.update'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -231,6 +232,75 @@ test('cards: create, get, update, list, and move through the board gates',async(
   assert.deepEqual(r.body.items.map(x=>x.number),[2]);
   r=await op('cards.list',{env:ENV,label:'Frontend'});
   assert.deepEqual(r.body.items.map(x=>x.number),[1]);
+});
+
+test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
+  let r=await op('agents.create',{env:ENV,name:'Chief of staff',title:'Orchestrator',status:'active',supervisor:'Cleo Park',projects:['Lantern']});
+  assert.equal(r.status,201);const lead=r.body.agent;
+  assert.deepEqual([lead.kind,lead.reportsTo,lead.supervisor,lead.projects],['agent','','cleo',['p1']]);
+  r=await op('agents.create',{env:ENV,name:'Researcher',reportsTo:'chief of staff',inputs:['A card',' A card '],outputs:['Notes'],cards:['#2'],items:['Public beta']});
+  assert.equal(r.status,201);const res=r.body.agent;
+  assert.deepEqual([res.reportsTo,res.inputs,res.cards,res.items],[lead.id,['A card'],[(await store.get(ENV)).data.devops.cards.find(c=>c.number===2).id],['i1']],'references resolve by name or number; text lists are trimmed and unique');
+  assert.equal((await op('agents.create',{env:ENV,name:'X',supervisor:'Kestrel Group'})).body.code,'unknown_person','supervisors are people');
+  assert.equal((await op('agents.create',{env:ENV,name:'X',cards:[99]})).body.code,'unknown_card');
+  assert.equal((await op('agents.create',{env:ENV,name:'X',kind:'robot'})).status,400);
+  // No loops in the org.
+  assert.equal((await op('agents.update',{env:ENV,agent:lead.id,reportsTo:'Researcher'})).body.code,'reports_loop');
+  assert.equal((await op('agents.update',{env:ENV,agent:'Researcher',reportsTo:'Researcher'})).body.code,'reports_loop');
+  r=await op('agents.update',{env:ENV,agent:'Researcher',kind:'agent',status:'active',tools:['Web search'],runtime:'T3'});
+  assert.deepEqual([r.body.agent.status,r.body.agent.tools,r.body.agent.runtime],['active',['Web search'],'T3']);
+  r=await op('agents.list',{env:ENV,status:'active',q:'research'});
+  assert.deepEqual(r.body.items.map(a=>a.name),['Researcher']);
+  r=await op('agents.list',{env:ENV,project:'Lantern'});
+  assert.deepEqual(r.body.items.map(a=>a.name),['Chief of staff']);
+
+  r=await op('workflows.create',{env:ENV,name:'Ship a card',trigger:'event',schedule:'A card enters Doing',status:'active',steps:[{agent:'Chief of staff',action:'Plan'},{agent:'Researcher',action:'Research',output:'Notes'},{action:'Review'}]});
+  assert.equal(r.status,201);const wf=r.body.workflow;
+  assert.deepEqual(wf.steps.map(s=>s.agent),[lead.id,res.id,'']);assert.ok(wf.steps.every(s=>s.id));
+  assert.equal((await op('workflows.create',{env:ENV,name:'X',steps:[{agent:'Nobody'}]})).body.code,'unknown_agent');
+  r=await op('workflows.update',{env:ENV,workflow:'ship a card',steps:[wf.steps[1],wf.steps[0]],cards:[1]});
+  assert.deepEqual(r.body.workflow.steps.map(s=>s.id),[wf.steps[1].id,wf.steps[0].id],'steps keep their ids when sent back');
+  r=await op('workflows.list',{env:ENV,agent:'Researcher'});
+  assert.deepEqual(r.body.items.map(w=>w.name),['Ship a card']);
+  assert.equal((await op('workflows.get',{env:ENV,workflow:'nope'})).body.code,'workflow_not_found');
+
+  // Briefs: everything a runner needs, including linked Flow work.
+  r=await op('agents.get',{env:ENV,agent:'Researcher'});
+  assert.equal(r.body.agent.id,res.id);
+  for(const part of ['# Researcher','Reports to: Chief of staff (Orchestrator)','- A card','- Notes','- Web search','Runs on: T3','Ship a card: step 1: Research','#2 Second','Public beta (release, 2026-12-01'])
+    assert.ok(r.body.brief.includes(part),`agent brief has "${part}"`);
+  r=await op('agents.get',{env:ENV,agent:lead.id});
+  assert.match(r.body.brief,/#1 Build the sign-up form \(Doing/,'open cards in linked projects are in the brief');
+  assert.match(r.body.brief,/Supervised by: Cleo Park/);
+  r=await op('workflows.get',{env:ENV,workflow:wf.id});
+  assert.match(r.body.brief,/1\. \*\*Researcher\*\*: Research → Notes\n2\. \*\*Chief of staff\*\*: Plan/);
+  r=await op('search',{env:ENV,q:'ship',types:'workflow,agent'});
+  assert.deepEqual(r.body.items.map(h=>[h.type,h.title]),[['workflow','Ship a card']]);
+
+  // Links to shared-in records (absent from stored data) survive unrelated API writes.
+  {const w=await store.get(ENV);w.data.agentflow.agents.find(x=>x.id===res.id).cards.push('sh.s1.k9');
+    assert.ok((await store.put(ENV,{baseRev:w.rev,data:w.data,by:OWNER.email,owner:OWNER.email,name:w.name})).ok);}
+  await op('projects.update',{env:ENV,project:'Lantern',color:'#3d6fb6'});
+  assert.ok((await store.get(ENV)).data.agentflow.agents.find(x=>x.id===res.id).cards.includes('sh.s1.k9'),'shared card links are kept');
+
+  // Deleting an agent moves its reports up and unassigns its steps.
+  r=await op('agents.delete',{env:ENV,agent:'Chief of staff'});
+  assert.deepEqual([r.status,r.body.deleted],[200,lead.id]);
+  const af=(await store.get(ENV)).data.agentflow;
+  assert.deepEqual([af.agents.map(a=>[a.name,a.reportsTo]),af.workflows[0].steps.map(s=>s.agent)],[[['Researcher','']],[res.id,'']]);
+  assert.equal((await op('agents.get',{env:ENV,agent:'Chief of staff'})).body.code,'unknown_agent');
+});
+
+test('AgentFlow: a full workspace refuses new agents and workflows instead of dropping them',async()=>{
+  const w=await store.get(ENV),now='2026-10-30T00:00:00.000Z';
+  w.data.agentflow.agents=Array.from({length:500},(_,i)=>({id:'cap'+i,name:'Cap '+i,created:now,updated:now}));
+  w.data.agentflow.workflows=Array.from({length:500},(_,i)=>({id:'wcap'+i,name:'W '+i,created:now,updated:now}));
+  assert.ok((await store.put(ENV,{baseRev:w.rev,data:w.data,by:OWNER.email,owner:OWNER.email,name:w.name})).ok);
+  let r=await op('agents.create',{env:ENV,name:'One too many'});
+  assert.deepEqual([r.status,r.body.code],[409,'too_many_agents']);
+  r=await op('workflows.create',{env:ENV,name:'One too many'});
+  assert.deepEqual([r.status,r.body.code],[409,'too_many_workflows']);
+  assert.equal((await store.get(ENV)).data.agentflow.agents.length,500);
 });
 
 test('every operation was exercised over HTTP',()=>{

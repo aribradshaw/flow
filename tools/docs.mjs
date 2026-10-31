@@ -26,7 +26,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'section';
 const json=v=>JSON.stringify(v,null,2);
 const firstSentence=s=>String(s||'').replace(/\s+/g,' ').trim().split(/(?<=[.!?])\s/)[0];
-const TAG_NAMES={cards:'DevOps cards',devops:'DevOps',charts:'Charts',chart:'Chart',timeline:'Timeline',projects:'Projects',labels:'Labels',envs:'Environments',environments:'Environments',inbox:'Agent inbox',sharing:'Sharing',keys:'API keys',workspace:'Workspace',other:'Other'};
+const TAG_NAMES={cards:'DevOps cards',agents:'AgentFlow agents',workflows:'AgentFlow workflows',devops:'DevOps',charts:'Charts',chart:'Chart',timeline:'Timeline',projects:'Projects',labels:'Labels',envs:'Environments',environments:'Environments',inbox:'Agent inbox',sharing:'Sharing',keys:'API keys',workspace:'Workspace',other:'Other'};
 const tagName=t=>TAG_NAMES[t]||t.replace(/(^|[-_])(\w)/g,(_,s,c)=>(s?' ':'')+c.toUpperCase());
 
 // ---- sources ----

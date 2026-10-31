@@ -1,6 +1,6 @@
 # Flow
 
-**An open-source organization tool for mapping people and ideas, planning work, and tracking delivery.** Built by [Flygon LC](https://flygonlc.com) for anyone to use as a mind map, timeline, and DevOps board in one workspace.
+**An open-source organization tool for mapping people and ideas, planning work, and tracking delivery.** Built by [Flygon LC](https://flygonlc.com) for anyone to use as a mind map, timeline, DevOps board, and agent org chart in one workspace.
 
 Create charts of people, organizations, projects, and notes; connect them to plans on a timeline and cards on a work board. Flow runs locally without an account, or can be hosted with sign-in and separate private workspaces. It uses browser JavaScript and Node.js, with no frontend build step.
 
@@ -87,6 +87,14 @@ A card board for tracking work from requests through completion.
 - Filters (remembered in this browser): projects (including "No project"), entity (cards in the projects under a chart entity or area), assignees, labels, search by `#number` or title, hide Done, Clear. The count shows visible cards.
 - On the chart, a selected person, entity or area shows "N open cards" in the inspector; click it to open the board filtered to them. The chart's project strip shows open-card counts per project.
 - On the timeline, a card can be linked to an item; the item's panel lists its cards. "Show DevOps cards" (Timeline view) draws cards that have a due date and a project as read-only markers; click one to open the card.
+
+### AgentFlow
+An org chart for agentic work: the agents (and people and teams) that run a business, what each one does, and the workflows they hand work through. Flow stores the design. Your own runner (an agent harness, a home server, cron) reads it through the API or MCP and does the work.
+- **Org chart** (1): agents laid out as a tree by who they report to. Each card shows its kind (AI agent, human, team), status, role, input/output counts, workflows and open cards. Search dims everything that does not match. **Start from a template** adds a small example org and workflow to edit.
+- Click an agent for its side panel: name, kind, role, status, reports to (never one of its own reports), supervisor (a person on your chart), purpose, inputs, outputs, tools, where it runs and the model, instructions (system prompt or runbook), and linked projects, DevOps cards and timeline items. The panel lists its linked work, direct reports and workflow steps; `+` adds a direct report.
+- **Workflows** (2): each workflow is a pipeline of steps, each one handled by an agent, started by hand, on a schedule or by an event. Edit, reorder and assign steps in the side panel.
+- **Copy brief** puts a Markdown brief for the agent or workflow on the clipboard: purpose, reporting line, inputs, outputs, tools, steps and linked cards and deadlines. `agents.get` and `workflows.get` return the same brief over the API and MCP. See [docs/concepts/09-agentflow.md](docs/concepts/09-agentflow.md).
+- A DevOps card's detail shows the agents on it, and you can assign agents from there. Deleting an agent moves its reports up to its manager.
 
 ### Shared UI pieces
 - **Pickers** (`ui.js`): `pickerButton(key, label, items, selected)` renders a trigger ("Projects · 2" with colour dots); `openPicker(trigger, {items, selected, onChange, multi})` opens a searchable listbox popover (arrows, Enter/Space, Esc, type to filter, Select all / Clear). Used for the DevOps and Timeline filters and card labels/assignees. Plain single selects are styled native `<select>`s.
@@ -193,7 +201,7 @@ New installations load a fictional starter chart. Replace its people and organiz
 
 `public/app.js` exposes `window.flygonFlow.registerTool({ id, label, icon, run })` (`window.orgChartStudio` remains as an alias). The tool appears in the floating palette (`icon` is an optional name from `public/icons.js`; `label` becomes its tooltip). The run callback receives `addNode(type)`, `getChart()` (a copy), and `mutate(fn)` (undoable and persisted).
 
-Code lives in ES modules under `public/`: `app.js` (shell, canvas, inspector), `timeline.js`, `devops.js` (DevOps board UI), `devops-core.js` (board data, validation and pure helpers), `store.js` (persistence, validation, undo), `ui.js` (tooltips, helpers), `icons.js`. Saved data keeps the original v1 chart schema; `projects`, `timeline` and `devops` are additive fields (older saves get an empty board with the default columns and labels), and cards may carry optional `w`/`h`.
+Code lives in ES modules under `public/`: `app.js` (shell, canvas, inspector), `timeline.js`, `devops.js` (DevOps board UI), `devops-core.js` (board data, validation and pure helpers), `agentflow.js` and `agentflow-core.js` (AgentFlow view and data), `store.js` (persistence, validation, undo), `ui.js` (tooltips, helpers), `icons.js`. Saved data keeps the original v1 chart schema; `projects`, `timeline`, `devops` and `agentflow` are additive fields (older saves get an empty board with the default columns and labels), and cards may carry optional `w`/`h`.
 
 ## Verification
 
