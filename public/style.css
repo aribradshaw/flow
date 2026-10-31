@@ -715,3 +715,17 @@ body[data-tab=agentflow] #inspector{width:320px}
 .af-step-b .ib[disabled]{opacity:.3;pointer-events:none}
 .af-addstep{display:inline-flex;align-items:center;gap:4px;margin-top:6px}
 @media (prefers-reduced-motion:reduce){.af-node,.af-port{transition:none}}
+
+/* ---------- right-click menus (menu.js) ---------- */
+.cm{position:fixed;z-index:70;min-width:200px;max-width:min(320px,calc(100vw - 12px));max-height:calc(100vh - 12px);overflow:auto;padding:5px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px #141e1c26}
+.cm-item{display:flex;align-items:center;gap:8px;min-height:28px;padding:3px 8px;border-radius:5px;font-size:12.5px;cursor:pointer;user-select:none;outline:none}
+.cm-item.active{background:var(--hover)}
+.cm-item[aria-disabled=true]{color:var(--faint);cursor:default}
+.cm-item.danger{color:var(--danger)}
+.cm-item.danger.active{background:#fbecea}
+.cm-chk,.cm-ic{display:flex;flex:none;width:14px;color:var(--muted)}
+.cm-item.danger .cm-ic{color:var(--danger)}
+.cm-l{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-item kbd{margin-left:12px;font:inherit;font-size:11px;color:var(--faint)}
+.cm-sub{display:flex;margin-left:8px;color:var(--faint)}
+.cm-sep{height:1px;margin:4px 6px;background:var(--line)}
