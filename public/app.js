@@ -14,6 +14,7 @@ import {loadDevlog} from './devlog.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {onPrefs,syncPrefs} from './prefs.js';
 import {ask} from './modal.js';
+import {openMenu} from './menu.js';
 import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
@@ -244,7 +245,8 @@ function deleteSelection(){
   if(!node(selected)&&!edge(selected))return;
   // Shared cards and their connections belong to their owner (they would come back on the next sync).
   if(linkOf(node(selected)||edge(selected))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
-  change(()=>{const id=selected;chart().nodes=chart().nodes.filter(n=>n.id!==id);chart().edges=chart().edges.filter(e=>e.id!==id&&e.from!==id&&e.to!==id);selected=null});
+  // A card deleted mid-connect (from its menu) can't stay the pending source.
+  change(()=>{const id=selected;chart().nodes=chart().nodes.filter(n=>n.id!==id);chart().edges=chart().edges.filter(e=>e.id!==id&&e.from!==id&&e.to!==id);selected=null;if(source===id)source=null});
 }
 function toggleConnect(){connecting=!connecting;source=null;renderCanvas();renderTools()}
 function connectTo(from,to){
@@ -321,6 +323,53 @@ canvas.addEventListener('dblclick',e=>{
   const el=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-node]');
   if(el){selected=el.dataset.node;render();const i=$('#name');i?.focus();i?.select();return}
   if(!e.target.closest('[data-edge]')){const p=toWorld(e),[w,h]=KINDS.entity.size;addNode('entity',{x:p.x-w/2,y:p.y-h/2})}
+});
+
+// ---------- right-click menus ----------
+// Right-clicking a card or connection selects it first, so the menu acts on what the inspector shows.
+// They follow the inspector's rules for shared cards: whatever it hides for them, the menu leaves out.
+const cardEl=id=>canvas.querySelector(`[data-node="${CSS.escape(id)}"],[data-edge="${CSS.escape(id)}"]`);
+function nodeMenu(n){
+  const l=linkOf(n),id=n.id,org=n.type==='entity'||n.type==='area';
+  const kind=t=>()=>{const m=node(id);if(m&&m.type!==t)change(()=>m.type=t)};
+  return [
+    canEdit(n)&&{label:'Rename',icon:'pencil',run(){selected=id;render();const i=$('#name');i?.focus();i?.select()}},
+    !l&&{label:'Kind',icon:KINDS[n.type].icon,items:Object.entries(KINDS).map(([t,k])=>({label:k.label,icon:k.icon,checked:t===n.type,run:kind(t)}))},
+    {label:'Connect from here',icon:'connect',run(){connecting=true;source=id;renderCanvas();renderTools()}},
+    !l&&{label:'Duplicate',icon:'copy',key:keyLabel('chart.duplicate'),run(){selected=id;duplicate()}},
+    !l&&{label:'Share…',icon:'link',run:()=>openShareDialog({nodeId:id,from:cardEl(id)})},
+    !l&&n.type!=='note'&&{label:'Open DevOps cards',icon:'branch',run:()=>toDevops(()=>dv.focus(n.type==='person'?{person:id}:{entity:id}))},
+    !l&&org&&{label:stripOff?'Show project timeline':'Hide project timeline',icon:'gantt',run:()=>setStripOff(!stripOff)},
+    (n.w||n.h)&&{label:'Reset size',icon:'shrink',run:()=>change(()=>{const m=node(id);if(m){delete m.w;delete m.h}})},
+    '-',
+    !l&&{label:'Delete card',icon:'trash',danger:true,key:keyLabel('chart.delete'),run(){selected=id;deleteSelection()}},
+  ].filter(Boolean);
+}
+function edgeMenu(ed){
+  if(linkOf(ed))return []; // a shared connection is read-only: no menu, just the inspector
+  const id=ed.id,type=t=>()=>{const x=edge(id);if(x&&x.type!==t)change(()=>{x.type=t;if(t==='group')x.percent=''})};
+  return [{label:'Ownership',icon:'arrowR',checked:ed.type==='ownership',run:type('ownership')},{label:'Grouping',icon:'dashed',checked:ed.type==='group',run:type('group')},
+    {label:'Reverse direction',icon:'swap',run:()=>change(()=>{const x=edge(id);if(x)[x.from,x.to]=[x.to,x.from]})},'-',
+    {label:'Delete connection',icon:'trash',danger:true,key:keyLabel('chart.delete'),run(){selected=id;deleteSelection()}}];
+}
+function canvasMenu(p){
+  // Cards land centred on the pointer, like a double-click; a keyboard-opened menu adds at the centre.
+  return [...Object.entries(KINDS).map(([t,k])=>({label:`Add ${k.label.toLowerCase()} here`,icon:k.icon,key:keyLabel(k.sc),run:()=>addNode(t,p&&{x:p.x-k.size[0]/2,y:p.y-k.size[1]/2})})),'-',
+    {label:'Connect two cards',icon:'connect',checked:connecting,key:keyLabel('chart.connect'),run:toggleConnect},
+    {label:'Fit to window',icon:'fit',key:keyLabel('chart.fit'),run:fit},{label:'Zoom to 100%',run:()=>zoom(1/view.z)},'-',
+    {label:'Undo',icon:'undo',key:keyLabel('global.undo'),disabled:!store.undo.length,run:()=>step(-1)},
+    {label:'Redo',icon:'redo',key:keyLabel('global.redo'),disabled:!store.redo.length,run:()=>step(1)}];
+}
+canvas.addEventListener('contextmenu',e=>{
+  e.preventDefault();if(drag)return;
+  const kb=e.clientX===0&&e.clientY===0,hit=e.target.closest('[data-node],[data-edge]'),id=hit&&(hit.dataset.node||hit.dataset.edge);
+  if(id&&selected!==id){selected=id;render()}
+  // render() rebuilt the card, so focus (where the menu returns focus) and a keyboard anchor use the new element.
+  const el=id&&cardEl(id);if(el){el.focus({preventScroll:true});hideTip()}
+  const at=kb&&el?el:e,n=node(id),ed=edge(id);
+  if(n)openMenu(at,nodeMenu(n),{label:n.name});
+  else if(ed)openMenu(at,edgeMenu(ed),{label:'Connection'});
+  else openMenu(e,canvasMenu(kb?null:toWorld(e)),{label:'Mind map'});
 });
 
 // ---------- inspector ----------

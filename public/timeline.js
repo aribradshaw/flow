@@ -344,7 +344,7 @@ function board(){
     const rel=releaseOf(i),when=dated(i)?dateLabel(i):rel?`→ ${rel.title}${dated(rel)?' · '+fmt(rel.start):''}`:'';
     return `<div class="card s-${i.status}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" tabindex="0" role="button" data-tip="${esc(itemTip(i))}" data-tip-delay="700" style="--c:${color(i)}">
       <div class="ct">${icon(KINDS[i.kind].icon,13)}<span>${esc(i.title)}</span>${i.priority?`<span class="pr ${i.priority}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}</div>
-      <div class="cm">${i.projects.slice(0,2).map(p=>tag(project(p))).join('')}${when?`<span class="cd">${esc(when)}</span>`:''}${i.owner?`<span class="ow">${esc(i.owner)}</span>`:''}</div></div>`;
+      <div class="cmeta">${i.projects.slice(0,2).map(p=>tag(project(p))).join('')}${when?`<span class="cd">${esc(when)}</span>`:''}${i.owner?`<span class="ow">${esc(i.owner)}</span>`:''}</div></div>`;
   };
   return `<div class="board">${cols.map(([k,s])=>{const list=items.filter(i=>i.status===k).sort(sort);
     return `<section class="col" data-col="${k}"><div class="col-h">${icon(s.icon,13)}<span>${esc(s.label)}</span><em>${list.length||''}</em><span class="sp"></span>${ib('plus',`Add to ${s.label}`,{attrs:`data-tl="colAdd" data-status="${k}"`})}</div>

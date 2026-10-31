@@ -161,6 +161,39 @@ try{
   assert(db.projects.some(p=>p.name==='Flygon App'&&p.entity==='flygon')&&await js(`document.querySelectorAll('#strip [data-strip-proj]').length`)===2,'new project sits under the selected entity and shows in its strip');
   await key('Escape',27);
 
+  // Right-click menus on the MindMap canvas (menu.js).
+  {const rclick=async(x,y)=>{await mouse('mousePressed',x,y,{button:'right',buttons:2});await mouse('mouseReleased',x,y,{button:'right',buttons:0});await sleep(80)};
+    const labels=()=>js(`[...document.querySelectorAll('.cm:not(.cm-child) .cm-l')].map(l=>l.textContent)`);
+    const pick=l=>js(`(()=>{const r=[...document.querySelectorAll('.cm .cm-item')].find(r=>r.querySelector('.cm-l').textContent===${JSON.stringify(l)});r?.click();return !!r})()`);
+    const count=()=>js('window.orgChartStudio.getChart().nodes.length');
+    await key('Escape',27);[x,y]=await center('[data-node=campaign] .nm');await rclick(x,y);
+    let ls=await labels();
+    assert(ls.includes('Rename')&&ls.includes('Delete card')&&ls.includes('Duplicate')&&await js(`document.querySelector('[data-node=campaign]').classList.contains('selected')`),'right-clicking a card selects it and opens its menu (Rename … Delete card)');
+    await key('Escape',27);
+    assert(!await js(`document.querySelector('.cm')`)&&await js(`!!document.querySelector('[data-node=campaign].selected')`),'Esc closes the menu without deselecting the card');
+    const n0=await count();await rclick(x,y);await pick('Duplicate');
+    assert(await count()===n0+1,'the card menu duplicates the card');
+    await key('Escape',27);
+    // An empty spot on the canvas (no card, connection or floating toolbar under it).
+    const [ex,ey]=await js(`(()=>{const r=document.querySelector('#canvas').getBoundingClientRect();for(let y=r.top+60;y<r.bottom-60;y+=24)for(let x=r.left+80;x<r.right-80;x+=24){const el=document.elementFromPoint(x,y);if(el&&el.closest('#canvas')&&!el.closest('[data-node],[data-edge]'))return [x,y]}})()`);
+    await rclick(ex,ey);ls=await labels();
+    assert(ls.includes('Add person here')&&ls.includes('Fit to window')&&ls.includes('Undo'),'right-clicking empty canvas offers Add … here, Fit and Undo');
+    await pick('Add person here');await sleep(80);
+    const added=await js(`(()=>{const c=window.orgChartStudio.getChart(),n=c.nodes.at(-1),r=document.querySelector('[data-node="'+n.id+'"]').getBoundingClientRect();return {type:n.type,dx:r.x+r.width/2-${ex},dy:r.y+r.height/2-${ey}}})()`);
+    assert(added.type==='person'&&Math.abs(added.dx)<=20&&Math.abs(added.dy)<=20,'Add person here puts a person card centred under the pointer');
+    await key('Escape',27);await key('Escape',27);
+    const eid=await js(`window.orgChartStudio.getChart().edges.find(e=>e.from==='flygon'&&e.to==='campaign').id`);
+    const [gx,gy]=await js(`(()=>{const p=document.querySelector('[data-edge="${eid}"] .hit'),q=p.getPointAtLength(p.getTotalLength()*.3),m=p.getScreenCTM();return [q.x*m.a+q.y*m.c+m.e,q.x*m.b+q.y*m.d+m.f]})()`);
+    await rclick(gx,gy);ls=await labels();
+    assert(ls.includes('Reverse direction')&&ls.includes('Delete connection'),'right-clicking a connection opens its menu');
+    await pick('Reverse direction');
+    assert((await js('window.orgChartStudio.getChart().edges')).some(e=>e.id===eid&&e.from==='campaign'&&e.to==='flygon'),'Reverse direction flips the connection');
+    await key('z',90,2);await key('Escape',27);
+    // A keyboard-opened menu (menu key / Shift+F10: no pointer position) opens under the focused card.
+    const below=await js(`(()=>{const el=document.querySelector('[data-node=flygon]');el.focus();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));const a=document.querySelector('[data-node=flygon]').getBoundingClientRect(),m=document.querySelector('.cm')?.getBoundingClientRect();return !!m&&Math.abs(m.top-a.bottom)<8})()`);
+    assert(below,'a keyboard-opened card menu opens under the card');
+    await key('Escape',27);await key('Escape',27);}
+
   // Timeline
   await js(`document.querySelector('[data-tab=timeline]').click()`);await sleep(150);
   await key('n',78,0,'n');await call('Input.insertText',{text:'QA Release'});
