@@ -101,7 +101,7 @@ Without sign-in configuration, Flow runs in **local single-user mode** on your c
 - `OPID_APP_SECRET`: its client secret (at least 32 characters; never sent to the browser).
 - `OPID_APP_ORIGIN`: the exact origin this app is served from.
 
-Sign-in sessions survive deploys: with `DATABASE_URL` they are stored in the additive `flygon_flow_sessions` table (only a SHA-256 hash of the session id, with idle and absolute expiry; sign-out deletes the row), otherwise in memory. The browser posts email/password (and a two-factor code when asked) to `/api/auth/*`; the server calls OneProfileID with the app secret, forwards its cookies, requires a Flygon Flow membership, and keeps its own httpOnly SameSite=Lax session (Secure on https). Every protected request revalidates the central session. `/api/auth/session`, `sign-in`, `two-factor` and `sign-out` are the routes.
+Hosted sign-in currently requires a native app registration provisioned by a OneProfileID operator; see [Self-hosting](docs/self-hosting.md) for the setup and current availability. Sign-in sessions survive deploys: with `DATABASE_URL` they are stored in the additive `flygon_flow_sessions` table (only a SHA-256 hash of the session id, with idle and absolute expiry; sign-out deletes the row), otherwise in memory. The browser posts email/password (and a two-factor code when asked) to `/api/auth/*`; the server calls OneProfileID with the app secret, forwards its cookies, requires a membership for the registered app, and keeps its own httpOnly SameSite=Lax session (Secure on https). Every protected request revalidates the central session. `/api/auth/session`, `sign-in`, `two-factor` and `sign-out` are the routes.
 
 **Environments** (`lib/environments.mjs`): each workspace carries `environment: {id, name, ownerEmail, visibility: 'private'|'public', members: []}` (`members` is reserved for invites). Existing workspaces retain their environment identity when upgraded. Save, load and backup only return environments the signed-in user owns or that are public; others get 404, and public ones are read-only for non-owners. The registry is `data/_environments.json`. The Postgres changes are additive and idempotent (`add column if not exists env_id, env_owner, env_visibility` on the saves table, plus a `flygon_flow_environments` table) and run when the server first uses the cloud.
 
@@ -120,7 +120,7 @@ Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/
 
 ## Deploying
 - `npm ci && npm start` (Node 22 or newer). Without OPID_* the server only listens on 127.0.0.1 and refuses a public `HOST`; with OPID_* set it listens on `HOST` (default `0.0.0.0`) at `PORT`.
-- Set `OWNER_EMAIL` to the address that should own your instance. That account gets the app's `owner` membership on its first verified OneProfileID sign-in; everyone else needs a membership created in OneProfileID.
+- Set `OWNER_EMAIL` to the address that should own your instance. That account gets the app's `owner` membership on its first verified OneProfileID sign-in; everyone else needs an invite and a claimed app membership.
 - Storage: `BACKUP_DIR`, `SAVES_DIR` and `INBOX_DIR` (e.g. a volume at `/data/backups`, `/data/saves`, `/data/inbox`; the inbox defaults beside `BACKUP_DIR`). The environments registry lives in `BACKUP_DIR`.
 - Cloud saves: `DATABASE_URL`; set `DATABASE_SSL=no-verify` for a TLS proxy with a self-signed chain (e.g. Railway's public URL), or `DATABASE_SSL=1` for verified TLS.
 

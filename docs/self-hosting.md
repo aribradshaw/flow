@@ -14,8 +14,15 @@ Copy `.env.example` to `.env` and uncomment only the settings you need. The serv
 
 ## Host for other users
 
-Public listening requires OneProfileID. Register the instance with OneProfileID and set `OPID_BASE_URL`, `OPID_APP_ID`, `OPID_APP_SECRET` (32+ characters), and `OPID_APP_ORIGIN` together. Set `OWNER_EMAIL` to the owner account. The server refuses a public `HOST` without OneProfileID configured.
+Public listening requires OneProfileID. At present, a OneProfileID operator must provision a **native app registration** for your instance. The OneProfileID developer integration request does not automatically issue a native app ID or secret. Hosted multi-user setup is therefore available to instances with an approved native registration; anyone can still run Flow locally without an account or registration.
 
-Provide persistent storage directories or Postgres before inviting users. `RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails; invitations can still be created without them.
+Once you have that registration:
 
-Use HTTPS for the public origin. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
+1. Give the operator your intended HTTPS origin and confirm that it is allowed for the native app. Keep the issued app secret on the server.
+2. Set `OPID_BASE_URL` to the native service origin, `OPID_APP_ID` and `OPID_APP_SECRET` to the issued native credentials, and `OPID_APP_ORIGIN` to your exact public origin. Set all four together; the secret must be at least 32 characters. Set `OWNER_EMAIL` to the verified OneProfileID address that should own the instance.
+3. Mount persistent storage for `BACKUP_DIR`, `SAVES_DIR`, and `INBOX_DIR` before inviting users. Optionally set `DATABASE_URL` for cloud saves, workspaces, sessions, and preferences; it does not replace the local backup and inbox directories. Serve the app over HTTPS and start it with `npm start`. The server refuses a public `HOST` when OneProfileID is not configured.
+4. Sign in as the owner first. Flow claims that owner's app membership on the first verified sign-in. Invite other people from **Settings → Account → Invite to Flow**; each invitee signs in with the invited address and claims their own membership. Other OneProfileID accounts do not automatically gain access.
+
+To offer **Continue with OneProfileID** for passkeys and existing OneProfileID browser sessions, ask the operator for a separate OneProfileID SSO client registered with `https://your-origin.example/api/auth/sso/callback`. Set both `OPID_SSO_CLIENT_ID` and `OPID_SSO_CLIENT_SECRET` (32+ characters). `OPID_SSO_ISSUER` optionally overrides the default OneProfileID issuer. These settings add the OneProfileID passkey route; native email/password sign-in works without them.
+
+`RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.

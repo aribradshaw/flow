@@ -10,4 +10,6 @@ Before a public tag:
 4. Verify the production deployment and compare the deployed commit with the intended tag.
 5. Update `CHANGELOG.md`, create an annotated `vMAJOR.MINOR.PATCH` tag on the verified commit, and publish the release notes.
 
+For the first public release, review author metadata and old GitHub workflow-linked commit objects before changing repository visibility. GitHub makes existing Actions logs public with the repository. After the visibility change, enable **Settings → Security and quality → Advanced Security → Private vulnerability reporting**, then verify that **Security → Report a vulnerability** is available as promised in `SECURITY.md`. Enable secret scanning and push protection where available. Create the tag and publish release notes only after the public commit and deployment are verified.
+
 The repository's `package.json` remains private. The CLI is available from a checkout with `node tools/flow.mjs`. Publishing it to npm needs a separate packaging and security review; do not advertise `npx flygon-flow` as available until that publication succeeds.
