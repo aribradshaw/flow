@@ -3,6 +3,7 @@ import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip} from './ui.js';
 import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
+import * as af from './agentflow.js';
 import {openCardsFor} from './devops-core.js';
 import {swap,busy,unskeletonize,panel,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
@@ -37,7 +38,7 @@ const rect=n=>{const [w,h]=size(n);return {x:n.x,y:n.y,w,h}};
 const node=id=>chart().nodes.find(n=>n.id===id);
 const edge=id=>chart().edges.find(e=>e.id===id);
 
-const TABS=['chart','timeline','devops'],hashTab=()=>TABS.find(t=>location.hash.slice(1).split('/')[0]===t)||'chart';
+const TABS=['chart','timeline','devops','agentflow'],hashTab=()=>TABS.find(t=>location.hash.slice(1).split('/')[0]===t)||'chart';
 let tab=hashTab(),selected=null,connecting=false,source=null,renaming=false,fitted=false;
 let view={x:40,y:40,z:1},drag=null,statusState='ok',statusText='Saved';
 const tools=[],edited=new WeakSet();
@@ -54,9 +55,9 @@ function renderTop(){
       +ib('pencil','Rename chart',{attrs:'data-act="rename"'})+ib('filePlus','New chart',{attrs:'data-act="new"'})
       +(db.charts.length>1?ib('trash','Delete this chart',{cls:'danger',attrs:'data-act="dropChart"'}):'')
       +`<span class="meta" data-tip="${c.nodes.length} cards · ${c.edges.length} connections">${c.nodes.length} · ${c.edges.length}</span>`
-    :tab==='timeline'?tl.headerHtml():dv.headerHtml();
+    :tab==='timeline'?tl.headerHtml():tab==='devops'?dv.headerHtml():af.headerHtml();
   $('#top').innerHTML=`<span class="logo" data-tip="${esc(instanceName)}">${instanceLogo?`<img src="${esc(instanceLogo)}" alt="" width="20" height="20">`:logoMark(20)}</span>
-    <nav class="tabs" role="tablist">${tabBtn('chart','network','Chart')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}</nav>
+    <nav class="tabs" role="tablist">${tabBtn('chart','network','Chart')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}${tabBtn('agentflow','bot','AgentFlow')}</nav>
     <div class="ctx">${ctx}</div><span class="sp"></span>
     ${ib('save','Save\nTo this computer and the Flygon cloud',{key:keyLabel('global.save'),attrs:'data-act="saveNow"'})}${ib('open','Load a save',{cls:loadPop?'on':'',attrs:'data-act="load"'})}
     <span id="status" class="dot ${statusState}" data-tip="${esc(statusText)}" role="status" aria-label="${esc(statusText)}"></span>
@@ -64,13 +65,13 @@ function renderTop(){
 }
 store.onStatus=(s,text)=>{statusState=s;statusText=text;const el=$('#status');if(el){el.className='dot '+s;el.dataset.tip=text;el.setAttribute('aria-label',text)}};
 
-const VIEWS={chart:'#chartView',timeline:'#timelineView',devops:'#devopsView'};
+const VIEWS={chart:'#chartView',timeline:'#timelineView',devops:'#devopsView',agentflow:'#agentflowView'};
 // Entrance order per view: toolbar, then panels, then columns / rows / cards.
-const ENTER={chart:['#canvas','#tools,#zoom','#strip'],timeline:['.tl-bar','.tl-scroll','.lane,.board .col,.lr'],devops:['.dv-bar','.dcol']};
+const ENTER={chart:['#canvas','#tools,#zoom','#strip'],timeline:['.tl-bar','.tl-scroll','.lane,.board .col,.lr'],devops:['.dv-bar','.dcol'],agentflow:['.af-bar','.af-org,.af-flows,.af-empty']};
 function setTab(t){
   if(t===tab)return;
   const from=$(VIEWS[tab]);
-  tab=t;selected=null;connecting=false;source=null;renaming=false;tl.leave();dv.leave();
+  tab=t;selected=null;connecting=false;source=null;renaming=false;tl.leave();dv.leave();af.leave();
   swap({from,update(){render();if(tab==='chart'&&!fitted)fit()},to:()=>[$(VIEWS[tab]),ENTER[tab]]});
 }
 window.addEventListener('popstate',()=>{setTab(hashTab());if(tab==='devops')dv.syncHash()});
@@ -329,6 +330,7 @@ function renderInspector(){
   const pane=$('#inspector');
   if(tab==='timeline'){tl.renderInspector(pane);return}
   if(tab==='devops'){dv.renderInspector(pane);return}
+  if(tab==='agentflow'){af.renderInspector(pane);return}
   const n=node(selected),e=edge(selected);
   // The panel slides in and out; its old content stays visible while it leaves.
   panel(pane,!!(n||e),{onHidden:()=>{if(!node(selected)&&!edge(selected))pane.innerHTML=''}});
@@ -368,6 +370,7 @@ let stripAdding=false;
 function setStripOff(v){stripOff=v;localStorage.setItem('org-chart-studio-strip',v?'off':'on');renderInspector()}
 function toTimeline(fn){history.pushState(null,'','#timeline');setTab('timeline');fn();render()}
 function toDevops(fn){if(tab!=='devops'){history.pushState(null,'','#devops');setTab('devops')}fn();render()}
+function toAgentflow(fn){if(tab!=='agentflow'){history.pushState(null,'','#agentflow');setTab('agentflow')}fn();render()}
 $('#strip').addEventListener('click',e=>{
   const n=node(selected),it=e.target.closest('[data-item]'),proj=e.target.closest('[data-strip-proj]')?.dataset.stripProj,a=e.target.closest('[data-strip]')?.dataset.strip;if(!n)return;
   const ids=tl.projectsFor(n).map(p=>p.id);
@@ -395,6 +398,7 @@ pane.addEventListener('submit',e=>e.preventDefault());
 pane.addEventListener('click',e=>{
   if(tab==='timeline')return tl.inspectorClick(e);
   if(tab==='devops')return dv.inspectorClick(e);
+  if(tab==='agentflow')return af.inspectorClick(e);
   const b=e.target.closest('button');if(!b)return;
   const n=node(selected),ed=edge(selected);
   if(b.dataset.kind&&n){if(!linkOf(n))change(()=>n.type=b.dataset.kind)}
@@ -409,6 +413,7 @@ pane.addEventListener('click',e=>{
 pane.addEventListener('input',e=>{
   if(tab==='timeline')return tl.inspectorInput(e);
   if(tab==='devops')return dv.inspectorInput(e);
+  if(tab==='agentflow')return af.inspectorInput(e);
   const form=$('#edit'),n=node(selected),ed=edge(selected);
   if(!form||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
   if(n&&!$('#name').value.trim())return;
@@ -418,8 +423,8 @@ pane.addEventListener('input',e=>{
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e)});
-pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='devops')dv.inspectorKey(e)});
+pane.addEventListener('change',e=>{if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='devops')dv.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------
 // Every key comes from the shortcut registry (shortcuts.js), so rebinding in Settings applies here.
@@ -433,6 +438,7 @@ document.addEventListener('keydown',e=>{
   if(typing){if(e.key==='Escape')e.target.blur();return}
   if(tab==='timeline')return tl.key(e);
   if(tab==='devops')return dv.key(e);
+  if(tab==='agentflow')return af.key(e);
   if(e.key==='Escape'){if(connecting){connecting=false;source=null;renderCanvas();renderTools()}else if(selected){selected=null;render()}return}
   if(matches(e,'chart.delete')){e.preventDefault();deleteSelection();return}
   if(matches(e,'chart.duplicate')){e.preventDefault();duplicate();return}
@@ -453,13 +459,15 @@ document.addEventListener('keydown',e=>{
 function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
-  if(tab==='chart'){renderCanvas();renderTools()}else if(tab==='timeline')tl.render();else dv.render();
+  if(tab==='chart'){renderCanvas();renderTools()}else if(tab==='timeline')tl.render();else if(tab==='devops')dv.render();else af.render();
   renderInspector();
 }
 store.onChange=render;
-// Cross-links: timeline items open linked DevOps cards; cards open their timeline item.
+// Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
 tl.mount({rerender:render,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
-dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
+dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast});
+// AgentFlow agents and workflows link to cards and timeline items.
+af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
 // Extension point: add palette tools without changing the canvas engine.
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.

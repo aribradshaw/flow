@@ -120,6 +120,36 @@ Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blo
 
 These docs are generated from the same registry, so the version in the header is the newest recorded release.
 
+## AgentFlow
+
+AgentFlow is an org chart for agentic work. You lay out the agents that do work for a business, say what each one is for and what it takes in and produces, chain them into workflows, and tie them to the projects, DevOps cards and deadlines they own.
+
+Flow stores the design. It does not run agents itself. A runner of your choice (an agent harness, a home server, a cron job) reads an agent's or workflow's **brief** through the API or MCP and does the work, then reports back on the DevOps cards like anyone else.
+
+### Agents
+
+An agent has `name, kind, title, status, reportsTo, supervisor, purpose, instructions, runtime, model, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
+
+- `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
+- `status`: `draft`, `active`, `paused` or `retired`.
+- `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
+- `supervisor` is a person card on one of your charts: the human accountable for the agent.
+- `inputs`, `outputs` and `tools` are short text lists, such as "A card in Doing" or "Pull request linked on the card".
+- `instructions` holds the system prompt or runbook. `runtime` says where it runs and `model` which model, if any.
+- Deleting an agent moves its direct reports up to its manager, and its workflow steps become unassigned.
+
+### Workflows
+
+A workflow has `name, description, status, trigger, schedule, steps[{agent, action, output}]` and the same links. `trigger` is `manual`, `schedule` or `event`. `schedule` says when or on what in plain words, e.g. "Weekdays at 09:00" or "A card enters UAT". Steps run in order, and each one names the agent that handles it.
+
+### Briefs
+
+`agents.get` and `workflows.get` return a `brief`: Markdown with everything a runner needs. That covers purpose, reporting line, inputs, outputs, tools, runtime, workflow steps, linked projects, cards (open ones from linked projects too) and deadlines, and the instructions. In the app, **Copy brief** in the side panel puts the same text on the clipboard.
+
+### In the app
+
+The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). `N` adds an agent under the selected one, `W` adds a workflow, `/` searches. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.
+
 # Using the API
 
 Every operation is an HTTP call under the base URL of your Flow server:
@@ -1785,6 +1815,760 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/labels" \
 }
 ```
 
+## AgentFlow agents
+
+### `agents.list`
+
+List AgentFlow agents
+
+`GET /api/v1/envs/{env}/agents` · scope `read` · MCP tool `agents_list`
+
+Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order. Filters: status, kind, project (id or name) and q (name, role, purpose, inputs, outputs, tools).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
+| `kind` | enum |  | One of `agent`, `human`, `team`. |
+| `project` | string |  | Project id or name. |
+| `q` | string |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `items[].title` | string |  |  |
+| `items[].status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `items[].reportsTo` | string | yes |  |
+| `items[].supervisor` | string | yes |  |
+| `items[].purpose` | string |  |  |
+| `items[].instructions` | string |  |  |
+| `items[].runtime` | string |  |  |
+| `items[].model` | string |  |  |
+| `items[].inputs` | string[] | yes |  |
+| `items[].outputs` | string[] | yes |  |
+| `items[].tools` | string[] | yes |  |
+| `items[].projects` | string[] | yes |  |
+| `items[].cards` | string[] | yes |  |
+| `items[].items` | string[] | yes |  |
+| `items[].created` | string |  |  |
+| `items[].updated` | string |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Active agents**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents?status=active" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "a1",
+      "name": "Researcher",
+      "kind": "agent",
+      "title": "Research",
+      "status": "active",
+      "reportsTo": "a0",
+      "supervisor": "cleo",
+      "purpose": "Gathers context before work starts.",
+      "instructions": "",
+      "runtime": "T3",
+      "model": "",
+      "inputs": [
+        "A card that needs research"
+      ],
+      "outputs": [
+        "Research notes on the card"
+      ],
+      "tools": [
+        "Web search"
+      ],
+      "projects": [
+        "p1"
+      ],
+      "cards": [
+        "k1"
+      ],
+      "items": [
+        "i1"
+      ],
+      "created": "2026-10-29T17:00:00.000Z",
+      "updated": "2026-10-29T17:00:00.000Z"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `agents.get`
+
+Get an AgentFlow agent and its brief
+
+`GET /api/v1/envs/{env}/agents/{agent}` · scope `read` · MCP tool `agents_get`
+
+One agent by id or name, with `brief`: Markdown for whatever runs the agent (purpose, reporting line, inputs, outputs, tools, runtime, workflow steps, linked projects, cards and deadlines, instructions).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `agent` | string | yes | Agent id or name. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `agent` | object | yes |  |
+| `agent.id` | string | yes |  |
+| `agent.name` | string | yes |  |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.title` | string |  |  |
+| `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.reportsTo` | string | yes |  |
+| `agent.supervisor` | string | yes |  |
+| `agent.purpose` | string |  |  |
+| `agent.instructions` | string |  |  |
+| `agent.runtime` | string |  |  |
+| `agent.model` | string |  |  |
+| `agent.inputs` | string[] | yes |  |
+| `agent.outputs` | string[] | yes |  |
+| `agent.tools` | string[] | yes |  |
+| `agent.projects` | string[] | yes |  |
+| `agent.cards` | string[] | yes |  |
+| `agent.items` | string[] | yes |  |
+| `agent.created` | string |  |  |
+| `agent.updated` | string |  |  |
+| `brief` | string | yes |  |
+
+**Example: Researcher**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "agent": {
+    "id": "a1",
+    "name": "Researcher",
+    "kind": "agent",
+    "title": "Research",
+    "status": "active",
+    "reportsTo": "a0",
+    "supervisor": "cleo",
+    "purpose": "Gathers context before work starts.",
+    "instructions": "",
+    "runtime": "T3",
+    "model": "",
+    "inputs": [
+      "A card that needs research"
+    ],
+    "outputs": [
+      "Research notes on the card"
+    ],
+    "tools": [
+      "Web search"
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [
+      "k1"
+    ],
+    "items": [
+      "i1"
+    ],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  },
+  "brief": "# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n"
+}
+```
+
+### `agents.create`
+
+Create an AgentFlow agent
+
+`POST /api/v1/envs/{env}/agents` · scope `write` · MCP tool `agents_create`
+
+Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, projects, cards, items) are ids or names; unknown ones are refused with 400, and a reporting loop with reports_loop.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `name` | string | yes |  |
+| `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
+| `title` | string |  | Role, e.g. Research. |
+| `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
+| `reportsTo` | string |  | The agent it reports to: id or name; "" for top level. |
+| `supervisor` | string |  | A person on a chart who oversees it: node id or name; "" for none. |
+| `purpose` | string |  |  |
+| `instructions` | string |  | System prompt or runbook. |
+| `runtime` | string |  | Where it runs, e.g. T3 or a home server. |
+| `model` | string |  |  |
+| `inputs` | string[] |  | What it takes in. |
+| `outputs` | string[] |  | What it produces. |
+| `tools` | string[] |  | What it may use. |
+| `projects` | string[] |  |  |
+| `cards` | string | integer[] |  |  |
+| `items` | string[] |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `agent` | object | yes |  |
+| `agent.id` | string | yes |  |
+| `agent.name` | string | yes |  |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.title` | string |  |  |
+| `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.reportsTo` | string | yes |  |
+| `agent.supervisor` | string | yes |  |
+| `agent.purpose` | string |  |  |
+| `agent.instructions` | string |  |  |
+| `agent.runtime` | string |  |  |
+| `agent.model` | string |  |  |
+| `agent.inputs` | string[] | yes |  |
+| `agent.outputs` | string[] | yes |  |
+| `agent.tools` | string[] | yes |  |
+| `agent.projects` | string[] | yes |  |
+| `agent.cards` | string[] | yes |  |
+| `agent.items` | string[] | yes |  |
+| `agent.created` | string |  |  |
+| `agent.updated` | string |  |  |
+
+**Example: New research agent**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Researcher","title":"Research","status":"active","reportsTo":"Chief of staff","supervisor":"Cleo Park","inputs":["A card that needs research"],"outputs":["Research notes on the card"],"cards":["#12"]}'
+```
+
+```json
+{
+  "rev": 56,
+  "agent": {
+    "id": "a1",
+    "name": "Researcher",
+    "kind": "agent",
+    "title": "Research",
+    "status": "active",
+    "reportsTo": "a0",
+    "supervisor": "cleo",
+    "purpose": "Gathers context before work starts.",
+    "instructions": "",
+    "runtime": "T3",
+    "model": "",
+    "inputs": [
+      "A card that needs research"
+    ],
+    "outputs": [
+      "Research notes on the card"
+    ],
+    "tools": [
+      "Web search"
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [
+      "k1"
+    ],
+    "items": [
+      "i1"
+    ],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `agents.update`
+
+Update an AgentFlow agent
+
+`PATCH /api/v1/envs/{env}/agents/{agent}` · scope `write` · MCP tool `agents_update`
+
+Change an agent's fields. Lists you send (inputs, outputs, tools, projects, cards, items) replace the old ones. Moving it under one of its own reports is refused with reports_loop.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `agent` | string | yes | Agent id or name. |
+| `name` | string |  |  |
+| `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
+| `title` | string |  | Role, e.g. Research. |
+| `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
+| `reportsTo` | string |  | The agent it reports to: id or name; "" for top level. |
+| `supervisor` | string |  | A person on a chart who oversees it: node id or name; "" for none. |
+| `purpose` | string |  |  |
+| `instructions` | string |  | System prompt or runbook. |
+| `runtime` | string |  | Where it runs, e.g. T3 or a home server. |
+| `model` | string |  |  |
+| `inputs` | string[] |  | What it takes in. |
+| `outputs` | string[] |  | What it produces. |
+| `tools` | string[] |  | What it may use. |
+| `projects` | string[] |  |  |
+| `cards` | string | integer[] |  |  |
+| `items` | string[] |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `agent` | object | yes |  |
+| `agent.id` | string | yes |  |
+| `agent.name` | string | yes |  |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.title` | string |  |  |
+| `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.reportsTo` | string | yes |  |
+| `agent.supervisor` | string | yes |  |
+| `agent.purpose` | string |  |  |
+| `agent.instructions` | string |  |  |
+| `agent.runtime` | string |  |  |
+| `agent.model` | string |  |  |
+| `agent.inputs` | string[] | yes |  |
+| `agent.outputs` | string[] | yes |  |
+| `agent.tools` | string[] | yes |  |
+| `agent.projects` | string[] | yes |  |
+| `agent.cards` | string[] | yes |  |
+| `agent.items` | string[] | yes |  |
+| `agent.created` | string |  |  |
+| `agent.updated` | string |  |  |
+
+**Example: Activate and link a card**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"active","cards":["#12"]}'
+```
+
+```json
+{
+  "rev": 57,
+  "agent": {
+    "id": "a1",
+    "name": "Researcher",
+    "kind": "agent",
+    "title": "Research",
+    "status": "active",
+    "reportsTo": "a0",
+    "supervisor": "cleo",
+    "purpose": "Gathers context before work starts.",
+    "instructions": "",
+    "runtime": "T3",
+    "model": "",
+    "inputs": [
+      "A card that needs research"
+    ],
+    "outputs": [
+      "Research notes on the card"
+    ],
+    "tools": [
+      "Web search"
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [
+      "k1"
+    ],
+    "items": [
+      "i1"
+    ],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `agents.delete`
+
+Delete an AgentFlow agent
+
+`DELETE /api/v1/envs/{env}/agents/{agent}` · scope `write` · MCP tool `agents_delete`
+
+Remove an agent. Its direct reports move up to its manager, and workflow steps it ran become unassigned.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `agent` | string | yes | Agent id or name. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `deleted` | string | yes |  |
+
+**Example: Remove the researcher**
+
+```sh
+curl -sS -X DELETE "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 58,
+  "deleted": "a1"
+}
+```
+
+## AgentFlow workflows
+
+### `workflows.list`
+
+List AgentFlow workflows
+
+`GET /api/v1/envs/{env}/workflows` · scope `read` · MCP tool `workflows_list`
+
+Workflows: ordered steps, each handled by an agent, started by hand, on a schedule or by an event. Filters: status, agent (id or name: workflows with a step it runs), project and q.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `status` | enum |  | One of `draft`, `active`, `paused`. |
+| `agent` | string |  | Agent id or name. |
+| `project` | string |  | Project id or name. |
+| `q` | string |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].description` | string |  |  |
+| `items[].status` | enum | yes | One of `draft`, `active`, `paused`. |
+| `items[].trigger` | enum | yes | One of `manual`, `schedule`, `event`. |
+| `items[].schedule` | string |  |  |
+| `items[].steps` | object[] | yes |  |
+| `items[].projects` | string[] | yes |  |
+| `items[].cards` | string[] | yes |  |
+| `items[].items` | string[] | yes |  |
+| `items[].created` | string |  |  |
+| `items[].updated` | string |  |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Workflows the researcher is in**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/workflows?agent=Researcher" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "w1",
+      "name": "Ship a card",
+      "description": "",
+      "status": "active",
+      "trigger": "event",
+      "schedule": "A card enters Doing",
+      "steps": [
+        {
+          "id": "s1",
+          "agent": "a1",
+          "action": "Research the approach",
+          "output": "Notes on the card"
+        }
+      ],
+      "projects": [
+        "p1"
+      ],
+      "cards": [],
+      "items": [],
+      "created": "2026-10-29T17:00:00.000Z",
+      "updated": "2026-10-29T17:00:00.000Z"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `workflows.get`
+
+Get an AgentFlow workflow and its brief
+
+`GET /api/v1/envs/{env}/workflows/{workflow}` · scope `read` · MCP tool `workflows_get`
+
+One workflow by id or name, with `brief`: Markdown listing its trigger, its steps with the agent for each, and its linked projects, cards and deadlines.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `workflow` | string | yes | Workflow id or name. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `workflow` | object | yes |  |
+| `workflow.id` | string | yes |  |
+| `workflow.name` | string | yes |  |
+| `workflow.description` | string |  |  |
+| `workflow.status` | enum | yes | One of `draft`, `active`, `paused`. |
+| `workflow.trigger` | enum | yes | One of `manual`, `schedule`, `event`. |
+| `workflow.schedule` | string |  |  |
+| `workflow.steps` | object[] | yes |  |
+| `workflow.projects` | string[] | yes |  |
+| `workflow.cards` | string[] | yes |  |
+| `workflow.items` | string[] | yes |  |
+| `workflow.created` | string |  |  |
+| `workflow.updated` | string |  |  |
+| `brief` | string | yes |  |
+
+**Example: Ship a card**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/workflows/Ship%20a%20card" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 42,
+  "workflow": {
+    "id": "w1",
+    "name": "Ship a card",
+    "description": "",
+    "status": "active",
+    "trigger": "event",
+    "schedule": "A card enters Doing",
+    "steps": [
+      {
+        "id": "s1",
+        "agent": "a1",
+        "action": "Research the approach",
+        "output": "Notes on the card"
+      }
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [],
+    "items": [],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  },
+  "brief": "# Ship a card\n\nWorkflow · Active · Event: A card enters Doing\n"
+}
+```
+
+### `workflows.create`
+
+Create an AgentFlow workflow
+
+`POST /api/v1/envs/{env}/workflows` · scope `write` · MCP tool `workflows_create`
+
+Add a workflow. Each step names an agent (id or name, or "" for unassigned), what it does and what it produces. Links (projects, cards, items) are ids or names.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `name` | string | yes |  |
+| `description` | string |  |  |
+| `status` | enum |  | One of `draft`, `active`, `paused`. |
+| `trigger` | enum |  | manual, schedule or event. One of `manual`, `schedule`, `event`. |
+| `schedule` | string |  | When or on what it starts, e.g. "Weekdays at 09:00". |
+| `steps` | object[] |  |  |
+| `steps[].id` | string |  |  |
+| `steps[].agent` | string |  | Agent id or name; "" for unassigned. |
+| `steps[].action` | string |  |  |
+| `steps[].output` | string |  |  |
+| `projects` | string[] |  |  |
+| `cards` | string | integer[] |  |  |
+| `items` | string[] |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `workflow` | object | yes |  |
+| `workflow.id` | string | yes |  |
+| `workflow.name` | string | yes |  |
+| `workflow.description` | string |  |  |
+| `workflow.status` | enum | yes | One of `draft`, `active`, `paused`. |
+| `workflow.trigger` | enum | yes | One of `manual`, `schedule`, `event`. |
+| `workflow.schedule` | string |  |  |
+| `workflow.steps` | object[] | yes |  |
+| `workflow.projects` | string[] | yes |  |
+| `workflow.cards` | string[] | yes |  |
+| `workflow.items` | string[] | yes |  |
+| `workflow.created` | string |  |  |
+| `workflow.updated` | string |  |  |
+
+**Example: Ship a card**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/workflows" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Ship a card","status":"active","trigger":"event","schedule":"A card enters Doing","steps":[{"agent":"Researcher","action":"Research the approach","output":"Notes on the card"}],"projects":["Lantern"]}'
+```
+
+```json
+{
+  "rev": 59,
+  "workflow": {
+    "id": "w1",
+    "name": "Ship a card",
+    "description": "",
+    "status": "active",
+    "trigger": "event",
+    "schedule": "A card enters Doing",
+    "steps": [
+      {
+        "id": "s1",
+        "agent": "a1",
+        "action": "Research the approach",
+        "output": "Notes on the card"
+      }
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [],
+    "items": [],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
+### `workflows.update`
+
+Update an AgentFlow workflow
+
+`PATCH /api/v1/envs/{env}/workflows/{workflow}` · scope `write` · MCP tool `workflows_update`
+
+Change a workflow's fields. `steps` you send replace the old ones (keep a step's `id` to keep it); so do projects, cards and items.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `workflow` | string | yes | Workflow id or name. |
+| `name` | string |  |  |
+| `description` | string |  |  |
+| `status` | enum |  | One of `draft`, `active`, `paused`. |
+| `trigger` | enum |  | manual, schedule or event. One of `manual`, `schedule`, `event`. |
+| `schedule` | string |  | When or on what it starts, e.g. "Weekdays at 09:00". |
+| `steps` | object[] |  |  |
+| `steps[].id` | string |  |  |
+| `steps[].agent` | string |  | Agent id or name; "" for unassigned. |
+| `steps[].action` | string |  |  |
+| `steps[].output` | string |  |  |
+| `projects` | string[] |  |  |
+| `cards` | string | integer[] |  |  |
+| `items` | string[] |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `workflow` | object | yes |  |
+| `workflow.id` | string | yes |  |
+| `workflow.name` | string | yes |  |
+| `workflow.description` | string |  |  |
+| `workflow.status` | enum | yes | One of `draft`, `active`, `paused`. |
+| `workflow.trigger` | enum | yes | One of `manual`, `schedule`, `event`. |
+| `workflow.schedule` | string |  |  |
+| `workflow.steps` | object[] | yes |  |
+| `workflow.projects` | string[] | yes |  |
+| `workflow.cards` | string[] | yes |  |
+| `workflow.items` | string[] | yes |  |
+| `workflow.created` | string |  |  |
+| `workflow.updated` | string |  |  |
+
+**Example: Pause it**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/workflows/Ship%20a%20card" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"paused"}'
+```
+
+```json
+{
+  "rev": 60,
+  "workflow": {
+    "id": "w1",
+    "name": "Ship a card",
+    "description": "",
+    "status": "paused",
+    "trigger": "event",
+    "schedule": "A card enters Doing",
+    "steps": [
+      {
+        "id": "s1",
+        "agent": "a1",
+        "action": "Research the approach",
+        "output": "Notes on the card"
+      }
+    ],
+    "projects": [
+      "p1"
+    ],
+    "cards": [],
+    "items": [],
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z"
+  }
+}
+```
+
 ## Search
 
 ### `search`
@@ -1793,7 +2577,7 @@ Search an environment
 
 `GET /api/v1/envs/{env}/search` · scope `read` · MCP tool `search`
 
-Case-insensitive search over chart nodes (name, notes), projects, timeline items (title, notes) and cards (#number, title, description). `types` narrows it (comma-separated in a query string).
+Case-insensitive search over chart nodes (name, notes), projects, timeline items (title, notes), cards (#number, title, description), AgentFlow agents (name, role, purpose) and workflows (name, description). `types` narrows it (comma-separated in a query string).
 
 **Input**
 
@@ -1810,7 +2594,7 @@ Case-insensitive search over chart nodes (name, notes), projects, timeline items
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `items` | object[] | yes |  |
-| `items[].type` | enum | yes | One of `node`, `project`, `item`, `card`. |
+| `items[].type` | enum | yes | One of `node`, `project`, `item`, `card`, `agent`, `workflow`. |
 | `items[].id` | string | yes |  |
 | `items[].title` | string | yes |  |
 | `items[].chart` | string |  |  |

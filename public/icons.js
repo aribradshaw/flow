@@ -63,6 +63,13 @@ const P={
   commit:'<circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   chevD:'<path d="m6 9 6 6 6-6"/>',
+  bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 4h6M2 13v3M22 13v3M9 13v1.5M15 13v1.5"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8M18 14a6.5 6.5 0 0 1 3.5 6"/>',
+  flow:'<rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="16" y="15" width="6" height="6" rx="1"/><path d="M8 12h4M12 6v12M12 6h4M12 18h4"/>',
+  chevU:'<path d="m6 15 6-6 6 6"/>',
+  play:'<path d="M7 4v16l13-8z"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  zap:'<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   checkSq:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/>',
 };
 export function icon(name,size=16){return `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name]||''}</svg>`}

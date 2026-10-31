@@ -59,7 +59,7 @@ button{cursor:pointer}
 
 main{flex:1;display:flex;min-height:0;position:relative}
 .view{position:relative;flex:1;min-width:0;display:none}
-body[data-tab=chart] #chartView,body[data-tab=timeline] #timelineView,body[data-tab=devops] #devopsView{display:flex;flex-direction:column}
+body[data-tab=chart] #chartView,body[data-tab=timeline] #timelineView,body[data-tab=devops] #devopsView,body[data-tab=agentflow] #agentflowView{display:flex;flex-direction:column}
 
 /* chart canvas */
 #canvas{position:absolute;inset:0;overflow:hidden;touch-action:none;background-color:var(--bg);background-image:radial-gradient(circle at 1px 1px,#c5cfcb 1px,transparent 1.4px)}
@@ -625,3 +625,85 @@ dialog.share-modal{width:min(560px,92vw);max-height:88vh}
 .sh-sub{display:block;font-style:normal;font-size:11px;color:var(--muted);font-weight:400}
 .sh-in li{flex-wrap:wrap}.sh-in-h{display:flex;align-items:center;gap:8px;width:100%}.sh-in-h .env-n{flex:1}
 .sh-in form{width:100%}
+
+/* ---------- AgentFlow: agent org chart and workflows ---------- */
+body[data-tab=agentflow] #inspector{width:320px}
+.af-bar{gap:6px}
+.af-bar .seg.txt button .i{flex:none}
+#af-q{width:220px;height:28px;font-size:12px}
+.txt.primary-txt{display:inline-flex;align-items:center;gap:4px;border-color:var(--primary);background:var(--primary);color:#fff}
+.txt.primary-txt:hover{background:var(--primary-hover)}
+.af-bar>.txt{display:inline-flex;align-items:center;gap:4px;height:28px}
+.af-scroll{flex:1;min-height:0;overflow:auto;background:var(--bg)}
+/* The org tree: nested lists, joined by lines drawn on each item's top edge. */
+.af-org{display:flex;justify-content:center;min-width:max-content;padding:28px 32px 56px}
+.af-tree,.af-tree ul{display:flex;justify-content:center;margin:0;padding:0;list-style:none}
+.af-tree{gap:28px}
+.af-tree ul{position:relative;padding-top:18px}
+.af-tree ul::before{content:'';position:absolute;top:0;left:50%;height:18px;border-left:1px solid var(--line2)}
+.af-tree li{position:relative;display:flex;flex-direction:column;align-items:center;padding:18px 7px 0}
+.af-tree>li{padding:0}
+.af-tree li::before,.af-tree li::after{content:'';position:absolute;top:0;right:50%;width:50%;height:18px;border-top:1px solid var(--line2)}
+.af-tree li::after{right:auto;left:50%;border-left:1px solid var(--line2)}
+.af-tree>li::before,.af-tree>li::after,.af-tree li:only-child::before,.af-tree li:only-child::after{display:none}
+.af-tree li:only-child{padding-top:0}
+.af-tree li:first-child::before,.af-tree li:last-child::after{border:0}
+.af-tree li:last-child::before{border-right:1px solid var(--line2);border-radius:0 5px 0 0}
+.af-tree li:first-child::after{border-radius:5px 0 0 0}
+.af-node{position:relative;z-index:1;width:188px;padding:8px 10px;background:#fff;border:1px solid var(--line2);border-radius:6px;box-shadow:0 1px 2px #141e1c0f;cursor:pointer;outline:none;transition:opacity .15s}
+.af-node:hover{border-color:#aab6b1}
+.af-node.sel,.af-node:focus-visible,.af-flow.sel,.af-flow:focus-visible{border-color:var(--accent-line);box-shadow:0 0 0 1px var(--accent-line)}
+.af-node.dim{opacity:.38}
+.af-node.k-team{background:#fbfcfb;border-style:dashed}
+.af-node.st-retired{background:#f6f7f6;color:var(--muted)}
+.af-n-top{display:flex;align-items:center;gap:6px}
+.af-k{display:flex;flex:none;color:var(--accent)}
+.k-human .af-k,.ihead .af-k.human{color:#3d6fb6}
+.af-node .nm{flex:1;min-width:0;overflow:hidden;font-size:12.5px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
+.af-st{flex:none;width:7px;height:7px;border:1.5px solid var(--faint);border-radius:50%}
+.st-active .af-st{border-color:#2f8a4f;background:#2f8a4f}
+.st-paused .af-st{border-color:var(--warn);background:var(--warn)}
+.st-retired .af-st{border-color:#c4cbc8;background:#c4cbc8}
+.af-n-title{margin:2px 0 0 20px;overflow:hidden;font-size:11.5px;color:var(--muted);white-space:nowrap;text-overflow:ellipsis}
+.af-n-foot{display:flex;align-items:center;gap:9px;min-height:16px;margin:6px 0 0 20px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.af-n-foot>span{display:inline-flex;align-items:center;gap:3px}
+.af-n-foot .bub{margin-left:0}
+/* Workflows: one card per workflow, steps as a left-to-right pipeline. */
+.af-flows{display:flex;flex-direction:column;gap:10px;max-width:1040px;margin:0 auto;padding:20px}
+.af-flow{padding:10px 12px 12px;background:#fff;border:1px solid var(--line2);border-radius:6px;cursor:pointer;outline:none}
+.af-flow:hover{border-color:#aab6b1}
+.af-f-head{display:flex;align-items:center;gap:7px;min-width:0}
+.af-f-head strong{overflow:hidden;font-size:13px;white-space:nowrap;text-overflow:ellipsis}
+.af-trig{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:11.5px;color:var(--muted)}
+.af-f-desc{margin:4px 0 0 21px;font-size:12px;line-height:1.45;color:var(--muted)}
+.af-steps{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:10px 0 0 21px;padding:0;list-style:none}
+.af-step-chip{position:relative;display:flex;flex-direction:column;gap:2px;min-width:120px;max-width:230px;padding:6px 9px 6px 25px;background:var(--bg);border:1px solid var(--line);border-radius:5px;font-size:11.5px;line-height:1.35}
+.af-step-chip em{position:absolute;top:6px;left:9px;font-style:normal;font-weight:700;color:var(--faint);font-variant-numeric:tabular-nums}
+.af-step-chip.none{padding-left:9px;color:var(--faint)}
+.af-who{display:flex;align-items:center;gap:4px;font-weight:600;color:var(--ink)}
+.af-who .i{flex:none;color:var(--accent)}
+.af-who.none{font-weight:500;font-style:italic;color:var(--faint)}
+.af-act{color:var(--muted)}
+.af-arrow{display:flex;align-items:center;color:var(--faint)}
+.af-none{text-align:center;font-size:12.5px;color:var(--faint)}
+.af-empty{display:flex;flex-direction:column;align-items:center;gap:8px;max-width:440px;margin:72px auto;padding:0 20px;text-align:center;color:var(--muted)}
+.af-empty>.i{color:var(--accent)}
+.af-empty strong{font-size:14px;color:var(--ink)}
+.af-empty p{margin:0;font-size:12.5px;line-height:1.5}
+.af-empty-b{display:flex;gap:6px;margin-top:6px}
+.af-empty-b .txt{height:30px;padding:0 12px}
+/* Side panel */
+.af-pk{display:flex;flex-direction:column;gap:4px}
+.af-pk .pk-btn{max-width:none;width:100%}
+.af-pk .pk-btn .pk-t{flex:1;text-align:left}
+.af-links{margin-top:6px}
+.af-step-list{margin:0;padding:0;list-style:none}
+.af-step-list li{display:flex;align-items:flex-start;gap:6px;padding:6px 0;border-bottom:1px solid var(--line)}
+.af-step-list li>em{flex:none;width:14px;padding-top:6px;font-style:normal;font-size:11px;font-weight:700;color:var(--faint);text-align:right}
+.af-step-f{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.ibody .af-step-f select,.ibody .af-step-f input{height:26px;font-size:12px}
+.af-step-b{display:flex;flex-direction:column}
+.af-step-b .ib{width:22px;height:20px}
+.af-step-b .ib[disabled]{opacity:.3;pointer-events:none}
+.af-addstep{display:inline-flex;align-items:center;gap:4px;margin-top:6px}
+@media (prefers-reduced-motion:reduce){.af-node{transition:none}}

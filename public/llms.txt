@@ -14,6 +14,7 @@ Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: 
 - [Sync](/docs/index.html#sync): The server is the source of truth.
 - [Sharing](/docs/index.html#sharing): The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment.
 - [Versioning](/docs/index.html#versioning): Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md).
+- [AgentFlow](/docs/index.html#agentflow): AgentFlow is an org chart for agentic work.
 
 ## API: Environments
 
@@ -63,6 +64,21 @@ Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: 
 
 - [labels.list](/docs/labels.html#op-labels-list): `GET /api/v1/envs/{env}/labels` (read). List DevOps labels
 - [labels.create](/docs/labels.html#op-labels-create): `POST /api/v1/envs/{env}/labels` (write). Create a DevOps label
+
+## API: AgentFlow agents
+
+- [agents.list](/docs/agents.html#op-agents-list): `GET /api/v1/envs/{env}/agents` (read). List AgentFlow agents
+- [agents.get](/docs/agents.html#op-agents-get): `GET /api/v1/envs/{env}/agents/{agent}` (read). Get an AgentFlow agent and its brief
+- [agents.create](/docs/agents.html#op-agents-create): `POST /api/v1/envs/{env}/agents` (write). Create an AgentFlow agent
+- [agents.update](/docs/agents.html#op-agents-update): `PATCH /api/v1/envs/{env}/agents/{agent}` (write). Update an AgentFlow agent
+- [agents.delete](/docs/agents.html#op-agents-delete): `DELETE /api/v1/envs/{env}/agents/{agent}` (write). Delete an AgentFlow agent
+
+## API: AgentFlow workflows
+
+- [workflows.list](/docs/workflows.html#op-workflows-list): `GET /api/v1/envs/{env}/workflows` (read). List AgentFlow workflows
+- [workflows.get](/docs/workflows.html#op-workflows-get): `GET /api/v1/envs/{env}/workflows/{workflow}` (read). Get an AgentFlow workflow and its brief
+- [workflows.create](/docs/workflows.html#op-workflows-create): `POST /api/v1/envs/{env}/workflows` (write). Create an AgentFlow workflow
+- [workflows.update](/docs/workflows.html#op-workflows-update): `PATCH /api/v1/envs/{env}/workflows/{workflow}` (write). Update an AgentFlow workflow
 
 ## API: Search
 

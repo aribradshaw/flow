@@ -5,6 +5,7 @@ import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,save} from './store.js';
+import {agentsForCard,full} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor} from './devops-core.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
@@ -22,7 +23,7 @@ for(const k of ['projects','assignees','labels'])if(!Array.isArray(ui[k]))ui[k]=
 // Paging: each column renders its first 20 cards, "Load more" adds 20. Reset whenever filters change.
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
-let selected=null,sortable=null,pop=null,pending=null,reveal=false,painted=false,rerender=()=>{},openItem=()=>{};
+let selected=null,sortable=null,pop=null,pending=null,reveal=false,painted=false,rerender=()=>{},openItem=()=>{},openAgent=()=>{},toast=()=>{};
 const edited=new WeakSet();
 
 const db=()=>store.db,dv=()=>store.db.devops,card=id=>dv().cards.find(c=>c.id===id);
@@ -40,7 +41,7 @@ const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="
 const bubble=(id,roles)=>{const n=nodeById(id);if(!n)return '';const [bg,fg]=memberColor(id);return `<span class="bub" style="background:${bg};color:${fg}" data-tip="${esc(n.name)} · ${esc(roles.join(', '))}">${esc(initials(n.name))}</span>`};
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
-export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;
+export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;
   const el=$('#devopsView');
   el.addEventListener('click',e=>{
     const pick=e.target.closest('[data-pick]');if(pick){finishPick(pick.dataset.pick);return}
@@ -307,7 +308,16 @@ function cardDetailHtml(c){
       return `<div class="dc-role"><small>${role[0].toUpperCase()+role.slice(1)}</small>${pickerButton('dc-role-'+role,ids.length?ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', '):'None',personItems(),ids,{cls:'mini wide'})}</div>`}).join('')}</div>`
       :`<div class="dc-hint">Add people to the org chart to assign them.</div>`}
     <label for="dc-item">Timeline item</label><div class="linkrow"><select id="dc-item">${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}</div>
+    ${agentRow(c)}
     <div class="dc-meta">Created ${esc(when(c.created))}<br>Updated ${esc(when(c.updated))}</div></aside></form>`;
+}
+// AgentFlow agents working this card (the link is stored on the agent, agentflow-core.js).
+const agentItems=()=>[...(db().agentflow?.agents||[])].sort((a,b)=>a.name.localeCompare(b.name)).map(a=>{const [bg,fg]=memberColor(a.id);return {value:a.id,label:a.name,sub:a.title,avatar:{text:initials(a.name),bg,fg}}});
+function agentRow(c){
+  if(!db().agentflow?.agents.length)return '';
+  const on=agentsForCard(db().agentflow,c.id);
+  return `<label>Agents <em>AgentFlow</em></label>${pickerButton('dc-agents',on.length?on.map(a=>a.name).join(', '):'None',agentItems(),on.map(a=>a.id),{cls:'mini wide'})}
+    ${on.length?`<ul class="links">${on.map(a=>`<li><button type="button" data-dc-agent="${esc(a.id)}" data-tip="Open in AgentFlow">${icon('bot',12)}<span>${esc(a.name)}</span><em>${esc(a.title)}</em></button></li>`).join('')}</ul>`:''}`;
 }
 function addLabel(){
   const i=$('#dc-newlabel'),name=i?.value.trim(),c=card(selected);if(!name||!c)return;
@@ -328,6 +338,13 @@ export function inspectorClick(e){
   if(b.dataset.picker?.startsWith('dc-role-')){const role=b.dataset.picker.slice(8);
     openPicker(b,{items:personItems(),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
       onChange(v){change(()=>{c.assignees=[...c.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(c)})}});return}
+  if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
+    onChange(v){
+      const over=db().agentflow.agents.find(a=>v.includes(a.id)&&!a.cards.includes(c.id)&&full(db().agentflow,'refs',a,'cards'));
+      if(over){toast(`${over.name} already has the most linked cards it can hold.`,true);rerender();return}
+      change(()=>{const now=new Date().toISOString();for(const a of db().agentflow.agents){const has=a.cards.includes(c.id),want=v.includes(a.id);
+      if(has!==want){a.cards=want?[...a.cards,c.id]:a.cards.filter(x=>x!==c.id);a.updated=now}}})}});return}
+  if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
   if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
   ({approve:()=>approve(c.id),delete:()=>remove(c.id),close:()=>select(null),labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>openItem(c.item),
