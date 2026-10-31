@@ -9,6 +9,8 @@ Create charts of people, organizations, projects, and notes; connect them to pla
 With Node.js 22 or newer:
 
 ```sh
+git clone https://github.com/aribradshaw/flow.git
+cd flow
 npm ci
 npm start
 ```
