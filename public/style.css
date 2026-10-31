@@ -647,6 +647,7 @@ body[data-tab=agentflow] #inspector{width:320px}
 .af-edges{position:absolute;width:1px;height:1px;overflow:visible}
 .af-ln{fill:none;stroke:#8fa39b;stroke-width:1.5}
 .af-ln.dim{opacity:.35}
+.af-hit{fill:none;stroke:transparent;stroke-width:12;pointer-events:stroke}
 .af-zoom{right:10px;bottom:10px;align-items:center}
 .af-zoom .sep{width:1px;height:18px;margin:0 3px}
 .af-scale{min-width:42px;height:28px;padding:0;border:0;border-radius:var(--r);background:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}

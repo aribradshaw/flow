@@ -526,6 +526,28 @@ try{
     assert(!(await saved()).agentflow.agents.some(a=>'x' in a),'Tidy up returns to the automatic tree');
     await js(`document.querySelector('[data-agent="${build.id}"]').click()`);await sleep(50);await js(`document.activeElement?.blur()`);await key('ArrowRight',39);
     assert(Number.isFinite((await ag('Builder')).x),'arrow keys nudge the selected agent');}
+  // Right-click menus on the canvas: an agent, then empty space. Each change is one undo step.
+  const rclick=async(x,y)=>{await mouse('mousePressed',x,y,{button:'right',buttons:2});await mouse('mouseReleased',x,y,{button:'right',buttons:0});await sleep(120)};
+  const menuPick=async(...path)=>{for(const t of path){await js(`[...document.querySelectorAll('.cm .cm-item')].find(i=>i.querySelector('.cm-l').textContent===${JSON.stringify(t)})?.click()`);await sleep(120)}};
+  {const ag=n=>saved().then(d=>d.agentflow.agents.find(x=>x.name===n)),res=await ag('Researcher'),at=async id=>rclick(...await center(`[data-agent="${id}"] .nm`));
+    await at(res.id);
+    assert(await js(`!!document.querySelector('.cm')&&document.querySelector('#af-name')?.value`)==='Researcher'&&!await js(`document.querySelector('#afCanvas').classList.contains('panning')`),'right-clicking an agent selects it and opens its menu, without panning');
+    await menuPick('Status','Active');
+    assert((await ag('Researcher')).status==='active'&&!await js(`!!document.querySelector('.cm')`),'the agent menu sets the status from a submenu');
+    await at(lead.id);await key('Escape',27);await sleep(100);
+    assert(!await js(`!!document.querySelector('.cm')`)&&await js(`document.querySelector('#af-name')?.value`)==='Ops lead','Escape closes the menu and keeps the selection');
+    let n=(await saved()).agentflow.agents.length;await at(lead.id);await menuPick('Add direct report');
+    db=await saved();assert(db.agentflow.agents.length===n+1&&db.agentflow.agents.at(-1).reportsTo===lead.id,'Add direct report adds an agent under it');
+    await js(`document.activeElement.blur()`);await key('z',90,2);
+    const [ex,ey]=await js(`(()=>{const r=document.querySelector('#afCanvas').getBoundingClientRect();return [r.x+40,r.bottom-40]})()`);
+    assert(await js(`document.elementFromPoint(${ex},${ey})?.id`)==='afCanvas','(empty canvas spot)');
+    await rclick(ex,ey);await menuPick('Add agent here');
+    db=await saved();assert(db.agentflow.agents.length===n+1&&!db.agentflow.agents.at(-1).reportsTo&&Number.isFinite(db.agentflow.agents.at(-1).x),'right-clicking empty canvas adds an agent there');
+    await js(`document.activeElement.blur()`);await key('z',90,2);
+    assert((await saved()).agentflow.agents.length===n,'menu changes undo');
+    await at(lead.id);await menuPick('Open work queue');await sleep(200);
+    assert(await js('location.hash')==='#devops'&&await js(`JSON.parse(localStorage.getItem('flygon-flow-devops-ui')).agents.join()`)===lead.id&&/Agents · 1/.test(await js(`document.querySelector('[data-picker=dv-agents]')?.textContent||''`)),'Open work queue shows the DevOps board filtered to that agent');
+    await js(`document.querySelector('[data-dv=clear]').click()`);await sleep(100);await js(`document.querySelector('[data-tab=agentflow]').click()`);await sleep(150);}
   // Link a card from the agent, then follow the link back from the card.
   await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);
   await js(`document.querySelector('#inspector [data-picker=af-cards]').click()`);await sleep(100);
@@ -537,6 +559,9 @@ try{
   await js(`document.querySelector('[data-flow]').click()`);await sleep(100);
   await js(`document.querySelector('#inspector [data-afi=addStep]').click()`);await sleep(100);
   assert((await saved()).agentflow.workflows[0].steps.length===5&&/^af-act-/.test(await js('document.activeElement.id')),'a step can be added to a workflow');
+  await js(`document.activeElement.blur()`);await rclick(...await center('[data-flow] strong'));await menuPick('Duplicate workflow');
+  db=await saved();assert(db.agentflow.workflows.length===2&&db.agentflow.workflows[1].steps.length===5&&db.agentflow.workflows[1].steps.every((s,i)=>s.id!==db.agentflow.workflows[0].steps[i].id),'a workflow card\'s menu duplicates it with new ids');
+  await js(`document.activeElement.blur()`);await key('z',90,2);await sleep(100);
   await js(`document.activeElement.blur()`);await key('Escape',27);
   await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(200);
   assert(await js(`!!document.querySelector('[data-card="${afCard.id}"] .bub.agent')`),'a delegated card shows its agent badge on the board');

@@ -3,11 +3,12 @@ import {$,esc,ib,pickerButton,openPicker} from './ui.js';
 import {panel,flipList} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask} from './modal.js';
+import {openMenu,menuOpen} from './menu.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,positions,placed,pin,unpin} from './agentflow-core.js';
+  canReportTo,CARD,positions,placed,pin,unpin,workQueue,duplicateWorkflow} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -22,7 +23,7 @@ try{Object.assign(ui,JSON.parse(localStorage.getItem(UIKEY))||{})}catch{}
 if(!['org','workflows'].includes(ui.view))ui.view='org';
 const keepUi=()=>{try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
 // selected = {type:'agent'|'workflow', id}
-let selected=null,rerender=()=>{},openCard=()=>{},openItem=()=>{},toast=()=>{};
+let selected=null,rerender=()=>{},openCard=()=>{},openItem=()=>{},openQueue=()=>{},toast=()=>{};
 const edited=new WeakSet();
 // Canvas: view = pan and zoom (this session only); drag = the gesture in progress.
 const GRID=16,snap=(v,on=true)=>on?Math.round(v/GRID)*GRID:Math.round(v);
@@ -39,11 +40,11 @@ const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');retu
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
 export function mount(opts){
-  rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;toast=opts.toast||toast;
+  rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
     const z=e.target.closest('[data-afz]')?.dataset.afz;
-    if(z){({out:()=>zoom(1/1.2),in:()=>zoom(1.2),reset:()=>zoom(1/view.z),fit,tidy(){if(af().agents.some(placed))change(()=>unpin(af()));requestAnimationFrame(fit)}})[z]?.();return}
+    if(z){({out:()=>zoom(1/1.2),in:()=>zoom(1.2),reset:()=>zoom(1/view.z),fit,tidy})[z]?.();return}
     const b=e.target.closest('[data-af]');if(b){action(b.dataset.af,b);return}
     const a=e.target.closest('[data-agent]');if(a){select('agent',a.dataset.agent);return}
     const w=e.target.closest('[data-flow]');if(w){select('workflow',w.dataset.flow);return}
@@ -52,6 +53,7 @@ export function mount(opts){
   el.addEventListener('pointerdown',canvasDown);
   el.addEventListener('pointermove',canvasMove);
   el.addEventListener('pointerup',canvasUp);
+  el.addEventListener('contextmenu',contextMenu);
   // A cancelled gesture (touch interrupted, capture lost) changes nothing.
   el.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.pid)return;drag=null;$('#afCanvas')?.classList.remove('panning');paint()});
   el.addEventListener('wheel',e=>{const cv=e.target.closest('#afCanvas');if(!cv)return;e.preventDefault();const r=cv.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
@@ -132,7 +134,9 @@ function paint(){
   cv.querySelector('.af-world').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.z})`;
   const g=GRID*view.z*(view.z<.45?4:view.z<.8?2:1);cv.style.backgroundSize=`${g}px ${g}px`;cv.style.backgroundPosition=`${view.x}px ${view.y}px`;
   cv.querySelector('.af-nodes').innerHTML=af().agents.map(a=>nodeHtml(a,pos.get(a.id),hits)).join('');
-  const lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>`<path class="af-ln${hits&&!(hits.has(a.id)&&hits.has(a.reportsTo))?' dim':''}" d="${linkPath(pos.get(a.reportsTo),pos.get(a.id))}"/>`).join('');
+  // Each line also gets a wide invisible twin, so it is easy to right-click.
+  const lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>{const d=linkPath(pos.get(a.reportsTo),pos.get(a.id));
+    return `<path class="af-ln${hits&&!(hits.has(a.id)&&hits.has(a.reportsTo))?' dim':''}" d="${d}"/><path class="af-hit" data-line="${esc(a.id)}" d="${d}"/>`}).join('');
   const m=drag?.mode==='link'&&pos.get(drag.id),ghost=m&&drag.px!=null?`<path class="ghost" d="M${m.x+CARD.w/2} ${m.y+CARD.h}L${drag.px} ${drag.py}"/>`:'';
   cv.querySelector('.af-edges').innerHTML=lines+ghost;
   const sc=$('#agentflowView .af-scale');if(sc)sc.textContent=Math.round(view.z*100)+'%';
@@ -155,6 +159,7 @@ function zoom(f,x,y){
   view.x=x-(x-view.x)*z/view.z;view.y=y-(y-view.y)*z/view.z;view.z=z;paint();
 }
 // Bring an agent into view (opened from a DevOps card) without changing the zoom.
+function tidy(){if(af().agents.some(placed))change(()=>unpin(af()));requestAnimationFrame(fit)}
 function center(id){
   const cv=$('#afCanvas'),p=positions(af()).get(id);if(!cv?.clientWidth||!p)return;
   view.x=cv.clientWidth/2-(p.x+CARD.w/2)*view.z;view.y=cv.clientHeight/2-(p.y+CARD.h/2)*view.z;paint();
@@ -166,6 +171,8 @@ const toWorld=e=>{const r=$('#afCanvas').getBoundingClientRect();return {x:(e.cl
 // Empty space: pan. Every finished change is one undo step.
 function canvasDown(e){
   const cv=e.target.closest('#afCanvas');if(!cv||(e.button!==0&&e.button!==1)||e.target.closest('button,input,a'))return;
+  // Ctrl+click on a Mac is a right-click: leave it to the context menu.
+  if(e.button===0&&e.ctrlKey&&/Mac/.test(navigator.platform))return;
   const el=e.target.closest('[data-agent]'),start={sx:e.clientX,sy:e.clientY,pid:e.pointerId};
   if(el&&e.button===0){
     const id=el.dataset.agent,pos=positions(af());
@@ -259,7 +266,7 @@ function action(name,b){
     view(){ui.view=b.dataset.v;keepUi();if(selected&&(selected.type==='agent')!==(ui.view==='org'))selected=null;rerender()},
     clear(){ui.q='';keepUi();render()},
     addAgent:()=>addAgent(),
-    addWorkflow,
+    addWorkflow:()=>addWorkflow(),
     starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
   })[name]?.();
 }
@@ -270,10 +277,9 @@ function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){
   change(()=>{if(at)pin(af());const a=newAgent(af(),{reportsTo,...(at||{})});selected={type:'agent',id:a.id}});
   focusName();
 }
-function addWorkflow(){
+function addWorkflow(first=selected?.type==='agent'?selected.id:''){
   const no=full(af(),'workflows');if(no){toast(no,true);return}
   ui.view='workflows';keepUi();
-  const first=selected?.type==='agent'?selected.id:'';
   change(()=>{const w=newWorkflow(af(),{steps:[newStep({agent:first})]});selected={type:'workflow',id:w.id}});
   focusName();
 }
@@ -294,6 +300,94 @@ async function copyBrief(){
   const x=sel();if(!x)return;
   const text=selected.type==='agent'?agentBrief(db(),x.id):workflowBrief(db(),x.id);
   try{await navigator.clipboard.writeText(text);toast('Brief copied as Markdown')}catch{toast('Could not copy: the browser blocked clipboard access',true)}
+}
+
+// ---------- right-click menus ----------
+// On an agent, a workflow card, a reporting line or empty canvas. The agent or workflow is selected
+// first, so the menu acts on what the side panel shows. Every change is one undo step.
+const MENU_CAP=15,byName=(x,y)=>x.name.localeCompare(y.name);
+function contextMenu(e){
+  const cv=e.target.closest('#afCanvas'),w=e.target.closest('[data-flow]');
+  if(!cv&&!w)return; // the toolbar and search field keep the browser's own menu
+  e.preventDefault();
+  if(drag)return; // a right-click mid-gesture must not interrupt it
+  // Opened from the keyboard (menu key, Shift+F10): the menu goes under the card, which the
+  // selection redraw replaced, so find and focus the new one.
+  const kb=e.clientX===0&&e.clientY===0;
+  const pick=(type,id,q)=>{if(selected?.type!==type||selected.id!==id)select(type,id);if(!kb)return e;const n=document.querySelector(q);n?.focus({preventScroll:true});return n||e};
+  const n=e.target.closest('[data-agent]'),ln=e.target.closest('[data-line]');
+  if(n){const id=n.dataset.agent;if(agent(id))agentMenu(pick('agent',id,`#afCanvas [data-agent="${CSS.escape(id)}"]`),id)}
+  else if(w){const id=w.dataset.flow;if(flow(id))flowMenu(pick('workflow',id,`#agentflowView [data-flow="${CSS.escape(id)}"]`),id)}
+  else if(ln)lineMenu(e,ln.dataset.line);
+  else canvasMenu(e);
+}
+function setOn(get,k,v){
+  const x=get();if(!x||x[k]===v)return;
+  if(k==='reportsTo'&&!canReportTo(af(),x.id,v))return;
+  change(()=>{x[k]=v;touch(x)});
+}
+function addStepFor(wid,aid){
+  const w=flow(wid);if(!w)return;const no=full(af(),'steps',w);if(no){toast(no,true);return}
+  change(()=>{w.steps.push(newStep({agent:aid}));touch(w)});toast(`Added as step ${w.steps.length} of "${w.name}"`);
+}
+function agentMenu(at,id){
+  const a=agent(id),A=af(),get=()=>agent(id),q=workQueue(db(),id).length;
+  // Reports to: everyone it may report to (not itself or its reports), the current manager always shown.
+  const ok=A.agents.filter(x=>x.id!==id&&canReportTo(A,id,x.id)).sort(byName),cur=ok.find(x=>x.id===a.reportsTo);
+  const shown=ok.slice(0,MENU_CAP);if(cur&&!shown.includes(cur))shown[MENU_CAP-1]=cur;
+  const flows=A.workflows.slice(0,MENU_CAP).map(w=>({label:w.name,icon:'flow',run:()=>addStepFor(w.id,id)}));
+  openMenu(at,[
+    {label:'Edit',icon:'pencil',run:focusName},
+    {label:'Add direct report',icon:'plus',key:keyLabel('agentflow.addAgent'),run:()=>addAgent(id)},
+    '-',
+    {label:'Kind',icon:KIND_ICON[a.kind],items:Object.entries(AGENT_KINDS).map(([k,n])=>({label:n,icon:KIND_ICON[k],checked:a.kind===k,run:()=>setOn(get,'kind',k)}))},
+    {label:'Status',icon:'dot',items:Object.entries(AGENT_STATUS).map(([k,n])=>({label:n,checked:a.status===k,run:()=>setOn(get,'status',k)}))},
+    {label:'Reports to',icon:'network',items:[{label:'Nobody (top level)',checked:!a.reportsTo,run:()=>setOn(get,'reportsTo','')},
+      ...shown.map(x=>({label:x.name,icon:KIND_ICON[x.kind],checked:x.id===a.reportsTo,run:()=>setOn(get,'reportsTo',x.id)})),
+      ...(ok.length>shown.length?['-',{label:'More in the side panel…',run(){select('agent',id);requestAnimationFrame(()=>$('#af-reports')?.focus())}}]:[])]},
+    {label:'Add to workflow',icon:'flow',items:[...flows,...(flows.length?['-']:[]),{label:'New workflow starting here',icon:'plus',run:()=>addWorkflow(id)}]},
+    '-',
+    {label:q?`Open work queue (${q})`:'Open work queue',icon:'branch',run:()=>openQueue(id)},
+    {label:'Copy brief',icon:'copy',run:copyBrief},
+    '-',
+    {label:'Delete agent',icon:'trash',danger:true,key:keyLabel('agentflow.delete'),run:removeSelected},
+  ],{label:`Agent: ${a.name}`});
+}
+function canvasMenu(e){
+  const cv=$('#afCanvas').getBoundingClientRect(),p=toWorld(e),A=af(),none=!A.agents.length;
+  openMenu(e,[
+    {label:'Add agent here',icon:'plus',run:()=>addAgent('',{x:snap(p.x-CARD.w/2),y:snap(p.y-CARD.h/2)})},
+    // Not the selected agent's workflow: nothing was right-clicked.
+    {label:'New workflow',icon:'flow',key:keyLabel('agentflow.addWorkflow'),run:()=>addWorkflow('')},
+    ...(none?[{label:'Start from a template',icon:'rocket',run:()=>action('starter')}]:[]),
+    '-',
+    {label:'Fit the org',icon:'fit',key:keyLabel('agentflow.fit'),disabled:none,run:fit},
+    {label:'Zoom to 100%',disabled:view.z===1,run:()=>zoom(1/view.z,e.clientX-cv.left,e.clientY-cv.top)},
+    {label:'Tidy up',icon:'network',disabled:!A.agents.some(placed),run:tidy},
+  ],{label:'Canvas'});
+}
+function lineMenu(e,id){
+  const r=agent(id),m=r&&agent(r.reportsTo);if(!m)return;
+  openMenu(e,[
+    {label:`Remove reporting line (make ${r.name} top level)`,icon:'x',run:()=>setOn(()=>agent(id),'reportsTo','')},
+    '-',
+    {label:`Select ${m.name}`,icon:KIND_ICON[m.kind],run:()=>select('agent',m.id)},
+    {label:`Select ${r.name}`,icon:KIND_ICON[r.kind],run:()=>select('agent',id)},
+  ],{label:`${r.name} reports to ${m.name}`});
+}
+function flowMenu(at,id){
+  const w=flow(id),get=()=>flow(id);
+  openMenu(at,[
+    {label:'Edit',icon:'pencil',run:focusName},
+    {label:'Status',icon:'dot',items:Object.entries(WORKFLOW_STATUS).map(([k,n])=>({label:n,checked:w.status===k,run:()=>setOn(get,'status',k)}))},
+    {label:'Duplicate workflow',icon:'filePlus',run(){
+      const no=full(af(),'workflows');if(no){toast(no,true);return}
+      change(()=>{const c=duplicateWorkflow(af(),id);if(c)selected={type:'workflow',id:c.id}});focusName();
+    }},
+    {label:'Copy brief',icon:'copy',run:copyBrief},
+    '-',
+    {label:'Delete workflow',icon:'trash',danger:true,key:keyLabel('agentflow.delete'),run:removeSelected},
+  ],{label:`Workflow: ${w.name}`});
 }
 
 // ---------- side panel (shared #inspector) ----------
@@ -424,7 +518,7 @@ export function inspectorKey(e){
   if(m){e.preventDefault();addTo(m[1])}else if(e.target.tagName==='INPUT')e.preventDefault();
 }
 export function key(e){
-  if(e.key==='Escape'){if(selected)select(null);return}
+  if(e.key==='Escape'){if(selected&&!menuOpen())select(null);return}
   if(matches(e,'agentflow.delete')&&sel()){e.preventDefault();removeSelected();return}
   if(matches(e,'agentflow.addAgent')){e.preventDefault();addAgent()}
   else if(matches(e,'agentflow.addWorkflow')){e.preventDefault();addWorkflow()}

@@ -516,7 +516,7 @@ store.onChange=render;
 tl.mount({rerender:render,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
 dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast});
 // AgentFlow agents and workflows link to cards and timeline items.
-af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
+af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
 // Extension point: add palette tools without changing the canvas engine.
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.

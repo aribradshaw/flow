@@ -88,6 +88,14 @@ export function newWorkflow(af,over={}){
   af.workflows.push(w);return w;
 }
 export const newStep=(over={})=>({id:id(),agent:'',action:'',output:'',...over});
+// A copy of a workflow with new ids (its own and every step's), placed right after the original.
+// The caller checks full(af,'workflows') first.
+export function duplicateWorkflow(af,workflowId){
+  const i=af.workflows.findIndex(w=>w.id===workflowId);if(i<0)return null;
+  const w=af.workflows[i],now=new Date().toISOString();
+  const copy={...structuredClone(w),id:id(),name:`${w.name} (copy)`.slice(0,120),steps:w.steps.map(s=>({...s,id:id()})),created:now,updated:now};
+  af.workflows.splice(i+1,0,copy);return copy;
+}
 
 // ---------- the org tree ----------
 export const agentOf=(af,agentId)=>af.agents.find(a=>a.id===agentId)||null;

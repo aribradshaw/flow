@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -197,4 +197,20 @@ test('the DevOps board filters cards by delegated agent',async()=>{
   assert.deepEqual(filterCards(db,{agents:[a.id]}).map(c=>c.id),['k3']);
   assert.deepEqual(filterCards(db,{agents:[a.id,b.id]}).map(c=>c.id),['k1','k3']);
   assert.equal(filterCards(db,{agents:[]}).length,3);
+});
+
+test('duplicating a workflow: a copy right after it, with new ids for it and its steps',()=>{
+  const af=seedAgentflow(),a=newAgent(af,{name:'A'});
+  const w=newWorkflow(af,{name:'Ship',status:'active',trigger:'event',schedule:'A card enters UAT',projects:['p1'],steps:[newStep({agent:a.id,action:'Build'}),newStep({action:'Review',output:'Notes'})]});
+  const last=newWorkflow(af,{name:'Last'});
+  const c=duplicateWorkflow(af,w.id);
+  assert.deepEqual(af.workflows.map(x=>x.name),['Ship','Ship (copy)','Last']);
+  assert.notEqual(c.id,w.id);
+  assert.ok(c.steps.every((s,i)=>s.id!==w.steps[i].id&&s.agent===w.steps[i].agent&&s.action===w.steps[i].action&&s.output===w.steps[i].output),'steps copied with new ids');
+  assert.deepEqual([c.status,c.trigger,c.schedule,c.projects],['active','event','A card enters UAT',['p1']]);
+  c.projects.push('x');c.steps[0].action='Changed';
+  assert.deepEqual([w.projects,w.steps[0].action],[['p1'],'Build'],'the copy shares nothing with the original');
+  assert.equal(duplicateWorkflow(af,'ghost'),null);
+  assert.ok(duplicateWorkflow(af,newWorkflow(af,{name:'x'.repeat(120)}).id).name.length<=120,'the name stays within its limit');
+  assert.equal(last.name,'Last');
 });

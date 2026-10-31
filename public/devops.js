@@ -234,8 +234,10 @@ function rename(colId){
 function remove(id){change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null})}
 
 // Opened from the chart (a person or entity) or the timeline (a linked card).
-export function focus({person,entity,cardId}={}){
+// agent: that agent's work queue (open cards delegated to it), from AgentFlow.
+export function focus({person,entity,agent,cardId}={}){
   if(person||entity){ui={...FILTERS(),entity:entity||'',assignees:person?[person]:[],hideDone:true};keepUi()}
+  else if(agent){ui={...FILTERS(),agents:[agent],hideDone:true};keepUi()}
   if(cardId&&card(cardId)){
     selected=cardId;reveal=true;
     if(!filterCards(db(),ui).some(c=>c.id===cardId)){ui=FILTERS();keepUi()}
