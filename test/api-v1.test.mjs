@@ -314,6 +314,16 @@ test('AgentFlow: delegating cards to agents and the work queue a runner reads',a
   r=await op('agents.work',{env:ENV,agent:'Runner bot',limit:1});
   assert.deepEqual([r.body.items.map(c=>c.number),!!r.body.nextCursor],[[1],true],'the queue pages like other lists');
   assert.equal((await op('agents.work',{env:ENV,agent:'Nobody'})).body.code,'unknown_agent');
+  // Query arrays: repeated keys, a comma list, and what the CLI (requestFor) and the docs' curl lines send all agree.
+  const want=(await op('agents.work',{env:ENV,agent:'Runner bot',columns:['doing','requests']})).body.items.map(c=>c.number);
+  assert.deepEqual(want,[1,sooner]);
+  const path=`/api/v1/envs/${ENV}/agents/${encodeURIComponent('Runner bot')}/work`;
+  assert.deepEqual((await call('GET',path+'?columns=doing&columns=requests')).body.items.map(c=>c.number),want,'repeated keys');
+  const {requestFor}=await import('../lib/api-spec.mjs'),{restCall}=await import('../tools/docs.mjs');
+  const rq=requestFor(getOperation('agents.work'),{env:ENV,agent:'Runner bot',columns:['doing','requests']});
+  assert.deepEqual((await call('GET',rq.path+rq.query)).body.items.map(c=>c.number),want,'the CLI request');
+  const curl=restCall(getOperation('agents.work'),{env:ENV,agent:'Runner bot',columns:['doing','requests']}),url=/"\$FLOW_URL([^"]+)"/.exec(curl)[1];
+  assert.deepEqual((await call('GET',url)).body.items.map(c=>c.number),want,'the docs curl line');
 });
 
 test('AgentFlow: a full workspace refuses new agents and workflows instead of dropping them',async()=>{

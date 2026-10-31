@@ -448,7 +448,7 @@ MCP: call `agents_work` with `{"env":"default-workspace","agent":"Researcher","c
 ```sh
 flow agents work --input '{"env":"default-workspace","agent":"Researcher","columns":["doing","requests"]}'
 
-curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=%5B%22doing%22%2C%22requests%22%5D" \
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=doing%2Crequests" \
   -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 

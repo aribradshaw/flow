@@ -75,7 +75,7 @@ const params=path=>[...path.matchAll(/\{(\w+)\}/g)].map(m=>m[1]);
 export function restCall(o,input={}){
   const p=params(o.path),rest=Object.fromEntries(Object.entries(input||{}).filter(([k])=>!p.includes(k)));
   const url=BASE+o.path.replace(/\{(\w+)\}/g,(_,k)=>input?.[k]!==undefined?encodeURIComponent(input[k]):`{${k}}`);
-  const query=['GET','DELETE'].includes(o.method)&&Object.keys(rest).length?'?'+new URLSearchParams(Object.entries(rest).map(([k,v])=>[k,typeof v==='string'?v:JSON.stringify(v)])):'';
+  const query=['GET','DELETE'].includes(o.method)&&Object.keys(rest).length?'?'+new URLSearchParams(Object.entries(rest).map(([k,v])=>[k,typeof v==='string'?v:Array.isArray(v)?v.join(','):JSON.stringify(v)])):'';
   const body=!['GET','DELETE'].includes(o.method)&&Object.keys(rest).length?JSON.stringify(rest):'';
   return `curl -sS -X ${o.method} "${url}${query}" \\\n  -H "Authorization: Bearer $FLOW_API_KEY"${body?` \\\n  -H 'Content-Type: application/json' \\\n  -d ${sq(body)}`:''}`;
 }

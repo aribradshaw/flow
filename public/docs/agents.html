@@ -734,7 +734,7 @@
     &quot;items&quot;,
     &quot;nextCursor&quot;
   ]
-}</code></pre></details><h4>Example: What should the researcher do now?</h4><pre><code>curl -sS -X GET &quot;$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=%5B%22doing%22%2C%22requests%22%5D&quot; \
+}</code></pre></details><h4>Example: What should the researcher do now?</h4><pre><code>curl -sS -X GET &quot;$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?columns=doing%2Crequests&quot; \
   -H &quot;Authorization: Bearer $FLOW_API_KEY&quot;</code></pre><pre class="out"><code>{
   &quot;rev&quot;: 42,
   &quot;agent&quot;: {
