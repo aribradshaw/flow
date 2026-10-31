@@ -173,9 +173,6 @@ Code lives in ES modules under `public/`: `app.js` (shell, canvas, inspector), `
 Inspector fields autosave valid edits as you type. The coloured dot in the top bar shows save state; hover it for details. Browser storage saves immediately; disk backups follow after 400 ms. Backups live in data/<browser-id>.json with the prior snapshot in <browser-id>.previous.json. Each browser gets a separate ID so an older chart in another browser cannot overwrite yours. The status indicator confirms disk writes and reports retries.
 
 
-## Naming
-Flow previously used the names Org Chart Studio and Flygon Flow. Browser storage keys (`org-chart-studio-v1`, `org-chart-studio-timeline-ui`, ...) and the Postgres table `org_chart_studio_saves` keep their old names so existing data keeps loading.
-
 ## Built by Flygon LC
 
 Flow is made by [Flygon LC](https://flygonlc.com) and licensed under [MIT](LICENSE).

@@ -320,7 +320,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .card.s-done .ct span,.card.s-cancelled .ct span{color:var(--faint)}
 .card.s-cancelled .ct span{text-decoration:line-through}
 
-/* DevOps board (Flow flow) */
+/* DevOps board */
 #devopsView{min-width:0;overflow:hidden;background:#fff}
 .dv-bar{flex-wrap:wrap;gap:4px 6px;height:auto;min-height:40px;padding:6px 10px}
 .dv-bar select{max-width:150px;font-size:12px}

@@ -7,7 +7,7 @@ import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,save} from './store.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor} from './devops-core.js';
 
-// DevOps tab: a Flow-style card board. Data rules live in devops-core.js; this module draws the
+// DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
 // board, its filters and the card panel (in the shared #inspector), and handles drag and gates.
 const UIKEY='flygon-flow-devops-ui',MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ITEM_KINDS={feature:'Feature',milestone:'Milestone',release:'Release',deadline:'Deadline',project:'Project',phase:'Phase',event:'Event'};

@@ -1,5 +1,5 @@
 // DevOps board data: defaults, validation and pure helpers (no DOM, no storage), so verify.mjs
-// can exercise them in Node. Flow and label colours follow Owner's Flow DevOps board.
+// can exercise them in Node. Label colours are designed to stay readable on white.
 // db.devops = {columns:[{id,name}], cards:[card], nextNumber, labels:[{id,name,section,color}]}
 // card = {id,number,title,description,column,project,labels[],points,due,assignees[{node,role}],
 //         checklist[{id,text,done}],links[{id,kind,url}],item,created,updated,moved}  (moved: last column change)
@@ -24,7 +24,7 @@ export const NEW_COLUMN='requests';
 export const ROLES=['developer','tester','requester'];
 export const LINK_KINDS={pr:'Pull request',commit:'Commit',url:'Link'};
 export const SECTIONS=[['priority','Priority'],['urgency','Urgency'],['area','Area'],['topic','Topic'],['other','Other']];
-// Flow label tokens (shared/devops-colors.ts): background + text pairs readable on white.
+// Label tokens: background and text pairs readable on white.
 export const COLORS={
   red:['#fdd5d2','#8e1f17'],orange:['#ffe2bd','#7a3d00'],yellow:['#fff0a8','#614b00'],green:['#cce9d7','#145c32'],blue:['#cfe4ff','#174f91'],
   sky:['#cdeef6','#145866'],purple:['#e6dcff','#513595'],pink:['#f8d6e9','#7a2854'],lime:['#e1efb5','#415c08'],black:['#d8dadd','#242629'],
@@ -85,7 +85,7 @@ export function moveCard(dv,cardId,column,index=Infinity){
   return true;
 }
 
-// Flow-style gates. Approve (UAT → Done) is a button and skips this; everything else asks first.
+// Workflow gates. Approve (UAT → Done) is a button and skips this; everything else asks first.
 export function gateFor(card,to){
   if(!card||card.column===to)return null;
   if(to==='done')return 'confirm-done';
@@ -115,7 +115,7 @@ export function filterCards(db,f={}){
     &&(!q||c.number===num||c.title.toLowerCase().includes(q)));
 }
 
-// Due tone like Flow: overdue (red) once past, soon (amber) within two days. Done cards are muted.
+// Due tone: overdue (red) once past, soon (amber) within two days. Done cards are muted.
 export function dueTone(card,today){
   if(!card.due||card.column==='done')return '';
   if(card.due<today)return 'overdue';

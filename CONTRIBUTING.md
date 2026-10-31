@@ -1,6 +1,6 @@
-# Contributing to Flygon Flow
+# Contributing to Flow
 
-Thanks for helping. Flygon Flow is a small vanilla-JS and Node app: there is no framework, no bundler and no build step. Contributions should keep it that way.
+Thanks for helping. Flow is a small vanilla-JS and Node app: there is no framework, no bundler and no build step. Contributions should keep it that way.
 
 ## Getting started
 
@@ -28,7 +28,7 @@ node verify.mjs               # end-to-end in headless Edge/Chrome on its own po
 
 - Match the surrounding code: compact ES modules, short comments that explain why, and no new runtime dependencies without discussing them first.
 - Pure logic (validation, merging, board rules) lives in `*-core.js` files with no DOM, so Node can test it. UI modules use those files.
-- Saved data must keep loading. Storage keys and table names keep their old names (see README › Naming), and schema changes are additive and idempotent.
+- Saved data must keep loading. Treat existing storage keys and table names as compatibility contracts, and make schema changes additive and idempotent.
 - Comments say what the code does, in plain words.
 
 ## Docs
