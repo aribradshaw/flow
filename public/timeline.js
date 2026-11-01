@@ -134,7 +134,7 @@ export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openC
   });
   el.addEventListener('keydown',e=>{const r=e.target.closest('.lr,.card');if(r&&(e.key==='Enter'||e.key===' ')){e.preventDefault();select(r.dataset.item)}});
 }
-export function leave(){selected=null;drag=null;if(modal&&!modal.closing)modal.close()}
+export function leave(){selected=null;drag=null;if(modal&&!modal.closing){modal.quiet=true;modal.close()}}
 function select(id){selected=id;rerender()}
 
 // ---------- header + toolbar ----------
@@ -387,7 +387,7 @@ export function renderInspector(pane){
   if(!modal||modal.closing){
     const m=detailModal({cls:'item-modal',label:'Timeline item',from:itemEl(i.id),
       events:{click:inspectorClick,input:inspectorInput,change:inspectorChange,keydown:inspectorKey},
-      onClose(){const id=m.forId;if(modal===m)modal=null;if(selected===id){selected=null;rerender()}itemEl(id)?.focus({preventScroll:true})}});
+      onClose(){const id=m.forId;if(modal===m)modal=null;if(selected===id){selected=null;rerender()}if(!m.quiet)itemEl(id)?.focus({preventScroll:true})}});
     modal=m;
   }
   modalFor=modal.forId=i.id;modal.from(itemEl(i.id));

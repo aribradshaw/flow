@@ -74,6 +74,10 @@ export function mount(opts){
   });
 }
 export function leave(){selected=null}
+// Split view (app.js): the org canvas follows its pane. A first fit waits until it has a width;
+// pan(dx) keeps the org centred while the pane is resized.
+export function resized(){if(!fitted&&ui.view==='org'&&$('#afCanvas')?.clientWidth)fit()}
+export function pan(dx){if(!$('#afCanvas')?.clientWidth)return;view.x+=dx;paint()}
 function select(type,id){selected=type?{type,id}:null;rerender()}
 
 // Opened from elsewhere (a DevOps card's agent list).

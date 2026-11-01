@@ -919,3 +919,40 @@ body[data-tab=agentflow] #inspector{width:320px}
 .pp-acts .txt{display:inline-flex;align-items:center;gap:5px}
 .pp-note{margin:6px 0 0;font-size:11.5px;color:var(--muted)}
 /* end person photos */
+
+/* ---------- split view (app.js layout): two tabs side by side ---------- */
+.tab-w{position:relative;display:flex}
+.tab-w>.tab{padding-right:14px}
+/* The corner notch: "Open in split view" on a tab that is not showing, × on a shown pane's tab. */
+.tab-x{position:absolute;top:3px;right:-3px;z-index:1;display:flex;align-items:center;justify-content:center;width:15px;height:15px;padding:0;border:1px solid var(--line2);border-radius:4px;background:#fff;color:var(--muted);box-shadow:0 1px 2px #141e1c14;opacity:0;transform:scale(.8);pointer-events:none;transition:opacity .12s,transform .12s ease-out}
+.tab-w:hover .tab-x,.tab-x:focus-visible{opacity:1;transform:none;pointer-events:auto}
+.tab-x:hover{border-color:var(--flygon-green);background:var(--flygon-tint);color:var(--flygon-dark)}
+.tab-x[data-split-close]:hover{border-color:#e3b9b4;background:#f8e9e7;color:var(--danger)}
+@media (prefers-reduced-motion:reduce){.tab-x{transition:none;transform:none}}
+.tab-side{display:flex;margin-left:1px;color:var(--faint)}
+.tab.in-split:not(.focus){border-bottom-color:var(--flygon-light)}
+.tab.in-split:not(.focus) .i{color:var(--muted)}
+.tab.focus .tab-side{color:var(--flygon-green)}
+.pane .af-bar .seg.txt button{white-space:nowrap}
+.pane{position:relative;display:flex;min-width:0;min-height:0;overflow:hidden;container:pane/inline-size}
+.pane[data-pane="0"]{flex:0 0 calc((100% - 6px) * var(--split,.5))}
+.pane[data-pane="1"]{flex:1 1 0}
+body.split main>.view{display:none}
+body.split .pane>.view{display:flex;flex-direction:column}
+/* The focused pane: a thin accent line along its top edge. */
+.pane::after{content:'';position:absolute;left:0;right:0;top:0;z-index:25;height:2px;background:var(--accent-line);opacity:0;pointer-events:none;transition:opacity .15s}
+.pane.focus::after{opacity:1}
+.split-div{position:relative;flex:none;width:6px;z-index:26;background:#fff;border-left:1px solid var(--line);border-right:1px solid var(--line);cursor:col-resize;touch-action:none;outline:none;transition:background .12s}
+.split-div::after{content:'';position:absolute;top:50%;left:1px;width:2px;height:32px;margin-top:-16px;border-radius:1px;background:var(--line2);transition:background .12s}
+.split-div:hover,.split-div:focus-visible,body.split-drag .split-div{background:var(--flygon-tint)}
+.split-div:hover::after,.split-div:focus-visible::after,body.split-drag .split-div::after{background:var(--flygon-green)}
+body.split-drag{cursor:col-resize;user-select:none}
+body.split-drag .pane{pointer-events:none}
+/* A narrow pane floats its side panel over the view instead of squeezing it. */
+@container pane (max-width:620px){#inspector{position:absolute;top:0;right:0;bottom:0;z-index:10;box-shadow:-4px 0 16px #141e1c1a}}
+/* Toolbars and rows in a half-width pane: the same trims as a narrow window. */
+@container pane (max-width:820px){
+  .dv-bar select{max-width:110px}#dv-q{width:110px}.dv-count{display:none}#af-q{width:150px}
+  .af-bar{flex-wrap:wrap;height:auto;min-height:40px;padding-top:5px;padding-bottom:5px;row-gap:5px}
+  .lr{grid-template-columns:96px 16px minmax(100px,1fr) 16px}.lr .tags,.lr .o{display:none}
+}

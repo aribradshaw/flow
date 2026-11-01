@@ -85,6 +85,12 @@ export function panel(el,show,{onHidden}={}){
   panels.set(el,a);
   a.finished.then(()=>{if(panels.get(el)!==a)return;panels.delete(el);el.hidden=true;el.style.pointerEvents='';a.cancel();onHidden?.()},()=>{});
 }
+// panelReset(el): hide a panel at once, cancelling any slide in flight (its onHidden never runs).
+export function panelReset(el){
+  const cur=panels.get(el);if(cur){panels.delete(el);cur.cancel()}
+  for(const a of el.getAnimations?.()||[])a.cancel();
+  el.style.pointerEvents='';el.hidden=true;
+}
 // flipList(root, selector, key, mutate): re-render a list; items that stay glide to their new
 // place, new ones fade in, removed ones fade out where they were (FLIP, transform/opacity only).
 export function flipList(root,selector,key,mutate){

@@ -580,6 +580,54 @@ try{
   await js(`document.querySelector('dialog.card-modal[open] [data-dc-agent]').click()`);await sleep(400);
   assert(await js('location.hash')==='#agentflow'&&await js(`document.querySelector('#af-name')?.value`)==='Ops lead'&&!await js(`!!document.querySelector('dialog.card-modal[open]')`),'a card opens its agent in AgentFlow');
   await key('Escape',27);await js(`document.querySelector('[data-tab=chart]').click()`);await sleep(100);
+  // Split view: two tabs side by side, focus decides where keys and the side panel go.
+  {const hover=async sel=>{const [hx,hy]=await center(sel);await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:hx,y:hy,button:'none',buttons:0});await sleep(200)};
+    const click=async(x,y)=>{await call('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,button:'none',buttons:0});await mouse('mousePressed',x,y);await mouse('mouseReleased',x,y);await sleep(150)};
+    const op=sel=>js(`getComputedStyle(document.querySelector(${JSON.stringify(sel)})).opacity`);
+    const panes=()=>js(`[...document.querySelectorAll('main>.pane')].map(p=>p.dataset.paneTab+(p.classList.contains('focus')?'*':'')).join('|')`);
+    await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(200);
+    await hover('.tab[data-tab=agentflow]');
+    assert(await op('[data-split-open=agentflow]')==='1'&&await op('[data-split-open=timeline]')==='0'&&!await js(`!!document.querySelector('[data-split-open=devops]')`),'split: hovering another tab reveals its split notch; the current tab has none');
+    await click(...await center('[data-split-open=agentflow]'));await sleep(150);
+    assert(await panes()==='devops|agentflow*'&&await js('location.hash')==='#devops|agentflow'&&await js(`[...document.querySelectorAll('.tab[aria-selected=true]')].map(t=>t.dataset.tab).join()`)==='devops,agentflow'
+      &&await js(`(()=>{const [a,b]=document.querySelectorAll('main>.pane');return a.querySelectorAll('#devopsView .dcol').length===7&&!!b.querySelector('#agentflowView #afCanvas [data-agent]')&&a.getBoundingClientRect().width>400&&b.getBoundingClientRect().width>400})()`),'split: the notch shows the current view on the left and the new one on the right, both rendered and both tabs selected');
+    const agentId=await js(`document.querySelector('#afCanvas [data-agent]').dataset.agent`);
+    await click(...await center(`#afCanvas [data-agent="${agentId}"] .nm`));
+    assert(await js(`document.querySelector('.pane[data-pane="1"] #inspector:not([hidden]) #af-name')?.value.length>0`),'split: the side panel opens inside the focused pane');
+    await click(...await center('[data-dcol=doing] .dcol-h em'));
+    assert(await panes()==='devops*|agentflow'&&await js(`document.body.dataset.tab==='devops'&&document.querySelector('#inspector').hidden&&!!document.querySelector('#afCanvas .af-node.sel')`),'split: pressing in the other pane moves focus there; the first pane keeps its selection');
+    await key('Escape',27);await key('/',191,0,'/');
+    assert(await js(`document.activeElement?.id`)==='dv-q'&&await js(`!!document.querySelector('#afCanvas .af-node.sel')`),'split: Escape and shortcuts go to the focused pane only (/ searches DevOps, the agent stays selected)');
+    await js(`document.activeElement.blur()`);
+    await click(...await js(`(()=>{const r=document.querySelector('#agentflowView .af-bar').getBoundingClientRect();return [r.left+3,r.top+3]})()`));
+    await key('/',191,0,'/');
+    assert(await panes()==='devops|agentflow*'&&await js(`document.activeElement?.id`)==='af-q'&&await js(`document.querySelector('.pane[data-pane="1"] #inspector:not([hidden]) #af-name')?.value.length>0`),'split: focusing the AgentFlow pane brings its side panel back and / searches agents');
+    await js(`document.activeElement.blur()`);
+    assert(await js(`(()=>{const p=document.querySelector('.pane[data-pane="1"]').getBoundingClientRect(),c=document.querySelector('#afCanvas').getBoundingClientRect();return c.width>0&&c.left>=p.left-1&&c.right<=p.right+1})()`),'split: the org canvas sizes to its pane');
+    const [dx,dy]=await center('.split-div'),w0=await js(`document.querySelector('.pane[data-pane="0"]').getBoundingClientRect().width`);
+    await drag(dx,dy,dx-180,dy);await sleep(100);
+    const ratio=await js(`JSON.parse(localStorage.getItem('flygon-flow-split')).ratio`);
+    assert(ratio<.45&&await js(`document.querySelector('.pane[data-pane="0"]').getBoundingClientRect().width`)<w0-150,'split: dragging the divider changes the ratio, which is saved');
+    await drag(dx-180,dy,5,dy);await sleep(100);
+    assert(Math.round(await js(`document.querySelector('.pane[data-pane="0"]').getBoundingClientRect().width`))>=360,'split: each pane keeps a minimum width');
+    await js(`document.querySelector('.split-div').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))`);await sleep(50);
+    assert(await js(`JSON.parse(localStorage.getItem('flygon-flow-split')).ratio`)===.5,'split: double-clicking the divider resets it to 50/50');
+    await js(`document.querySelector('[data-tab=chart]').click()`);await sleep(200);
+    assert(await panes()==='devops|chart*'&&await js('location.hash')==='#devops|chart'&&await js(`document.querySelectorAll('.pane[data-pane="1"] #chartView .node').length>0`),'split: clicking a third tab replaces the focused pane');
+    await js(`history.back()`);await sleep(300);
+    assert(await panes()==='devops|agentflow*'&&await js('location.hash')==='#devops|agentflow','split: Back restores the previous split');
+    await hover('.tab[data-tab=devops]');
+    assert(await op('[data-split-close=devops]')==='1','split: hovering a shown tab reveals its ×');
+    await click(...await center('[data-split-close=devops]'));
+    assert(!await js(`!!document.querySelector('main>.pane')`)&&await js('location.hash')==='#agentflow'&&await js(`document.body.dataset.tab==='agentflow'&&getComputedStyle(document.querySelector('#agentflowView')).display==='flex'&&getComputedStyle(document.querySelector('#devopsView')).display==='none'&&JSON.parse(localStorage.getItem('flygon-flow-split')).tabs===null`),'split: the × closes that pane and the other view fills the window');
+    await hover('.tab[data-tab=timeline]');await click(...await center('[data-split-open=timeline]'));
+    await call('Emulation.setDeviceMetricsOverride',{width:820,height:900,deviceScaleFactor:1,mobile:false});await sleep(300);
+    assert(!await js(`!!document.querySelector('main>.pane,[data-split-open],[data-split-close]')`)&&await js(`document.body.dataset.tab==='timeline'&&getComputedStyle(document.querySelector('#timelineView')).display==='flex'`),'split: narrow windows hide the notch and show the focused pane alone');
+    await call('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});await sleep(300);
+    assert(await panes()==='agentflow|timeline*','split: the split comes back when the window is wide again');
+    await hover('.tab[data-tab=timeline]');await click(...await center('[data-split-close=timeline]'));await key('Escape',27);
+    await js(`document.querySelector('[data-tab=chart]').click()`);await sleep(150);
+  }
   // Static files: anything under public/, nothing outside it.
   const raw=p=>new Promise(res=>http.get({host:'127.0.0.1',port:PORT,path:p},r=>{r.resume();res(r.statusCode)}).on('error',()=>res(0)));
   assert(await raw('/motion.js')===200&&await raw('/favicon.svg')===200&&(await Promise.all(['/../server.mjs','/%2e%2e/server.mjs','/..%5cserver.mjs','/.env','/%2e%2e%2fverify.mjs'].map(raw))).every(c=>c===404),'static serving covers public/ and refuses paths outside it');

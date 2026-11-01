@@ -102,6 +102,15 @@ An org chart for agentic work: the agents (and people and teams) that run a busi
 - **Copy brief** puts a Markdown brief for the agent or workflow on the clipboard: purpose, reporting line, inputs, outputs, tools, steps and linked cards and deadlines. `agents.get` and `workflows.get` return the same brief over the API and MCP. See [docs/concepts/09-agentflow.md](docs/concepts/09-agentflow.md).
 - **Delegate** a DevOps card to agents in its **Delegated to** picker (or `cards.update` with `agents`). Cards show their agents as square badges, the board has an **Agents** filter, and `agents.work` gives a runner the agent's brief plus its queue of open delegated cards, active work first. Deleting an agent moves its reports up to its manager.
 
+### Split view
+Show two tabs side by side, for example DevOps next to AgentFlow, or the MindMap next to the Timeline.
+- Hover a tab you are not on and click the small split icon in its top-right corner: the current view stays on the left and that tab opens on the right. Both tabs then look selected, each with a mark for its side.
+- The pane you last clicked or tabbed into has **focus** (a thin green line along its top). The header, the side panel, keyboard shortcuts and Esc all follow it, so `N` adds to the focused view only. Selections in the other pane stay put; its side panel comes back when you focus it again.
+- Clicking one of the two shown tabs focuses its pane. Clicking any other tab replaces the focused pane. A link that opens another view (a card's agent, a person's DevOps cards) opens it in the other pane, so the view you came from stays in sight.
+- Drag the divider to resize (each pane keeps at least 360px), or double-click it for 50/50. With the divider focused, the arrow keys resize too.
+- Hover either shown tab and click the × in its corner to close that pane; the other view fills the window.
+- The split and its ratio are remembered on this device, and the address shows both tabs (`#devops|agentflow`), so Back, Forward and links work; older links such as `#timeline` or `#devops/card/12` still open one view. Windows narrower than 900px show only the focused pane until there is room again.
+
 ### Shared UI pieces
 - **Pickers** (`ui.js`): `pickerButton(key, label, items, selected)` renders a trigger ("Projects · 2" with colour dots); `openPicker(trigger, {items, selected, onChange, multi})` opens a searchable listbox popover (arrows, Enter/Space, Esc, type to filter, Select all / Clear). Used for the DevOps and Timeline filters and card labels/assignees. Plain single selects are styled native `<select>`s.
 - **Motion and skeletons** (`motion.js`, documented at the top of the file): `swap({from, update, to})` animates tab changes (View Transitions API when available), `enter(root, groups)` staggers a view in, `busy(el, promise)` / `skeletonize(el)` / `skeletonAppend(list, n)` / `unskeletonize(el)` show shimmer placeholders measured from the element's real layout (`data-no-skeleton` opts out). All of it respects `prefers-reduced-motion`. A new module opts in by calling these; no skeleton markup is needed.

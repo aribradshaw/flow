@@ -84,7 +84,8 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
   lastMove={from,to};
   return requestMove(id,to,index,ctx);
 }
-export function leave(){selected=null;pop=null;pending=null;if(modal&&!modal.closing)modal.close()}
+// Leaving closes the card quietly: focus is not handed back to the board (it may sit in the other split pane).
+export function leave(){selected=null;pop=null;pending=null;if(modal&&!modal.closing){modal.quiet=true;modal.close()}}
 function select(id){selected=id;rerender()}
 
 // ---------- moves and gates ----------
@@ -263,7 +264,7 @@ export function renderInspector(pane){
         // Only the current modal owns the URL; an older one closing behind a newer one leaves it alone.
         if(current&&location.hash.startsWith('#devops/card/')){if(pushed){pushed=false;history.back()}else history.replaceState(null,'','#devops')}
         if(selected===id){selected=null;rerender()}
-        requestAnimationFrame(()=>cardEl(id)?.focus({preventScroll:true}));
+        if(!m.quiet)requestAnimationFrame(()=>cardEl(id)?.focus({preventScroll:true}));
       }});
     modal=m;
   }

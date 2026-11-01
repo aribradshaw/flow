@@ -6,7 +6,8 @@ import * as dv from './devops.js';
 import * as af from './agentflow.js';
 import {openCardsFor} from './devops-core.js';
 import {peopleOf} from './agentflow-core.js';
-import {swap,busy,unskeletonize,panel,popOut} from './motion.js';
+import {swap,busy,unskeletonize,panel,panelReset,popOut} from './motion.js';
+import {TABS,parseHash,hashFor,clampRatio,openSplit,closePane,clickTab,revealTab,cleanSplit,NARROW,DIVIDER} from './split-core.js';
 import {logoMark} from './logo-mark.js';
 import {accountHtml,sessionUser} from './account.js';
 import {startInbox} from './inbox.js';
@@ -40,15 +41,33 @@ const rect=n=>{const [w,h]=size(n);return {x:n.x,y:n.y,w,h}};
 const node=id=>chart().nodes.find(n=>n.id===id);
 const edge=id=>chart().edges.find(e=>e.id===id);
 
-const TABS=['chart','timeline','devops','agentflow'],hashTab=()=>TABS.find(t=>location.hash.slice(1).split('/')[0]===t)||'chart';
-let tab=hashTab(),selected=null,connecting=false,source=null,renaming=false,fitted=false;
+// Split view: split.tabs is [left, right] while two tabs show side by side (null: one view) and
+// split.ratio the left pane's share. tab is the focused pane's tab, so everything that follows "the
+// current tab" (header, side panel, shortcuts, Escape) follows focus. Kept per device in localStorage
+// (it depends on the screen); the hash is #left|right. A bare URL brings the last split back.
+const SPLITKEY='flygon-flow-split';
+const split=(()=>{try{return cleanSplit(JSON.parse(localStorage.getItem(SPLITKEY)))}catch{return cleanSplit()}})();
+const keepSplit=()=>{try{localStorage.setItem(SPLITKEY,JSON.stringify(split))}catch{}};
+const narrow=()=>innerWidth<NARROW,isSplit=()=>!!split.tabs&&!narrow();
+const openTabs=()=>isSplit()?split.tabs:[tab],isOpen=t=>openTabs().includes(t);
+const layoutNow=()=>({tabs:split.tabs,focus:split.tabs?Math.max(0,split.tabs.indexOf(tab)):0});
+const startHash=parseHash(location.hash);
+if(startHash.tabs||location.hash)split.tabs=startHash.tabs;
+let tab=split.tabs?split.tabs[0]:startHash.tab,selected=null,connecting=false,source=null,renaming=false,fitted=false;
 let view={x:40,y:40,z:1},drag=null,statusState='ok',statusText='Saved';
 const tools=[],edited=new WeakSet();
 let stripOff=localStorage.getItem('org-chart-studio-strip')==='off';
 
 
 // ---------- top bar ----------
-const tabBtn=(id,ic,label)=>`<button type="button" class="tab" role="tab" data-tab="${id}" aria-selected="${tab===id}">${icon(ic,15)}${label}</button>`;
+// A tab that is not showing has a split notch (top right, on hover); in split view both shown tabs
+// are selected, mark their side and have an × there that closes their pane.
+function tabBtn(id,ic,label){
+  const sp=isSplit(),side=sp?split.tabs.indexOf(id):-1,on=sp?side>=0:tab===id,where=side?'right':'left';
+  const corner=narrow()?'':side>=0?`<button type="button" class="tab-x" data-split-close="${id}" data-tip="Close this pane" aria-label="Close the ${label} pane">${icon('x',10)}</button>`
+    :!sp&&!on?`<button type="button" class="tab-x" data-split-open="${id}" data-tip="Open in split view" aria-label="Open ${label} in split view">${icon('split',11)}</button>`:'';
+  return `<span class="tab-w"><button type="button" class="tab${side>=0?` in-split${id===tab?' focus':''}`:''}" role="tab" data-tab="${id}" aria-selected="${on}"${side>=0?` data-side="${where}" aria-label="${label}, ${where} pane${id===tab?', focused':''}"`:''}>${icon(ic,15)}${label}${side>=0?`<span class="tab-side" aria-hidden="true">${icon(side?'paneR':'paneL',11)}</span>`:''}</button>${corner}</span>`;
+}
 function renderTop(){
   const c=chart(),db=store.db;
   const ctx=tab==='chart'
@@ -59,7 +78,7 @@ function renderTop(){
       +`<span class="meta" data-tip="${c.nodes.length} cards · ${c.edges.length} connections">${c.nodes.length} · ${c.edges.length}</span>`
     :tab==='timeline'?tl.headerHtml():tab==='devops'?dv.headerHtml():af.headerHtml();
   $('#top').innerHTML=`<span class="logo" data-tip="${esc(instanceName)}">${instanceLogo?`<img src="${esc(instanceLogo)}" alt="" width="20" height="20">`:logoMark(20)}</span>
-    <nav class="tabs" role="tablist">${tabBtn('chart','network','MindMap')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}${tabBtn('agentflow','bot','AgentFlow')}</nav>
+    <nav class="tabs" role="tablist"${isSplit()?' aria-multiselectable="true"':''}>${tabBtn('chart','network','MindMap')}${tabBtn('timeline','gantt','Timeline')}${tabBtn('devops','branch','DevOps')}${tabBtn('agentflow','bot','AgentFlow')}</nav>
     <div class="ctx">${ctx}</div><span class="sp"></span>
     ${ib('save','Save\nTo this computer and the Flygon cloud',{key:keyLabel('global.save'),attrs:'data-act="saveNow"'})}${ib('open','Load a save',{cls:loadPop?'on':'',attrs:'data-act="load"'})}
     <span id="status" class="dot ${statusState}" data-tip="${esc(statusText)}" role="status" aria-label="${esc(statusText)}"></span>
@@ -71,15 +90,138 @@ const VIEWS={chart:'#chartView',timeline:'#timelineView',devops:'#devopsView',ag
 // Entrance order per view: toolbar, then panels, then columns / rows / cards.
 const ENTER={chart:['#canvas','#tools,#zoom','#strip'],timeline:['.tl-bar','.tl-scroll','.lane,.board .col,.lr'],devops:['.dv-bar','.dcol'],agentflow:['.af-bar','.af-canvas,.af-flows']};
 function setTab(t){
+  // A single-view change (a narrow window) drops a stored split that no longer holds the tab.
+  if(split.tabs&&!split.tabs.includes(t)){split.tabs=null;keepSplit()}
   if(t===tab)return;
   const from=$(VIEWS[tab]);
   tab=t;selected=null;connecting=false;source=null;renaming=false;tl.leave();dv.leave();af.leave();
   swap({from,update(){render();if(tab==='chart'&&!fitted)fit()},to:()=>[$(VIEWS[tab]),ENTER[tab]]});
 }
-window.addEventListener('popstate',()=>{setTab(hashTab());if(tab==='devops')dv.syncHash()});
+// ---------- split view ----------
+// Each pane wraps one view's own <section> (moved in, so its listeners and state come along) and the
+// focused pane also holds the one side panel (#inspector), which shows the focused view's selection.
+// The other pane keeps its selection on its canvas and gets its panel back when it is focused again.
+const mainEl=$('main'),inspectorEl=$('#inspector'),SCROLLERS='.tl-scroll,.dv-scroll,.af-scroll,.dcol-b';
+let panes=null;
+function leaveTab(t){if(t==='chart'){selected=null;connecting=false;source=null}else ({timeline:tl,devops:dv,agentflow:af})[t].leave()}
+// Moving a section keeps its scroll positions.
+function moveView(sec,parent,before=null){
+  if(sec.parentNode===parent&&(before?sec.nextSibling===before:true))return;
+  const keep=[...sec.querySelectorAll(SCROLLERS)].map(el=>[el,el.scrollLeft,el.scrollTop]);
+  parent.insertBefore(sec,before);
+  for(const [el,l,t] of keep){el.scrollLeft=l;el.scrollTop=t}
+}
+function makeDivider(){
+  const d=document.createElement('div');
+  Object.assign(d,{className:'split-div',tabIndex:0});
+  for(const [k,v] of Object.entries({role:'separator','aria-orientation':'vertical','aria-label':'Resize the split panes','aria-valuemin':'0','aria-valuemax':'100','data-tip':'Drag to resize · double-click for 50/50','data-tip-delay':'700'}))d.setAttribute(k,v);
+  let pid=null;
+  d.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();pid=e.pointerId;d.setPointerCapture(pid);hideTip();document.body.classList.add('split-drag')});
+  d.addEventListener('pointermove',e=>{if(e.pointerId!==pid)return;const r=mainEl.getBoundingClientRect();setRatio((e.clientX-r.left-DIVIDER/2)/(r.width-DIVIDER),false)});
+  const end=e=>{if(e.pointerId!==pid)return;pid=null;document.body.classList.remove('split-drag');keepSplit()};
+  d.addEventListener('pointerup',end);d.addEventListener('pointercancel',end);
+  d.addEventListener('dblclick',()=>setRatio(.5));
+  d.addEventListener('keydown',e=>{
+    const k={ArrowLeft:-.02,ArrowRight:.02}[e.key];
+    if(k||e.key==='Home'||e.key==='End'||e.key==='Enter'){e.preventDefault();e.stopPropagation();setRatio(k?clampRatio(split.ratio,mainEl.clientWidth)+k:e.key==='Home'?0:e.key==='End'?1:.5)}
+  });
+  return d;
+}
+const applyRatio=()=>{const r=clampRatio(split.ratio,mainEl.clientWidth);mainEl.style.setProperty('--split',String(r));panes?.[1].setAttribute('aria-valuenow',String(Math.round(r*100)))};
+function setRatio(r,persist=true){split.ratio=clampRatio(r,mainEl.clientWidth);keepCentre(applyRatio);if(persist)keepSplit()}
+// Resizing a pane keeps the MindMap and the AgentFlow org centred in it.
+function keepCentre(fn){
+  const cv=$('#canvas'),c0=cv.clientWidth,a0=$('#afCanvas')?.clientWidth||0;
+  fn();
+  const c1=cv.clientWidth,a1=$('#afCanvas')?.clientWidth||0;
+  if(c0&&c1&&c0!==c1){view.x+=(c1-c0)/2;renderCanvas()}
+  if(a0&&a1&&a0!==a1)af.pan((a1-a0)/2);
+}
+// Put the DOM in step with the state: sections in their panes (or back in <main>), the side panel in
+// the focused pane, the divider at the ratio.
+function layout(){
+  const on=isSplit();
+  document.body.classList.toggle('split',on);
+  if(!on){
+    if(!panes)return;
+    if(inspectorFor!==tab)panelReset(inspectorEl);
+    mainEl.append(inspectorEl);for(const t of TABS)moveView($(VIEWS[t]),mainEl,inspectorEl);
+    for(const p of panes)p.remove();panes=null;mainEl.style.removeProperty('--split');return;
+  }
+  if(!panes){
+    const pane=i=>{const p=document.createElement('div');p.className='pane';p.dataset.pane=String(i);return p};
+    panes=[pane(0),makeDivider(),pane(1)];mainEl.append(...panes);
+  }
+  split.tabs.forEach((t,i)=>{
+    const p=panes[i*2],sec=$(VIEWS[t]);
+    for(const old of p.querySelectorAll(':scope>.view'))if(old!==sec)moveView(old,mainEl,panes[0]);
+    moveView(sec,p,p.firstChild);
+    p.classList.toggle('focus',t===tab);p.dataset.paneTab=t;
+  });
+  const fp=panes[split.tabs.indexOf(tab)*2];
+  if(inspectorEl.parentNode!==fp){if(inspectorFor!==tab)panelReset(inspectorEl);fp.append(inspectorEl)}
+  applyRatio();
+}
+// Change what shows: tabs [left, right] or null, focused tab `to`; how = 'push' | 'replace' the hash.
+// Tabs that stop showing are left (their selection clears); new ones animate in.
+function setLayout(tabs,to,how){
+  if(renaming)$('#chartName')?.blur();
+  const before=openTabs();
+  split.tabs=tabs;tab=to;keepSplit();
+  const now=openTabs();
+  for(const t of before)if(!now.includes(t))leaveTab(t);
+  if(how)history[how==='push'?'pushState':'replaceState'](null,'',hashFor(tab,split.tabs)||location.pathname);
+  const fresh=now.find(t=>!before.includes(t));
+  const update=()=>{keepCentre(layout);render();if(isOpen('chart')&&!fitted)fit();af.resized()};
+  if(fresh)swap({from:null,update,to:()=>[$(VIEWS[fresh]),ENTER[fresh]]});else update();
+}
+// Focus a pane: the header, side panel, shortcuts and Escape follow it. Its contents are not redrawn
+// (this runs on pointerdown, before the view's own handlers see the press).
+function focusPane(i){
+  const t=split.tabs?.[i];if(!t||t===tab)return;
+  if(!isSplit()){setLayout(split.tabs,t);return}
+  if(renaming)$('#chartName')?.blur();
+  tab=t;hideTip();layout();document.body.dataset.tab=tab;renderTop();renderInspector(false);
+}
+// Focus follows a press in a pane, or keyboard Tab into it (programmatic focus, e.g. a closing modal
+// handing focus back, does not move it).
+let tabbing=false;
+document.addEventListener('keydown',e=>{tabbing=e.key==='Tab'},true);
+document.addEventListener('pointerdown',()=>{tabbing=false},true);
+mainEl.addEventListener('pointerdown',e=>{const p=isSplit()&&e.target.closest?.('.pane');if(p)focusPane(+p.dataset.pane)},true);
+mainEl.addEventListener('focusin',e=>{const p=tabbing&&isSplit()&&e.target.closest?.('.pane');if(p)focusPane(+p.dataset.pane)});
+// Narrow windows show the focused pane alone; the split comes back when there is room again.
+let wasNarrow=narrow();
+window.addEventListener('resize',()=>{
+  if(narrow()!==wasNarrow){wasNarrow=narrow();if(split.tabs){keepCentre(layout);render();if(isOpen('chart')&&!fitted)fit()}else renderTop()}
+  else if(isSplit())applyRatio();
+});
+// Canvases size to their pane: a first fit waits for a width, and the chart strip follows the divider.
+let chartW=0;
+new ResizeObserver(()=>{
+  const w=$('#chartView').clientWidth;
+  if(w&&w!==chartW){chartW=w;if(!fitted&&isOpen('chart'))fit();if(isSplit()&&isOpen('chart')&&!stripAdding)renderStrip()}
+  if(isOpen('agentflow'))af.resized();
+}).observe($('#chartView'));
+new ResizeObserver(()=>{if(isOpen('agentflow'))af.resized()}).observe($('#agentflowView'));
+
+// Back / Forward: a split hash restores that split; a deep link (#devops/card/4) into a shown pane
+// focuses it; any other single-tab hash leaves the split.
+window.addEventListener('popstate',()=>{
+  const h=parseHash(location.hash);
+  if(h.tabs){if(h.tabs.join()!==split.tabs?.join())setLayout(h.tabs,h.tabs.includes(tab)?tab:h.tabs.find(t=>!split.tabs?.includes(t))||h.tabs[0])}
+  else if(split.tabs&&location.hash.includes('/')&&split.tabs.includes(h.tab))focusPane(split.tabs.indexOf(h.tab));
+  else if(split.tabs)setLayout(null,h.tab);
+  else setTab(h.tab);
+  if(isOpen('devops'))dv.syncHash();
+});
 $('#top').addEventListener('click',e=>{
+  const so=e.target.closest('[data-split-open]');if(so){const n=!narrow()&&openSplit(tab,so.dataset.splitOpen);if(n)setLayout(n.tabs,n.tabs[n.focus],'replace');return}
+  const sc=e.target.closest('[data-split-close]');if(sc){const n=closePane(layoutNow(),sc.dataset.splitClose);if(n)setLayout(null,n.tab,'replace');return}
   const t=e.target.closest('.tab[data-tab]');
-  if(t){if(t.dataset.tab!==tab){history.pushState(null,'',t.dataset.tab==='chart'?location.pathname:'#'+t.dataset.tab);setTab(t.dataset.tab)}return}
+  // In split view a shown tab takes focus; any other tab replaces the focused pane.
+  if(t&&isSplit()){const n=clickTab(layoutNow(),t.dataset.tab);if(n.replaced)setLayout(n.tabs,n.tab,'push');else focusPane(n.focus);return}
+  if(t){if(t.dataset.tab!==tab){history.pushState(null,'',t.dataset.tab==='chart'?location.pathname:'#'+t.dataset.tab);setTab(t.dataset.tab)}else if(split.tabs){split.tabs=null;keepSplit();history.replaceState(null,'',hashFor(tab,null)||location.pathname)}return}
   const b=e.target.closest('[data-act],[data-tl]');if(!b)return;
   if(b.dataset.tl)return tl.action(b.dataset.tl,b);
   ({rename(){renaming=true;renderTop();const i=$('#chartName');i.focus();i.select()},
@@ -101,7 +243,7 @@ $('#file').onchange=async e=>{
   try{
     if(file.size>5_000_000)throw Error('File is too large (5 MB maximum)');
     const data=JSON.parse(await file.text()),c=data.chart||data;
-    if(validDb(data)){replaceDb(data);toast('Loaded '+file.name+' · Ctrl Z to undo');if(tab==='chart')fit();e.target.value='';return}
+    if(validDb(data)){replaceDb(data);toast('Loaded '+file.name+' · Ctrl Z to undo');if(isOpen('chart'))fit();e.target.value='';return}
     if(!validChart(c))throw Error('Invalid mind map: check entities, connections and percentages');
     change(()=>{c.id=uid();c.name+=' (imported)';store.db.charts.push(c);store.db.active=c.id;selected=null});fit();
   }catch(err){alert(err.message)}
@@ -151,7 +293,7 @@ document.addEventListener('click',async e=>{
     const req=fetch('/api/saves/'+b.dataset.load);window.flowSplash?.during(req);
     const r=await busy($('main'),req),s=await r.json();
     if(!r.ok||!validDb(s.data))throw Error(s.error||'That save is not a valid workspace');
-    replaceDb(s.data);if(tab==='chart')fit();toast(`Loaded save from ${at} · Ctrl Z to undo`);
+    replaceDb(s.data);if(isOpen('chart'))fit();toast(`Loaded save from ${at} · Ctrl Z to undo`);
   }catch(err){toast('Load failed · '+err.message,true)}
   finally{unskeletonize($('main'))}
 });
@@ -417,8 +559,10 @@ async function useMyPhoto(){
   }catch(err){toast('Could not use your photo · '+err.message,true)}
 }
 const options=id=>chart().nodes.map(n=>`<option value="${esc(n.id)}"${id===n.id?' selected':''}>${esc(n.name)}</option>`).join('');
-function renderInspector(){
-  const pane=$('#inspector');
+let inspectorFor=null;
+// strip=false: a focus change in split view, which leaves the chart's strip (possibly under the pointer) alone.
+function renderInspector(strip=true){
+  const pane=$('#inspector');inspectorFor=tab;
   if(tab==='timeline'){tl.renderInspector(pane);return}
   if(tab==='devops'){dv.renderInspector(pane);return}
   if(tab==='agentflow'){af.renderInspector(pane);return}
@@ -447,11 +591,11 @@ function renderInspector(){
       ${own?`<label for="percent">Share</label><div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>`:''}${l?historyHtml(e,'edge'):''}</form>`;
   }
   if(linkOf(n||e))loadHistory(pane);
-  renderStrip();
+  if(strip)renderStrip();
 }
 // Selecting an entity or area shows its slice of the Timeline along the bottom of the canvas.
 function renderStrip(){
-  const el=$('#strip'),cv=$('#chartView'),n=node(selected),show=tab==='chart'&&!!n&&(n.type==='entity'||n.type==='area')&&!stripOff;
+  const el=$('#strip'),cv=$('#chartView'),n=node(selected),show=isOpen('chart')&&!!n&&(n.type==='entity'||n.type==='area')&&!stripOff;
   el.hidden=!show;cv.classList.toggle('has-strip',show);
   if(!show){stripAdding=false;return}
   if(stripAdding!==false&&stripAdding!==n.id)stripAdding=false;
@@ -460,9 +604,16 @@ function renderStrip(){
 }
 let stripAdding=false;
 function setStripOff(v){stripOff=v;localStorage.setItem('org-chart-studio-strip',v?'off':'on');renderInspector()}
-function toTimeline(fn){history.pushState(null,'','#timeline');setTab('timeline');fn();render()}
-function toDevops(fn){if(tab!=='devops'){history.pushState(null,'','#devops');setTab('devops')}fn();render()}
-function toAgentflow(fn){if(tab!=='agentflow'){history.pushState(null,'','#agentflow');setTab('agentflow')}fn();render()}
+// Cross-links. In split view the target opens in the other pane (the source stays in view) and takes
+// focus; a DevOps card or timeline item the link came from closes, since its modal covers both panes.
+function reveal(t){
+  const n=revealTab(layoutNow(),t);
+  if(tab!==t&&(tab==='devops'||tab==='timeline'))leaveTab(tab);
+  if(n.replaced)setLayout(n.tabs,t,'push');else focusPane(n.focus);
+}
+function toTimeline(fn){if(isSplit())reveal('timeline');else{history.pushState(null,'','#timeline');setTab('timeline')}fn();render()}
+function toDevops(fn){if(isSplit())reveal('devops');else if(tab!=='devops'){history.pushState(null,'','#devops');setTab('devops')}fn();render()}
+function toAgentflow(fn){if(isSplit())reveal('agentflow');else if(tab!=='agentflow'){history.pushState(null,'','#agentflow');setTab('agentflow')}fn();render()}
 $('#strip').addEventListener('click',e=>{
   const n=node(selected),it=e.target.closest('[data-item]'),proj=e.target.closest('[data-strip-proj]')?.dataset.stripProj,a=e.target.closest('[data-strip]')?.dataset.strip;if(!n)return;
   const ids=tl.projectsFor(n).map(p=>p.id);
@@ -484,7 +635,7 @@ $('#strip').addEventListener('keydown',e=>{
   if(e.key==='Escape'){e.stopPropagation();stripAdding=false;renderStrip()}
 });
 $('#strip').addEventListener('focusout',e=>{if(e.target.id==='stripNew'&&stripAdding&&!e.target.value.trim()){stripAdding=false;setTimeout(renderStrip)}});
-window.addEventListener('resize',()=>{if(tab==='chart')renderStrip()});
+window.addEventListener('resize',()=>{if(isOpen('chart'))renderStrip()});
 const pane=$('#inspector');
 pane.addEventListener('submit',e=>e.preventDefault());
 pane.addEventListener('click',e=>{
@@ -552,11 +703,14 @@ document.addEventListener('keydown',e=>{
   else if(matches(e,'chart.zoomOut'))zoom(1/1.2);
 });
 
+// Every shown view renders (both panes in split view, from the one store); hidden views do no work.
 function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
-  if(tab==='chart'){renderCanvas();renderTools()}else if(tab==='timeline')tl.render();else if(tab==='devops')dv.render();else af.render();
+  for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
   renderInspector();
+  // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
+  if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
 store.onChange=render;
 setPeopleSource(()=>peopleOf(store.db||{}));
@@ -572,7 +726,7 @@ af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.
 window.flygonFlow=window.orgChartStudio={registerTool({id,label,icon:ic,run}){tools.push({id,label,icon:ic,run});renderTools()},getChart:()=>clone(chart())};
 
-initTooltips();initSelects();render();if(tab==='chart')fit();save();startSync();startInbox();if(tab==='devops')dv.syncHash();loadDevlog().then(()=>renderTop());
+initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());
 // Rebinding a shortcut re-renders, so tooltips show the new keys.
 onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}});syncPrefs();
 document.body.removeAttribute('aria-busy');
