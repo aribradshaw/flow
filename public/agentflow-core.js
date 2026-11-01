@@ -143,20 +143,46 @@ export function workQueue(db,agentId){
 // ---------- canvas layout ----------
 // Card size on the canvas and the spacing of the automatic tree.
 export const CARD={w:188,h:76},STEP={x:212,y:128};
-// A tidy tree: leaves side by side, each manager centred over its reports, root trees side by side.
-export function treeLayout(af){
-  const out=new Map(),kids=new Map(af.agents.map(a=>[a.id,[]]));
+// A manager with STACK.min or more reports that have no reports of their own lists those in
+// columns of up to STACK.rows, indented under it, so a big team doesn't stretch the chart sideways.
+export const STACK={min:3,rows:6,y:CARD.h+20,indent:24};
+const teams=af=>{
+  const kids=new Map(af.agents.map(a=>[a.id,[]]));
   for(const a of af.agents)if(a.reportsTo&&kids.has(a.reportsTo)&&a.reportsTo!==a.id)kids.get(a.reportsTo).push(a);
-  let slot=0;
-  const place=(a,depth)=>{
-    if(out.has(a.id))return out.get(a.id).x;
-    out.set(a.id,{x:0,y:depth*STEP.y});
-    const xs=kids.get(a.id).map(k=>place(k,depth+1)).filter(x=>x!==undefined);
-    const x=xs.length?(xs[0]+xs.at(-1))/2:slot++*STEP.x;
-    out.get(a.id).x=x;return x;
+  return kids;
+};
+// The agents drawn in a stacked column (their reporting line enters from the side).
+export function stacked(af){
+  const kids=teams(af),out=new Set();
+  for(const list of kids.values()){
+    const leaves=list.filter(k=>!kids.get(k.id).length);
+    if(leaves.length>=STACK.min)for(const k of leaves)out.add(k.id);
+  }
+  return out;
+}
+// A tidy tree: each manager centred over its reports, root trees side by side. Reports without
+// reports of their own are stacked in columns (left) when there are STACK.min or more of them.
+export function treeLayout(af){
+  const out=new Map(),kids=teams(af),gap=STEP.x-CARD.w,col=STEP.x+STACK.indent;
+  const place=(a,x0,y)=>{
+    if(out.has(a.id))return 0;
+    out.set(a.id,{x:x0,y});
+    const list=kids.get(a.id).filter(k=>!out.has(k.id));
+    if(!list.length)return STEP.x;
+    const leaves=list.filter(k=>!kids.get(k.id).length),stack=leaves.length>=STACK.min;
+    let x=x0;
+    if(stack){
+      leaves.forEach((k,i)=>out.set(k.id,{x:x0+Math.floor(i/STACK.rows)*col+STACK.indent,y:y+STEP.y+(i%STACK.rows)*STACK.y}));
+      x+=Math.ceil(leaves.length/STACK.rows)*col;
+    }
+    for(const k of list)if(!stack||!leaves.includes(k))x+=place(k,x,y+STEP.y);
+    const w=Math.max(STEP.x,x-x0);
+    out.get(a.id).x=x0+(w-gap-CARD.w)/2;
+    return w;
   };
-  for(const a of af.agents)if(!a.reportsTo||!kids.has(a.reportsTo))place(a,0);
-  for(const a of af.agents)if(!out.has(a.id))place(a,0); // only reachable through a loop
+  let x=0;
+  for(const a of af.agents)if(!a.reportsTo||!kids.has(a.reportsTo))x+=place(a,x,0);
+  for(const a of af.agents)if(!out.has(a.id))x+=place(a,x,0); // only reachable through a loop
   return out;
 }
 // Where each agent is drawn: the tree until someone arranges the canvas; after that, saved
@@ -171,6 +197,9 @@ export function positions(af){
   while(todo.length){
     const i=Math.max(0,todo.findIndex(a=>!ids.has(a.reportsTo)||out.has(a.reportsTo))),a=todo.splice(i,1)[0],m=out.get(a.reportsTo);
     let x=m?m.x:Math.max(...taken.map(p=>p.x))+STEP.x,y=m?m.y+STEP.y:Math.min(...taken.map(p=>p.y));
+    // Under a manager that already has reports drawn, continue the column below the last one.
+    const sib=m&&af.agents.filter(s=>s.reportsTo===a.reportsTo&&s.id!==a.id&&out.has(s.id)).map(s=>out.get(s.id)).filter(p=>p.y>m.y).at(-1);
+    if(sib&&!free(x,y)){x=sib.x;y=sib.y+STACK.y;while(!free(x,y))y+=STACK.y}
     while(!free(x,y))x+=STEP.x;
     const p={x,y};out.set(a.id,p);taken.push(p);
   }

@@ -8,7 +8,7 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,positions,placed,pin,unpin,workQueue,duplicateWorkflow} from './agentflow-core.js';
+  canReportTo,CARD,STACK,stacked,positions,placed,pin,unpin,workQueue,duplicateWorkflow} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -108,8 +108,13 @@ function nodeHtml(a,p,hits){
     <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
 }
 // Manager to report: a rounded elbow down from the manager when the report sits below, else a curve.
-function linkPath(m,r){
+// A stacked report (see stacked()) hangs off a spine just left of its column and enters from the side.
+function linkPath(m,r,side){
   const x1=m.x+CARD.w/2,y1=m.y+CARD.h,x2=r.x+CARD.w/2,y2=r.y;
+  if(side&&y2-y1>=24){
+    const ym=y1+Math.min(28,(y2-y1)/2),sx=r.x-STACK.indent/2,yc=r.y+CARD.h/2,dx=sx-x1,rad=Math.min(8,Math.abs(dx)/2),s=Math.sign(dx)||1;
+    return `M${x1} ${y1}V${ym-rad}Q${x1} ${ym} ${x1+s*rad} ${ym}H${sx-s*rad}Q${sx} ${ym} ${sx} ${ym+rad}V${yc-rad}Q${sx} ${yc} ${sx+rad} ${yc}H${r.x}`;
+  }
   if(y2-y1>=24){
     const ym=y1+Math.min(28,(y2-y1)/2),dx=x2-x1,rad=Math.min(8,Math.abs(dx)/2,(y2-ym)/2),sx=Math.sign(dx);
     return dx===0?`M${x1} ${y1}V${y2}`:`M${x1} ${y1}V${ym-rad}Q${x1} ${ym} ${x1+sx*rad} ${ym}H${x2-sx*rad}Q${x2} ${ym} ${x2} ${ym+rad}V${y2}`;
@@ -135,7 +140,7 @@ function paint(){
   const g=GRID*view.z*(view.z<.45?4:view.z<.8?2:1);cv.style.backgroundSize=`${g}px ${g}px`;cv.style.backgroundPosition=`${view.x}px ${view.y}px`;
   cv.querySelector('.af-nodes').innerHTML=af().agents.map(a=>nodeHtml(a,pos.get(a.id),hits)).join('');
   // Each line also gets a wide invisible twin, so it is easy to right-click.
-  const lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>{const d=linkPath(pos.get(a.reportsTo),pos.get(a.id));
+  const side=stacked(af()),lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>{const d=linkPath(pos.get(a.reportsTo),pos.get(a.id),side.has(a.id));
     return `<path class="af-ln${hits&&!(hits.has(a.id)&&hits.has(a.reportsTo))?' dim':''}" d="${d}"/><path class="af-hit" data-line="${esc(a.id)}" d="${d}"/>`}).join('');
   const m=drag?.mode==='link'&&pos.get(drag.id),ghost=m&&drag.px!=null?`<path class="ghost" d="M${m.x+CARD.w/2} ${m.y+CARD.h}L${drag.px} ${drag.py}"/>`:'';
   cv.querySelector('.af-edges').innerHTML=lines+ghost;

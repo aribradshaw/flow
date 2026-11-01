@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -146,6 +146,22 @@ test('canvas: the automatic tree centres managers over their reports',()=>{
   assert.deepEqual([...positions(af)],[...p],'no saved positions: the tree');
 });
 
+test('canvas: a big team of individual contributors stacks in indented columns',()=>{
+  const af=seedAgentflow();
+  const top=newAgent(af,{name:'Top'}),lead=newAgent(af,{name:'Lead',reportsTo:top.id}),sub=newAgent(af,{name:'Sub',reportsTo:lead.id}),solo=newAgent(af,{name:'Solo',reportsTo:sub.id});
+  const ics=Array.from({length:STACK.rows+2},(_,i)=>newAgent(af,{name:'IC'+i,reportsTo:lead.id}));
+  const p=treeLayout(af),L=p.get(lead.id);
+  assert.deepEqual(stacked(af),new Set(ics.map(a=>a.id)),'only reports without reports, and only once there are enough');
+  ics.slice(0,STACK.rows).forEach((a,i)=>assert.deepEqual(p.get(a.id),{x:STACK.indent,y:2*STEP.y+i*STACK.y},'first column, one under another'));
+  assert.equal(p.get(ics[STACK.rows].id).x,STEP.x+2*STACK.indent,'then a second column');
+  assert.ok(p.get(sub.id).x>=p.get(ics.at(-1).id).x+CARD.w,'a report with its own team sits to the right of the columns');
+  assert.equal(p.get(sub.id).y,L.y+STEP.y);
+  const ps=[...p.values()];
+  for(const q of ps)for(const r of ps)if(q!==r)assert.ok(Math.abs(q.x-r.x)>=CARD.w||Math.abs(q.y-r.y)>=CARD.h,'no two cards overlap');
+  newAgent(af,{name:'Solo2',reportsTo:sub.id});
+  assert.ok(!stacked(af).has(solo.id),'two reports stay side by side');
+});
+
 test('canvas: pinning saves what is drawn; agents without a position go under their manager',()=>{
   const af=seedAgentflow();
   const a=newAgent(af,{name:'A'}),b=newAgent(af,{name:'B',reportsTo:a.id});
@@ -155,7 +171,7 @@ test('canvas: pinning saves what is drawn; agents without a position go under th
   const c=newAgent(af,{name:'C',reportsTo:a.id}),d=newAgent(af,{name:'D',reportsTo:a.id}),e=newAgent(af,{name:'E'});
   const p=positions(af);
   assert.deepEqual(p.get(c.id),{x:400,y:96+STEP.y},'below the manager');
-  assert.deepEqual(p.get(d.id),{x:400+STEP.x,y:96+STEP.y},'next free spot beside a sibling');
+  assert.deepEqual(p.get(d.id),{x:400,y:96+STEP.y+STACK.y},'continues the column below the last sibling');
   assert.equal(p.get(e.id).y,Math.min(a.y,b.y),'a new root goes to the right, at the top');
   assert.ok(p.get(e.id).x>Math.max(a.x,b.x,p.get(d.id).x-1));
   const ps=[...p.values()];
