@@ -1,5 +1,5 @@
 import {icon,makerIcon} from './icons.js';
-import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg,personPhoto} from './ui.js';
+import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed} from './ui.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask} from './modal.js';
@@ -7,7 +7,7 @@ import {openMenu,menuOpen} from './menu.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
-  removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
+  removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
   canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
@@ -97,12 +97,22 @@ function toolbar(){
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
-// A person's face: their photo when the person card has one (image: a URL or data URL), else
-// initials on their member colour.
-// A person's photo: their own, or the signed-in account's when the email matches (ui.js personPhoto).
+// A person's photo: their own, or the signed-in account's when the card is theirs (ui.js personPhoto).
 const photo=n=>n?safeImg(personPhoto(n)):'';
-const faceHtml=(n,cls,tip)=>{const src=photo(n),[bg,fg]=memberColor(n.id);
-  return src?`<img class="${cls} img" src="${esc(src)}" alt="" draggable="false" data-tip="${esc(tip)}">`:`<span class="${cls}" style="background:${bg};color:${fg}" data-tip="${esc(tip)}">${esc(initials(n.name))}</span>`};
+// A human agent's face, {id, name, src} or null: the person it is linked to (its supervisor), else the
+// one person card with its name, else (no person has that name) the signed-in user when it has theirs.
+// Display only: nothing is linked or saved.
+function humanFace(a){
+  if(a.kind!=='human')return null;
+  const sup=person(a.supervisor);if(sup)return {id:sup.id,name:sup.name,src:photo(sup)};
+  const ppl=peopleOf(db()),p=personNamed(ppl,a.name);if(p)return {id:p.id,name:p.name,src:photo(p)};
+  const src=!ppl.some(x=>sameName(x.name,a.name))&&safeImg(sessionPhotoNamed(a.name));
+  return src?{id:a.id,name:a.name,src}:null;
+}
+// A face: the photo over initials on the member colour (initials show if the photo fails to load).
+const faceHtml=(f,cls,tip)=>{const [bg,fg]=memberColor(f.id);
+  return `<span class="${cls}${f.src?' has-photo':''}" style="background:${bg};color:${fg}" data-tip="${esc(tip)}"><span class="pa-txt">${esc(initials(f.name))}</span>${f.src?photoImg(f.src):''}</span>`};
+const faceOf=n=>({id:n.id,name:n.name,src:photo(n)}),faceNode=f=>({id:f.id,name:f.name,image:f.src});
 // The models an AI agent runs on, bottom-right of its card: up to three maker marks in order (the
 // primary larger, fallbacks tucked behind) and "+N", or one auto mark and a count when on Auto.
 function modelMarks(a){
@@ -118,13 +128,14 @@ function nodeHtml(a,p,hits){
   const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
   const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
   const run=runLine(af(),a),live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),kind=AGENT_KINDS[a.kind],status=AGENT_STATUS[a.status];
-  // A human agent is the person it is linked to; anyone else shows its kind.
-  const me=a.kind==='human'&&sup,rt=a.runtime.trim(),glyph=(rt||a.model.trim()).charAt(0).toUpperCase(),[gb,gf]=glyph?memberColor(rt.toLowerCase()||a.model):[];
-  const avatar=me?faceHtml(sup,'af-av',`${kind}: ${sup.name}`):`<span class="af-av k" data-tip="${kind}">${icon(KIND_ICON[a.kind],15)}</span>`;
+  // A human agent is the person it is linked to (or named after, when that person has a photo);
+  // anyone else shows its kind.
+  const hf=humanFace(a),me=hf&&(hf.id===sup?.id||hf.src)?hf:null,rt=a.runtime.trim(),glyph=(rt||a.model.trim()).charAt(0).toUpperCase(),[gb,gf]=glyph?memberColor(rt.toLowerCase()||a.model):[];
+  const avatar=me?faceHtml(me,'af-av',`${kind}: ${me.name}`):`<span class="af-av k" data-tip="${kind}">${icon(KIND_ICON[a.kind],15)}</span>`;
   const runTip=`${run||'No runner or model yet'}\n${live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone'}`;
   return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${kind}: ${a.name}${a.title?`, ${a.title}`:''}. ${status}${live?', live':''}`)}" style="left:${p.x}px;top:${p.y}px">
     <i class="af-st" data-tip="Status: ${status}"></i>
-    <div class="af-n-head"><span class="af-avw">${avatar}${sup&&!me?faceHtml(sup,'af-sup',`Supervised by ${sup.name}`):''}</span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
+    <div class="af-n-head"><span class="af-avw">${avatar}${sup&&!me?faceHtml(faceOf(sup),'af-sup',`Supervised by ${sup.name}`):''}</span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
       <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||kind)}</span></div></div>
     ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
     <div class="af-n-foot"><span class="af-n-stats"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
@@ -436,12 +447,16 @@ function sec(k,ic,title,body,meta=''){
 }
 const ago=iso=>{const s=(Date.now()-Date.parse(iso))/1000;if(!Number.isFinite(s))return '';if(s<90)return 'just now';if(s<5400)return `${Math.round(s/60)} min ago`;if(s<129600)return `${Math.round(s/3600)} h ago`;return `${Math.round(s/86400)} days ago`};
 const personAv=p=>{const [bg,fg]=memberColor(p.id);return {text:initials(p.name),bg,fg,img:photo(p)}};
-const bub=(p,cls='')=>{const v=personAv(p),img=safeImg(v.img);return `<span class="bub ${cls}${img?' img':''}" style="background:${v.bg};color:${v.fg}">${img?`<img src="${esc(img)}" alt="">`:esc(v.text)}</span>`};
-// The agent's face: its own image (if it ever has one), a human's supervisor photo, else its kind icon.
+const bub=(p,cls='')=>personAvatar(p,{cls});
+// The agent's face: its own image (if it ever has one), a human's face photo (humanFace), else its kind
+// icon; its supervisor on the corner unless the face is theirs. A photo that fails shows initials.
 function avatarHtml(a){
-  const sup=person(a.supervisor),img=safeImg(a.image)||(a.kind==='human'&&photo(sup));
-  return `<span class="af-av k-${a.kind}${img?' img':''}" data-tip="${AGENT_KINDS[a.kind]}">${img?`<img src="${esc(img)}" alt="">`:icon(KIND_ICON[a.kind],20)}${sup&&!(a.kind==='human'&&img)?bub(sup,'af-av-sup'):''}</span>`;
+  const sup=person(a.supervisor),hf=humanFace(a),img=safeImg(a.image)||hf?.src||'';
+  const face=img?`<span class="pa-txt">${esc(initials(hf?.name||a.name))}</span>${photoImg(img)}`:icon(KIND_ICON[a.kind],20);
+  return `<span class="af-av k-${a.kind}${img?' has-photo':''}" data-tip="${AGENT_KINDS[a.kind]}">${face}${sup&&!(hf&&hf.id===sup.id&&img)?bub(sup,'af-av-sup'):''}</span>`;
 }
+// A picker or button lead for an agent: a human's face photo, else its kind icon.
+const agentAv=x=>{const f=humanFace(x);if(!f?.src)return null;const [bg,fg]=memberColor(f.id);return {text:initials(f.name),bg,fg,img:f.src}};
 // Status as coloured pills (one click each) for agents and workflows.
 const statusPills=(cur,names)=>`<div class="af-pills" role="group" aria-label="Status">${Object.entries(names).map(([k,n])=>{const [bg,fg]=colorOf(STATUS_TONE[k]||'slate');
   return `<button type="button" class="af-pill${cur===k?' on':''}" id="af-st-${k}" data-af-status="${k}" aria-pressed="${cur===k}" style="--pb:${bg};--pf:${fg}"><i></i>${esc(n)}</button>`}).join('')}</div>`;
@@ -473,7 +488,7 @@ function agentHtml(a){
   const identity=`<label>Kind</label><div class="seg wide">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" id="af-kind-${k}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
     <label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}">
     <label>Status</label>${statusPills(a.status,AGENT_STATUS)}
-    <label for="af-reports">Reports to</label>${selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr})}
+    <label for="af-reports">Reports to</label>${selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',mgr&&agentAv(mgr)?bub(faceNode(humanFace(mgr)),'mini'):`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr})}
     ${chain.length>1?`<div class="dc-hint af-chain">${esc(chain.map(x=>x.name).reverse().join(' › '))} › ${esc(a.name)}</div>`:''}
     <label for="af-sup">Supervisor <em>a person on your MindMap</em></label>${ppl.length?selBtn('af-sup','Supervisor',sup?sup.name:'None',sup?bub(sup,'mini'):`<span class="pk-ic">${icon('user',13)}</span>`,{none:!sup}):`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`}`;
   const work=`<label for="af-purpose">Purpose</label><textarea id="af-purpose" rows="3" maxlength="2000" placeholder="What this agent is responsible for">${esc(a.purpose)}</textarea>
@@ -650,7 +665,7 @@ function addTo(key){
 }
 // Single-choice pickers in the side panel: who it reports to, its supervisor, its runner.
 const SINGLE={
-  'af-reports':{label:'Reports to',items:a=>[{value:'',label:'Nobody (top level)',icon:'network'},...managersFor(a).map(x=>({value:x.id,label:x.name,sub:x.title,icon:KIND_ICON[x.kind]}))],cur:a=>a.reportsTo,
+  'af-reports':{label:'Reports to',items:a=>[{value:'',label:'Nobody (top level)',icon:'network'},...managersFor(a).map(x=>{const av=agentAv(x);return {value:x.id,label:x.name,sub:x.title,...(av?{avatar:av}:{icon:KIND_ICON[x.kind]})}})],cur:a=>a.reportsTo,
     set(a,v){if(v&&!canReportTo(af(),a.id,v)){rerender();return}change(()=>{a.reportsTo=v;touch(a)})}},
   'af-sup':{label:'Supervisor',items:()=>[{value:'',label:'None',icon:'user'},...peopleOf(db()).sort(byName).map(p=>({value:p.id,label:p.name,sub:p.title||'',avatar:personAv(p)}))],cur:a=>a.supervisor,
     set(a,v){change(()=>{a.supervisor=v;touch(a)})}},

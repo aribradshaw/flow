@@ -51,6 +51,27 @@ export function peopleOf(db){
   return [...m.values()];
 }
 
+// Matching people by name or email, for display only (photos); nothing here is ever saved.
+// Names compare case-insensitively with runs of whitespace collapsed.
+export const normName=s=>String(s??'').trim().replace(/\s+/g,' ').toLowerCase();
+const normEmail=s=>String(s??'').trim().toLowerCase();
+export const sameName=(a,b)=>{const x=normName(a);return !!x&&x===normName(b)};
+// The one person in `people` called `name`, or null when nobody or several people are.
+export function personNamed(people,name){
+  const k=normName(name);if(!k)return null;let hit=null;
+  for(const p of people||[])if(normName(p?.name)===k){if(hit&&hit.id!==p.id)return null;hit=p}
+  return hit;
+}
+// Is person card `n` the signed-in user `me` ({email, name})? By email when the card has one;
+// otherwise when it is the only person in `people` with their name and no card carries their email.
+export function isSessionPerson(n,people,me){
+  if(!n||!me)return false;
+  const mail=normEmail(me.email),e=normEmail(n.email);
+  if(e)return !!mail&&e===mail;
+  if(mail&&(people||[]).some(p=>normEmail(p?.email)===mail))return false;
+  return personNamed(people,me.name)?.id===n.id;
+}
+
 // Validate a saved AgentFlow against the rest of the database. Unknown kinds and statuses fall back
 // to defaults; links to deleted agents, people, projects, cards or items are dropped, and a
 // reportsTo loop is broken at the first agent (in saved order) that closes it.

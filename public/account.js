@@ -12,7 +12,7 @@
 
 import {store,change} from './store.js';
 import {STATUS_DEFAULTS,WORKFLOW_PRESETS,cleanWorkflow} from './workflow.js';
-import {esc,setSessionUser} from './ui.js';
+import {esc,setSessionUser,sessionPhoto} from './ui.js';
 import {popIn,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
 import {loadDevlog,currentVersion,mountDevlog} from './devlog.js';
@@ -50,7 +50,7 @@ const user=()=>session.user;
 export const sessionUser=()=>session.user||null;
 let sessionKey='';
 function sessionChanged(){
-  const u=session.user,key=u?`${u.email}\n${u.image||''}`:'';if(key===sessionKey)return;
+  const u=session.user,key=u?`${u.email}\n${u.name||''}\n${u.image||''}`:'';if(key===sessionKey)return;
   sessionKey=key;setSessionUser(u);window.dispatchEvent(new Event('flow:session'));
 }
 const opid=()=>session.mode==='opid';
@@ -62,7 +62,8 @@ function initials(u){
 }
 function avatar(u,size){
   const st=`width:${size}px;height:${size}px;font-size:${Math.round(size*.4)}px`;
-  if(u?.image)return `<span class="acct-av" style="${st}"><img src="${esc(u.image)}" alt="" referrerpolicy="no-referrer"></span>`;
+  // sessionPhoto() is the URL every person avatar uses for this photo (one cached copy, see ui.js).
+  if(u?.image)return `<span class="acct-av" style="${st}"><img src="${esc(u===user()&&sessionPhoto()||u.image)}" alt="" referrerpolicy="no-referrer"></span>`;
   if(!u)return `<span class="acct-av anon" style="${st}"><svg width="${Math.round(size*.6)}" height="${Math.round(size*.6)}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8.5" r="4.5"/><path d="M3.5 21a8.5 8.5 0 0 1 17 0z"/></svg></span>`;
   return `<span class="acct-av" style="${st}">${esc(initials(u))}</span>`;
 }
@@ -73,7 +74,7 @@ export function accountHtml(){
 }
 function refreshButton(){const b=document.getElementById('acctBtn');if(b)b.outerHTML=accountHtml()}
 function refreshPhotos(){
-  refreshButton();sessionChanged();
+  sessionChanged();refreshButton();
   for(const head of document.querySelectorAll('.acct-head,.acct-card')){
     const old=head.querySelector('.acct-av');if(old)old.outerHTML=avatar(user(),head.classList.contains('acct-head')?38:44);
   }
@@ -502,6 +503,6 @@ window.fetch=async(...args)=>{
     const r=await nativeFetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
     if(r.ok)session=await r.json();
   }catch{}
-  ready=true;refreshButton();sessionChanged();
+  ready=true;sessionChanged();refreshButton();
   if(opid()){loadOpidUi();if(!user())showSignIn()}
 })();

@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -356,4 +356,21 @@ test('model makers: the icon follows who made the model, not the harness that ru
   assert.deepEqual(modelMaker('opencode:opencode/big-pickle'),{key:'other',name:'',letter:'B'},'unknown: a letter tile');
   assert.equal(modelMaker('opencode:opencode/big-pickle','Pickle').letter,'P','the label wins for the letter');
   assert.equal(modelMaker('','').letter,'?');assert.equal(modelMaker(null).key,'other');
+});
+
+test('matching the signed-in user to a person card: email first, then a unique name',()=>{
+  const me={email:'ari@example.com',name:'Ari  Example'};
+  const ari={id:'a',name:' ari example ',type:'person'},pat={id:'p',name:'Pat Lee',type:'person',email:'pat@example.com'};
+  assert.equal(normName('  Ari \t Example '),'ari example');
+  assert.ok(sameName('ARI EXAMPLE','ari  example'));assert.ok(!sameName('',''));
+  assert.ok(isSessionPerson({id:'x',name:'Someone',email:' ARI@example.com '},[pat],me),'email match');
+  assert.ok(!isSessionPerson(pat,[pat],me),'someone else\'s email');
+  assert.ok(!isSessionPerson({id:'y',name:'Ari Example',email:'other@example.com'},[],me),'an email that is not theirs beats the name');
+  assert.ok(isSessionPerson(ari,[ari,pat],me),'unique name, no email');
+  const twin={id:'b',name:'Ari Example',type:'person'};
+  assert.ok(!isSessionPerson(ari,[ari,twin,pat],me),'two people with that name: no match');
+  assert.equal(personNamed([ari,twin],'ari example'),null);assert.equal(personNamed([ari,pat],'Ari Example'),ari);assert.equal(personNamed([ari],''),null);
+  assert.ok(!isSessionPerson(ari,[ari,{id:'m',name:'Me',email:'ari@example.com'}],me),'a card with their email is them, not the namesake');
+  assert.ok(!isSessionPerson(ari,[ari],null),'no session');
+  assert.ok(!isSessionPerson(ari,[ari],{email:'ari@example.com',name:''}),'session without a name');
 });

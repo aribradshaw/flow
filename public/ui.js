@@ -1,6 +1,7 @@
 import {icon} from './icons.js';
 import {popIn,popOut} from './motion.js';
 import {initials,memberColor} from './devops-core.js';
+import {sameName,isSessionPerson} from './agentflow-core.js';
 export const $=(s,r=document)=>r.querySelector(s);
 export const uid=()=>crypto.randomUUID();
 export const clone=x=>structuredClone(x);
@@ -62,15 +63,35 @@ export function initTooltips(){
 
 // ---------- person photos ----------
 // personAvatar(node, {size, cls, tip}) is the one way to draw a person: a round bubble with their photo
-// (node.image, or the signed-in user's own photo when node.email is theirs; display only, never saved),
+// (node.image, or the signed-in user's own photo when the card is theirs; display only, never saved),
 // otherwise their initials in their memberColor. A photo that fails to load falls back to the initials.
-// account.js reports the session user through setSessionUser().
-let me=null;
-export const setSessionUser=u=>{me=u?{email:String(u.email||'').trim().toLowerCase(),image:typeof u.image==='string'?u.image:''}:null};
+// A card is the signed-in user's when its email is theirs or, with no email, when it is the only
+// person in the workspace with their name (agentflow-core.js isSessionPerson).
+// account.js reports the session user through setSessionUser(); app.js gives the workspace through
+// setPeopleSource(). A data: URL session photo is decoded once into an object URL (sessionPhoto()),
+// so every avatar, the header one included, points at the same small URL instead of repeating it.
+let me=null,meUrl='',peopleSrc=()=>[],peopleCache=null;
+function photoUrl(u){
+  const m=/^data:(image\/[a-z0-9.+-]+)(;base64)?,(.*)$/is.exec(u);if(!m)return u;
+  try{const bin=m[2]?atob(m[3]):decodeURIComponent(m[3]),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return URL.createObjectURL(new Blob([b],{type:m[1]}))}catch{return u}
+}
+export const setSessionUser=u=>{
+  const image=typeof u?.image==='string'?u.image.trim():'';
+  if(meUrl.startsWith('blob:')&&image!==me?.raw)URL.revokeObjectURL(meUrl);
+  if(image!==me?.raw)meUrl=image?photoUrl(image):'';
+  me=u?{email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:meUrl,raw:image}:null;
+};
+// The signed-in user's photo URL as every avatar uses it ('' when signed out or without one).
+export const sessionPhoto=()=>me?.image||'';
+// The signed-in user's photo when `name` is their name (an AgentFlow human agent with no person card).
+export const sessionPhotoNamed=name=>me?.image&&sameName(name,me.name)?me.image:'';
+export const setPeopleSource=fn=>{peopleSrc=fn};
+// The workspace's people, read once per synchronous render.
+export function people(){if(!peopleCache){peopleCache=peopleSrc()||[];queueMicrotask(()=>{peopleCache=null})}return peopleCache}
+export const isMe=n=>isSessionPerson(n,people(),me);
 export function personPhoto(n){
   if(!n)return '';if(typeof n.image==='string'&&n.image)return n.image;
-  const e=String(n.email||'').trim().toLowerCase();
-  return e&&me?.image&&e===me.email?me.image:'';
+  return me?.image&&isMe(n)?me.image:'';
 }
 export const photoImg=src=>`<img class="pa-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`;
 export function personAvatar(n,{size=0,cls='',tip=''}={}){
@@ -90,7 +111,8 @@ document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains
 // re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
 // Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-export const safeImg=u=>typeof u==='string'&&/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())?u.trim():'';
+// The session photo's object URL (blob:) is the one non-http(s), non-data URL allowed.
+export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl))?u.trim():'';
 const av=(a,cls)=>{const img=safeImg(a.img);return `<span class="bub ${cls}${img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${img?photoImg(img):''}</span>`};
 const swatch=it=>it.avatar?av(it.avatar,'pk-av')
   :it.icon?`<span class="pk-ic">${icon(it.icon,13)}</span>`

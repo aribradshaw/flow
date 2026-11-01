@@ -1,10 +1,11 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto} from './ui.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource} from './ui.js';
 import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
 import * as af from './agentflow.js';
 import {openCardsFor} from './devops-core.js';
+import {peopleOf} from './agentflow-core.js';
 import {swap,busy,unskeletonize,panel,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
 import {accountHtml,sessionUser} from './account.js';
@@ -375,15 +376,18 @@ canvas.addEventListener('contextmenu',e=>{
 // ---------- inspector ----------
 const segBtn=(attr,val,ic,label,on)=>`<button type="button" class="ib${on?' on':''}" data-${attr}="${val}" data-tip="${label}" aria-label="${label}" aria-pressed="${on}">${icon(ic)}</button>`;
 // A person's photo and email. A shared card shows its photo read-only (its email never crosses a share).
-// With no photo of its own, a card whose email is the signed-in user's shows their account photo.
+// With no photo of its own, a card that is the signed-in user's (their email or, with no email, the only
+// person with their name) shows their account photo. "This is me" links a card with no email to the
+// account by setting the email only, so the live account photo keeps showing.
 function photoHtml(n,shared){
   const src=personPhoto(n),mine=!n.image&&!!src,me=sessionUser();
   if(shared)return src?`<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}</div>`:'';
   return `<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}<div class="pp-acts">
       <button type="button" class="txt" data-i="photoUpload" data-tip="PNG, JPEG or WebP · cropped to a 128 px square">${icon('upload',13)}Upload photo</button><input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp" hidden>
       ${n.image?`<button type="button" class="txt" data-i="photoRemove">${icon('trash',13)}Remove</button>`:''}
-      ${me?.image&&n.image!==me.image?`<button type="button" class="txt" data-i="photoMine" data-tip="Use your account photo and email (${esc(me.email)})">${icon('user',13)}Use my photo</button>`:''}</div></div>
-    ${mine?`<p class="pp-note">Showing your account photo: this email is yours.</p>`:''}
+      ${me?.image&&n.image!==me.image?`<button type="button" class="txt" data-i="photoMine" data-tip="Use your account photo and email (${esc(me.email)})">${icon('user',13)}Use my photo</button>`:''}
+      ${me?.email&&!n.email?`<button type="button" class="txt" data-i="thisIsMe" data-tip="Link this card to your account (${esc(me.email)}) so it shows your account photo">${icon('check',13)}This is me</button>`:''}</div></div>
+    ${mine?`<p class="pp-note">Showing your account photo: ${n.email?'this email is yours':'this card has your name'}.</p>`:''}
     <label for="pemail">Email</label><input id="pemail" type="email" maxlength="200" placeholder="Matches them to an account" value="${esc(n.email||'')}">`;
 }
 // Any picked image becomes a 128x128 centre-cropped WebP (JPEG where WebP encoding is missing) data URL.
@@ -495,7 +499,7 @@ pane.addEventListener('click',e=>{
   else if(b.dataset.i==='shComment')postComment(pane,n||ed).catch(err=>toast(err.message,true));
   else if(b.dataset.goto){selected=b.dataset.goto;render()}
   else ({from(){connecting=true;source=n.id;renderCanvas();renderTools()},dup:duplicate,delete:deleteSelection,close(){selected=null;render()},
-    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
+    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,thisIsMe(){const em=cleanPersonEmail(sessionUser()?.email);if(em)setPhoto(n.id,{email:em})},devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
 });
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
@@ -555,6 +559,7 @@ function render(){
   renderInspector();
 }
 store.onChange=render;
+setPeopleSource(()=>peopleOf(store.db||{}));
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.

@@ -11,7 +11,7 @@ An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, i
 - `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
-- `supervisor` is a person card on one of your mind maps: the human accountable for the agent.
+- `supervisor` is a person card on one of your mind maps: the human accountable for the agent. A `human` agent shows a person's photo: its supervisor's, else that of the only person card with the agent's name, else your account photo when the agent has your account name and no person card does.
 - `inputs`, `outputs` and `tools` are short text lists, such as "A card in Doing" or "Pull request linked on the card".
 - `instructions` holds the system prompt or runbook. `runtime` says where it runs (a runner's name).
 - `models` lists the models it may run on, up to 10 ids from its runner, in order: the **primary** first, then **fallbacks** the runner tries when one fails (a rate or usage limit, a provider that is down). `model` is always the first of them, kept for older runners; sending `model` alone to `agents.update` sets `models` to just it, and when both are sent `models` wins.
