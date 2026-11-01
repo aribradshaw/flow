@@ -61,7 +61,7 @@
     &quot;env&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>items[].title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>items[].live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>items[].title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>items[].live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].models</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].model</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].auto</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;items&quot;: {
@@ -111,8 +111,17 @@
           &quot;runtime&quot;: {
             &quot;type&quot;: &quot;string&quot;
           },
+          &quot;models&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;string&quot;
+            }
+          },
           &quot;model&quot;: {
             &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;auto&quot;: {
+            &quot;type&quot;: &quot;boolean&quot;
           },
           &quot;inputs&quot;: {
             &quot;type&quot;: &quot;array&quot;,
@@ -171,6 +180,9 @@
           &quot;live&quot;,
           &quot;reportsTo&quot;,
           &quot;supervisor&quot;,
+          &quot;models&quot;,
+          &quot;model&quot;,
+          &quot;auto&quot;,
           &quot;inputs&quot;,
           &quot;outputs&quot;,
           &quot;tools&quot;,
@@ -211,7 +223,9 @@
       &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
       &quot;instructions&quot;: &quot;&quot;,
       &quot;runtime&quot;: &quot;T3&quot;,
+      &quot;models&quot;: [],
       &quot;model&quot;: &quot;&quot;,
+      &quot;auto&quot;: false,
       &quot;inputs&quot;: [
         &quot;A card that needs research&quot;
       ],
@@ -259,7 +273,7 @@
     &quot;agent&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>brief</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.models</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.auto</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>brief</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -311,8 +325,17 @@
         &quot;runtime&quot;: {
           &quot;type&quot;: &quot;string&quot;
         },
+        &quot;models&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
         &quot;model&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;auto&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;
         },
         &quot;inputs&quot;: {
           &quot;type&quot;: &quot;array&quot;,
@@ -371,6 +394,9 @@
         &quot;live&quot;,
         &quot;reportsTo&quot;,
         &quot;supervisor&quot;,
+        &quot;models&quot;,
+        &quot;model&quot;,
+        &quot;auto&quot;,
         &quot;inputs&quot;,
         &quot;outputs&quot;,
         &quot;tools&quot;,
@@ -403,7 +429,9 @@
     &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
     &quot;instructions&quot;: &quot;&quot;,
     &quot;runtime&quot;: &quot;T3&quot;,
+    &quot;models&quot;: [],
     &quot;model&quot;: &quot;&quot;,
+    &quot;auto&quot;: false,
     &quot;inputs&quot;: [
       &quot;A card that needs research&quot;
     ],
@@ -478,7 +506,7 @@
     &quot;agent&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>brief</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>items[].due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.models</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.auto</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr><tr><td><code>brief</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>items[].due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -530,8 +558,17 @@
         &quot;runtime&quot;: {
           &quot;type&quot;: &quot;string&quot;
         },
+        &quot;models&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
         &quot;model&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;auto&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;
         },
         &quot;inputs&quot;: {
           &quot;type&quot;: &quot;array&quot;,
@@ -590,6 +627,9 @@
         &quot;live&quot;,
         &quot;reportsTo&quot;,
         &quot;supervisor&quot;,
+        &quot;models&quot;,
+        &quot;model&quot;,
+        &quot;auto&quot;,
         &quot;inputs&quot;,
         &quot;outputs&quot;,
         &quot;tools&quot;,
@@ -766,7 +806,9 @@
     &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
     &quot;instructions&quot;: &quot;&quot;,
     &quot;runtime&quot;: &quot;T3&quot;,
+    &quot;models&quot;: [],
     &quot;model&quot;: &quot;&quot;,
+    &quot;auto&quot;: false,
     &quot;inputs&quot;: [
       &quot;A card that needs research&quot;
     ],
@@ -829,7 +871,7 @@
 }</code></pre></section>
 <section class="op" id="op-agents-create"><h3><code>agents.create</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/agents</code> <span class="muted">MCP <code>agents_create</code></span></p>
-<p class="summary">Create an AgentFlow agent</p><p>Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, projects, cards, items) are ids or names; unknown ones are refused with 400, and a reporting loop with reports_loop.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>kind</code></td><td>enum</td><td></td><td>agent (AI agent), human or team. One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td>Role, e.g. Research.</td></tr><tr><td><code>status</code></td><td>enum</td><td></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>live</code></td><td>boolean</td><td></td><td>The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue.</td></tr><tr><td><code>reportsTo</code></td><td>string</td><td></td><td>The agent it reports to: id or name; &quot;&quot; for top level.</td></tr><tr><td><code>supervisor</code></td><td>string</td><td></td><td>A person on a chart who oversees it: node id or name; &quot;&quot; for none.</td></tr><tr><td><code>purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>instructions</code></td><td>string</td><td></td><td>System prompt or runbook.</td></tr><tr><td><code>runtime</code></td><td>string</td><td></td><td>Where it runs: a runner name from runners.list, e.g. a home server.</td></tr><tr><td><code>model</code></td><td>string</td><td></td><td>A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5.</td></tr><tr><td><code>inputs</code></td><td>string[]</td><td></td><td>What it takes in.</td></tr><tr><td><code>outputs</code></td><td>string[]</td><td></td><td>What it produces.</td></tr><tr><td><code>tools</code></td><td>string[]</td><td></td><td>What it may use.</td></tr><tr><td><code>projects</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>cards</code></td><td>string | integer[]</td><td></td><td></td></tr><tr><td><code>items</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>x</code></td><td>number</td><td></td><td>Canvas position (with y). Leave out to place it under its manager.</td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Create an AgentFlow agent</p><p>Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, projects, cards, items) are ids or names; unknown ones are refused with 400, and a reporting loop with reports_loop.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>kind</code></td><td>enum</td><td></td><td>agent (AI agent), human or team. One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td>Role, e.g. Research.</td></tr><tr><td><code>status</code></td><td>enum</td><td></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>live</code></td><td>boolean</td><td></td><td>The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue.</td></tr><tr><td><code>reportsTo</code></td><td>string</td><td></td><td>The agent it reports to: id or name; &quot;&quot; for top level.</td></tr><tr><td><code>supervisor</code></td><td>string</td><td></td><td>A person on a chart who oversees it: node id or name; &quot;&quot; for none.</td></tr><tr><td><code>purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>instructions</code></td><td>string</td><td></td><td>System prompt or runbook.</td></tr><tr><td><code>runtime</code></td><td>string</td><td></td><td>Where it runs: a runner name from runners.list, e.g. a home server.</td></tr><tr><td><code>models</code></td><td>string[]</td><td></td><td>Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent.</td></tr><tr><td><code>model</code></td><td>string</td><td></td><td>One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it (&quot;&quot; for none). Always reads back as the first of models.</td></tr><tr><td><code>auto</code></td><td>boolean</td><td></td><td>false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card.</td></tr><tr><td><code>inputs</code></td><td>string[]</td><td></td><td>What it takes in.</td></tr><tr><td><code>outputs</code></td><td>string[]</td><td></td><td>What it produces.</td></tr><tr><td><code>tools</code></td><td>string[]</td><td></td><td>What it may use.</td></tr><tr><td><code>projects</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>cards</code></td><td>string | integer[]</td><td></td><td></td></tr><tr><td><code>items</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>x</code></td><td>number</td><td></td><td>Canvas position (with y). Leave out to place it under its manager.</td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -893,10 +935,24 @@
       &quot;maxLength&quot;: 200,
       &quot;description&quot;: &quot;Where it runs: a runner name from runners.list, e.g. a home server.&quot;
     },
+    &quot;models&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;maxItems&quot;: 10,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;minLength&quot;: 1,
+        &quot;maxLength&quot;: 120
+      },
+      &quot;description&quot;: &quot;Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent.&quot;
+    },
     &quot;model&quot;: {
       &quot;type&quot;: &quot;string&quot;,
       &quot;maxLength&quot;: 120,
-      &quot;description&quot;: &quot;A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5.&quot;
+      &quot;description&quot;: &quot;One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it (\&quot;\&quot; for none). Always reads back as the first of models.&quot;
+    },
+    &quot;auto&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card.&quot;
     },
     &quot;inputs&quot;: {
       &quot;type&quot;: &quot;array&quot;,
@@ -976,7 +1032,7 @@
     &quot;name&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.models</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.auto</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -1028,8 +1084,17 @@
         &quot;runtime&quot;: {
           &quot;type&quot;: &quot;string&quot;
         },
+        &quot;models&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
         &quot;model&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;auto&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;
         },
         &quot;inputs&quot;: {
           &quot;type&quot;: &quot;array&quot;,
@@ -1088,6 +1153,9 @@
         &quot;live&quot;,
         &quot;reportsTo&quot;,
         &quot;supervisor&quot;,
+        &quot;models&quot;,
+        &quot;model&quot;,
+        &quot;auto&quot;,
         &quot;inputs&quot;,
         &quot;outputs&quot;,
         &quot;tools&quot;,
@@ -1118,7 +1186,9 @@
     &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
     &quot;instructions&quot;: &quot;&quot;,
     &quot;runtime&quot;: &quot;T3&quot;,
+    &quot;models&quot;: [],
     &quot;model&quot;: &quot;&quot;,
+    &quot;auto&quot;: false,
     &quot;inputs&quot;: [
       &quot;A card that needs research&quot;
     ],
@@ -1143,7 +1213,7 @@
 }</code></pre></section>
 <section class="op" id="op-agents-update"><h3><code>agents.update</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-patch">PATCH</span> <code>/api/v1/envs/{env}/agents/{agent}</code> <span class="muted">MCP <code>agents_update</code></span></p>
-<p class="summary">Update an AgentFlow agent</p><p>Change an agent&#39;s fields. Lists you send (inputs, outputs, tools, projects, cards, items) replace the old ones. Moving it under one of its own reports is refused with reports_loop.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>agent</code></td><td>string</td><td><span class="req">required</span></td><td>Agent id or name.</td></tr><tr><td><code>name</code></td><td>string</td><td></td><td></td></tr><tr><td><code>kind</code></td><td>enum</td><td></td><td>agent (AI agent), human or team. One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td>Role, e.g. Research.</td></tr><tr><td><code>status</code></td><td>enum</td><td></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>live</code></td><td>boolean</td><td></td><td>The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue.</td></tr><tr><td><code>reportsTo</code></td><td>string</td><td></td><td>The agent it reports to: id or name; &quot;&quot; for top level.</td></tr><tr><td><code>supervisor</code></td><td>string</td><td></td><td>A person on a chart who oversees it: node id or name; &quot;&quot; for none.</td></tr><tr><td><code>purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>instructions</code></td><td>string</td><td></td><td>System prompt or runbook.</td></tr><tr><td><code>runtime</code></td><td>string</td><td></td><td>Where it runs: a runner name from runners.list, e.g. a home server.</td></tr><tr><td><code>model</code></td><td>string</td><td></td><td>A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5.</td></tr><tr><td><code>inputs</code></td><td>string[]</td><td></td><td>What it takes in.</td></tr><tr><td><code>outputs</code></td><td>string[]</td><td></td><td>What it produces.</td></tr><tr><td><code>tools</code></td><td>string[]</td><td></td><td>What it may use.</td></tr><tr><td><code>projects</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>cards</code></td><td>string | integer[]</td><td></td><td></td></tr><tr><td><code>items</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>x</code></td><td>number</td><td></td><td>Canvas position (with y). Leave out to place it under its manager.</td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Update an AgentFlow agent</p><p>Change an agent&#39;s fields. Lists you send (inputs, outputs, tools, projects, cards, items) replace the old ones. Moving it under one of its own reports is refused with reports_loop.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>agent</code></td><td>string</td><td><span class="req">required</span></td><td>Agent id or name.</td></tr><tr><td><code>name</code></td><td>string</td><td></td><td></td></tr><tr><td><code>kind</code></td><td>enum</td><td></td><td>agent (AI agent), human or team. One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td>Role, e.g. Research.</td></tr><tr><td><code>status</code></td><td>enum</td><td></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>live</code></td><td>boolean</td><td></td><td>The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue.</td></tr><tr><td><code>reportsTo</code></td><td>string</td><td></td><td>The agent it reports to: id or name; &quot;&quot; for top level.</td></tr><tr><td><code>supervisor</code></td><td>string</td><td></td><td>A person on a chart who oversees it: node id or name; &quot;&quot; for none.</td></tr><tr><td><code>purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>instructions</code></td><td>string</td><td></td><td>System prompt or runbook.</td></tr><tr><td><code>runtime</code></td><td>string</td><td></td><td>Where it runs: a runner name from runners.list, e.g. a home server.</td></tr><tr><td><code>models</code></td><td>string[]</td><td></td><td>Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent.</td></tr><tr><td><code>model</code></td><td>string</td><td></td><td>One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it (&quot;&quot; for none). Always reads back as the first of models.</td></tr><tr><td><code>auto</code></td><td>boolean</td><td></td><td>false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card.</td></tr><tr><td><code>inputs</code></td><td>string[]</td><td></td><td>What it takes in.</td></tr><tr><td><code>outputs</code></td><td>string[]</td><td></td><td>What it produces.</td></tr><tr><td><code>tools</code></td><td>string[]</td><td></td><td>What it may use.</td></tr><tr><td><code>projects</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>cards</code></td><td>string | integer[]</td><td></td><td></td></tr><tr><td><code>items</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>x</code></td><td>number</td><td></td><td>Canvas position (with y). Leave out to place it under its manager.</td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -1213,10 +1283,24 @@
       &quot;maxLength&quot;: 200,
       &quot;description&quot;: &quot;Where it runs: a runner name from runners.list, e.g. a home server.&quot;
     },
+    &quot;models&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;maxItems&quot;: 10,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;minLength&quot;: 1,
+        &quot;maxLength&quot;: 120
+      },
+      &quot;description&quot;: &quot;Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent.&quot;
+    },
     &quot;model&quot;: {
       &quot;type&quot;: &quot;string&quot;,
       &quot;maxLength&quot;: 120,
-      &quot;description&quot;: &quot;A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5.&quot;
+      &quot;description&quot;: &quot;One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it (\&quot;\&quot; for none). Always reads back as the first of models.&quot;
+    },
+    &quot;auto&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;description&quot;: &quot;false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card.&quot;
     },
     &quot;inputs&quot;: {
       &quot;type&quot;: &quot;array&quot;,
@@ -1296,7 +1380,7 @@
     &quot;agent&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>agent</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>agent</code>, <code>human</code>, <code>team</code>.</td></tr><tr><td><code>agent.title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.status</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>draft</code>, <code>active</code>, <code>paused</code>, <code>retired</code>.</td></tr><tr><td><code>agent.live</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.reportsTo</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.supervisor</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.purpose</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.instructions</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.runtime</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.models</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.model</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.auto</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.inputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.outputs</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.tools</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.projects</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.cards</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.items</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agent.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agent.x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>agent.y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -1348,8 +1432,17 @@
         &quot;runtime&quot;: {
           &quot;type&quot;: &quot;string&quot;
         },
+        &quot;models&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
         &quot;model&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;auto&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;
         },
         &quot;inputs&quot;: {
           &quot;type&quot;: &quot;array&quot;,
@@ -1408,6 +1501,9 @@
         &quot;live&quot;,
         &quot;reportsTo&quot;,
         &quot;supervisor&quot;,
+        &quot;models&quot;,
+        &quot;model&quot;,
+        &quot;auto&quot;,
         &quot;inputs&quot;,
         &quot;outputs&quot;,
         &quot;tools&quot;,
@@ -1438,7 +1534,9 @@
     &quot;purpose&quot;: &quot;Gathers context before work starts.&quot;,
     &quot;instructions&quot;: &quot;&quot;,
     &quot;runtime&quot;: &quot;T3&quot;,
+    &quot;models&quot;: [],
     &quot;model&quot;: &quot;&quot;,
+    &quot;auto&quot;: false,
     &quot;inputs&quot;: [
       &quot;A card that needs research&quot;
     ],
@@ -1505,7 +1603,7 @@
 }</code></pre></section>
 <section class="op" id="op-runners-list"><h3><code>runners.list</code> <span class="scope s-read">read</span></h3>
 <p class="route"><span class="m m-get">GET</span> <code>/api/v1/envs/{env}/runners</code> <span class="muted">MCP <code>runners_list</code></span></p>
-<p class="summary">List AgentFlow runners</p><p>Machines or services that run agents, with the models each one offers, as they last reported (runners.report). An agent&#39;s runtime names a runner and its model is one of that runner&#39;s model ids.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>limit</code></td><td>integer</td><td></td><td>Page size (1-200, default 50).</td></tr><tr><td><code>cursor</code></td><td>string</td><td></td><td>nextCursor from the previous page.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">List AgentFlow runners</p><p>Machines or services that run agents, with the models each one offers, as they last reported (runners.report). An agent&#39;s runtime names a runner and its models are some of that runner&#39;s model ids. Each model may say its provider (a display group) and billing (included or metered).</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>limit</code></td><td>integer</td><td></td><td>Page size (1-200, default 50).</td></tr><tr><td><code>cursor</code></td><td>string</td><td></td><td>nextCursor from the previous page.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -1551,6 +1649,15 @@
                 },
                 &quot;label&quot;: {
                   &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;provider&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;billing&quot;: {
+                  &quot;enum&quot;: [
+                    &quot;included&quot;,
+                    &quot;metered&quot;
+                  ]
                 }
               },
               &quot;required&quot;: [
@@ -1594,7 +1701,9 @@
       &quot;models&quot;: [
         {
           &quot;id&quot;: &quot;claudeAgent:claude-sonnet-5-5&quot;,
-          &quot;label&quot;: &quot;Claude · Sonnet 5.5&quot;
+          &quot;label&quot;: &quot;Claude · Sonnet 5.5&quot;,
+          &quot;provider&quot;: &quot;Claude&quot;,
+          &quot;billing&quot;: &quot;included&quot;
         }
       ],
       &quot;reported&quot;: &quot;2026-10-29T17:00:00.000Z&quot;
@@ -1605,7 +1714,7 @@
 }</code></pre></section>
 <section class="op" id="op-runners-report"><h3><code>runners.report</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/runners/{runner}</code> <span class="muted">MCP <code>runners_report</code></span></p>
-<p class="summary">Report a runner and its models</p><p>A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick a model id. Up to 20 runners and 500 models each.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>runner</code></td><td>string</td><td><span class="req">required</span></td><td>Runner name, e.g. Home server.</td></tr><tr><td><code>models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].label</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Report a runner and its models</p><p>A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick model ids. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners and 500 models each.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>runner</code></td><td>string</td><td><span class="req">required</span></td><td>Runner name, e.g. Home server.</td></tr><tr><td><code>models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].label</code></td><td>string</td><td></td><td></td></tr><tr><td><code>models[].provider</code></td><td>string</td><td></td><td>Display group, e.g. Claude or OpenCode.</td></tr><tr><td><code>models[].billing</code></td><td>enum</td><td></td><td>included (a subscription or free) or metered (paid per use). One of <code>included</code>, <code>metered</code>.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -1633,6 +1742,18 @@
           &quot;label&quot;: {
             &quot;type&quot;: &quot;string&quot;,
             &quot;maxLength&quot;: 160
+          },
+          &quot;provider&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 80,
+            &quot;description&quot;: &quot;Display group, e.g. Claude or OpenCode.&quot;
+          },
+          &quot;billing&quot;: {
+            &quot;enum&quot;: [
+              &quot;included&quot;,
+              &quot;metered&quot;
+            ],
+            &quot;description&quot;: &quot;included (a subscription or free) or metered (paid per use).&quot;
           }
         },
         &quot;required&quot;: [
@@ -1671,6 +1792,15 @@
               },
               &quot;label&quot;: {
                 &quot;type&quot;: &quot;string&quot;
+              },
+              &quot;provider&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              &quot;billing&quot;: {
+                &quot;enum&quot;: [
+                  &quot;included&quot;,
+                  &quot;metered&quot;
+                ]
               }
             },
             &quot;required&quot;: [
@@ -1701,14 +1831,16 @@
 }</code></pre></details><h4>Example: Home server</h4><pre><code>curl -sS -X POST &quot;$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server&quot; \
   -H &quot;Authorization: Bearer $FLOW_API_KEY&quot; \
   -H &#39;Content-Type: application/json&#39; \
-  -d &#39;{&quot;models&quot;:[{&quot;id&quot;:&quot;claudeAgent:claude-sonnet-5-5&quot;,&quot;label&quot;:&quot;Claude · Sonnet 5.5&quot;}]}&#39;</code></pre><pre class="out"><code>{
+  -d &#39;{&quot;models&quot;:[{&quot;id&quot;:&quot;claudeAgent:claude-sonnet-5-5&quot;,&quot;label&quot;:&quot;Claude · Sonnet 5.5&quot;,&quot;provider&quot;:&quot;Claude&quot;,&quot;billing&quot;:&quot;included&quot;}]}&#39;</code></pre><pre class="out"><code>{
   &quot;rev&quot;: 59,
   &quot;runner&quot;: {
     &quot;name&quot;: &quot;Home server&quot;,
     &quot;models&quot;: [
       {
         &quot;id&quot;: &quot;claudeAgent:claude-sonnet-5-5&quot;,
-        &quot;label&quot;: &quot;Claude · Sonnet 5.5&quot;
+        &quot;label&quot;: &quot;Claude · Sonnet 5.5&quot;,
+        &quot;provider&quot;: &quot;Claude&quot;,
+        &quot;billing&quot;: &quot;included&quot;
       }
     ],
     &quot;reported&quot;: &quot;2026-10-29T17:00:00.000Z&quot;

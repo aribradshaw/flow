@@ -1731,7 +1731,9 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items[].purpose` | string |  |  |
 | `items[].instructions` | string |  |  |
 | `items[].runtime` | string |  |  |
-| `items[].model` | string |  |  |
+| `items[].models` | string[] | yes |  |
+| `items[].model` | string | yes |  |
+| `items[].auto` | boolean | yes |  |
 | `items[].inputs` | string[] | yes |  |
 | `items[].outputs` | string[] | yes |  |
 | `items[].tools` | string[] | yes |  |
@@ -1767,7 +1769,9 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents?status=active" \
       "purpose": "Gathers context before work starts.",
       "instructions": "",
       "runtime": "T3",
+      "models": [],
       "model": "",
+      "auto": false,
       "inputs": [
         "A card that needs research"
       ],
@@ -1827,7 +1831,9 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent.purpose` | string |  |  |
 | `agent.instructions` | string |  |  |
 | `agent.runtime` | string |  |  |
-| `agent.model` | string |  |  |
+| `agent.models` | string[] | yes |  |
+| `agent.model` | string | yes |  |
+| `agent.auto` | boolean | yes |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -1862,7 +1868,9 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "purpose": "Gathers context before work starts.",
     "instructions": "",
     "runtime": "T3",
+    "models": [],
     "model": "",
+    "auto": false,
     "inputs": [
       "A card that needs research"
     ],
@@ -1923,7 +1931,9 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `agent.purpose` | string |  |  |
 | `agent.instructions` | string |  |  |
 | `agent.runtime` | string |  |  |
-| `agent.model` | string |  |  |
+| `agent.models` | string[] | yes |  |
+| `agent.model` | string | yes |  |
+| `agent.auto` | boolean | yes |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -1977,7 +1987,9 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
     "purpose": "Gathers context before work starts.",
     "instructions": "",
     "runtime": "T3",
+    "models": [],
     "model": "",
+    "auto": false,
     "inputs": [
       "A card that needs research"
     ],
@@ -2063,7 +2075,9 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `purpose` | string |  |  |
 | `instructions` | string |  | System prompt or runbook. |
 | `runtime` | string |  | Where it runs: a runner name from runners.list, e.g. a home server. |
-| `model` | string |  | A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5. |
+| `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
+| `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
+| `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2090,7 +2104,9 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent.purpose` | string |  |  |
 | `agent.instructions` | string |  |  |
 | `agent.runtime` | string |  |  |
-| `agent.model` | string |  |  |
+| `agent.models` | string[] | yes |  |
+| `agent.model` | string | yes |  |
+| `agent.auto` | boolean | yes |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -2126,7 +2142,9 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/agents" \
     "purpose": "Gathers context before work starts.",
     "instructions": "",
     "runtime": "T3",
+    "models": [],
     "model": "",
+    "auto": false,
     "inputs": [
       "A card that needs research"
     ],
@@ -2175,7 +2193,9 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `purpose` | string |  |  |
 | `instructions` | string |  | System prompt or runbook. |
 | `runtime` | string |  | Where it runs: a runner name from runners.list, e.g. a home server. |
-| `model` | string |  | A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5. |
+| `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
+| `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
+| `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2202,7 +2222,9 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent.purpose` | string |  |  |
 | `agent.instructions` | string |  |  |
 | `agent.runtime` | string |  |  |
-| `agent.model` | string |  |  |
+| `agent.models` | string[] | yes |  |
+| `agent.model` | string | yes |  |
+| `agent.auto` | boolean | yes |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -2238,7 +2260,9 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "purpose": "Gathers context before work starts.",
     "instructions": "",
     "runtime": "T3",
+    "models": [],
     "model": "",
+    "auto": false,
     "inputs": [
       "A card that needs research"
     ],
@@ -2305,7 +2329,7 @@ List AgentFlow runners
 
 `GET /api/v1/envs/{env}/runners` · scope `read` · MCP tool `runners_list`
 
-Machines or services that run agents, with the models each one offers, as they last reported (runners.report). An agent's runtime names a runner and its model is one of that runner's model ids.
+Machines or services that run agents, with the models each one offers, as they last reported (runners.report). An agent's runtime names a runner and its models are some of that runner's model ids. Each model may say its provider (a display group) and billing (included or metered).
 
 **Input**
 
@@ -2341,7 +2365,9 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/runners" \
       "models": [
         {
           "id": "claudeAgent:claude-sonnet-5-5",
-          "label": "Claude · Sonnet 5.5"
+          "label": "Claude · Sonnet 5.5",
+          "provider": "Claude",
+          "billing": "included"
         }
       ],
       "reported": "2026-10-29T17:00:00.000Z"
@@ -2358,7 +2384,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick a model id. Up to 20 runners and 500 models each.
+A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick model ids. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners and 500 models each.
 
 **Input**
 
@@ -2369,6 +2395,8 @@ A runner says what it can run. The model list replaces the old one; nothing is s
 | `models` | object[] | yes |  |
 | `models[].id` | string | yes |  |
 | `models[].label` | string |  |  |
+| `models[].provider` | string |  | Display group, e.g. Claude or OpenCode. |
+| `models[].billing` | enum |  | included (a subscription or free) or metered (paid per use). One of `included`, `metered`. |
 
 **Output**
 
@@ -2387,7 +2415,7 @@ A runner says what it can run. The model list replaces the old one; nothing is s
 curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5","provider":"Claude","billing":"included"}]}'
 ```
 
 ```json
@@ -2398,7 +2426,9 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
     "models": [
       {
         "id": "claudeAgent:claude-sonnet-5-5",
-        "label": "Claude · Sonnet 5.5"
+        "label": "Claude · Sonnet 5.5",
+        "provider": "Claude",
+        "billing": "included"
       }
     ],
     "reported": "2026-10-29T17:00:00.000Z"

@@ -504,15 +504,15 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/runners" \
 
 ### Home server
 
-MCP: call `runners_report` with `{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}`
+MCP: call `runners_report` with `{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5","provider":"Claude","billing":"included"}]}`
 
 ```sh
-flow runners report --input '{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+flow runners report --input '{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5","provider":"Claude","billing":"included"}]}'
 
 curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5","provider":"Claude","billing":"included"}]}'
 ```
 
 ### Workflows the researcher is in

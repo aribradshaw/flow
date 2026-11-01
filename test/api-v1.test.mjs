@@ -264,6 +264,16 @@ test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
   assert.equal(r.body.agent.live,true);
   assert.deepEqual((await op('agents.list',{env:ENV,live:true})).body.items.map(a=>a.name),['Researcher']);
   assert.match((await op('agents.get',{env:ENV,agent:'Researcher'})).body.brief,/Model: Claude · Sonnet 5\.5 \(claudeAgent:claude-sonnet-5-5\)/);
+  assert.deepEqual([r.body.agent.models,r.body.agent.model,r.body.agent.auto],[['claudeAgent:claude-sonnet-5-5'],'claudeAgent:claude-sonnet-5-5',false],'model alone sets models to it');
+  r=await op('agents.update',{env:ENV,agent:'Researcher',models:[' codex:gpt-6.1-terra','claudeAgent:claude-sonnet-5-5','codex:gpt-6.1-terra'],model:'ignored:x',auto:true});
+  assert.deepEqual([r.body.agent.models,r.body.agent.model,r.body.agent.auto],[['codex:gpt-6.1-terra','claudeAgent:claude-sonnet-5-5'],'codex:gpt-6.1-terra',true],'models wins over model, cleaned');
+  assert.match((await op('agents.get',{env:ENV,agent:'Researcher'})).body.brief,/- Auto from: codex:gpt-6\.1-terra, Claude · Sonnet 5\.5 \(claudeAgent:claude-sonnet-5-5\)/);
+  assert.equal((await op('agents.update',{env:ENV,agent:'Researcher',models:Array.from({length:11},(_,i)=>'x:'+i)})).status,400,'up to 10 models');
+  r=await op('runners.report',{env:ENV,runner:'Home server',models:[{id:'claudeAgent:claude-sonnet-5-5',label:'Claude · Sonnet 5.5',provider:'Claude',billing:'included'},{id:'opencode:openai/gpt-6',provider:'OpenCode',billing:'metered'}]});
+  assert.deepEqual([r.body.changed,r.body.runner.models],[true,[{id:'claudeAgent:claude-sonnet-5-5',label:'Claude · Sonnet 5.5',provider:'Claude',billing:'included'},{id:'opencode:openai/gpt-6',label:'',provider:'OpenCode',billing:'metered'}]]);
+  assert.equal((await op('runners.report',{env:ENV,runner:'Home server',models:[{id:'a:b',billing:'free'}]})).status,400,'billing is included or metered');
+  r=await op('agents.update',{env:ENV,agent:'Researcher',model:'',auto:false});
+  assert.deepEqual([r.body.agent.models,r.body.agent.model],[[],''],'an empty model clears models');
   r=await op('agents.update',{env:ENV,agent:'Researcher',live:false,runtime:'T3',model:''});
   r=await op('agents.list',{env:ENV,status:'active',q:'research'});
   assert.deepEqual(r.body.items.map(a=>a.name),['Researcher']);

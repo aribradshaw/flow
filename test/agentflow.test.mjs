@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -244,11 +244,49 @@ test('agents are not live until switched on, and runners list what they can run'
   assert.equal(runLine(db.agentflow,a),'');
   assert.equal(liveProblem(db.agentflow,c),'Pick where it runs');
   c.runtime='home';assert.equal(liveProblem(db.agentflow,c),'Pick a model');
-  c.model='x:other';assert.equal(liveProblem(db.agentflow,c),'Home did not report this model');
+  c.model='x:other';assert.equal(liveProblem(db.agentflow,c),'Home did not report x:other');
   c.model='x:m1';assert.equal(liveProblem(db.agentflow,c),'');
   assert.equal(modelLabel(db.agentflow,c),'M1');assert.equal(runLine(db.agentflow,c),'home · M1');
   c.runtime='Elsewhere';c.model='y:z';assert.equal(liveProblem(db.agentflow,c),'','an unreported runner is taken at its word');assert.equal(runLine(db.agentflow,c),'Elsewhere · y:z');
   c.kind='team';assert.equal(liveProblem(db.agentflow,c),'Only AI agents run');
   assert.match(agentBrief(db,'c'),/^# C\n\nTeam · Draft\n/,'teams have no live state in the brief');
   assert.match(agentBrief(db,'a'),/AI agent · Draft · Not live/);
+});
+
+test('models: primary then fallbacks, model mirrors the first, older saves keep their model, and auto pools',()=>{
+  const db=base(),long='m'.repeat(130);
+  db.agentflow=cleanAgentflow({agents:[
+    {id:'old',name:'Old',model:'x:m1'},
+    {id:'both',name:'Both',model:'x:ignored',models:[' x:m2 ','x:m1','x:m2','',7,long,...Array.from({length:12},(_,i)=>'y:'+i)],auto:'yes'},
+    {id:'none',name:'None'},
+    {id:'pool',name:'Pool',runtime:'Home',models:['x:m2','x:m1'],auto:true},
+  ],runners:[{name:'Home',models:[{id:'x:m1',label:'M1',provider:' Claude ',billing:'included'},{id:'x:m2',label:'M2',provider:'p'.repeat(90),billing:'free'},{id:'x:m3'}]}]},db);
+  const [old,both,none,pool]=db.agentflow.agents;
+  assert.deepEqual([old.models,old.model,old.auto],[['x:m1'],'x:m1',false],'an older save with only model gets models=[model]');
+  assert.equal(both.models.length,LIMITS.agentModels);assert.equal(LIMITS.agentModels,10);
+  assert.deepEqual(both.models.slice(0,3),['x:m2','x:m1','m'.repeat(120)],'models win over model: trimmed, unique, non-empty, 120 chars at most');
+  assert.equal(both.model,'x:m2','model is always the first of models');assert.equal(both.auto,false,'only true turns auto on');
+  assert.deepEqual([none.models,none.model,none.auto],[[],'',false]);
+  {const n=newAgent(seedAgentflow());assert.deepEqual([n.models,n.model,n.auto],[[],'',false])}
+  assert.deepEqual(db.agentflow.runners[0].models,[{id:'x:m1',label:'M1',provider:'Claude',billing:'included'},{id:'x:m2',label:'M2',provider:'p'.repeat(80)},{id:'x:m3',label:''}],
+    'runners keep provider (80 chars) and billing (included or metered only)');
+  assert.deepEqual(cleanAgentflow(JSON.parse(JSON.stringify(db.agentflow)),db),db.agentflow,'cleaning is idempotent');
+
+  assert.deepEqual(modelChoices(db.agentflow,pool),[{id:'x:m2',label:'M2',provider:'p'.repeat(80),billing:''},{id:'x:m1',label:'M1',provider:'Claude',billing:'included'}]);
+  assert.deepEqual(modelChoices(db.agentflow,old),[{id:'x:m1',label:'x:m1',provider:'',billing:''}],'no runner: the id stands in for the label');
+  assert.equal(runLine(db.agentflow,pool),'Home · Auto (2 models)');
+  pool.auto=false;assert.equal(runLine(db.agentflow,pool),'Home · M2 +1');assert.equal(modelLabel(db.agentflow,pool),'M2');
+  pool.models=['x:m1'];assert.equal(runLine(db.agentflow,pool),'Home · M1');
+  pool.live=true;assert.equal(liveProblem(db.agentflow,pool),'');
+  pool.models=['x:m1','x:gone'];assert.equal(liveProblem(db.agentflow,pool),'Home did not report x:gone','every listed model must be reported');
+  pool.models=[];pool.model='';assert.equal(liveProblem(db.agentflow,pool),'Pick a model');assert.equal(runLine(db.agentflow,pool),'Home');
+
+  pool.models=['x:m1','x:m2'];
+  assert.match(agentBrief(db,'pool'),/## Runtime\n\n- Runs on: Home\n- Model 1: M1 \(x:m1\) \(primary\)\n- Model 2: M2 \(x:m2\) \(fallback\)\n/);
+  pool.auto=true;
+  assert.match(agentBrief(db,'pool'),/- Auto from: M1 \(x:m1\), M2 \(x:m2\) \(the runner picks one per card\)/);
+  pool.models=['x:m1'];pool.auto=false;
+  assert.match(agentBrief(db,'pool'),/- Model: M1 \(x:m1\)\n/);
+  assert.match(agentBrief(db,'old'),/## Runtime\n\n- Model: x:m1\n/);
+  assert.doesNotMatch(agentBrief(db,'none'),/## Runtime/);
 });

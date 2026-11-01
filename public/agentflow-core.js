@@ -3,17 +3,22 @@
 // use them in Node, as with devops-core.js.
 //
 // db.agentflow = {agents:[agent], workflows:[workflow], runners:[runner]}
-// agent    = {id,name,kind,title,status,live,reportsTo,supervisor,purpose,instructions,runtime,model,
+// agent    = {id,name,kind,title,status,live,reportsTo,supervisor,purpose,instructions,runtime,models[],model,auto,
 //             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated, x?,y?}
 //   live: the switch a runner obeys. Off (the default), runners leave the agent alone whatever its
-//   status; on, a runner whose name matches `runtime` works its queue with `model`.
+//   status; on, a runner whose name matches `runtime` works its queue on `models`.
+//   models: model ids in order, the primary first and then fallbacks the runner tries when one fails
+//   (unique, up to LIMITS.agentModels). model is always models[0] (or ''), kept for older readers.
+//   auto: models is a pool, and the runner picks one per card instead of always starting on the first.
 //   x, y: where the card sits on the AgentFlow canvas (optional; see positions()).
 //   reportsTo: another agent (the AgentFlow org chart); supervisor: a person card on a Flow chart.
 // workflow = {id,name,description,status,trigger,schedule,steps:[{id,agent,action,output}],
 //             projects[],cards[],items[],created,updated}
-// runner   = {name,models:[{id,label}],reported}: a machine or service that runs agents, as it
-//   reported itself (runners.report). Its name is what agents put in `runtime`, and its models are
-//   the choices for `model`. Flow never contacts a runner; the runner calls Flow.
+// runner   = {name,models:[{id,label,provider?,billing?}],reported}: a machine or service that runs
+//   agents, as it reported itself (runners.report). Its name is what agents put in `runtime`, and its
+//   models are the choices for `models`. provider groups models for display (e.g. "Claude"); billing is
+//   'included' (a subscription or free) or 'metered' (paid per use). Flow never contacts a runner;
+//   the runner calls Flow.
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
@@ -23,7 +28,8 @@ export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired
 export const WORKFLOW_STATUS={draft:'Draft',active:'Active',paused:'Paused'};
 export const TRIGGERS={manual:'Manual',schedule:'Schedule',event:'Event'};
 export const TRIGGER_HINT={manual:'Someone starts it',schedule:'e.g. Weekdays at 09:00',event:'e.g. A card enters UAT'};
-export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500};
+export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500,agentModels:10};
+export const BILLING={included:'Included',metered:'Metered'};
 // Ids of records shared in from another workspace. They are projected in on read and are not in
 // stored data, so links to them are kept even when the record is not present (e.g. on the server).
 const shared=x=>typeof x==='string'&&x.startsWith('sh.');
@@ -58,7 +64,7 @@ export function cleanAgentflow(d,db={}){
   const agents=(Array.isArray(d.agents)?d.agents:[]).filter(a=>a&&typeof a.id==='string'&&a.id&&typeof a.name==='string'&&!seen.has(a.id)&&seen.add(a.id)).slice(0,LIMITS.agents).map(a=>({
     id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind:pick(a.kind,AGENT_KINDS,'agent'),title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),live:a.live===true,
     reportsTo:typeof a.reportsTo==='string'?a.reportsTo:'',supervisor:typeof a.supervisor==='string'&&(people.has(a.supervisor)||shared(a.supervisor))?a.supervisor:'',
-    purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),model:str(a.model,120),
+    purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),...cleanModels(a),
     inputs:strs(a.inputs),outputs:strs(a.outputs),tools:strs(a.tools),...links(a),created:iso(a.created,now),updated:iso(a.updated,now),
     ...(placed(a)?{x:clampXY(a.x),y:clampXY(a.y)}:{})}));
   const byId=new Map(agents.map(a=>[a.id,a]));
@@ -80,34 +86,54 @@ export function cleanAgentflow(d,db={}){
   });
   return {agents,workflows,runners:cleanRunners(d.runners)};
 }
+// models wins over model; older saves with only model get models=[model]. model mirrors models[0].
+function cleanModels(a){
+  const models=strs(Array.isArray(a.models)&&a.models.length?a.models:typeof a.model==='string'?[a.model]:[],LIMITS.agentModels,120);
+  return {models,model:models[0]||'',auto:a.auto===true};
+}
 // Runners as they reported themselves: unique names, each with unique model ids.
 export function cleanRunners(v){
   const seen=new Set();
   return (Array.isArray(v)?v:[]).filter(r=>r&&typeof r.name==='string'&&r.name.trim()).map(r=>({...r,name:r.name.trim().slice(0,200)}))
     .filter(r=>!seen.has(r.name.toLowerCase())&&seen.add(r.name.toLowerCase())).slice(0,LIMITS.runners).map(r=>{
       const ms=new Set();
-      return {name:r.name,models:(Array.isArray(r.models)?r.models:[]).filter(m=>m&&typeof m.id==='string'&&m.id.trim()).map(m=>({id:m.id.trim().slice(0,120),label:str(m.label,160).trim()}))
+      return {name:r.name,models:(Array.isArray(r.models)?r.models:[]).filter(m=>m&&typeof m.id==='string'&&m.id.trim()).map(m=>{
+        const provider=str(m.provider,80).trim();
+        return {id:m.id.trim().slice(0,120),label:str(m.label,160).trim(),...(provider?{provider}:{}),...(Object.hasOwn(BILLING,m.billing)?{billing:m.billing}:{})};
+      })
         .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),reported:iso(r.reported,new Date().toISOString())};
     });
 }
 export const runnerOf=(af,name)=>{const n=String(name??'').trim().toLowerCase();return n?(af?.runners||[]).find(r=>r.name.toLowerCase()===n)||null:null};
-// What the org card shows under the title: where it runs and on which model (the model's label
-// when its runner reported one). Empty for an agent with neither.
-export const modelLabel=(af,a)=>(a.model&&runnerOf(af,a.runtime)?.models.find(m=>m.id===a.model)?.label)||a.model;
-export const runLine=(af,a)=>[a.runtime.trim(),modelLabel(af,a).trim()].filter(Boolean).join(' · ');
+// An agent's model ids in order. Agents not yet cleaned may only have model.
+const idsOf=a=>Array.isArray(a.models)&&a.models.length?a.models:a.model?[a.model]:[];
+// The agent's models in order, as {id,label,provider,billing}: label, provider and billing from its
+// runner's report, else the id as the label and '' for the rest.
+export function modelChoices(af,a){
+  const r=runnerOf(af,a.runtime);
+  return idsOf(a).map(id=>{const m=r?.models.find(x=>x.id===id);return {id,label:m?.label||id,provider:m?.provider||'',billing:m?.billing||''}});
+}
+// What the org card shows under the title: where it runs and on which model (the primary model's
+// label when its runner reported one, "+N" for fallbacks, or "Auto (N models)"). Empty for neither.
+export const modelLabel=(af,a)=>modelChoices(af,a)[0]?.label||'';
+export function runLine(af,a){
+  const n=idsOf(a).length;
+  const model=!n?'':a.auto?`Auto (${n} model${n===1?'':'s'})`:`${modelLabel(af,a).trim()}${n>1?` +${n-1}`:''}`;
+  return [a.runtime.trim(),model].filter(Boolean).join(' · ');
+}
 // Why a live agent would be skipped by its runner, or '' when it is ready.
 export function liveProblem(af,a){
   if(a.kind!=='agent')return 'Only AI agents run';
   if(!a.runtime.trim())return 'Pick where it runs';
-  if(!a.model.trim())return 'Pick a model';
-  const r=runnerOf(af,a.runtime);
-  if(r&&r.models.length&&!r.models.some(m=>m.id===a.model))return `${r.name} did not report this model`;
+  if(!idsOf(a).length)return 'Pick a model';
+  const r=runnerOf(af,a.runtime),miss=r&&r.models.length&&modelChoices(af,a).find(m=>!r.models.some(x=>x.id===m.id));
+  if(miss)return `${r.name} did not report ${miss.label}`;
   return '';
 }
 
 export function newAgent(af,over={}){
   const now=new Date().toISOString();
-  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',model:'',
+  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',models:[],model:'',auto:false,
     inputs:[],outputs:[],tools:[],projects:[],cards:[],items:[],created:now,updated:now,...over};
   af.agents.push(a);return a;
 }
@@ -284,8 +310,13 @@ function workSection(db,x){
   const w=workFor(db,x);
   return `## Linked Flow work\n\nProjects:\n${bullets(w.projects.map(p=>p.name))}\n\nCards:\n${bullets(w.cards.map(c=>cardLine(db,c)))}\n\nTimeline and deadlines:\n${bullets(w.items.map(itemLine))}`;
 }
+const modelText=m=>m.label!==m.id?`${m.label} (${m.id})`:m.id;
+// Model lines for the brief: one model, the primary and fallbacks in order, or the auto pool.
+const runtimeModels=(auto,ms)=>!ms.length?[]:auto?[`- Auto from: ${ms.map(modelText).join(', ')} (the runner picks one per card)`]
+  :ms.length===1?[`- Model: ${modelText(ms[0])}`]:ms.map((m,i)=>`- Model ${i+1}: ${modelText(m)} (${i?'fallback':'primary'})`);
 export function agentBrief(db,agentId){
   const af=db.agentflow,a=agentOf(af,agentId);if(!a)return '';
+  const ms=modelChoices(af,a);
   const name=x=>x?`${x.name}${x.title?` (${x.title})`:''}`:'';
   const boss=agentOf(af,a.reportsTo),sup=peopleOf(db).find(n=>n.id===a.supervisor);
   const flows=workflowsFor(af,a.id).map(w=>{const steps=w.steps.map((s,i)=>s.agent===a.id?`step ${i+1}: ${s.action||'(no action)'}`:'').filter(Boolean);return `${w.name}: ${steps.join('; ')}`});
@@ -294,7 +325,7 @@ export function agentBrief(db,agentId){
     `## Purpose\n\n${a.purpose.trim()||'Not written yet.'}`,
     `## Reporting\n\n- Reports to: ${name(boss)||'Nobody (top of the org)'}\n- Supervised by: ${sup?.name||'Nobody assigned'}\n- Direct reports: ${reportsOf(af,a.id).map(name).join(', ')||'None'}`,
     `## Inputs\n\n${bullets(a.inputs)}`,`## Outputs\n\n${bullets(a.outputs)}`,`## Tools\n\n${bullets(a.tools)}`,
-    ...(a.runtime||a.model?[`## Runtime\n\n${a.runtime?`- Runs on: ${a.runtime}\n`:''}${a.model?`- Model: ${modelLabel(af,a)}${modelLabel(af,a)!==a.model?` (${a.model})`:''}`:''}`.trim()]:[]),
+    ...(a.runtime||ms.length?[`## Runtime\n\n${[...(a.runtime?[`- Runs on: ${a.runtime}`]:[]),...runtimeModels(a.auto,ms)].join('\n')}`]:[]),
     `## Workflows\n\n${bullets(flows)}`,
     workSection(db,a),
     ...(a.instructions.trim()?[`## Instructions\n\n${a.instructions.trim()}`]:[]),
