@@ -1,4 +1,4 @@
-import {icon} from './icons.js';
+import {icon,makerIcon} from './icons.js';
 import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg,personPhoto} from './ui.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
@@ -8,7 +8,7 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from './agentflow-core.js';
+  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -103,8 +103,17 @@ function toolbar(){
 const photo=n=>n?safeImg(personPhoto(n)):'';
 const faceHtml=(n,cls,tip)=>{const src=photo(n),[bg,fg]=memberColor(n.id);
   return src?`<img class="${cls} img" src="${esc(src)}" alt="" draggable="false" data-tip="${esc(tip)}">`:`<span class="${cls}" style="background:${bg};color:${fg}" data-tip="${esc(tip)}">${esc(initials(n.name))}</span>`};
-// The org card: avatar and name, role, where it runs (and the Live badge), then counts. The left
-// stripe is the status. Every text row is one line, cut with an ellipsis; the tooltip has it all.
+// The models an AI agent runs on, bottom-right of its card: up to three maker marks in order (the
+// primary larger, fallbacks tucked behind) and "+N", or one auto mark and a count when on Auto.
+function modelMarks(a){
+  const ms=a.kind==='agent'?modelChoices(af(),a):[];if(!ms.length)return '';
+  if(a.auto===true)return `<span class="af-n-mk auto" data-tip="${esc(`Auto from: ${ms.map(m=>m.label).join(', ')}`)}">${makerIcon({key:'auto'},12)}<b>${ms.length}</b></span>`;
+  const tip=ms.map((m,i)=>`${i+1}. ${m.label}${i?'':' (primary)'}`).join('\n');
+  return `<span class="af-n-mk" data-tip="${esc(tip)}">${ms.slice(0,3).map((m,i)=>`<i>${makerIcon(modelMaker(m.id,m.label),i?11:13)}</i>`).join('')}${ms.length>3?`<b>+${ms.length-3}</b>`:''}</span>`;
+}
+// The org card: avatar (its supervisor's face on the corner) and name, role, where it runs (and the
+// Live badge), then counts and its models. The left stripe is the status. Every text row is one
+// line, cut with an ellipsis; the tooltip has it all.
 function nodeHtml(a,p,hits){
   const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
   const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
@@ -115,13 +124,13 @@ function nodeHtml(a,p,hits){
   const runTip=`${run||'No runner or model yet'}\n${live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone'}`;
   return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${kind}: ${a.name}${a.title?`, ${a.title}`:''}. ${status}${live?', live':''}`)}" style="left:${p.x}px;top:${p.y}px">
     <i class="af-st" data-tip="Status: ${status}"></i>
-    <div class="af-n-head">${avatar}<div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
+    <div class="af-n-head"><span class="af-avw">${avatar}${sup&&!me?faceHtml(sup,'af-sup',`Supervised by ${sup.name}`):''}</span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
       <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||kind)}</span></div></div>
     ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
-    <div class="af-n-foot"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
+    <div class="af-n-foot"><span class="af-n-stats"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
-      ${sup&&!me?`<span class="sp"></span>${faceHtml(sup,'bub mini',`Supervised by ${sup.name}`)}`:''}</div>
+      </span>${modelMarks(a)}</div>
     <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
 }
 // The reporting chain above an agent, highlighted while it is hovered or selected: its own line and
@@ -514,7 +523,7 @@ function setModels(a,list){
 function runtimeHtml(a){
   const rs=af().runners||[],r=runnerOf(af(),a.runtime),ms=modelsOf(a),pool=new Map(modelPool(a).map(m=>[m.id,m]));
   const rows=ms.map((id,i)=>{const m=pool.get(id);
-    return `<li class="af-m${i?'':' first'}"><em>${i+1}</em><span class="af-m-l"><b>${esc(m?.label||id)}</b><small>${i?`Fallback ${i+1}`:a.auto===true?'Pool':'Primary'}${m?.label&&m.label!==id?` · ${esc(id)}`:''}${m||!pool.size?'':' · not reported'}</small></span>${billBadge(m)}
+    return `<li class="af-m${i?'':' first'}"><em>${i+1}</em>${makerIcon(modelMaker(id,m?.label),15)}<span class="af-m-l"><b>${esc(m?.label||id)}</b><small>${i?`Fallback ${i+1}`:a.auto===true?'Pool':'Primary'}${m?.label&&m.label!==id?` · ${esc(id)}`:''}${m||!pool.size?'':' · not reported'}</small></span>${billBadge(m)}
       <span class="af-m-b">${ib('chevU','Move up',{attrs:`id="af-mup-${i}" data-af-mup="${i}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`id="af-mdn-${i}" data-af-mdn="${i}"${i<ms.length-1?'':' disabled'}`})}${ib('x','Remove',{attrs:`id="af-mdel-${i}" data-af-mdel="${i}"`,label:`Remove ${m?.label||id}`})}</span></li>`}).join('');
   return `<label for="af-runtime">Runner</label>
     <div class="af-combo"><input id="af-runtime" maxlength="200" placeholder="${rs.length?'Pick or type a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
@@ -556,7 +565,7 @@ function openModels(btn){
     active=Math.max(0,Math.min(active,rows.length-1));let g;
     list.innerHTML=rows.length?rows.map((m,k)=>{const at=cur.indexOf(m.id),head=m.g&&m.g!==g?(g=m.g,`<div class="pk-group" role="presentation">${m.g==='Favorites'?icon('star',10):''}${esc(m.g)}</div>`):'';
       return head+`<div class="pk-opt af-mo${k===active?' active':''}" role="option" id="af-mp-${k}" data-k="${k}" aria-selected="${at>=0}"><span class="af-mo-n${at>=0?' on':''}">${at>=0?at+1:icon('plus',10)}</span>
-        <span class="pk-l">${m.custom?`Use “${esc(m.id)}”`:esc(m.label||m.id)}<small>${m.custom?'a model id the runner knows':esc(m.id)}</small></span>${billBadge(m)}
+        ${makerIcon(modelMaker(m.id,m.label),14)}<span class="pk-l">${m.custom?`Use “${esc(m.id)}”`:esc(m.label||m.id)}<small>${m.custom?'a model id the runner knows':esc(m.id)}</small></span>${billBadge(m)}
         ${m.custom?'':`<button type="button" class="af-star${fav.has(m.id)?' on':''}" data-star="${k}" tabindex="-1" aria-label="${fav.has(m.id)?'Unfavorite':'Favorite'} ${esc(m.label||m.id)}">${icon('star',13)}</button>`}</div>`}).join('')
       :`<div class="pk-empty">${pool.length?'No models match':'This runner reported no models: type an id'}</div>`;
     input.setAttribute('aria-activedescendant',rows.length?`af-mp-${active}`:'');

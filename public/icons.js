@@ -83,3 +83,25 @@ const P={
   send:'<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>',
 };
 export function icon(name,size=16){return `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name]||''}</svg>`}
+// Model makers (agentflow-core.js modelMaker): small self-drawn marks, brand-tinted, 24px grid.
+const MK={
+  anthropic:['#d97757','<path fill="currentColor" d="M12 2.5c.6 0 .9.4 1 1l.6 5.3 3.4-4.1c.4-.5.9-.5 1.3-.2s.4.8.1 1.3l-3 4.3 5.2-1.2c.6-.1 1 .2 1.1.7s-.2.9-.7 1.1L16 12l5 1.3c.5.2.8.6.7 1.1s-.5.8-1.1.7l-5.2-1.2 3 4.3c.3.5.3 1-.1 1.3s-.9.3-1.3-.2l-3.4-4.1-.6 5.3c-.1.6-.4 1-1 1s-.9-.4-1-1l-.6-5.3-3.4 4.1c-.4.5-.9.5-1.3.2s-.4-.8-.1-1.3l3-4.3-5.2 1.2c-.6.1-1-.2-1.1-.7s.2-.9.7-1.1L8 12 3 10.7c-.5-.2-.8-.6-.7-1.1s.5-.8 1.1-.7l5.2 1.2-3-4.3c-.3-.5-.3-1 .1-1.3s.9-.3 1.3.2l3.4 4.1.6-5.3c.1-.6.4-1 1-1z"/>'],
+  openai:['#111a17','<g fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="12" rx="3.6" ry="8.6"/><ellipse cx="12" cy="12" rx="3.6" ry="8.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="3.6" ry="8.6" transform="rotate(120 12 12)"/></g>'],
+  google:['#4c7cf0','<path fill="currentColor" d="M12 2c.5 5.4 4.6 9.5 10 10-5.4.5-9.5 4.6-10 10-.5-5.4-4.6-9.5-10-10 5.4-.5 9.5-4.6 10-10z"/>'],
+  xai:['#111a17','<path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M4.5 4.5 19.5 19.5M19.5 4.5 14 10M10 14 4.5 19.5"/>'],
+  meta:['#0866ff','<path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M12 12c-2.2-3.6-3.8-5.5-5.6-5.5C4.2 6.5 3 9.4 3 12.6 3 15.3 4.1 17 5.9 17c2 0 3.6-2.4 6.1-6.5s4.1-4 5.6-4c2.2 0 3.4 2.9 3.4 6.1 0 2.7-1.1 4.4-2.9 4.4-2 0-3.6-2.4-6.1-6.5"/>'],
+  qwen:['#615ced','<g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 19.8 7.5v9L12 21l-7.8-4.5v-9z"/><path d="m13.5 13.5 4 4"/></g>'],
+  deepseek:['#4d6bfe','<path fill="currentColor" d="M21.6 6.2c-.5-.2-.8.3-1.2.6-1-1.3-2.7-1.4-3.9-.9C14.4 4.6 11.7 4 9 4.7 5 5.8 2.4 9.4 2.5 13.4c.1 4 3.4 6.8 7.6 6.6 2.7-.1 5-1.6 6.7-3.6.9-1.1 1.6-2.4 2-3.8.9-.3 1.8-1 2.3-1.9.4-.8.6-1.6.5-2.5 0-.6.6-1.6 0-2zM9.3 16.8c-2.6-.6-4.2-2.6-4.1-5 .9 1.8 2.9 3.4 5.2 3.6-.2.5-.6 1-1.1 1.4zm7.9-7.3a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>'],
+  mistral:['#f2600c','<path fill="currentColor" d="M3 4h4v4H3zM17 4h4v4h-4zM3 8h8v4H3zM13 8h8v4h-8zM3 12h18v4H3zM3 16h4v4H3zM10 16h4v4h-4zM17 16h4v4h-4z"/>'],
+  moonshot:['#1d2421','<path fill="currentColor" d="M14.5 3a9 9 0 1 0 6.4 13.4A7.5 7.5 0 0 1 14.5 3z"/>'],
+  zhipu:['#3d5afe','<path fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" d="M5.5 5h13L5.5 19h13"/>'],
+  abliterated:['#6b7672','<g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/></g>'],
+  cursor:['#1d2421','<g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.5 20.5 7.3v9.4L12 21.5l-8.5-4.8V7.3z"/><path d="M3.5 7.3 12 12l8.5-4.7M12 12v9.5" opacity=".55"/></g>'],
+  auto:['#2f7d6b','<g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 10-10M12.5 7.5l4 4"/><path d="M18 2.5v3M16.5 4h3M21 8.5v2M20 9.5h2M10 3v2M9 4h2" stroke-width="1.8"/></g>'],
+};
+// A maker's mark as inline SVG, or a letter tile when the maker is unknown (m = modelMaker()).
+export function makerIcon(m,size=14){
+  const v=MK[m?.key];
+  if(!v)return `<span class="mk mk-other" style="width:${size}px;height:${size}px;font-size:${Math.round(size*.62)}px" aria-hidden="true">${String(m?.letter||'?').replace(/[^A-Z0-9?]/gi,'').slice(0,1)||'?'}</span>`;
+  return `<svg class="mk mk-${m.key}" width="${size}" height="${size}" viewBox="0 0 24 24" style="color:${v[0]}" aria-hidden="true">${v[1]}</svg>`;
+}

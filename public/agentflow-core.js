@@ -113,6 +113,35 @@ export function modelChoices(af,a){
   const r=runnerOf(af,a.runtime);
   return idsOf(a).map(id=>{const m=r?.models.find(x=>x.id===id);return {id,label:m?.label||id,provider:m?.provider||'',billing:m?.billing||''}});
 }
+// Who made a model (not which harness runs it), for its icon: {key,name,letter}. Read from the model
+// part of "<providerInstance>:<model>" and the label, so "cursor:claude-opus-5-5" is Anthropic and
+// "opencode:orcarouter/openai/gpt-5.4-mini" is OpenAI. Router "default"/"auto" models are auto. A
+// single-maker harness (claude, codex, gemini, grok) is the last hint; else key 'other' with a letter.
+const MAKERS=[
+  ['anthropic','Anthropic',/anthropic|claude|\b(opus|sonnet|haiku)\b/],
+  ['openai','OpenAI',/openai|chatgpt|\bgpt|codex|(^|[^a-z0-9])o\d($|[^a-z0-9])/],
+  ['google','Google Gemini',/google|gemini|gemma/],
+  ['xai','xAI',/\bx-?ai\b|grok/],
+  ['meta','Meta',/meta-llama|llama|(^|\/)meta\//],
+  ['qwen','Qwen',/qwen|qwq|alibaba/],
+  ['deepseek','DeepSeek',/deepseek/],
+  ['mistral','Mistral',/mistral|mixtral|[cd]evstral|codestral|magistral/],
+  ['moonshot','Moonshot Kimi',/moonshot|kimi/],
+  ['zhipu','Zhipu GLM',/zhipu|\bz-ai\b|glm/],
+  ['abliterated','Abliterated',/abliterat/],
+  ['cursor','Cursor',/composer|^cursor(-|\/|$)/],
+];
+const AUTO_IDS=new Set(['default','auto','auto-smart']);
+export function modelMaker(id,label=''){
+  const s=String(id??'').trim(),i=s.indexOf(':'),host=i>0?s.slice(0,i).toLowerCase():'',model=(i>0?s.slice(i+1):s).trim().toLowerCase();
+  const lab=String(label??'').trim(),text=`${model} ${lab.toLowerCase()===s.toLowerCase()?'':lab.toLowerCase()}`;
+  if(AUTO_IDS.has(model.split('/').pop())||/^auto\b/i.test(lab))return {key:'auto',name:'Auto',letter:''};
+  for(const [key,name,re] of MAKERS)if(re.test(text))return {key,name,letter:''};
+  const h=[['claude','anthropic'],['codex','openai'],['gemini','google'],['antigravity','google'],['grok','xai']].find(([k])=>host.startsWith(k));
+  if(h){const [key,name]=MAKERS.find(m=>m[0]===h[1]);return {key,name,letter:''}}
+  const word=(lab&&lab!==s?lab:model.split('/').pop()||host)||'',letter=(word.match(/[a-z0-9]/i)?.[0]||'?').toUpperCase();
+  return {key:'other',name:'',letter};
+}
 // What the org card shows under the title: where it runs and on which model (the primary model's
 // label when its runner reported one, "+N" for fallbacks, or "Auto (N models)"). Empty for neither.
 export const modelLabel=(af,a)=>modelChoices(af,a)[0]?.label||'';

@@ -680,7 +680,7 @@ body[data-tab=agentflow] #inspector{width:320px}
 .af-av.k{border-radius:8px;background:var(--accent-2);color:var(--accent)}
 .k-human .af-av.k{background:#eaf1fa;color:#3d6fb6}
 .k-team .af-av.k{background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2)}
-img.af-av,img.bub{object-fit:cover;background:var(--hover)}
+img.af-av,img.bub,img.af-sup{object-fit:cover;background:var(--hover)}
 .af-n-id{display:flex;flex:1;flex-direction:column;min-width:0}
 .af-node .nm,.af-n-role,.af-n-run span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .af-node .nm{font-size:13px;font-weight:600;line-height:17px}
@@ -691,10 +691,24 @@ img.af-av,img.bub{object-fit:cover;background:var(--hover)}
 .af-n-run b{flex:none;padding:0 5px;border-radius:3px;background:#2f8a4f;color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.04em;line-height:15px;text-transform:uppercase}
 .af-n-run.warn b{background:var(--warn)}
 .af-g{display:flex;flex:none;align-items:center;justify-content:center;width:15px;height:15px;border-radius:4px;font-size:9px;font-style:normal;font-weight:700}
-.af-n-foot{display:flex;flex:none;align-items:center;gap:10px;min-width:0;height:16px;margin-top:auto;overflow:hidden;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
-.af-n-foot>span{display:inline-flex;flex:none;align-items:center;gap:3px}
-.af-n-foot>.sp{flex:1}
-.af-n-foot .bub{margin-left:0}
+.af-n-foot{display:flex;flex:none;align-items:center;min-width:0;height:18px;white-space:nowrap;margin-top:auto;overflow:hidden;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.af-n-stats{display:flex;flex:1;align-items:center;gap:10px;min-width:0;overflow:hidden}
+.af-n-stats>span{display:inline-flex;flex:none;align-items:center;gap:3px}
+/* Supervisor's face on the avatar's corner. */
+.af-avw{position:relative;display:flex;flex:none}
+.af-sup{position:absolute;right:-5px;bottom:-4px;display:flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid #fff;border-radius:50%;font-size:7px;font-weight:700;letter-spacing:.02em;box-sizing:border-box}
+/* Model maker marks, bottom-right: the primary first and largest, fallbacks tucked behind it. */
+.mk{display:block;flex:none}
+.mk-other{display:flex;align-items:center;justify-content:center;border-radius:3px;background:#e6ebe9;color:#4a5551;font-weight:700;line-height:1}
+.af-n-mk{display:flex;flex:none;align-items:center;margin-left:8px;color:var(--muted);font-size:10px;font-weight:600}
+.af-n-mk>i{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--line2);border-radius:50%;background:#fff}
+.af-n-mk>i+i{width:16px;height:16px;margin-left:-5px}
+.af-n-mk>i:nth-child(1){position:relative;z-index:3}.af-n-mk>i:nth-child(2){position:relative;z-index:2}
+.af-n-mk>b{margin-left:3px;font-weight:600}
+.af-n-mk.auto{gap:3px;height:18px;padding:0 6px 0 4px;border:1px solid #2f7d6b40;border-radius:9px;background:#eef6f3;color:#2f7d6b}
+.af-n-mk.auto>b{margin:0}
+.af-n-mk .mk-other{background:none}
+.af-m>.mk,.af-mo>.mk{flex:none}
 /* Zoomed out, a card shows only who it is, larger, so the org stays readable. */
 .af-canvas.lod .af-n-role,.af-canvas.lod .af-n-run,.af-canvas.lod .af-n-foot,.af-canvas.lod .af-port{display:none}
 .af-canvas.lod .af-node{justify-content:center;padding:8px 10px 8px 13px}

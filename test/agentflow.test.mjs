@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -334,4 +334,26 @@ test('models: primary then fallbacks, model mirrors the first, older saves keep 
   assert.match(agentBrief(db,'pool'),/- Model: M1 \(x:m1\)\n/);
   assert.match(agentBrief(db,'old'),/## Runtime\n\n- Model: x:m1\n/);
   assert.doesNotMatch(agentBrief(db,'none'),/## Runtime/);
+});
+
+test('model makers: the icon follows who made the model, not the harness that runs it',()=>{
+  const k=(id,label)=>modelMaker(id,label).key;
+  assert.equal(k('claudeAgent:claude-sonnet-5-5','Claude Sonnet 5.5'),'anthropic');
+  assert.equal(k('cursor:claude-opus-5-5'),'anthropic','Cursor runs it, Anthropic made it');
+  assert.equal(k('opencode:vercel/anthropic/claude-haiku-4.5'),'anthropic');
+  assert.equal(k('claudeAgent:sonnet'),'anthropic');
+  assert.equal(k('codex:gpt-6.1-sol'),'openai');assert.equal(k('opencode:orcarouter/openai/gpt-5.4-mini'),'openai');
+  assert.equal(k('x:o3-mini'),'openai');assert.equal(k('codex:some-new-model'),'openai','a one-maker harness is the last hint');
+  assert.equal(k('antigravity:gemini-3.8-flash-high'),'google');
+  assert.equal(k('grok:grok-4.7'),'xai');assert.equal(k('cursor_cursor_pmd:grok-4.7'),'xai');
+  assert.equal(k('opencode:meta-llama/llama-4-scout'),'meta');assert.equal(k('x:qwen3-coder'),'qwen');
+  assert.equal(k('x:deepseek-v4'),'deepseek');assert.equal(k('x:mistralai/devstral-2'),'mistral');
+  assert.equal(k('x:moonshotai/kimi-k3'),'moonshot');assert.equal(k('x:z-ai/glm-5'),'zhipu');
+  assert.equal(k('opencode:abliteration/abliterated-model-large-v2'),'abliterated');
+  assert.equal(k('cursor:composer-2'),'cursor');
+  for(const id of ['cursor:default','opencode:openrouter/auto','x:auto-smart'])assert.equal(k(id),'auto',id);
+  assert.equal(k('x:anything','Auto'),'auto','a router labelled Auto');
+  assert.deepEqual(modelMaker('opencode:opencode/big-pickle'),{key:'other',name:'',letter:'B'},'unknown: a letter tile');
+  assert.equal(modelMaker('opencode:opencode/big-pickle','Pickle').letter,'P','the label wins for the letter');
+  assert.equal(modelMaker('','').letter,'?');assert.equal(modelMaker(null).key,'other');
 });
