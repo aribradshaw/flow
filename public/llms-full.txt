@@ -128,15 +128,26 @@ Flow stores the design. It does not run agents itself. A runner of your choice (
 
 ### Agents
 
-An agent has `name, kind, title, status, reportsTo, supervisor, purpose, instructions, runtime, model, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
+An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, instructions, runtime, model, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
 
 - `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
 - `supervisor` is a person card on one of your mind maps: the human accountable for the agent.
 - `inputs`, `outputs` and `tools` are short text lists, such as "A card in Doing" or "Pull request linked on the card".
-- `instructions` holds the system prompt or runbook. `runtime` says where it runs and `model` which model, if any.
+- `instructions` holds the system prompt or runbook. `runtime` says where it runs (a runner's name) and `model` which model, if any.
+- `live` is the switch runners obey. It is off for every new agent, and a runner leaves an agent that is not live alone, whatever its status. Turn it on in the agent's side panel, or with `agents.update` (`live: true`). The org card then shows a **Live** badge, in amber when its runner would skip it (no runner or model picked, or a model its runner did not report).
 - Deleting an agent moves its direct reports up to its manager, and its workflow steps become unassigned.
+
+### Runners
+
+A runner is a machine or service that runs agents, such as a home server with agent harnesses installed. It tells Flow what it can run with `runners.report`: its name and the models it offers, each with an id and a label. `runners.list` returns them. In an agent's side panel, **Runs on** suggests the reported runners and **Model** that runner's models, and every org card shows where the agent runs and on which model. Reporting the same models again saves nothing, so a runner can report on every pass.
+
+```sh
+flow runners report --input '{"runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+```
+
+`tools/agent-runner.mjs` is a reference runner for [T3 Code](https://t3.codes): it reports the providers and models signed in on its machine, and for each live agent whose `runtime` is its name, starts a T3 thread on the agent's model for the top card in its queue, then moves the card to UAT when the thread finishes. It starts in dry-run mode, so it only prints what it would do until you turn that off. See the comment at the top of the file for its settings.
 
 ### Workflows
 
@@ -152,6 +163,8 @@ Delegating a DevOps card to an agent puts it in that agent's **work queue**. The
 2. Take the first card. Move it to Doing with `cards.move` if it is new.
 3. Do the work, following the brief and the card's description and checklist.
 4. Report back with `cards.update` (tick the checklist, add the pull request under `links`), then `cards.move` to `uat` for a human to approve.
+
+A runner only works agents with `live` on: `agents.list` with `live: true` gives it that list.
 
 ```sh
 curl -H "Authorization: Bearer $FLOW_TOKEN" "$FLOW_URL/api/v1/envs/$FLOW_ENV/agents/Researcher/work?columns=doing,requests"
@@ -1867,7 +1880,7 @@ List AgentFlow agents
 
 `GET /api/v1/envs/{env}/agents` · scope `read` · MCP tool `agents_list`
 
-Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order. Filters: status, kind, project (id or name) and q (name, role, purpose, inputs, outputs, tools).
+Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order. Filters: status, kind, live (true: the agents a runner should work), project (id or name) and q (name, role, purpose, inputs, outputs, tools).
 
 **Input**
 
@@ -1876,6 +1889,7 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `env` | string | yes | Environment id (see envs.list). |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
 | `kind` | enum |  | One of `agent`, `human`, `team`. |
+| `live` | boolean |  |  |
 | `project` | string |  | Project id or name. |
 | `q` | string |  |  |
 | `limit` | integer |  | Page size (1-200, default 50). |
@@ -1891,6 +1905,7 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items[].kind` | enum | yes | One of `agent`, `human`, `team`. |
 | `items[].title` | string |  |  |
 | `items[].status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `items[].live` | boolean | yes |  |
 | `items[].reportsTo` | string | yes |  |
 | `items[].supervisor` | string | yes |  |
 | `items[].purpose` | string |  |  |
@@ -1926,6 +1941,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents?status=active" \
       "kind": "agent",
       "title": "Research",
       "status": "active",
+      "live": false,
       "reportsTo": "a0",
       "supervisor": "cleo",
       "purpose": "Gathers context before work starts.",
@@ -1985,6 +2001,7 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.live` | boolean | yes |  |
 | `agent.reportsTo` | string | yes |  |
 | `agent.supervisor` | string | yes |  |
 | `agent.purpose` | string |  |  |
@@ -2019,6 +2036,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "kind": "agent",
     "title": "Research",
     "status": "active",
+    "live": false,
     "reportsTo": "a0",
     "supervisor": "cleo",
     "purpose": "Gathers context before work starts.",
@@ -2046,7 +2064,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z"
   },
-  "brief": "# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n"
+  "brief": "# Researcher\n\nAI agent · Research · Active · Not live\n\n## Purpose\n\nGathers context before work starts.\n"
 }
 ```
 
@@ -2079,6 +2097,7 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.live` | boolean | yes |  |
 | `agent.reportsTo` | string | yes |  |
 | `agent.supervisor` | string | yes |  |
 | `agent.purpose` | string |  |  |
@@ -2132,6 +2151,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
     "kind": "agent",
     "title": "Research",
     "status": "active",
+    "live": false,
     "reportsTo": "a0",
     "supervisor": "cleo",
     "purpose": "Gathers context before work starts.",
@@ -2159,7 +2179,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z"
   },
-  "brief": "# Researcher\n\nAI agent · Research · Active\n\n## Purpose\n\nGathers context before work starts.\n",
+  "brief": "# Researcher\n\nAI agent · Research · Active · Not live\n\n## Purpose\n\nGathers context before work starts.\n",
   "items": [
     {
       "id": "k1",
@@ -2217,12 +2237,13 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
 | `title` | string |  | Role, e.g. Research. |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
+| `live` | boolean |  | The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue. |
 | `reportsTo` | string |  | The agent it reports to: id or name; "" for top level. |
 | `supervisor` | string |  | A person on a chart who oversees it: node id or name; "" for none. |
 | `purpose` | string |  |  |
 | `instructions` | string |  | System prompt or runbook. |
-| `runtime` | string |  | Where it runs, e.g. T3 or a home server. |
-| `model` | string |  |  |
+| `runtime` | string |  | Where it runs: a runner name from runners.list, e.g. a home server. |
+| `model` | string |  | A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2243,6 +2264,7 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.live` | boolean | yes |  |
 | `agent.reportsTo` | string | yes |  |
 | `agent.supervisor` | string | yes |  |
 | `agent.purpose` | string |  |  |
@@ -2278,6 +2300,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/agents" \
     "kind": "agent",
     "title": "Research",
     "status": "active",
+    "live": false,
     "reportsTo": "a0",
     "supervisor": "cleo",
     "purpose": "Gathers context before work starts.",
@@ -2326,12 +2349,13 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
 | `title` | string |  | Role, e.g. Research. |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
+| `live` | boolean |  | The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue. |
 | `reportsTo` | string |  | The agent it reports to: id or name; "" for top level. |
 | `supervisor` | string |  | A person on a chart who oversees it: node id or name; "" for none. |
 | `purpose` | string |  |  |
 | `instructions` | string |  | System prompt or runbook. |
-| `runtime` | string |  | Where it runs, e.g. T3 or a home server. |
-| `model` | string |  |  |
+| `runtime` | string |  | Where it runs: a runner name from runners.list, e.g. a home server. |
+| `model` | string |  | A model id the runner reported (runners.list), e.g. claudeAgent:claude-sonnet-5-5. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2352,6 +2376,7 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
+| `agent.live` | boolean | yes |  |
 | `agent.reportsTo` | string | yes |  |
 | `agent.supervisor` | string | yes |  |
 | `agent.purpose` | string |  |  |
@@ -2387,6 +2412,7 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "kind": "agent",
     "title": "Research",
     "status": "active",
+    "live": false,
     "reportsTo": "a0",
     "supervisor": "cleo",
     "purpose": "Gathers context before work starts.",
@@ -2450,6 +2476,114 @@ curl -sS -X DELETE "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
 {
   "rev": 58,
   "deleted": "a1"
+}
+```
+
+### `runners.list`
+
+List AgentFlow runners
+
+`GET /api/v1/envs/{env}/runners` · scope `read` · MCP tool `runners_list`
+
+Machines or services that run agents, with the models each one offers, as they last reported (runners.report). An agent's runtime names a runner and its model is one of that runner's model ids.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].name` | string | yes |  |
+| `items[].models` | object[] | yes |  |
+| `items[].reported` | string | yes |  |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Runners**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/runners" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "name": "Home server",
+      "models": [
+        {
+          "id": "claudeAgent:claude-sonnet-5-5",
+          "label": "Claude · Sonnet 5.5"
+        }
+      ],
+      "reported": "2026-10-29T17:00:00.000Z"
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `runners.report`
+
+Report a runner and its models
+
+`POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
+
+A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick a model id. Up to 20 runners and 500 models each.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `runner` | string | yes | Runner name, e.g. Home server. |
+| `models` | object[] | yes |  |
+| `models[].id` | string | yes |  |
+| `models[].label` | string |  |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `runner` | object | yes |  |
+| `runner.name` | string | yes |  |
+| `runner.models` | object[] | yes |  |
+| `runner.reported` | string | yes |  |
+| `changed` | boolean | yes |  |
+
+**Example: Home server**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+```
+
+```json
+{
+  "rev": 59,
+  "runner": {
+    "name": "Home server",
+    "models": [
+      {
+        "id": "claudeAgent:claude-sonnet-5-5",
+        "label": "Claude · Sonnet 5.5"
+      }
+    ],
+    "reported": "2026-10-29T17:00:00.000Z"
+  },
+  "changed": true
 }
 ```
 

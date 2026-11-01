@@ -8,7 +8,7 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,STACK,stacked,positions,placed,pin,unpin,workQueue,duplicateWorkflow} from './agentflow-core.js';
+  canReportTo,CARD,STACK,stacked,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -98,9 +98,11 @@ function nodeHtml(a,p,hits){
   const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
   const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
   const [bg,fg]=sup?memberColor(sup.id):[];
-  return `<div class="af-node k-${a.kind} st-${a.status}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${AGENT_KINDS[a.kind]}: ${a.name}`)}" style="left:${p.x}px;top:${p.y}px">
+  const run=runLine(af(),a),live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a);
+  return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${AGENT_KINDS[a.kind]}: ${a.name}`)}" style="left:${p.x}px;top:${p.y}px">
     <div class="af-n-top"><span class="af-k" data-tip="${AGENT_KINDS[a.kind]}">${icon(KIND_ICON[a.kind],14)}</span><span class="nm">${esc(a.name)}</span><i class="af-st" data-tip="${AGENT_STATUS[a.status]}"></i></div>
     <div class="af-n-title">${esc(a.title)}</div>
+    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone')}">${live?`<b>Live</b>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
     <div class="af-n-foot"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
@@ -417,6 +419,7 @@ function agentHtml(a){
     ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('plus','Add a direct report',{attrs:'data-afi="addReport"'})}
     ${ib('trash','Delete agent',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
     <form id="afedit" class="ibody" autocomplete="off">
+    ${a.kind==='agent'?liveHtml(a):''}
     <label for="af-name">Name</label><input id="af-name" maxlength="120" required value="${esc(a.name)}">
     <label>Kind</label><div class="seg wide">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
     <div class="two"><div><label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}"></div>
@@ -428,13 +431,28 @@ function agentHtml(a){
     ${listEditor('inputs','Inputs','what it takes in',a.inputs)}
     ${listEditor('outputs','Outputs','what it produces',a.outputs)}
     ${listEditor('tools','Tools','what it may use',a.tools)}
-    <div class="two"><div><label for="af-runtime">Runs on</label><input id="af-runtime" maxlength="200" placeholder="e.g. T3, home server" value="${esc(a.runtime)}"></div>
-      <div><label for="af-model">Model</label><input id="af-model" maxlength="120" placeholder="optional" value="${esc(a.model)}"></div></div>
+    ${runtimeHtml(a)}
     <label for="af-instr">Instructions <em>system prompt or runbook</em></label><textarea id="af-instr" rows="7" maxlength="20000">${esc(a.instructions)}</textarea>
     ${linksHtml(a)}
     ${reps.length?`<label>Direct reports</label><ul class="links">${reps.map(r=>`<li><button type="button" data-agent-go="${esc(r.id)}">${icon(KIND_ICON[r.kind],12)}<span>${esc(r.name)}</span><em>${esc(r.title)}</em></button></li>`).join('')}</ul>`:''}
     ${flows.length?`<label>Workflows</label><ul class="links">${flows.map(w=>`<li><button type="button" data-flow-go="${esc(w.id)}">${icon('flow',12)}<span>${esc(w.name)}</span><em>step ${w.steps.map((s,i)=>s.agent===a.id?i+1:0).filter(Boolean).join(', ')}</em></button></li>`).join('')}</ul>`:''}
     </form>`;
+}
+// The switch a runner obeys. It stays off until someone turns it on, whatever the status says.
+function liveHtml(a){
+  const why=liveProblem(af(),a);
+  return `<label class="af-live${a.live?' on':''}${a.live&&why?' warn':''}"><input type="checkbox" id="af-live" role="switch"${a.live?' checked':''}><span class="af-sw" aria-hidden="true"></span>
+    <span class="af-live-t"><strong>${a.live?'Live':'Not live'}</strong><em>${a.live?(why?`Its runner will skip it: ${why}`:`${esc(a.runtime)} works its queue`):'Runners leave this agent alone'}</em></span></label>`;
+}
+// Runs on and Model, with the runners and models reported to this workspace as suggestions.
+function runtimeHtml(a){
+  const rs=af().runners||[],r=runnerOf(af(),a.runtime),models=r?r.models:rs.flatMap(x=>x.models);
+  return `<div class="two"><div><label for="af-runtime">Runs on</label><input id="af-runtime" list="af-runners" maxlength="200" placeholder="${rs.length?'Pick a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
+      <datalist id="af-runners">${rs.map(x=>`<option value="${esc(x.name)}">${x.models.length} models</option>`).join('')}</datalist></div>
+    <div><label for="af-model">Model</label><input id="af-model" list="af-models" maxlength="120" placeholder="${models.length?'Pick a model':'optional'}" value="${esc(a.model)}">
+      <datalist id="af-models">${models.map(m=>`<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</datalist></div></div>
+    ${a.runtime&&rs.length&&!r?`<div class="dc-hint">No runner called “${esc(a.runtime)}” has reported to this workspace.</div>`:''}
+    ${r?`<div class="dc-hint">${esc(r.name)} reported ${r.models.length} models${a.model&&r.models.find(m=>m.id===a.model)?` · ${esc(r.models.find(m=>m.id===a.model).label)}`:''}.</div>`:''}`;
 }
 function workflowHtml(w){
   const agents=[...af().agents].sort((x,y)=>x.name.localeCompare(y.name));
@@ -511,7 +529,8 @@ export function inspectorInput(e){
 export function inspectorChange(e){
   const t=e.target,x=sel();if(!x)return;
   const set=(k,v)=>change(()=>{x[k]=v;touch(x)});
-  if(t.id==='af-status'||t.id==='af-wstatus')set('status',t.value);
+  if(t.id==='af-live')set('live',t.checked);
+  else if(t.id==='af-status'||t.id==='af-wstatus')set('status',t.value);
   else if(t.id==='af-sup')set('supervisor',t.value);
   else if(t.id==='af-trigger')set('trigger',t.value);
   else if(t.id==='af-reports'){if(t.value===x.reportsTo)return;if(t.value&&descendants(af(),x.id).has(t.value)){rerender();return}set('reportsTo',t.value)}

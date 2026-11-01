@@ -6,15 +6,26 @@ Flow stores the design. It does not run agents itself. A runner of your choice (
 
 ## Agents
 
-An agent has `name, kind, title, status, reportsTo, supervisor, purpose, instructions, runtime, model, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
+An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, instructions, runtime, model, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
 
 - `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
 - `supervisor` is a person card on one of your mind maps: the human accountable for the agent.
 - `inputs`, `outputs` and `tools` are short text lists, such as "A card in Doing" or "Pull request linked on the card".
-- `instructions` holds the system prompt or runbook. `runtime` says where it runs and `model` which model, if any.
+- `instructions` holds the system prompt or runbook. `runtime` says where it runs (a runner's name) and `model` which model, if any.
+- `live` is the switch runners obey. It is off for every new agent, and a runner leaves an agent that is not live alone, whatever its status. Turn it on in the agent's side panel, or with `agents.update` (`live: true`). The org card then shows a **Live** badge, in amber when its runner would skip it (no runner or model picked, or a model its runner did not report).
 - Deleting an agent moves its direct reports up to its manager, and its workflow steps become unassigned.
+
+## Runners
+
+A runner is a machine or service that runs agents, such as a home server with agent harnesses installed. It tells Flow what it can run with `runners.report`: its name and the models it offers, each with an id and a label. `runners.list` returns them. In an agent's side panel, **Runs on** suggests the reported runners and **Model** that runner's models, and every org card shows where the agent runs and on which model. Reporting the same models again saves nothing, so a runner can report on every pass.
+
+```sh
+flow runners report --input '{"runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+```
+
+`tools/agent-runner.mjs` is a reference runner for [T3 Code](https://t3.codes): it reports the providers and models signed in on its machine, and for each live agent whose `runtime` is its name, starts a T3 thread on the agent's model for the top card in its queue, then moves the card to UAT when the thread finishes. It starts in dry-run mode, so it only prints what it would do until you turn that off. See the comment at the top of the file for its settings.
 
 ## Workflows
 
@@ -30,6 +41,8 @@ Delegating a DevOps card to an agent puts it in that agent's **work queue**. The
 2. Take the first card. Move it to Doing with `cards.move` if it is new.
 3. Do the work, following the brief and the card's description and checklist.
 4. Report back with `cards.update` (tick the checklist, add the pull request under `links`), then `cards.move` to `uat` for a human to approve.
+
+A runner only works agents with `live` on: `agents.list` with `live: true` gives it that list.
 
 ```sh
 curl -H "Authorization: Bearer $FLOW_TOKEN" "$FLOW_URL/api/v1/envs/$FLOW_ENV/agents/Researcher/work?columns=doing,requests"

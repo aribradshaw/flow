@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -14,8 +14,8 @@ const base=()=>({charts:[{id:'c',name:'C',nodes:[{id:'pat',name:'Pat Lee',type:'
 
 test('a missing or broken AgentFlow becomes an empty one',()=>{
   assert.deepEqual(cleanAgentflow(undefined,base()),seedAgentflow());
-  assert.deepEqual(cleanAgentflow('nope',base()),{agents:[],workflows:[]});
-  assert.deepEqual(normalize({charts:[]}).agentflow,{agents:[],workflows:[]},'the server normalizer adds it to older saves');
+  assert.deepEqual(cleanAgentflow('nope',base()),{agents:[],workflows:[],runners:[]});
+  assert.deepEqual(normalize({charts:[]}).agentflow,{agents:[],workflows:[],runners:[]},'the server normalizer adds it to older saves');
 });
 
 test('validation: defaults, limits, dangling links and duplicate ids',()=>{
@@ -229,4 +229,26 @@ test('duplicating a workflow: a copy right after it, with new ids for it and its
   assert.equal(duplicateWorkflow(af,'ghost'),null);
   assert.ok(duplicateWorkflow(af,newWorkflow(af,{name:'x'.repeat(120)}).id).name.length<=120,'the name stays within its limit');
   assert.equal(last.name,'Last');
+});
+
+test('agents are not live until switched on, and runners list what they can run',()=>{
+  const db=base();
+  db.agentflow=cleanAgentflow({agents:[{id:'a',name:'A'},{id:'b',name:'B',live:'yes'},{id:'c',name:'C',live:true}],
+    runners:[{name:' Home ',models:[{id:'x:m1',label:'M1'},{id:'x:m1'},{id:''},{label:'no id'}]},{name:'home'},{name:''},{nope:1}]},db);
+  assert.deepEqual(db.agentflow.agents.map(a=>a.live),[false,false,true],'only true is live');
+  assert.deepEqual(db.agentflow.runners.map(r=>[r.name,r.models]),[['Home',[{id:'x:m1',label:'M1'}]]],'runner names are unique (any case), model ids too');
+  assert.equal(runnerOf(db.agentflow,'HOME').name,'Home');assert.equal(runnerOf(db.agentflow,''),null);
+  assert.equal(cleanRunners(Array.from({length:30},(_,i)=>({name:'r'+i}))).length,LIMITS.runners);
+  const [a,,c]=db.agentflow.agents;
+  assert.deepEqual(filterAgents(db.agentflow,{live:true}).map(x=>x.id),['c']);
+  assert.equal(runLine(db.agentflow,a),'');
+  assert.equal(liveProblem(db.agentflow,c),'Pick where it runs');
+  c.runtime='home';assert.equal(liveProblem(db.agentflow,c),'Pick a model');
+  c.model='x:other';assert.equal(liveProblem(db.agentflow,c),'Home did not report this model');
+  c.model='x:m1';assert.equal(liveProblem(db.agentflow,c),'');
+  assert.equal(modelLabel(db.agentflow,c),'M1');assert.equal(runLine(db.agentflow,c),'home · M1');
+  c.runtime='Elsewhere';c.model='y:z';assert.equal(liveProblem(db.agentflow,c),'','an unreported runner is taken at its word');assert.equal(runLine(db.agentflow,c),'Elsewhere · y:z');
+  c.kind='team';assert.equal(liveProblem(db.agentflow,c),'Only AI agents run');
+  assert.match(agentBrief(db,'c'),/^# C\n\nTeam · Draft\n/,'teams have no live state in the brief');
+  assert.match(agentBrief(db,'a'),/AI agent · Draft · Not live/);
 });

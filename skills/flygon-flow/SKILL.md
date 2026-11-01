@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (36)
+## Operations (38)
 
 ### Environments
 
@@ -102,6 +102,8 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | `agents.create` | `agents_create` | `POST /api/v1/envs/{env}/agents` | write | Create an AgentFlow agent |
 | `agents.update` | `agents_update` | `PATCH /api/v1/envs/{env}/agents/{agent}` | write | Update an AgentFlow agent |
 | `agents.delete` | `agents_delete` | `DELETE /api/v1/envs/{env}/agents/{agent}` | write | Delete an AgentFlow agent |
+| `runners.list` | `runners_list` | `GET /api/v1/envs/{env}/runners` | read | List AgentFlow runners |
+| `runners.report` | `runners_report` | `POST /api/v1/envs/{env}/runners/{runner}` | write | Report a runner and its models |
 
 ### AgentFlow workflows
 
@@ -487,6 +489,30 @@ flow agents delete --input '{"env":"default-workspace","agent":"Researcher"}'
 
 curl -sS -X DELETE "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
   -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Runners
+
+MCP: call `runners_list` with `{"env":"default-workspace"}`
+
+```sh
+flow runners list --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/runners" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Home server
+
+MCP: call `runners_report` with `{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}`
+
+```sh
+flow runners report --input '{"env":"default-workspace","runner":"Home server","models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}]}'
 ```
 
 ### Workflows the researcher is in

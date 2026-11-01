@@ -2,13 +2,18 @@
 // Defaults, validation and pure helpers (no DOM, no storage), so the server, the API and tests can
 // use them in Node, as with devops-core.js.
 //
-// db.agentflow = {agents:[agent], workflows:[workflow]}
-// agent    = {id,name,kind,title,status,reportsTo,supervisor,purpose,instructions,runtime,model,
+// db.agentflow = {agents:[agent], workflows:[workflow], runners:[runner]}
+// agent    = {id,name,kind,title,status,live,reportsTo,supervisor,purpose,instructions,runtime,model,
 //             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated, x?,y?}
+//   live: the switch a runner obeys. Off (the default), runners leave the agent alone whatever its
+//   status; on, a runner whose name matches `runtime` works its queue with `model`.
 //   x, y: where the card sits on the AgentFlow canvas (optional; see positions()).
 //   reportsTo: another agent (the AgentFlow org chart); supervisor: a person card on a Flow chart.
 // workflow = {id,name,description,status,trigger,schedule,steps:[{id,agent,action,output}],
 //             projects[],cards[],items[],created,updated}
+// runner   = {name,models:[{id,label}],reported}: a machine or service that runs agents, as it
+//   reported itself (runners.report). Its name is what agents put in `runtime`, and its models are
+//   the choices for `model`. Flow never contacts a runner; the runner calls Flow.
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
@@ -18,7 +23,7 @@ export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired
 export const WORKFLOW_STATUS={draft:'Draft',active:'Active',paused:'Paused'};
 export const TRIGGERS={manual:'Manual',schedule:'Schedule',event:'Event'};
 export const TRIGGER_HINT={manual:'Someone starts it',schedule:'e.g. Weekdays at 09:00',event:'e.g. A card enters UAT'};
-export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100};
+export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500};
 // Ids of records shared in from another workspace. They are projected in on read and are not in
 // stored data, so links to them are kept even when the record is not present (e.g. on the server).
 const shared=x=>typeof x==='string'&&x.startsWith('sh.');
@@ -30,7 +35,7 @@ const pick=(v,map,dflt)=>Object.hasOwn(map,v)?v:dflt;
 const strs=(v,n=LIMITS.list,len=200)=>[...new Set((Array.isArray(v)?v:[]).filter(x=>typeof x==='string').map(x=>x.trim().slice(0,len)).filter(Boolean))].slice(0,n);
 const refs=(v,ok)=>[...new Set((Array.isArray(v)?v:[]).filter(x=>typeof x==='string'&&(ok.has(x)||shared(x))))].slice(0,LIMITS.refs);
 
-export const seedAgentflow=()=>({agents:[],workflows:[]});
+export const seedAgentflow=()=>({agents:[],workflows:[],runners:[]});
 const clampXY=v=>Math.max(-1e5,Math.min(1e5,Math.round(v)));
 export const placed=a=>Number.isFinite(a?.x)&&Number.isFinite(a?.y);
 
@@ -51,7 +56,7 @@ export function cleanAgentflow(d,db={}){
   const links=x=>({projects:refs(x.projects,projects),cards:refs(x.cards,cards),items:refs(x.items,items)});
   const seen=new Set();
   const agents=(Array.isArray(d.agents)?d.agents:[]).filter(a=>a&&typeof a.id==='string'&&a.id&&typeof a.name==='string'&&!seen.has(a.id)&&seen.add(a.id)).slice(0,LIMITS.agents).map(a=>({
-    id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind:pick(a.kind,AGENT_KINDS,'agent'),title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),
+    id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind:pick(a.kind,AGENT_KINDS,'agent'),title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),live:a.live===true,
     reportsTo:typeof a.reportsTo==='string'?a.reportsTo:'',supervisor:typeof a.supervisor==='string'&&(people.has(a.supervisor)||shared(a.supervisor))?a.supervisor:'',
     purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),model:str(a.model,120),
     inputs:strs(a.inputs),outputs:strs(a.outputs),tools:strs(a.tools),...links(a),created:iso(a.created,now),updated:iso(a.updated,now),
@@ -73,12 +78,36 @@ export function cleanAgentflow(d,db={}){
       }),
       ...links(w),created:iso(w.created,now),updated:iso(w.updated,now)};
   });
-  return {agents,workflows};
+  return {agents,workflows,runners:cleanRunners(d.runners)};
+}
+// Runners as they reported themselves: unique names, each with unique model ids.
+export function cleanRunners(v){
+  const seen=new Set();
+  return (Array.isArray(v)?v:[]).filter(r=>r&&typeof r.name==='string'&&r.name.trim()).map(r=>({...r,name:r.name.trim().slice(0,200)}))
+    .filter(r=>!seen.has(r.name.toLowerCase())&&seen.add(r.name.toLowerCase())).slice(0,LIMITS.runners).map(r=>{
+      const ms=new Set();
+      return {name:r.name,models:(Array.isArray(r.models)?r.models:[]).filter(m=>m&&typeof m.id==='string'&&m.id.trim()).map(m=>({id:m.id.trim().slice(0,120),label:str(m.label,160).trim()}))
+        .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),reported:iso(r.reported,new Date().toISOString())};
+    });
+}
+export const runnerOf=(af,name)=>{const n=String(name??'').trim().toLowerCase();return n?(af?.runners||[]).find(r=>r.name.toLowerCase()===n)||null:null};
+// What the org card shows under the title: where it runs and on which model (the model's label
+// when its runner reported one). Empty for an agent with neither.
+export const modelLabel=(af,a)=>(a.model&&runnerOf(af,a.runtime)?.models.find(m=>m.id===a.model)?.label)||a.model;
+export const runLine=(af,a)=>[a.runtime.trim(),modelLabel(af,a).trim()].filter(Boolean).join(' · ');
+// Why a live agent would be skipped by its runner, or '' when it is ready.
+export function liveProblem(af,a){
+  if(a.kind!=='agent')return 'Only AI agents run';
+  if(!a.runtime.trim())return 'Pick where it runs';
+  if(!a.model.trim())return 'Pick a model';
+  const r=runnerOf(af,a.runtime);
+  if(r&&r.models.length&&!r.models.some(m=>m.id===a.model))return `${r.name} did not report this model`;
+  return '';
 }
 
 export function newAgent(af,over={}){
   const now=new Date().toISOString();
-  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',model:'',
+  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',model:'',
     inputs:[],outputs:[],tools:[],projects:[],cards:[],items:[],created:now,updated:now,...over};
   af.agents.push(a);return a;
 }
@@ -142,7 +171,7 @@ export function workQueue(db,agentId){
 
 // ---------- canvas layout ----------
 // Card size on the canvas and the spacing of the automatic tree.
-export const CARD={w:188,h:76},STEP={x:212,y:128};
+export const CARD={w:188,h:92},STEP={x:212,y:144};
 // A manager with STACK.min or more reports that have no reports of their own lists those in
 // columns of up to STACK.rows, indented under it, so a big team doesn't stretch the chart sideways.
 export const STACK={min:3,rows:6,y:CARD.h+20,indent:24};
@@ -235,7 +264,7 @@ export function full(af,kind,x,key){
 // filter = {q, status, kind, project}. q matches name, title, purpose, inputs, outputs and tools.
 export function filterAgents(af,f={}){
   const q=String(f.q||'').trim().toLowerCase();
-  return af.agents.filter(a=>(!f.status||a.status===f.status)&&(!f.kind||a.kind===f.kind)&&(!f.project||a.projects.includes(f.project))
+  return af.agents.filter(a=>(!f.status||a.status===f.status)&&(!f.kind||a.kind===f.kind)&&(f.live===undefined||a.live===f.live)&&(!f.project||a.projects.includes(f.project))
     &&(!q||[a.name,a.title,a.purpose,...a.inputs,...a.outputs,...a.tools].some(s=>s.toLowerCase().includes(q))));
 }
 export function filterWorkflows(af,f={}){
@@ -261,11 +290,11 @@ export function agentBrief(db,agentId){
   const boss=agentOf(af,a.reportsTo),sup=peopleOf(db).find(n=>n.id===a.supervisor);
   const flows=workflowsFor(af,a.id).map(w=>{const steps=w.steps.map((s,i)=>s.agent===a.id?`step ${i+1}: ${s.action||'(no action)'}`:'').filter(Boolean);return `${w.name}: ${steps.join('; ')}`});
   return [`# ${a.name}`,
-    `${AGENT_KINDS[a.kind]}${a.title?` · ${a.title}`:''} · ${AGENT_STATUS[a.status]}`,
+    `${AGENT_KINDS[a.kind]}${a.title?` · ${a.title}`:''} · ${AGENT_STATUS[a.status]}${a.kind==='agent'?` · ${a.live?'Live':'Not live'}`:''}`,
     `## Purpose\n\n${a.purpose.trim()||'Not written yet.'}`,
     `## Reporting\n\n- Reports to: ${name(boss)||'Nobody (top of the org)'}\n- Supervised by: ${sup?.name||'Nobody assigned'}\n- Direct reports: ${reportsOf(af,a.id).map(name).join(', ')||'None'}`,
     `## Inputs\n\n${bullets(a.inputs)}`,`## Outputs\n\n${bullets(a.outputs)}`,`## Tools\n\n${bullets(a.tools)}`,
-    ...(a.runtime||a.model?[`## Runtime\n\n${a.runtime?`- Runs on: ${a.runtime}\n`:''}${a.model?`- Model: ${a.model}`:''}`.trim()]:[]),
+    ...(a.runtime||a.model?[`## Runtime\n\n${a.runtime?`- Runs on: ${a.runtime}\n`:''}${a.model?`- Model: ${modelLabel(af,a)}${modelLabel(af,a)!==a.model?` (${a.model})`:''}`:''}`.trim()]:[]),
     `## Workflows\n\n${bullets(flows)}`,
     workSection(db,a),
     ...(a.instructions.trim()?[`## Instructions\n\n${a.instructions.trim()}`]:[]),

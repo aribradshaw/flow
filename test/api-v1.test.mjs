@@ -82,7 +82,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','workflows.list','workflows.get','workflows.create','workflows.update'];
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -253,6 +253,18 @@ test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
   assert.ok(Number.isFinite((await op('agents.get',{env:ENV,agent:lead.id})).body.agent.x),'placing one agent pins the rest where they were drawn');
   r=await op('agents.update',{env:ENV,agent:'Researcher',kind:'agent',status:'active',tools:['Web search'],runtime:'T3'});
   assert.deepEqual([r.body.agent.status,r.body.agent.tools,r.body.agent.runtime],['active',['Web search'],'T3']);
+  assert.equal(r.body.agent.live,false,'new agents are not live');
+  r=await op('runners.report',{env:ENV,runner:'Home server',models:[{id:'claudeAgent:claude-sonnet-5-5',label:'Claude · Sonnet 5.5'},{id:'codex:gpt-6.1-terra'}]});
+  assert.deepEqual([r.status,r.body.changed,r.body.runner.models.length],[200,true,2]);const rev1=r.body.rev;
+  r=await op('runners.report',{env:ENV,runner:'home server',models:[{id:'claudeAgent:claude-sonnet-5-5',label:'Claude · Sonnet 5.5'},{id:'codex:gpt-6.1-terra'}]});
+  assert.deepEqual([r.body.changed,r.body.rev,r.body.runner.name],[false,rev1,'Home server'],'an unchanged report saves nothing');
+  r=await op('runners.list',{env:ENV});
+  assert.deepEqual(r.body.items.map(x=>x.name),['Home server']);
+  r=await op('agents.update',{env:ENV,agent:'Researcher',live:true,runtime:'Home server',model:'claudeAgent:claude-sonnet-5-5'});
+  assert.equal(r.body.agent.live,true);
+  assert.deepEqual((await op('agents.list',{env:ENV,live:true})).body.items.map(a=>a.name),['Researcher']);
+  assert.match((await op('agents.get',{env:ENV,agent:'Researcher'})).body.brief,/Model: Claude · Sonnet 5\.5 \(claudeAgent:claude-sonnet-5-5\)/);
+  r=await op('agents.update',{env:ENV,agent:'Researcher',live:false,runtime:'T3',model:''});
   r=await op('agents.list',{env:ENV,status:'active',q:'research'});
   assert.deepEqual(r.body.items.map(a=>a.name),['Researcher']);
   r=await op('agents.list',{env:ENV,project:'Lantern'});

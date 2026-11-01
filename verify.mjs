@@ -495,6 +495,12 @@ try{
   await js(`document.querySelector('#af-new-inputs').focus()`);await call('Input.insertText',{text:'Customer email'});await key('Enter',13);
   db=await saved();
   assert(db.agentflow.agents[0].name==='Ops lead'&&db.agentflow.agents[0].inputs.includes('Customer email')&&await js(`document.activeElement.id`)==='af-new-inputs','agent fields autosave and list inputs add on Enter');
+  assert(db.agentflow.agents.every(a=>a.live===false)&&await js(`document.querySelector('#af-live')?.checked`)===false&&await js(`document.querySelectorAll('.af-node.live').length`)===0,'agents start not live');
+  await js(`document.querySelector('#af-live').click()`);await sleep(100);
+  assert((await saved()).agentflow.agents[0].live===true&&await js(`document.querySelector('.af-node.live .af-n-run.warn b')?.textContent`)==='Live','the Live switch saves, and a live agent with no runner shows an amber badge');
+  if(process.env.VERIFY_SHOTS)writeFileSync(process.env.VERIFY_SHOTS+'/agentflow-live.png',Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+  await js(`document.querySelector('#af-live').click()`);await sleep(100);
+  assert((await saved()).agentflow.agents[0].live===false,'and switches back off');
   await js(`document.activeElement.blur()`);await key('n',78,0,'n');await sleep(100);
   db=await saved();
   assert(db.agentflow.agents.length===5&&db.agentflow.agents[4].reportsTo===lead.id&&await js('document.activeElement.id')==='af-name','N adds an agent under the selected one');
