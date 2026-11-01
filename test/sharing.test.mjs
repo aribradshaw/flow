@@ -91,6 +91,22 @@ describe('scope',()=>{
     assert.equal(parseLinkedId(card.project).id,'p-cb');assert.equal(parseLinkedId(card.item).id,'i-cb');
     assert.deepEqual(p.labels.map(l=>parseLinkedId(l.id).id),['l-high']);
   });
+  test('person photos cross a share; person emails never do',()=>{
+    const png='data:image/png;base64,iVBORw0KGgo=',o=owner();
+    Object.assign(o.charts[0].nodes.find(n=>n.id==='bo'),{image:png,email:'bo.private@example.test'});
+    Object.assign(o.charts[0].nodes.find(n=>n.id==='cleo'),{image:'https://example.test/cleo.jpg',email:'cleo.private@example.test'});
+    o.charts[0].nodes.find(n=>n.id==='marsh').image='javascript:alert(1)';
+    for(const scope of [{kind:'environment'},{kind:'person',nodeId:'bo'},{kind:'nodes',nodeIds:['bo','cleo']}]){
+      const s=share(scope),p=projectForRecipient(o,s),db=applyProjection(recipient(),p),text=JSON.stringify([p,db]);
+      assert.ok(!text.includes('private@example.test'),`${scope.kind}: no email in the projection or the recipient's workspace`);
+      assert.ok(p.nodes.every(n=>!('email' in n)),scope.kind);
+      assert.equal(p.nodes.find(n=>parseLinkedId(n.id).id==='bo').image,png,`${scope.kind}: the photo comes along`);
+      assert.equal(p.nodes.find(n=>parseLinkedId(n.id).id==='marsh')?.image,undefined,'only valid photos on person cards');
+      // A recipient adding an email to their copy sends nothing back.
+      const sent=structuredClone(db);for(const n of sent.charts.flatMap(c=>c.nodes))if(n.id===linkedId(s.id,'bo'))n.email='guess@example.test';
+      assert.deepEqual(extractRecipientChanges(p,sent).edits,[]);
+    }
+  });
   test('other scope kinds: environment, project, label, hand-picked nodes',()=>{
     const db=owner();
     const all=resolveScope(db,share({kind:'environment'}));

@@ -1,5 +1,6 @@
 import {icon} from './icons.js';
 import {popIn,popOut} from './motion.js';
+import {initials,memberColor} from './devops-core.js';
 export const $=(s,r=document)=>r.querySelector(s);
 export const uid=()=>crypto.randomUUID();
 export const clone=x=>structuredClone(x);
@@ -59,17 +60,39 @@ export function initTooltips(){
   for(const ev of ['pointerdown','wheel','keydown'])document.addEventListener(ev,hideTip,{capture:true,passive:true});
 }
 
+// ---------- person photos ----------
+// personAvatar(node, {size, cls, tip}) is the one way to draw a person: a round bubble with their photo
+// (node.image, or the signed-in user's own photo when node.email is theirs; display only, never saved),
+// otherwise their initials in their memberColor. A photo that fails to load falls back to the initials.
+// account.js reports the session user through setSessionUser().
+let me=null;
+export const setSessionUser=u=>{me=u?{email:String(u.email||'').trim().toLowerCase(),image:typeof u.image==='string'?u.image:''}:null};
+export function personPhoto(n){
+  if(!n)return '';if(typeof n.image==='string'&&n.image)return n.image;
+  const e=String(n.email||'').trim().toLowerCase();
+  return e&&me?.image&&e===me.email?me.image:'';
+}
+export const photoImg=src=>`<img class="pa-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`;
+export function personAvatar(n,{size=0,cls='',tip=''}={}){
+  const [bg,fg]=memberColor(n?.id||''),src=personPhoto(n);
+  const st=`background:${bg};color:${fg}`+(size?`;width:${size}px;height:${size}px;font-size:${Math.max(7,Math.round(size*.4))}px`:'');
+  return `<span class="bub${src?' has-photo':''}${cls?' '+cls:''}" style="${st}"${tip?` data-tip="${esc(tip)}"`:''}><span class="pa-txt">${esc(initials(n?.name))}</span>${src?photoImg(src):''}</span>`;
+}
+// A broken photo (expired link, offline) is removed so the initials underneath show.
+document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains('pa-img')){t.parentElement?.classList.remove('has-photo');t.remove()}},true);
+
 // ---------- picker: a popover listbox for multi-select (default) or single-select ----------
 // pickerButton(key, label, items, selected) renders the trigger ("Projects · 2" plus colour dots);
 // openPicker(trigger, {items, selected, onChange, multi, placeholder}) opens the list under it.
-// items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg} | pill:{bg,fg}}].
+// items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg,img?} | pill:{bg,fg}}] (img: a photo URL).
 // onChange(values) fires on every change (live); the caller re-renders and the picker stays open,
 // re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
 // Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-const swatch=it=>it.avatar?`<span class="bub pk-av" style="background:${it.avatar.bg};color:${it.avatar.fg}">${esc(it.avatar.text)}</span>`
+const av=(a,cls)=>`<span class="bub ${cls}${a.img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${a.img?photoImg(a.img):''}</span>`;
+const swatch=it=>it.avatar?av(it.avatar,'pk-av')
   :it.color?`<i class="pk-sw" style="background:${it.color}"></i>`:'';
-const dot=it=>it.avatar?`<span class="bub mini" style="background:${it.avatar.bg};color:${it.avatar.fg}">${esc(it.avatar.text)}</span>`
+const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;
 export const pickerOpen=key=>picker?.key===key;
 export function pickerButton(key,label,items,selected,{cls='',tip=''}={}){

@@ -5,6 +5,8 @@ The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**
 - Card types: `entity` (a company or organisation), `person`, `area` (a project area that groups cards inside it) and `note`.
 - Edge types: `ownership` is a solid arrow that can carry a percentage from 0 to 100, or `""` when the percentage is unknown. `group` is a dashed line that means grouping only.
 - Cards snap to a 16px grid and can be resized. Moving an area also moves every card that sits fully inside it.
+- A `person` card can have a **photo** (`image`: an `https://` URL, or a `data:image/png|jpeg|webp;base64,` URL of at most 61,440 characters) and an **email** (`email`, up to 200 characters, stored lower-case). In the app, the person's side panel can upload a photo (cropped to a 128px square), remove it, or **Use my photo** to take your account photo and email. A person whose email is yours shows your account photo until they get one of their own. The photo then appears wherever that person does: their card, DevOps assignee bubbles, pickers and AgentFlow supervisor badges. Invalid values, and photos or emails on other card types, are dropped.
+- Sharing a person shares their photo with whoever can see the card, but never their email.
 - Selecting an entity or area shows its **project strip**: the projects placed under it, their next timeline item, backlog counts and open DevOps cards.
 
 ```json

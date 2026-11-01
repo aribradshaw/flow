@@ -24,6 +24,18 @@ export function validChart(c){
   for(const e of c.edges){if(typeof e.id!=='string'||edges.has(e.id)||nodes.has(e.id)||!nodes.has(e.from)||!nodes.has(e.to)||e.from===e.to||!['ownership','group'].includes(e.type)||(e.percent!==''&&(!Number.isFinite(Number(e.percent))||Number(e.percent)<0||Number(e.percent)>100)))return false;edges.add(e.id)}
   return true;
 }
+// Person cards may carry a photo (an https URL or a small data: URL, as the inspector's upload makes)
+// and an email that matches them to an account. Anything invalid, or on another kind of card, is dropped.
+export const PERSON_IMAGE_MAX=61440,PERSON_EMAIL_MAX=200;
+const IMAGE=/^(https:\/\/[^\s"'<>()\\]+|data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2})$/,PERSON_EMAIL=/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/;
+export const validPersonImage=v=>typeof v==='string'&&v.length<=(v.startsWith('data:')?PERSON_IMAGE_MAX:2048)&&IMAGE.test(v);
+export const cleanPersonEmail=v=>{const e=typeof v==='string'?v.trim().toLowerCase():'';return e.length<=PERSON_EMAIL_MAX&&PERSON_EMAIL.test(e)?e:''};
+export function cleanNode(n){
+  const person=n.type==='person',image=person&&validPersonImage(n.image)?n.image:'',email=person?cleanPersonEmail(n.email):'';
+  if(image)n.image=image;else delete n.image;
+  if(email)n.email=email;else delete n.email;
+  return n;
+}
 // A project may sit under a chart card (entity or area) via its node id.
 export function cleanProject(p,i=0){return p&&typeof p.id==='string'&&typeof p.name==='string'?{id:p.id,name:p.name.slice(0,80),color:COLOR.test(p.color)?p.color:PALETTE[i%PALETTE.length],entity:typeof p.entity==='string'?p.entity:''}:null}
 export function cleanItem(i,projects){
@@ -44,6 +56,7 @@ export function cleanEnvironment(e){
 }
 function normalize(db){
   db.environment=cleanEnvironment(db.environment);
+  for(const c of Array.isArray(db.charts)?db.charts:[])if(Array.isArray(c?.nodes))for(const n of c.nodes)if(n&&typeof n==='object')cleanNode(n);
   db.workflow=cleanWorkflow(db.workflow);
   db.projects=(Array.isArray(db.projects)?db.projects:[]).map(cleanProject).filter(Boolean);
   db.timeline=(Array.isArray(db.timeline)?db.timeline:[]).map(i=>cleanItem(i,db.projects)).filter(Boolean);

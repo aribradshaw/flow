@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,pickerButton,openPicker} from './ui.js';
+import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto} from './ui.js';
 import {busy,skeletonAppend,panel,flipList} from './motion.js';
 import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
@@ -38,7 +38,7 @@ const today=()=>{const t=new Date();return `${t.getFullYear()}-${String(t.getMon
 const fmt=s=>`${MONTHS[+s.slice(5,7)-1]} ${+s.slice(8)}${s.slice(0,4)!==today().slice(0,4)?`, ${s.slice(0,4)}`:''}`;
 const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
 const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="background:${bg};color:${fg}"${l.name.length>12?` data-tip="${esc(l.name)}"`:''}>${esc(l.name)}</span>`};
-const bubble=(id,roles)=>{const n=nodeById(id);if(!n)return '';const [bg,fg]=memberColor(id);return `<span class="bub" style="background:${bg};color:${fg}" data-tip="${esc(n.name)} · ${esc(roles.join(', '))}">${esc(initials(n.name))}</span>`};
+const bubble=(id,roles)=>{const n=nodeById(id);return n?personAvatar(n,{tip:`${n.name} · ${roles.join(', ')}`}):''};
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
 export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;
@@ -132,7 +132,7 @@ function sanitize(){
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
 const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
-const personItems=()=>people().map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg}}});
+const personItems=()=>people().map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
 const labelItems=()=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
 const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
 function openFilter(b){

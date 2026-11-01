@@ -12,7 +12,7 @@
 
 import {store,change} from './store.js';
 import {STATUS_DEFAULTS,WORKFLOW_PRESETS,cleanWorkflow} from './workflow.js';
-import {esc} from './ui.js';
+import {esc,setSessionUser} from './ui.js';
 import {popIn,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
 import {loadDevlog,currentVersion,mountDevlog} from './devlog.js';
@@ -46,6 +46,13 @@ if(!document.querySelector('link[data-account]')){
 }
 
 const user=()=>session.user;
+// The signed-in user ({id,email,name,image}) or null; 'flow:session' fires on window when it changes.
+export const sessionUser=()=>session.user||null;
+let sessionKey='';
+function sessionChanged(){
+  const u=session.user,key=u?`${u.email}\n${u.image||''}`:'';if(key===sessionKey)return;
+  sessionKey=key;setSessionUser(u);window.dispatchEvent(new Event('flow:session'));
+}
 const opid=()=>session.mode==='opid';
 const env=()=>store.db?.environment||null;
 function initials(u){
@@ -66,7 +73,7 @@ export function accountHtml(){
 }
 function refreshButton(){const b=document.getElementById('acctBtn');if(b)b.outerHTML=accountHtml()}
 function refreshPhotos(){
-  refreshButton();
+  refreshButton();sessionChanged();
   for(const head of document.querySelectorAll('.acct-head,.acct-card')){
     const old=head.querySelector('.acct-av');if(old)old.outerHTML=avatar(user(),head.classList.contains('acct-head')?38:44);
   }
@@ -495,6 +502,6 @@ window.fetch=async(...args)=>{
     const r=await nativeFetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
     if(r.ok)session=await r.json();
   }catch{}
-  ready=true;refreshButton();
+  ready=true;refreshButton();sessionChanged();
   if(opid()){loadOpidUi();if(!user())showSignIn()}
 })();

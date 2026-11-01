@@ -91,7 +91,7 @@ test('lib/cleaners.mjs matches the client cleaners in public/store.js',()=>{
   // Evaluate store.js's pure section (constants through cleanEnvironment) without its DOM imports.
   const src=readFileSync(fileURLToPath(new URL('../public/store.js',import.meta.url)),'utf8');
   const body=src.slice(src.indexOf('const KEY='),src.indexOf('function normalize(')).replace(/^export /gm,'');
-  const orig=new Function('uid',body+';return {validChart,cleanProject,cleanItem,ITEM_KINDS,ITEM_PRIORITY,ITEM_STATUS,PALETTE}')(()=>'x');
+  const orig=new Function('uid',body+';return {validChart,cleanProject,cleanItem,cleanNode,ITEM_KINDS,ITEM_PRIORITY,ITEM_STATUS,PALETTE}')(()=>'x');
   for(const k of ['ITEM_KINDS','ITEM_PRIORITY','ITEM_STATUS','PALETTE'])assert.deepEqual(cleaners[k],orig[k],k);
   const charts=[seed().charts[0],{name:'x',nodes:[{id:'a',name:'A',type:'bad',x:0,y:0}],edges:[]},{name:'x',nodes:[{id:'a',name:'A',type:'note',x:0,y:0,w:0}],edges:[]},
     {name:'x',nodes:[{id:'a',name:'A',type:'note',x:0,y:0},{id:'b',name:'B',type:'note',x:1,y:1}],edges:[{id:'e',from:'a',to:'b',type:'ownership',percent:'150'}]},null];
@@ -101,6 +101,26 @@ test('lib/cleaners.mjs matches the client cleaners in public/store.js',()=>{
   const ps=[{id:'p'}],items=[{id:'i',title:'T',start:'2026-01-02',end:'2026-01-01',kind:'nope',status:'done',projects:['p','p','zz'],priority:'high',inbox:{at:'x',sig:'s'}},
     {id:'j',title:'U',start:'',end:'2026-01-01'},{id:'k',title:'V',start:'bad'},{id:'l',title:'W',start:'2026-02-01',end:'2026-03-01',owner:7,notes:null}];
   for(const it of items)assert.deepEqual(cleaners.cleanItem(it,ps),orig.cleanItem(it,ps));
+  const nodes=[{id:'a',type:'person',image:'https://example.test/a.png',email:' A@Example.TEST '},{id:'b',type:'entity',image:'https://example.test/b.png',email:'b@example.test'},
+    {id:'c',type:'person',image:'data:image/png;base64,'+'A'.repeat(cleaners.PERSON_IMAGE_MAX),email:'nope'},{id:'d',type:'person',image:'javascript:alert(1)',email:7}];
+  for(const n of nodes)assert.deepEqual(cleaners.cleanNode(structuredClone(n)),orig.cleanNode(structuredClone(n)));
+});
+
+test('person photos and emails: valid ones are kept, anything else is dropped',()=>{
+  const {cleanNode,PERSON_IMAGE_MAX}=cleaners,p=x=>cleanNode({id:'p',name:'P',type:'person',x:0,y:0,...x});
+  const png='data:image/png;base64,iVBORw0KGgo=',webp='data:image/webp;base64,UklGRg==',jpeg='data:image/jpeg;base64,/9j/4AAQ';
+  for(const image of ['https://example.test/me.jpg',png,webp,jpeg])assert.equal(p({image}).image,image,image.slice(0,30));
+  assert.equal(p({email:'  Cleo@Example.TEST '}).email,'cleo@example.test','trimmed and lower-cased');
+  const big='data:image/webp;base64,'+'A'.repeat(PERSON_IMAGE_MAX);
+  const fits='data:image/webp;base64,'+'A'.repeat(PERSON_IMAGE_MAX-'data:image/webp;base64,'.length);
+  assert.equal(p({image:fits}).image,fits,'exactly at the cap');
+  for(const image of [big,'http://example.test/me.jpg','javascript:alert(1)','data:image/svg+xml;base64,PHN2Zz4=','data:image/png;base64,<script>','https://example.test/a b.png','https://x.test/"onerror="x','',42,null,{}])
+    assert.equal('image' in p({image}),false,`drops ${String(image).slice(0,40)}`);
+  for(const email of ['nope','a@b','a b@example.test','x'.repeat(190)+'@example.test','',12,null])assert.equal('email' in p({email}),false,`drops ${String(email).slice(0,30)}`);
+  assert.deepEqual(cleanNode({id:'e',name:'E',type:'entity',x:0,y:0,image:png,email:'e@example.test'}),{id:'e',name:'E',type:'entity',x:0,y:0},'only person cards keep them');
+  // normalize() cleans every chart's nodes and leaves shared (sh.*) ids alone.
+  const db=cleaners.normalize({charts:[{id:'c',name:'C',nodes:[{id:'sh.s1.cleo',name:'Cleo',type:'person',x:0,y:0,image:png,email:'bad'}],edges:[]}]});
+  assert.deepEqual(db.charts[0].nodes[0],{id:'sh.s1.cleo',name:'Cleo',type:'person',x:0,y:0,image:png});
 });
 
 test('envs, charts and search',async()=>{
@@ -135,6 +155,27 @@ test('nodes: list, get, create, update, move',async()=>{
   assert.deepEqual([r.body.node.x,r.body.node.y],[-48,288]);
   assert.equal((await op('nodes.update',{env:ENV,chart:'c1',node:area.id,type:'robot'})).body.code,'invalid_input');
   const w=await store.get(ENV);assert.equal(w.rev,r.body.rev);assert.equal(w.data.charts[0].nodes.find(n=>n.id===area.id).x,-48);
+});
+
+test('nodes: a person\'s photo and email',async()=>{
+  const png='data:image/png;base64,iVBORw0KGgo=';
+  let r=await op('nodes.update',{env:ENV,chart:'c1',node:'bo',image:png,email:' Bo@Example.TEST '});
+  assert.equal(r.status,200);assert.equal(r.body.node.image,png);assert.equal(r.body.node.email,'bo@example.test');
+  r=await op('nodes.get',{env:ENV,chart:'c1',node:'bo'});assert.equal(r.body.node.image,png);
+  r=await op('nodes.update',{env:ENV,chart:'c1',node:'bo',image:'https://example.test/bo.jpg'});
+  assert.equal(r.body.node.image,'https://example.test/bo.jpg');assert.equal(r.body.node.email,'bo@example.test','left out, so kept');
+  for(const [input,code] of [[{image:'http://example.test/bo.jpg'},'invalid_image'],[{image:'data:image/svg+xml;base64,PHN2Zz4='},'invalid_image'],[{email:'not-an-email'},'invalid_email'],
+    [{image:'data:image/png;base64,'+'A'.repeat(cleaners.PERSON_IMAGE_MAX)},'invalid_input']]){
+    r=await op('nodes.update',{env:ENV,chart:'c1',node:'bo',...input});assert.equal(r.status,400);assert.equal(r.body.code,code,JSON.stringify(input).slice(0,60));
+  }
+  assert.equal((await op('nodes.update',{env:ENV,chart:'c1',node:'flygon',image:png})).body.code,'invalid_image','only person cards');
+  r=await op('nodes.create',{env:ENV,chart:'c1',type:'person',name:'Photo Person',image:png,email:'pp@example.test',x:900,y:900});
+  assert.equal(r.status,201);assert.deepEqual([r.body.node.image,r.body.node.email],[png,'pp@example.test']);
+  // Changing a person into another kind of card drops both; "" removes them.
+  r=await op('nodes.update',{env:ENV,chart:'c1',node:r.body.node.id,type:'entity'});assert.equal(r.body.node.image,undefined);assert.equal(r.body.node.email,undefined);
+  r=await op('nodes.update',{env:ENV,chart:'c1',node:'bo',image:'',email:''});
+  assert.equal(r.body.node.image,undefined);assert.equal(r.body.node.email,undefined);
+  const w=await store.get(ENV);assert.equal('image' in w.data.charts[0].nodes.find(n=>n.id==='bo'),false);
 });
 
 test('edges: list, create, delete',async()=>{

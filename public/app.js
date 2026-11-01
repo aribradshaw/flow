@@ -1,13 +1,13 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip} from './ui.js';
-import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb} from './store.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto} from './ui.js';
+import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
 import * as af from './agentflow.js';
 import {openCardsFor} from './devops-core.js';
 import {swap,busy,unskeletonize,panel,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
-import {accountHtml} from './account.js';
+import {accountHtml,sessionUser} from './account.js';
 import {startInbox} from './inbox.js';
 import {startSync} from './sync.js';
 import {loadDevlog} from './devlog.js';
@@ -204,7 +204,7 @@ function nodeHtml(n){
   const l=linkOf(n);
   const cls=`node ${n.type}${selected===n.id?' selected':''}${source===n.id?' source':''}${drag?.mode==='link'&&drag.over===n.id?' drop':''}${l?' linked':''}${l?.stub?' stub':''}`;
   const tip=(notes?`${n.name}\n${notes.length>280?notes.slice(0,280)+'…':notes}`:'')+(l?(notes?'\n\n':`${n.name}\n`)+sharedTip(l):'');
-  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}"><span class="k">${icon(k.icon,14)}</span><span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge" aria-label="${l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
+  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}">${n.type==='person'&&personPhoto(n)?personAvatar(n,{size:22,cls:'k-av'}):`<span class="k">${icon(k.icon,14)}</span>`}<span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge" aria-label="${l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
 }
 function renderCanvas(){
   const c=chart(),cv=$('#canvas');
@@ -374,6 +374,44 @@ canvas.addEventListener('contextmenu',e=>{
 
 // ---------- inspector ----------
 const segBtn=(attr,val,ic,label,on)=>`<button type="button" class="ib${on?' on':''}" data-${attr}="${val}" data-tip="${label}" aria-label="${label}" aria-pressed="${on}">${icon(ic)}</button>`;
+// A person's photo and email. A shared card shows its photo read-only (its email never crosses a share).
+// With no photo of its own, a card whose email is the signed-in user's shows their account photo.
+function photoHtml(n,shared){
+  const src=personPhoto(n),mine=!n.image&&!!src,me=sessionUser();
+  if(shared)return src?`<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}</div>`:'';
+  return `<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}<div class="pp-acts">
+      <button type="button" class="txt" data-i="photoUpload" data-tip="PNG, JPEG or WebP · cropped to a 128 px square">${icon('upload',13)}Upload photo</button><input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp" hidden>
+      ${n.image?`<button type="button" class="txt" data-i="photoRemove">${icon('trash',13)}Remove</button>`:''}
+      ${me?.image&&n.image!==me.image?`<button type="button" class="txt" data-i="photoMine" data-tip="Use your account photo and email (${esc(me.email)})">${icon('user',13)}Use my photo</button>`:''}</div></div>
+    ${mine?`<p class="pp-note">Showing your account photo: this email is yours.</p>`:''}
+    <label for="pemail">Email</label><input id="pemail" type="email" maxlength="200" placeholder="Matches them to an account" value="${esc(n.email||'')}">`;
+}
+// Any picked image becomes a 128x128 centre-cropped WebP (JPEG where WebP encoding is missing) data URL.
+async function squarePhoto(blob){
+  const bmp=await createImageBitmap(blob);
+  try{
+    const S=128,c=document.createElement('canvas'),s=Math.min(bmp.width,bmp.height);c.width=c.height=S;
+    c.getContext('2d').drawImage(bmp,(bmp.width-s)/2,(bmp.height-s)/2,s,s,0,0,S,S);
+    let url=c.toDataURL('image/webp',.85);if(!url.startsWith('data:image/webp'))url=c.toDataURL('image/jpeg',.85);
+    if(!validPersonImage(url))throw Error('That photo is too large');
+    return url;
+  }finally{bmp.close()}
+}
+function setPhoto(id,fields){change(()=>{const n=node(id);if(!n)return;for(const [k,v] of Object.entries(fields))if(v)n[k]=v;else delete n[k]})}
+async function uploadPhoto(file){
+  const id=selected;if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>15e6){toast('Choose a PNG, JPEG or WebP image under 15 MB',true);return}
+  try{setPhoto(id,{image:await squarePhoto(file)})}catch(err){toast('Could not use that photo · '+err.message,true)}
+}
+// The account photo as it is when it fits (an https URL or a small data URL), otherwise a 128 px copy.
+async function useMyPhoto(){
+  const id=selected,me=sessionUser();if(!me?.image)return;
+  try{
+    const image=validPersonImage(me.image)?me.image:me.image.startsWith('data:image/')?await squarePhoto(await (await fetch(me.image)).blob()):'';
+    if(!image)throw Error('it is not an https or image link');
+    setPhoto(id,{image,email:cleanPersonEmail(me.email)||node(id)?.email});
+  }catch(err){toast('Could not use your photo · '+err.message,true)}
+}
 const options=id=>chart().nodes.map(n=>`<option value="${esc(n.id)}"${id===n.id?' selected':''}>${esc(n.name)}</option>`).join('');
 function renderInspector(){
   const pane=$('#inspector');
@@ -391,6 +429,7 @@ function renderInspector(){
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label><input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
       ${l?'':`<label>Kind</label><div class="seg">${Object.entries(KINDS).map(([t,x])=>segBtn('kind',t,x.icon,x.label,t===n.type)).join('')}</div>`}
       ${l?.stub?'':`<label for="notes">Notes</label><textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
+      ${n.type==='person'?photoHtml(n,!!l):''}
       ${l?historyHtml(n,'node'):''}
       ${n.type==='note'||l?'':(c=>`<label>DevOps</label><button type="button" class="txt dv-open" data-i="devops" data-tip="${n.type==='person'?'Open cards assigned to this person':'Open cards in the projects under this card'}">${icon('branch',13)}<span>${c} open card${c===1?'':'s'}</span>${icon('arrowR',13)}</button>`)(openCardsFor(store.db,n.type==='person'?{person:n.id}:{entity:n.id}).length)}
       ${links.length?`<label>Connections</label><ul class="links">${links.map(x=>{const out=x.from===n.id,o=node(out?x.to:x.from),what=x.type==='group'?'grouping':x.percent===''?'ownership, % unspecified':x.percent+'% ownership';
@@ -456,7 +495,7 @@ pane.addEventListener('click',e=>{
   else if(b.dataset.i==='shComment')postComment(pane,n||ed).catch(err=>toast(err.message,true));
   else if(b.dataset.goto){selected=b.dataset.goto;render()}
   else ({from(){connecting=true;source=n.id;renderCanvas();renderTools()},dup:duplicate,delete:deleteSelection,close(){selected=null;render()},
-    resetSize(){change(()=>{delete n.w;delete n.h})},devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
+    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
 });
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
@@ -464,15 +503,19 @@ pane.addEventListener('input',e=>{
   if(tab==='devops')return dv.inspectorInput(e);
   if(tab==='agentflow')return af.inspectorInput(e);
   const form=$('#edit'),n=node(selected),ed=edge(selected);
-  if(!form||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
+  if(!form||e.target.type==='file'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
   if(n&&!$('#name').value.trim())return;
   if(ed&&$('#fromNode').value===$('#toNode').value)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
   if(n)Object.assign(n,{name:$('#name').value.trim(),...($('#notes')?{notes:$('#notes').value}:{})});
+  if(n&&$('#pemail')){
+    const em=cleanPersonEmail($('#pemail').value);if(em)n.email=em;else delete n.email;
+    const av=pane.querySelector('.pp-av');if(av)av.outerHTML=personAvatar(n,{size:48,cls:'pp-av'});
+  }
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
 pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='devops')dv.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------
@@ -512,6 +555,8 @@ function render(){
   renderInspector();
 }
 store.onChange=render;
+// Signing in (or changing the account photo) changes which cards show the user's photo.
+window.addEventListener('flow:session',()=>render());
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
 tl.mount({rerender:render,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
 dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast});
