@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg} from './ui.js';
+import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg,personPhoto} from './ui.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask} from './modal.js';
@@ -99,7 +99,8 @@ function toolbar(){
 }
 // A person's face: their photo when the person card has one (image: a URL or data URL), else
 // initials on their member colour.
-const photo=n=>typeof n?.image==='string'&&/^(https?:|data:image\/)/i.test(n.image.trim())?n.image.trim():'';
+// A person's photo: their own, or the signed-in account's when the email matches (ui.js personPhoto).
+const photo=n=>n?safeImg(personPhoto(n)):'';
 const faceHtml=(n,cls,tip)=>{const src=photo(n),[bg,fg]=memberColor(n.id);
   return src?`<img class="${cls} img" src="${esc(src)}" alt="" draggable="false" data-tip="${esc(tip)}">`:`<span class="${cls}" style="background:${bg};color:${fg}" data-tip="${esc(tip)}">${esc(initials(n.name))}</span>`};
 // The org card: avatar and name, role, where it runs (and the Live badge), then counts. The left
@@ -425,11 +426,11 @@ function sec(k,ic,title,body,meta=''){
     <div class="af-sec-b" id="af-secb-${k}"${open?'':' hidden'}>${body}</div></section>`;
 }
 const ago=iso=>{const s=(Date.now()-Date.parse(iso))/1000;if(!Number.isFinite(s))return '';if(s<90)return 'just now';if(s<5400)return `${Math.round(s/60)} min ago`;if(s<129600)return `${Math.round(s/3600)} h ago`;return `${Math.round(s/86400)} days ago`};
-const personAv=p=>{const [bg,fg]=memberColor(p.id);return {text:initials(p.name),bg,fg,img:p.image}};
+const personAv=p=>{const [bg,fg]=memberColor(p.id);return {text:initials(p.name),bg,fg,img:photo(p)}};
 const bub=(p,cls='')=>{const v=personAv(p),img=safeImg(v.img);return `<span class="bub ${cls}${img?' img':''}" style="background:${v.bg};color:${v.fg}">${img?`<img src="${esc(img)}" alt="">`:esc(v.text)}</span>`};
 // The agent's face: its own image (if it ever has one), a human's supervisor photo, else its kind icon.
 function avatarHtml(a){
-  const sup=person(a.supervisor),img=safeImg(a.image)||(a.kind==='human'&&safeImg(sup?.image));
+  const sup=person(a.supervisor),img=safeImg(a.image)||(a.kind==='human'&&photo(sup));
   return `<span class="af-av k-${a.kind}${img?' img':''}" data-tip="${AGENT_KINDS[a.kind]}">${img?`<img src="${esc(img)}" alt="">`:icon(KIND_ICON[a.kind],20)}${sup&&!(a.kind==='human'&&img)?bub(sup,'af-av-sup'):''}</span>`;
 }
 // Status as coloured pills (one click each) for agents and workflows.

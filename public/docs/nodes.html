@@ -52,7 +52,7 @@
     &quot;chart&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>items[].x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>items[].x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>items[].notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].image</code></td><td>string</td><td></td><td>Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.</td></tr><tr><td><code>items[].email</code></td><td>string</td><td></td><td>Person email, matching them to an account.</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;items&quot;: {
@@ -88,6 +88,14 @@
           },
           &quot;notes&quot;: {
             &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;image&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.&quot;
+          },
+          &quot;email&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;description&quot;: &quot;Person email, matching them to an account.&quot;
           }
         },
         &quot;required&quot;: [
@@ -159,7 +167,7 @@
     &quot;node&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>node.image</code></td><td>string</td><td></td><td>Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.</td></tr><tr><td><code>node.email</code></td><td>string</td><td></td><td>Person email, matching them to an account.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -197,6 +205,14 @@
         },
         &quot;notes&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;image&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.&quot;
+        },
+        &quot;email&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person email, matching them to an account.&quot;
         }
       },
       &quot;required&quot;: [
@@ -226,7 +242,7 @@
 }</code></pre></section>
 <section class="op" id="op-nodes-create"><h3><code>nodes.create</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/charts/{chart}/nodes</code> <span class="muted">MCP <code>nodes_create</code></span></p>
-<p class="summary">Create a node</p><p>Add a card to a chart. Without x/y it is placed at the origin, stepping 32px diagonally past occupied spots (as the app does).</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>chart</code></td><td>string</td><td><span class="req">required</span></td><td>Chart id, or &quot;active&quot; for the chart open in the app.</td></tr><tr><td><code>type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Create a node</p><p>Add a card to a chart. Without x/y it is placed at the origin, stepping 32px diagonally past occupied spots (as the app does).</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>chart</code></td><td>string</td><td><span class="req">required</span></td><td>Chart id, or &quot;active&quot; for the chart open in the app.</td></tr><tr><td><code>type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>image</code></td><td>string</td><td></td><td>Person cards only: a photo as an https URL, or a data:image/(png|jpeg|webp);base64 URL up to 61440 characters. &quot;&quot; removes it.</td></tr><tr><td><code>email</code></td><td>string</td><td></td><td>Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. &quot;&quot; removes it.</td></tr><tr><td><code>x</code></td><td>number</td><td></td><td></td></tr><tr><td><code>y</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -267,6 +283,16 @@
       &quot;minimum&quot;: 1,
       &quot;maximum&quot;: 5000
     },
+    &quot;image&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 61440,
+      &quot;description&quot;: &quot;Person cards only: a photo as an https URL, or a data:image/(png|jpeg|webp);base64 URL up to 61440 characters. \&quot;\&quot; removes it.&quot;
+    },
+    &quot;email&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 200,
+      &quot;description&quot;: &quot;Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. \&quot;\&quot; removes it.&quot;
+    },
     &quot;x&quot;: {
       &quot;type&quot;: &quot;number&quot;
     },
@@ -281,7 +307,7 @@
     &quot;name&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>node.image</code></td><td>string</td><td></td><td>Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.</td></tr><tr><td><code>node.email</code></td><td>string</td><td></td><td>Person email, matching them to an account.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -319,6 +345,14 @@
         },
         &quot;notes&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;image&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.&quot;
+        },
+        &quot;email&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person email, matching them to an account.&quot;
         }
       },
       &quot;required&quot;: [
@@ -350,7 +384,7 @@
 }</code></pre></section>
 <section class="op" id="op-nodes-update"><h3><code>nodes.update</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-patch">PATCH</span> <code>/api/v1/envs/{env}/charts/{chart}/nodes/{node}</code> <span class="muted">MCP <code>nodes_update</code></span></p>
-<p class="summary">Update a node</p><p>Change a chart card&#39;s name, type, notes or size. Fields left out stay as they are. Use nodes.move for position.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>chart</code></td><td>string</td><td><span class="req">required</span></td><td>Chart id, or &quot;active&quot; for the chart open in the app.</td></tr><tr><td><code>node</code></td><td>string</td><td><span class="req">required</span></td><td>Node id.</td></tr><tr><td><code>type</code></td><td>enum</td><td></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td></td><td></td></tr><tr><td><code>notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>h</code></td><td>number</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Update a node</p><p>Change a chart card&#39;s name, type, notes or size, or a person&#39;s photo and email. Fields left out stay as they are. Use nodes.move for position.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>chart</code></td><td>string</td><td><span class="req">required</span></td><td>Chart id, or &quot;active&quot; for the chart open in the app.</td></tr><tr><td><code>node</code></td><td>string</td><td><span class="req">required</span></td><td>Node id.</td></tr><tr><td><code>type</code></td><td>enum</td><td></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td></td><td></td></tr><tr><td><code>notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>image</code></td><td>string</td><td></td><td>Person cards only: a photo as an https URL, or a data:image/(png|jpeg|webp);base64 URL up to 61440 characters. &quot;&quot; removes it.</td></tr><tr><td><code>email</code></td><td>string</td><td></td><td>Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. &quot;&quot; removes it.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -396,6 +430,16 @@
       &quot;type&quot;: &quot;number&quot;,
       &quot;minimum&quot;: 1,
       &quot;maximum&quot;: 5000
+    },
+    &quot;image&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 61440,
+      &quot;description&quot;: &quot;Person cards only: a photo as an https URL, or a data:image/(png|jpeg|webp);base64 URL up to 61440 characters. \&quot;\&quot; removes it.&quot;
+    },
+    &quot;email&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 200,
+      &quot;description&quot;: &quot;Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. \&quot;\&quot; removes it.&quot;
     }
   },
   &quot;required&quot;: [
@@ -404,7 +448,7 @@
     &quot;node&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>node.image</code></td><td>string</td><td></td><td>Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.</td></tr><tr><td><code>node.email</code></td><td>string</td><td></td><td>Person email, matching them to an account.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -442,6 +486,14 @@
         },
         &quot;notes&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;image&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.&quot;
+        },
+        &quot;email&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person email, matching them to an account.&quot;
         }
       },
       &quot;required&quot;: [
@@ -508,7 +560,7 @@
     &quot;y&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>node</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.type</code></td><td>enum</td><td><span class="req">required</span></td><td>One of <code>entity</code>, <code>person</code>, <code>area</code>, <code>note</code>.</td></tr><tr><td><code>node.x</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.y</code></td><td>number</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>node.w</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.h</code></td><td>number</td><td></td><td></td></tr><tr><td><code>node.notes</code></td><td>string</td><td></td><td></td></tr><tr><td><code>node.image</code></td><td>string</td><td></td><td>Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.</td></tr><tr><td><code>node.email</code></td><td>string</td><td></td><td>Person email, matching them to an account.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -546,6 +598,14 @@
         },
         &quot;notes&quot;: {
           &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;image&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person photo: an https URL or a data:image/(png|jpeg|webp);base64 URL.&quot;
+        },
+        &quot;email&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;description&quot;: &quot;Person email, matching them to an account.&quot;
         }
       },
       &quot;required&quot;: [
