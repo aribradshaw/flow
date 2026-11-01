@@ -84,13 +84,16 @@ document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains
 // ---------- picker: a popover listbox for multi-select (default) or single-select ----------
 // pickerButton(key, label, items, selected) renders the trigger ("Projects · 2" plus colour dots);
 // openPicker(trigger, {items, selected, onChange, multi, placeholder}) opens the list under it.
-// items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg,img?} | pill:{bg,fg}}] (img: a photo URL).
+// items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg,img?} | icon | pill:{bg,fg}}].
+// avatar.img (an http(s) or data:image URL) shows a photo over the initials; icon names an icons.js icon.
 // onChange(values) fires on every change (live); the caller re-renders and the picker stays open,
 // re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
 // Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-const av=(a,cls)=>`<span class="bub ${cls}${a.img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${a.img?photoImg(a.img):''}</span>`;
+export const safeImg=u=>typeof u==='string'&&/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())?u.trim():'';
+const av=(a,cls)=>{const img=safeImg(a.img);return `<span class="bub ${cls}${img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${img?photoImg(img):''}</span>`};
 const swatch=it=>it.avatar?av(it.avatar,'pk-av')
+  :it.icon?`<span class="pk-ic">${icon(it.icon,13)}</span>`
   :it.color?`<i class="pk-sw" style="background:${it.color}"></i>`:'';
 const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;

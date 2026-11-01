@@ -1,6 +1,6 @@
 import {icon} from './icons.js';
-import {$,esc,ib,pickerButton,openPicker} from './ui.js';
-import {panel,flipList} from './motion.js';
+import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg} from './ui.js';
+import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask} from './modal.js';
 import {openMenu,menuOpen} from './menu.js';
@@ -8,7 +8,7 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem} from './agentflow-core.js';
+  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -368,7 +368,7 @@ function agentMenu(at,id){
     {label:'Status',icon:'dot',items:Object.entries(AGENT_STATUS).map(([k,n])=>({label:n,checked:a.status===k,run:()=>setOn(get,'status',k)}))},
     {label:'Reports to',icon:'network',items:[{label:'Nobody (top level)',checked:!a.reportsTo,run:()=>setOn(get,'reportsTo','')},
       ...shown.map(x=>({label:x.name,icon:KIND_ICON[x.kind],checked:x.id===a.reportsTo,run:()=>setOn(get,'reportsTo',x.id)})),
-      ...(ok.length>shown.length?['-',{label:'More in the side panel…',run(){select('agent',id);requestAnimationFrame(()=>$('#af-reports')?.focus())}}]:[])]},
+      ...(ok.length>shown.length?['-',{label:'More in the side panel…',run(){ui.sec={...ui.sec,identity:true};keepUi();select('agent',id);requestAnimationFrame(()=>$('#af-reports')?.click())}}]:[])]},
     {label:'Add to workflow',icon:'flow',items:[...flows,...(flows.length?['-']:[]),{label:'New workflow starting here',icon:'plus',run:()=>addWorkflow(id)}]},
     '-',
     {label:q?`Open work queue (${q})`:'Open work queue',icon:'branch',run:()=>openQueue(id)},
@@ -415,84 +415,213 @@ function flowMenu(at,id){
 }
 
 // ---------- side panel (shared #inspector) ----------
-const listEditor=(key,label,hint,values)=>`<label>${label} <em>${hint}</em></label><ul class="dc-list">${values.map((v,i)=>`<li><span class="nm">${esc(v)}</span>${ib('x','Remove',{attrs:`data-af-del="${key}" data-i="${i}"`})}</li>`).join('')}</ul>
-  <div class="dc-row"><input id="af-new-${key}" maxlength="200" placeholder="Add and press Enter" aria-label="New ${label.toLowerCase().replace(/s$/,'')}">${ib('plus','Add',{attrs:`data-af-add="${key}"`})}</div>`;
+// The selection's header (avatar, name, status, Live), then collapsible sections. Which sections
+// are open is remembered in ui.sec (localStorage); favourite models in ui.fav.
+const SEC_OPEN={identity:true,run:true,work:true,instr:false,links:false,team:true,setup:true,steps:true};
+const secOpen=k=>typeof ui.sec?.[k]==='boolean'?ui.sec[k]:SEC_OPEN[k]??true;
+function sec(k,ic,title,body,meta=''){
+  const open=secOpen(k);
+  return `<section class="af-sec${open?' open':''}"><h3 class="af-sec-t"><button type="button" class="af-sec-h" id="af-sec-${k}" data-af-sec="${k}" aria-expanded="${open}" aria-controls="af-secb-${k}">${icon(ic,13)}<span>${title}</span>${meta?`<em>${meta}</em>`:''}<i class="af-chev">${icon('chevD',12)}</i></button></h3>
+    <div class="af-sec-b" id="af-secb-${k}"${open?'':' hidden'}>${body}</div></section>`;
+}
+const ago=iso=>{const s=(Date.now()-Date.parse(iso))/1000;if(!Number.isFinite(s))return '';if(s<90)return 'just now';if(s<5400)return `${Math.round(s/60)} min ago`;if(s<129600)return `${Math.round(s/3600)} h ago`;return `${Math.round(s/86400)} days ago`};
+const personAv=p=>{const [bg,fg]=memberColor(p.id);return {text:initials(p.name),bg,fg,img:p.image}};
+const bub=(p,cls='')=>{const v=personAv(p),img=safeImg(v.img);return `<span class="bub ${cls}${img?' img':''}" style="background:${v.bg};color:${v.fg}">${img?`<img src="${esc(img)}" alt="">`:esc(v.text)}</span>`};
+// The agent's face: its own image (if it ever has one), a human's supervisor photo, else its kind icon.
+function avatarHtml(a){
+  const sup=person(a.supervisor),img=safeImg(a.image)||(a.kind==='human'&&safeImg(sup?.image));
+  return `<span class="af-av k-${a.kind}${img?' img':''}" data-tip="${AGENT_KINDS[a.kind]}">${img?`<img src="${esc(img)}" alt="">`:icon(KIND_ICON[a.kind],20)}${sup&&!(a.kind==='human'&&img)?bub(sup,'af-av-sup'):''}</span>`;
+}
+// Status as coloured pills (one click each) for agents and workflows.
+const statusPills=(cur,names)=>`<div class="af-pills" role="group" aria-label="Status">${Object.entries(names).map(([k,n])=>{const [bg,fg]=colorOf(STATUS_TONE[k]||'slate');
+  return `<button type="button" class="af-pill${cur===k?' on':''}" id="af-st-${k}" data-af-status="${k}" aria-pressed="${cur===k}" style="--pb:${bg};--pf:${fg}"><i></i>${esc(n)}</button>`}).join('')}</div>`;
+// A single-select picker trigger (ui.js openPicker) that shows the current choice.
+const selBtn=(key,label,text,lead='',{none=false,disabled=false}={})=>`<button type="button" class="pk-btn af-sel${none?' none':''}" id="${key}" data-picker="${key}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}" aria-label="${esc(`${label}: ${text}`)}"${disabled?' disabled':''}>${lead}<span class="pk-t">${esc(text)}</span>${icon('chevD',12)}</button>`;
+// Inputs, outputs and tools: chips with ×, and an inline field that adds on Enter.
+function chips(key,label,ic,hint,values){
+  const one=label.toLowerCase().replace(/s$/,'');
+  return `<div class="af-chips-l"><label for="af-new-${key}">${icon(ic,12)}${label}</label><em>${hint}</em></div>
+    <div class="af-chips">${values.map((v,i)=>`<span class="af-chip"><span>${esc(v)}</span><button type="button" data-af-del="${key}" data-i="${i}" aria-label="${esc(`Remove ${one}: ${v}`)}">${icon('x',10)}</button></span>`).join('')}<input id="af-new-${key}" maxlength="200" placeholder="${values.length?'Add…':`Add ${one}, then Enter`}" aria-label="New ${one}"></div>`;
+}
 const projectItems=()=>db().projects.map(p=>({value:p.id,label:p.name,color:p.color}));
 const cardItems=()=>db().devops.cards.map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
 const itemItems=()=>[...db().timeline].sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
 const PICKERS={'af-projects':['projects',projectItems,'Projects'],'af-cards':['cards',cardItems,'Cards'],'af-items':['items',itemItems,'Timeline items']};
+const linkCount=x=>x.projects.length+x.cards.length+x.items.length;
 function linksHtml(x){
   const w=workFor(db(),x);
   const cards=w.cards.map(c=>`<li><button type="button" data-af-card="${esc(c.id)}" data-tip="${x.cards.includes(c.id)?'Linked card':'Open card in a linked project'}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(db().devops.columns.find(k=>k.id===c.column)?.name||c.column)}${c.due?' · '+esc(c.due):''}</em></button></li>`).join('');
   const items=w.items.map(i=>`<li><button type="button" data-af-item="${esc(i.id)}" data-tip="Open in the Timeline">${icon(i.kind==='deadline'?'flag':'gantt',12)}<span>${esc(i.title)}</span><em>${esc(i.start||'unscheduled')}</em></button></li>`).join('');
-  return `<label>Flow work <em>projects, cards and deadlines</em></label>
-    <div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>
-    ${cards||items?`<ul class="links af-links">${cards}${items}</ul>`:`<div class="dc-hint">Nothing linked yet.</div>`}`;
+  return `<div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>
+    ${cards||items?`<ul class="links af-links">${cards}${items}</ul>`:`<div class="dc-hint">Nothing linked yet: projects, cards and deadlines.</div>`}`;
 }
+// The candidates for Reports to: not itself and not one of its own reports.
+const managersFor=a=>af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).has(x.id)).sort(byName);
 function agentHtml(a){
-  const others=af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).has(x.id)).sort((x,y)=>x.name.localeCompare(y.name));
-  const ppl=peopleOf(db()).sort((x,y)=>x.name.localeCompare(y.name)),reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id),chain=chainOf(af(),a.id);
-  return `<div class="ihead"><span class="k af-k">${icon(KIND_ICON[a.kind])}</span><strong>${AGENT_KINDS[a.kind]}</strong><span class="sp"></span>
+  const ppl=peopleOf(db()),reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id),chain=chainOf(af(),a.id),mgr=agent(a.reportsTo),sup=person(a.supervisor);
+  const live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),ms=modelsOf(a);
+  const identity=`<label>Kind</label><div class="seg wide">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" id="af-kind-${k}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
+    <label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}">
+    <label>Status</label>${statusPills(a.status,AGENT_STATUS)}
+    <label for="af-reports">Reports to</label>${selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr})}
+    ${chain.length>1?`<div class="dc-hint af-chain">${esc(chain.map(x=>x.name).reverse().join(' › '))} › ${esc(a.name)}</div>`:''}
+    <label for="af-sup">Supervisor <em>a person on your MindMap</em></label>${ppl.length?selBtn('af-sup','Supervisor',sup?sup.name:'None',sup?bub(sup,'mini'):`<span class="pk-ic">${icon('user',13)}</span>`,{none:!sup}):`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`}`;
+  const work=`<label for="af-purpose">Purpose</label><textarea id="af-purpose" rows="3" maxlength="2000" placeholder="What this agent is responsible for">${esc(a.purpose)}</textarea>
+    ${chips('inputs','Inputs','inbox','what it takes in',a.inputs)}${chips('outputs','Outputs','send','what it produces',a.outputs)}${chips('tools','Tools','wrench','what it may use',a.tools)}`;
+  const team=(reps.length?`<label>Direct reports</label><ul class="links">${reps.map(r=>`<li><button type="button" data-agent-go="${esc(r.id)}">${icon(KIND_ICON[r.kind],12)}<span>${esc(r.name)}</span><em>${esc(r.title)}</em></button></li>`).join('')}</ul>`:'')
+    +(flows.length?`<label>Workflows</label><ul class="links">${flows.map(w=>`<li><button type="button" data-flow-go="${esc(w.id)}">${icon('flow',12)}<span>${esc(w.name)}</span><em>step ${w.steps.map((s,i)=>s.agent===a.id?i+1:0).filter(Boolean).join(', ')}</em></button></li>`).join('')}</ul>`:'');
+  const instrMeta=a.instructions.trim()?plural(a.instructions.trim().split('\n').length,'line'):'empty';
+  const runMeta=a.runtime.trim()?esc(a.runtime.trim()):'not set',linkMeta=linkCount(a)?String(linkCount(a)):'none';
+  return `<div class="ihead"><span class="k af-k${a.kind==='human'?' human':''}">${icon(KIND_ICON[a.kind])}</span><strong>${AGENT_KINDS[a.kind]}</strong><span class="sp"></span>
     ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('plus','Add a direct report',{attrs:'data-afi="addReport"'})}
     ${ib('trash','Delete agent',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
-    <form id="afedit" class="ibody" autocomplete="off">
-    ${a.kind==='agent'?liveHtml(a):''}
-    <label for="af-name">Name</label><input id="af-name" maxlength="120" required value="${esc(a.name)}">
-    <label>Kind</label><div class="seg wide">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
-    <div class="two"><div><label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}"></div>
-      <div><label for="af-status">Status</label><select id="af-status">${Object.entries(AGENT_STATUS).map(([k,n])=>opt(k,n,a.status)).join('')}</select></div></div>
-    <label for="af-reports">Reports to</label><select id="af-reports">${opt('','Nobody (top level)',a.reportsTo)}${others.map(x=>opt(x.id,x.name+(x.title?` · ${x.title}`:''),a.reportsTo)).join('')}</select>
-    ${chain.length>1?`<div class="dc-hint">${esc(chain.map(x=>x.name).reverse().join(' › '))} › ${esc(a.name)}</div>`:''}
-    <label for="af-sup">Supervisor <em>a person on your MindMap</em></label>${ppl.length?`<select id="af-sup">${opt('','None',a.supervisor)}${ppl.map(p=>opt(p.id,p.name,a.supervisor)).join('')}</select>`:`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`}
-    <label for="af-purpose">Purpose</label><textarea id="af-purpose" rows="3" maxlength="2000" placeholder="What this agent is responsible for">${esc(a.purpose)}</textarea>
-    ${listEditor('inputs','Inputs','what it takes in',a.inputs)}
-    ${listEditor('outputs','Outputs','what it produces',a.outputs)}
-    ${listEditor('tools','Tools','what it may use',a.tools)}
-    ${runtimeHtml(a)}
-    <label for="af-instr">Instructions <em>system prompt or runbook</em></label><textarea id="af-instr" rows="7" maxlength="20000">${esc(a.instructions)}</textarea>
-    ${linksHtml(a)}
-    ${reps.length?`<label>Direct reports</label><ul class="links">${reps.map(r=>`<li><button type="button" data-agent-go="${esc(r.id)}">${icon(KIND_ICON[r.kind],12)}<span>${esc(r.name)}</span><em>${esc(r.title)}</em></button></li>`).join('')}</ul>`:''}
-    ${flows.length?`<label>Workflows</label><ul class="links">${flows.map(w=>`<li><button type="button" data-flow-go="${esc(w.id)}">${icon('flow',12)}<span>${esc(w.name)}</span><em>step ${w.steps.map((s,i)=>s.agent===a.id?i+1:0).filter(Boolean).join(', ')}</em></button></li>`).join('')}</ul>`:''}
+    <form id="afedit" class="ibody af-panel" autocomplete="off">
+    <div class="af-hero">${avatarHtml(a)}<div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(a.name)}" aria-label="Name">
+      <div class="af-hero-s">${statusPill(a.status,AGENT_STATUS)}<span>${esc([a.title,a.kind==='agent'&&ms.length?modelLabel(af(),{...a,model:ms[0]}):''].filter(Boolean).join(' · ')||AGENT_KINDS[a.kind])}</span></div></div>
+      ${a.kind==='agent'?liveHtml(a,why):''}</div>
+    ${why?`<div class="af-warn" role="status">${icon('alert',12)}<span>Its runner will skip it: ${esc(why)}</span></div>`:''}
+    ${sec('identity','idCard','Identity',identity)}
+    ${a.kind==='agent'?sec('run','server','Runs on',runtimeHtml(a),runMeta):''}
+    ${sec('work','target','Work',work,`${a.inputs.length} in · ${a.outputs.length} out`)}
+    ${sec('instr','book','Instructions',`<textarea id="af-instr" rows="8" maxlength="20000" aria-label="Instructions" placeholder="System prompt or runbook">${esc(a.instructions)}</textarea>`,instrMeta)}
+    ${sec('links','link','Links',linksHtml(a),linkMeta)}
+    ${team?sec('team','network','Team',team,[reps.length&&plural(reps.length,'report'),flows.length&&plural(flows.length,'workflow')].filter(Boolean).join(' · ')):''}
     </form>`;
 }
 // The switch a runner obeys. It stays off until someone turns it on, whatever the status says.
-function liveHtml(a){
-  const why=liveProblem(af(),a);
-  return `<label class="af-live${a.live?' on':''}${a.live&&why?' warn':''}"><input type="checkbox" id="af-live" role="switch"${a.live?' checked':''}><span class="af-sw" aria-hidden="true"></span>
-    <span class="af-live-t"><strong>${a.live?'Live':'Not live'}</strong><em>${a.live?(why?`Its runner will skip it: ${why}`:`${esc(a.runtime)} works its queue`):'Runners leave this agent alone'}</em></span></label>`;
+function liveHtml(a,why){
+  const tip=a.live?(why?`Live, but its runner will skip it: ${why}`:`Live: ${a.runtime} works its queue`):'Not live: runners leave this agent alone';
+  return `<label class="af-live af-live-c${a.live?' on':''}${why?' warn':''}" data-tip="${esc(tip)}"><input type="checkbox" id="af-live" role="switch"${a.live?' checked':''}><span class="af-sw" aria-hidden="true"></span><span class="af-live-l">Live</span></label>`;
 }
-// Runs on and Model, with the runners and models reported to this workspace as suggestions.
+// ---------- Runs on: a reported runner (or any name) and an ordered list of models ----------
+// Agent models: `models` primary first then fallbacks (max 10), `model` = models[0] for older
+// readers, `auto` = the runner picks from the list per card.
+const MAX_MODELS=10,MP_CAP=200;
+const modelsOf=a=>Array.isArray(a.models)?a.models:(a.model?[a.model]:[]);
+const providerOf=m=>m.provider||(m.id.includes(':')?m.id.split(':')[0]:'Other');
+const BILLING={included:['Included','green'],metered:['Metered','amber']};
+const billBadge=m=>{const b=BILLING[m?.billing];if(!b)return '';const [bg,fg]=colorOf(b[1]);return `<span class="af-bill" style="background:${bg};color:${fg}">${b[0]}</span>`};
+function modelPool(a){
+  const r=runnerOf(af(),a.runtime),seen=new Set(),out=[];
+  for(const m of r?r.models:(af().runners||[]).flatMap(x=>x.models))if(!seen.has(m.id)){seen.add(m.id);out.push(m)}
+  return out;
+}
+function setModels(a,list){
+  list=[...new Set(list)].slice(0,MAX_MODELS);
+  change(()=>{a.models=list;a.model=list[0]||'';touch(a)});
+}
 function runtimeHtml(a){
-  const rs=af().runners||[],r=runnerOf(af(),a.runtime),models=r?r.models:rs.flatMap(x=>x.models);
-  return `<div class="two"><div><label for="af-runtime">Runs on</label><input id="af-runtime" list="af-runners" maxlength="200" placeholder="${rs.length?'Pick a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
-      <datalist id="af-runners">${rs.map(x=>`<option value="${esc(x.name)}">${x.models.length} models</option>`).join('')}</datalist></div>
-    <div><label for="af-model">Model</label><input id="af-model" list="af-models" maxlength="120" placeholder="${models.length?'Pick a model':'optional'}" value="${esc(a.model)}">
-      <datalist id="af-models">${models.map(m=>`<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}</datalist></div></div>
-    ${a.runtime&&rs.length&&!r?`<div class="dc-hint">No runner called “${esc(a.runtime)}” has reported to this workspace.</div>`:''}
-    ${r?`<div class="dc-hint">${esc(r.name)} reported ${r.models.length} models${a.model&&r.models.find(m=>m.id===a.model)?` · ${esc(r.models.find(m=>m.id===a.model).label)}`:''}.</div>`:''}`;
+  const rs=af().runners||[],r=runnerOf(af(),a.runtime),ms=modelsOf(a),pool=new Map(modelPool(a).map(m=>[m.id,m]));
+  const rows=ms.map((id,i)=>{const m=pool.get(id);
+    return `<li class="af-m${i?'':' first'}"><em>${i+1}</em><span class="af-m-l"><b>${esc(m?.label||id)}</b><small>${i?`Fallback ${i+1}`:a.auto===true?'Pool':'Primary'}${m?.label&&m.label!==id?` · ${esc(id)}`:''}${m||!pool.size?'':' · not reported'}</small></span>${billBadge(m)}
+      <span class="af-m-b">${ib('chevU','Move up',{attrs:`id="af-mup-${i}" data-af-mup="${i}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`id="af-mdn-${i}" data-af-mdn="${i}"${i<ms.length-1?'':' disabled'}`})}${ib('x','Remove',{attrs:`id="af-mdel-${i}" data-af-mdel="${i}"`,label:`Remove ${m?.label||id}`})}</span></li>`}).join('');
+  return `<label for="af-runtime">Runner</label>
+    <div class="af-combo"><input id="af-runtime" maxlength="200" placeholder="${rs.length?'Pick or type a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
+      <button type="button" class="af-combo-b" data-picker="af-runner" aria-haspopup="listbox" aria-expanded="${pickerOpen('af-runner')}" aria-label="Reported runners"${rs.length?'':' disabled'} data-tip="${rs.length?`${plural(rs.length,'runner')} reported`:'No runner has reported to this workspace yet'}">${icon('chevD',12)}</button></div>
+    ${r?`<div class="dc-hint af-ok">${icon('check',11)}Reported ${esc(ago(r.reported))} · ${plural(r.models.length,'model')}</div>`
+      :a.runtime.trim()&&rs.length?`<div class="dc-hint">No runner called “${esc(a.runtime.trim())}” has reported to this workspace.</div>`:''}
+    <label for="af-model-add">Models <em>${a.auto===true?'the runner picks per card':'primary, then fallbacks'}</em></label>
+    ${rows?`<ol class="af-models">${rows}</ol>`:''}
+    <button type="button" class="pk-btn af-madd" id="af-model-add" data-af-models aria-haspopup="listbox" aria-expanded="${!!mp}"${ms.length>=MAX_MODELS?' disabled':''}>${icon('plus',12)}<span class="pk-t">${ms.length?'Add a fallback':'Choose a model'}</span><small>${pool.size?`${pool.size} available`:'type any id'}</small></button>
+    <label class="af-tog${a.auto===true?' on':''}"><input type="checkbox" id="af-auto" role="switch"${a.auto===true?' checked':''}><span class="af-sw" aria-hidden="true"></span><span>${icon('sparkle',12)}Auto <em>let the runner pick from these per card</em></span></label>`;
+}
+// The model picker: searchable, grouped by provider, favourites first, and it stays open while you
+// add (Enter or click), so a primary and its fallbacks are picked in one go. Rows are capped so a
+// runner with hundreds of models stays quick; typing narrows the list.
+let mp=null;
+function closeModels(refocus=false){
+  if(!mp)return;const p=mp;mp=null;popOut(p.el);document.removeEventListener('pointerdown',p.out,true);removeEventListener('resize',p.place);
+  const b=$('#af-model-add');b?.setAttribute('aria-expanded','false');if(refocus)setTimeout(()=>$('#af-model-add')?.focus());
+}
+function openModels(btn){
+  if(mp){closeModels();return}
+  const id=sel()?.id,a0=agent(id);if(!a0)return;
+  const pool=modelPool(a0).map(m=>{const p=providerOf(m);return {...m,p,h:`${m.label} ${m.id} ${p}`.toLowerCase()}});
+  const el=document.createElement('div');el.className='picker af-mp';
+  el.innerHTML=`<input class="pk-q" type="search" placeholder="${pool.length?`Search ${plural(pool.length,'model')}`:'Type a model id'}" aria-label="Search models" aria-controls="af-mp-list" autocomplete="off" role="combobox" aria-expanded="true">
+    <div class="pk-list" role="listbox" id="af-mp-list" aria-multiselectable="true" aria-label="Models"></div><div class="af-mp-foot"></div>`;
+  document.body.append(el);
+  const input=el.querySelector('.pk-q'),list=el.querySelector('.pk-list'),foot=el.querySelector('.af-mp-foot');
+  let rows=[],active=0;
+  function draw(){
+    const a=agent(id);if(!a){closeModels();return}
+    const cur=modelsOf(a),raw=input.value.trim(),words=raw.toLowerCase().split(/\s+/).filter(Boolean),fav=new Set(ui.fav||[]);
+    const hit=words.length?pool.filter(m=>words.every(w=>m.h.includes(w))):pool;
+    const groups=new Map([['Favorites',[]]]);
+    for(const m of hit){const g=fav.has(m.id)?'Favorites':m.p;if(!groups.has(g))groups.set(g,[]);groups.get(g).push(m)}
+    rows=[];
+    if(raw&&!pool.some(m=>m.id===raw))rows.push({id:raw.slice(0,120),label:raw.slice(0,120),custom:true,g:''});
+    for(const [g,ms] of groups)for(const m of ms){if(rows.length>=MP_CAP)break;rows.push({...m,g})}
+    active=Math.max(0,Math.min(active,rows.length-1));let g;
+    list.innerHTML=rows.length?rows.map((m,k)=>{const at=cur.indexOf(m.id),head=m.g&&m.g!==g?(g=m.g,`<div class="pk-group" role="presentation">${m.g==='Favorites'?icon('star',10):''}${esc(m.g)}</div>`):'';
+      return head+`<div class="pk-opt af-mo${k===active?' active':''}" role="option" id="af-mp-${k}" data-k="${k}" aria-selected="${at>=0}"><span class="af-mo-n${at>=0?' on':''}">${at>=0?at+1:icon('plus',10)}</span>
+        <span class="pk-l">${m.custom?`Use “${esc(m.id)}”`:esc(m.label||m.id)}<small>${m.custom?'a model id the runner knows':esc(m.id)}</small></span>${billBadge(m)}
+        ${m.custom?'':`<button type="button" class="af-star${fav.has(m.id)?' on':''}" data-star="${k}" tabindex="-1" aria-label="${fav.has(m.id)?'Unfavorite':'Favorite'} ${esc(m.label||m.id)}">${icon('star',13)}</button>`}</div>`}).join('')
+      :`<div class="pk-empty">${pool.length?'No models match':'This runner reported no models: type an id'}</div>`;
+    input.setAttribute('aria-activedescendant',rows.length?`af-mp-${active}`:'');
+    foot.innerHTML=`<span>${hit.length>MP_CAP?`${MP_CAP} of ${hit.length} shown · type to narrow`:`${cur.length}/${MAX_MODELS} chosen`}</span><span><kbd>Enter</kbd> add · <kbd>Shift+Enter</kbd> favorite</span>`;
+    list.querySelector('.active')?.scrollIntoView({block:'nearest'});
+  }
+  function toggle(k){
+    const m=rows[k],a=agent(id);if(!m||!a)return;const cur=modelsOf(a);
+    if(cur.includes(m.id))setModels(a,cur.filter(x=>x!==m.id));
+    else if(cur.length>=MAX_MODELS){toast(`Up to ${MAX_MODELS} models: a primary and its fallbacks.`,true);return}
+    else{setModels(a,[...cur,m.id]);if(m.custom)input.value=''}
+    active=k;draw();place();
+  }
+  function star(k){
+    const m=rows[k];if(!m||m.custom)return;const f=new Set(ui.fav||[]);
+    if(f.has(m.id))f.delete(m.id);else f.add(m.id);ui.fav=[...f].slice(-200);keepUi();draw();
+  }
+  function place(){
+    const r=($('#af-model-add')||btn).getBoundingClientRect();el.style.width=Math.max(300,r.width)+'px';
+    const H=el.offsetHeight;let top=r.bottom+4;if(top+H>innerHeight-6)top=Math.max(6,r.top-H-4);
+    el.style.left=Math.max(6,Math.min(r.left,innerWidth-el.offsetWidth-6))+'px';el.style.top=top+'px';
+  }
+  el.addEventListener('keydown',e=>{
+    e.stopPropagation();const n=rows.length;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:-1)+n)%Math.max(1,n);draw()}
+    else if(e.key==='Enter'){e.preventDefault();e.shiftKey?star(active):toggle(active)}
+    else if(e.key==='Escape'){e.preventDefault();closeModels(true)}
+    else if(e.key==='Tab')closeModels();
+    else if((e.key==='Home'||e.key==='End')&&!input.value){e.preventDefault();active=e.key==='Home'?0:n-1;draw()}
+  });
+  input.addEventListener('input',()=>{active=0;draw();place()});
+  el.addEventListener('click',e=>{
+    const s=e.target.closest('[data-star]');if(s){star(+s.dataset.star);input.focus();return}
+    const o=e.target.closest('.pk-opt');if(o){toggle(+o.dataset.k);input.focus()}
+  });
+  const out=e=>{if(!el.contains(e.target)&&!e.target.closest?.('#af-model-add'))closeModels()};
+  mp={id,el,out,place,draw};
+  document.addEventListener('pointerdown',out,true);addEventListener('resize',place);
+  btn.setAttribute('aria-expanded','true');
+  draw();place();popIn(el);input.focus();
 }
 function workflowHtml(w){
-  const agents=[...af().agents].sort((x,y)=>x.name.localeCompare(y.name));
-  return `<div class="ihead"><span class="k af-k">${icon('flow')}</span><strong>Workflow</strong><span class="sp"></span>
-    ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('trash','Delete workflow',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
-    <form id="afedit" class="ibody" autocomplete="off">
-    <label for="af-name">Name</label><input id="af-name" maxlength="120" required value="${esc(w.name)}">
-    <label for="af-desc">Description</label><textarea id="af-desc" rows="3" maxlength="4000" placeholder="What this workflow achieves">${esc(w.description)}</textarea>
-    <div class="two"><div><label for="af-trigger">Trigger</label><select id="af-trigger">${Object.entries(TRIGGERS).map(([k,n])=>opt(k,n,w.trigger)).join('')}</select></div>
-      <div><label for="af-wstatus">Status</label><select id="af-wstatus">${Object.entries(WORKFLOW_STATUS).map(([k,n])=>opt(k,n,w.status)).join('')}</select></div></div>
-    ${w.trigger==='manual'?'':`<label for="af-sched">${w.trigger==='schedule'?'When':'On'}</label><input id="af-sched" maxlength="200" placeholder="${esc(TRIGGER_HINT[w.trigger])}" value="${esc(w.schedule)}">`}
-    <label>Steps <em>in order</em></label>
-    <ol class="af-step-list">${w.steps.map((s,i)=>`<li data-step="${esc(s.id)}"><em>${i+1}</em><div class="af-step-f">
+  const agents=[...af().agents].sort(byName);
+  const setup=`<label for="af-desc">Description</label><textarea id="af-desc" rows="3" maxlength="4000" placeholder="What this workflow achieves">${esc(w.description)}</textarea>
+    <label>Trigger</label><div class="seg wide">${Object.entries(TRIGGERS).map(([k,n])=>`<button type="button" class="${w.trigger===k?'on':''}" id="af-trig-${k}" data-af-trigger="${k}" aria-pressed="${w.trigger===k}">${icon(TRIGGER_ICON[k],12)}${n}</button>`).join('')}</div>
+    ${w.trigger==='manual'?'':`<label for="af-sched">${w.trigger==='schedule'?'When':'On'}</label><input id="af-sched" maxlength="200" placeholder="${esc(TRIGGER_HINT[w.trigger])}" value="${esc(w.schedule)}">`}`;
+  const steps=`<ol class="af-step-list">${w.steps.map((s,i)=>`<li data-step="${esc(s.id)}"><em>${i+1}</em><div class="af-step-f">
       <select data-step-agent="${esc(s.id)}" aria-label="Step ${i+1} agent">${opt('','Unassigned',s.agent)}${agents.map(a=>opt(a.id,a.name,s.agent)).join('')}</select>
       <input data-step-action="${esc(s.id)}" id="af-act-${esc(s.id)}" maxlength="500" placeholder="What happens" value="${esc(s.action)}" aria-label="Step ${i+1} action">
       <input data-step-output="${esc(s.id)}" id="af-out-${esc(s.id)}" maxlength="300" placeholder="Output (optional)" value="${esc(s.output)}" aria-label="Step ${i+1} output"></div>
       <div class="af-step-b">${ib('chevU','Move up',{attrs:`data-step-up="${esc(s.id)}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`data-step-down="${esc(s.id)}"${i<w.steps.length-1?'':' disabled'}`})}${ib('x','Remove step',{attrs:`data-step-del="${esc(s.id)}"`})}</div></li>`).join('')}</ol>
-    <button type="button" class="txt af-addstep" data-afi="addStep">${icon('plus',13)}Add step</button>
-    ${linksHtml(w)}
+    <button type="button" class="txt af-addstep" data-afi="addStep">${icon('plus',13)}Add step</button>`;
+  return `<div class="ihead"><span class="k af-k">${icon('flow')}</span><strong>Workflow</strong><span class="sp"></span>
+    ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('trash','Delete workflow',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
+    <form id="afedit" class="ibody af-panel" autocomplete="off">
+    <div class="af-hero"><span class="af-av k-flow">${icon('flow',20)}</span><div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(w.name)}" aria-label="Name">
+      <div class="af-hero-s">${icon(TRIGGER_ICON[w.trigger],11)}<span>${esc(TRIGGERS[w.trigger])}${w.schedule&&w.trigger!=='manual'?` · ${esc(w.schedule)}`:''} · ${plural(w.steps.length,'step')}</span></div></div></div>
+    ${statusPills(w.status,WORKFLOW_STATUS)}
+    ${sec('setup','zap','Setup',setup)}
+    ${sec('steps','list','Steps',steps,String(w.steps.length))}
+    ${sec('links','link','Links',linksHtml(w),linkCount(w)?String(linkCount(w)):'none')}
     </form>`;
 }
 export function renderInspector(pane){
   const x=sel();
+  if(mp&&(!x||x.id!==mp.id))closeModels();
   panel(pane,!!x,{onHidden:()=>{if(!sel())pane.innerHTML=''}});
   if(!x)return;
   // Keep focus and caret when the panel is redrawn after a change.
@@ -501,6 +630,7 @@ export function renderInspector(pane){
   pane.scrollTop=top;
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
+  if(mp){mp.draw();mp.place()}
 }
 function addTo(key){
   const x=sel(),i=$('#af-new-'+key),v=i?.value.trim();if(!x||!v)return;
@@ -508,14 +638,36 @@ function addTo(key){
   change(()=>{if(!x[key].includes(v))x[key].push(v.slice(0,200));touch(x)});
   $('#af-new-'+key)?.focus();
 }
+// Single-choice pickers in the side panel: who it reports to, its supervisor, its runner.
+const SINGLE={
+  'af-reports':{label:'Reports to',items:a=>[{value:'',label:'Nobody (top level)',icon:'network'},...managersFor(a).map(x=>({value:x.id,label:x.name,sub:x.title,icon:KIND_ICON[x.kind]}))],cur:a=>a.reportsTo,
+    set(a,v){if(v&&!canReportTo(af(),a.id,v)){rerender();return}change(()=>{a.reportsTo=v;touch(a)})}},
+  'af-sup':{label:'Supervisor',items:()=>[{value:'',label:'None',icon:'user'},...peopleOf(db()).sort(byName).map(p=>({value:p.id,label:p.name,sub:p.title||'',avatar:personAv(p)}))],cur:a=>a.supervisor,
+    set(a,v){change(()=>{a.supervisor=v;touch(a)})}},
+  'af-runner':{label:'Runners',items:()=>(af().runners||[]).map(r=>({value:r.name,label:r.name,sub:`${plural(r.models.length,'model')} · ${ago(r.reported)}`,icon:'server'})),cur:a=>runnerOf(af(),a.runtime)?.name||a.runtime,
+    set(a,v){change(()=>{a.runtime=v;touch(a)})}},
+};
 export function inspectorClick(e){
+  const box=e.target.closest('.af-chips');if(box&&e.target===box){box.querySelector('input')?.focus();return}
   const b=e.target.closest('button');if(!b)return;
   const x=sel();if(!x)return;
+  if(b.dataset.afSec){const k=b.dataset.afSec;ui.sec={...ui.sec,[k]:!secOpen(k)};keepUi();rerender();return}
   const pk=PICKERS[b.dataset.picker];
   if(pk){const [k,items,label]=pk;openPicker(b,{items:items(),selected:x[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){if(v.length>LIMITS.refs){toast(`Up to ${LIMITS.refs} linked ${k} each.`,true);rerender();return}change(()=>{x[k]=v;touch(x)})}});return}
+  const one=SINGLE[b.dataset.picker];
+  if(one){const items=one.items(x);openPicker(b,{items,selected:[one.cur(x)],multi:false,search:items.length>6,label:one.label,placeholder:`Search ${one.label.toLowerCase()}`,onChange([v]){const y=sel();if(y&&v!==one.cur(y))one.set(y,v??'')}});return}
+  if(b.dataset.afModels!==undefined){openModels(b);return}
+  if(b.dataset.afMup||b.dataset.afMdn||b.dataset.afMdel){
+    const ms=[...modelsOf(x)],i=+(b.dataset.afMup||b.dataset.afMdn||b.dataset.afMdel);
+    if(b.dataset.afMdel){ms.splice(i,1);setModels(x,ms);requestAnimationFrame(()=>($(`#af-mdel-${Math.min(i,ms.length-1)}`)||$('#af-model-add'))?.focus());return}
+    const j=b.dataset.afMup?i-1:i+1;if(j<0||j>=ms.length)return;[ms[i],ms[j]]=[ms[j],ms[i]];setModels(x,ms);
+    requestAnimationFrame(()=>($(`#af-${b.dataset.afMup?'mup':'mdn'}-${j}:not([disabled])`)||$(`#af-mdel-${j}`))?.focus());return;
+  }
   if(b.dataset.afKind){if(x.kind!==b.dataset.afKind)change(()=>{x.kind=b.dataset.afKind;touch(x)});return}
+  if(b.dataset.afStatus){if(x.status!==b.dataset.afStatus)change(()=>{x.status=b.dataset.afStatus;touch(x)});return}
+  if(b.dataset.afTrigger){if(x.trigger!==b.dataset.afTrigger)change(()=>{x.trigger=b.dataset.afTrigger;touch(x)});return}
   if(b.dataset.afAdd){addTo(b.dataset.afAdd);return}
-  if(b.dataset.afDel){const k=b.dataset.afDel,i=+b.dataset.i;change(()=>{x[k].splice(i,1);touch(x)});return}
+  if(b.dataset.afDel){const k=b.dataset.afDel,i=+b.dataset.i;change(()=>{x[k].splice(i,1);touch(x)});requestAnimationFrame(()=>$('#af-new-'+k)?.focus());return}
   if(b.dataset.afCard){openCard(b.dataset.afCard);return}
   if(b.dataset.afItem){openItem(b.dataset.afItem);return}
   if(b.dataset.agentGo){select('agent',b.dataset.agentGo);return}
@@ -532,7 +684,7 @@ export function inspectorClick(e){
   })[b.dataset.afi]?.();
 }
 // Text fields autosave as you type: one undo step per open form.
-const TEXT={'af-name':'name','af-title':'title','af-purpose':'purpose','af-runtime':'runtime','af-model':'model','af-instr':'instructions','af-desc':'description','af-sched':'schedule'};
+const TEXT={'af-name':'name','af-title':'title','af-purpose':'purpose','af-runtime':'runtime','af-instr':'instructions','af-desc':'description','af-sched':'schedule'};
 export function inspectorInput(e){
   const t=e.target,x=sel(),form=$('#afedit');if(!x||!form)return;
   const key=TEXT[t.id],sa=t.dataset.stepAction,so=t.dataset.stepOutput;
@@ -547,15 +699,16 @@ export function inspectorChange(e){
   const t=e.target,x=sel();if(!x)return;
   const set=(k,v)=>change(()=>{x[k]=v;touch(x)});
   if(t.id==='af-live')set('live',t.checked);
-  else if(t.id==='af-status'||t.id==='af-wstatus')set('status',t.value);
-  else if(t.id==='af-sup')set('supervisor',t.value);
-  else if(t.id==='af-trigger')set('trigger',t.value);
-  else if(t.id==='af-reports'){if(t.value===x.reportsTo)return;if(t.value&&descendants(af(),x.id).has(t.value)){rerender();return}set('reportsTo',t.value)}
+  else if(t.id==='af-auto')set('auto',t.checked);
+  // The runner hint and the models it offers follow a typed runner name once the field is left.
+  else if(t.id==='af-runtime')rerender();
   else if(t.dataset.stepAgent)change(()=>{const s=x.steps.find(y=>y.id===t.dataset.stepAgent);if(s)s.agent=t.value;touch(x)});
 }
 export function inspectorKey(e){
-  if(e.key!=='Enter')return;
   const m=/^af-new-(\w+)$/.exec(e.target.id||'');
+  // Backspace in an empty chip field removes the last chip.
+  if(m&&e.key==='Backspace'&&!e.target.value){const x=sel();if(x?.[m[1]]?.length){e.preventDefault();change(()=>{x[m[1]].pop();touch(x)})}return}
+  if(e.key!=='Enter')return;
   if(m){e.preventDefault();addTo(m[1])}else if(e.target.tagName==='INPUT')e.preventDefault();
 }
 export function key(e){

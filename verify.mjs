@@ -490,7 +490,7 @@ try{
   db=await saved();const lead=db.agentflow.agents[0];
   assert(db.agentflow.agents.length===4&&db.agentflow.workflows.length===1&&await js(`document.querySelectorAll('.af-node').length`)===4,'the template adds a small org and a workflow');
   assert(await js(`!document.querySelector('#inspector').hidden&&document.querySelector('#af-name')?.value`)==='Chief of staff','the new org lead opens in the side panel');
-  assert(await js(`[...document.querySelectorAll('#af-reports option')].map(o=>o.value).join()`)==='','an agent cannot report to its own reports');
+  assert(await js(`(()=>{const b=document.querySelector('#af-reports');b.click();const l=[...document.querySelectorAll('.picker:not(.leaving) .pk-opt .pk-l')].map(o=>o.textContent);b.click();return l.join()})()`)==='Nobody (top level)','an agent cannot report to its own reports');
   await js(`(()=>{const i=document.querySelector('#af-name');i.focus();i.select();return 1})()`);await call('Input.insertText',{text:'Ops lead'});
   await js(`document.querySelector('#af-new-inputs').focus()`);await call('Input.insertText',{text:'Customer email'});await key('Enter',13);
   db=await saved();
