@@ -8,7 +8,7 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,
-  canReportTo,CARD,STACK,stacked,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem} from './agentflow-core.js';
+  canReportTo,CARD,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -54,6 +54,9 @@ export function mount(opts){
   el.addEventListener('pointermove',canvasMove);
   el.addEventListener('pointerup',canvasUp);
   el.addEventListener('contextmenu',contextMenu);
+  // Hovering a card highlights its reporting chain (only the highlight path is redrawn).
+  el.addEventListener('pointerover',e=>{const id=!drag&&e.target.closest?.('#afCanvas [data-agent]')?.dataset.agent||null;if(id!==hoverId){hoverId=id;paintChain()}});
+  el.addEventListener('pointerleave',()=>{if(hoverId){hoverId=null;paintChain()}});
   // A cancelled gesture (touch interrupted, capture lost) changes nothing.
   el.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.pid)return;drag=null;$('#afCanvas')?.classList.remove('panning');paint()});
   el.addEventListener('wheel',e=>{const cv=e.target.closest('#afCanvas');if(!cv)return;e.preventDefault();const r=cv.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
@@ -94,37 +97,45 @@ function toolbar(){
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
+// A person's face: their photo when the person card has one (image: a URL or data URL), else
+// initials on their member colour.
+const photo=n=>typeof n?.image==='string'&&/^(https?:|data:image\/)/i.test(n.image.trim())?n.image.trim():'';
+const faceHtml=(n,cls,tip)=>{const src=photo(n),[bg,fg]=memberColor(n.id);
+  return src?`<img class="${cls} img" src="${esc(src)}" alt="" draggable="false" data-tip="${esc(tip)}">`:`<span class="${cls}" style="background:${bg};color:${fg}" data-tip="${esc(tip)}">${esc(initials(n.name))}</span>`};
+// The org card: avatar and name, role, where it runs (and the Live badge), then counts. The left
+// stripe is the status. Every text row is one line, cut with an ellipsis; the tooltip has it all.
 function nodeHtml(a,p,hits){
   const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
   const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
-  const [bg,fg]=sup?memberColor(sup.id):[];
-  const run=runLine(af(),a),live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a);
-  return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${AGENT_KINDS[a.kind]}: ${a.name}`)}" style="left:${p.x}px;top:${p.y}px">
-    <div class="af-n-top"><span class="af-k" data-tip="${AGENT_KINDS[a.kind]}">${icon(KIND_ICON[a.kind],14)}</span><span class="nm">${esc(a.name)}</span><i class="af-st" data-tip="${AGENT_STATUS[a.status]}"></i></div>
-    <div class="af-n-title">${esc(a.title)}</div>
-    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone')}">${live?`<b>Live</b>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
+  const run=runLine(af(),a),live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),kind=AGENT_KINDS[a.kind],status=AGENT_STATUS[a.status];
+  // A human agent is the person it is linked to; anyone else shows its kind.
+  const me=a.kind==='human'&&sup,rt=a.runtime.trim(),glyph=(rt||a.model.trim()).charAt(0).toUpperCase(),[gb,gf]=glyph?memberColor(rt.toLowerCase()||a.model):[];
+  const avatar=me?faceHtml(sup,'af-av',`${kind}: ${sup.name}`):`<span class="af-av k" data-tip="${kind}">${icon(KIND_ICON[a.kind],15)}</span>`;
+  const runTip=`${run||'No runner or model yet'}\n${live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone'}`;
+  return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${kind}: ${a.name}${a.title?`, ${a.title}`:''}. ${status}${live?', live':''}`)}" style="left:${p.x}px;top:${p.y}px">
+    <i class="af-st" data-tip="Status: ${status}"></i>
+    <div class="af-n-head">${avatar}<div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
+      <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||kind)}</span></div></div>
+    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
     <div class="af-n-foot"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
-      ${sup?`<span class="sp"></span><span class="bub mini" style="background:${bg};color:${fg}" data-tip="Supervised by ${esc(sup.name)}">${esc(initials(sup.name))}</span>`:''}</div>
+      ${sup&&!me?`<span class="sp"></span>${faceHtml(sup,'bub mini',`Supervised by ${sup.name}`)}`:''}</div>
     <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
 }
-// Manager to report: a rounded elbow down from the manager when the report sits below, else a curve.
-// A stacked report (see stacked()) hangs off a spine just left of its column and enters from the side.
-function linkPath(m,r,side){
-  const x1=m.x+CARD.w/2,y1=m.y+CARD.h,x2=r.x+CARD.w/2,y2=r.y;
-  if(side&&y2-y1>=24){
-    const ym=y1+Math.min(28,(y2-y1)/2),sx=r.x-STACK.indent/2,yc=r.y+CARD.h/2,dx=sx-x1,rad=Math.min(8,Math.abs(dx)/2),s=Math.sign(dx)||1;
-    return `M${x1} ${y1}V${ym-rad}Q${x1} ${ym} ${x1+s*rad} ${ym}H${sx-s*rad}Q${sx} ${ym} ${sx} ${ym+rad}V${yc-rad}Q${sx} ${yc} ${sx+rad} ${yc}H${r.x}`;
-  }
-  if(y2-y1>=24){
-    const ym=y1+Math.min(28,(y2-y1)/2),dx=x2-x1,rad=Math.min(8,Math.abs(dx)/2,(y2-ym)/2),sx=Math.sign(dx);
-    return dx===0?`M${x1} ${y1}V${y2}`:`M${x1} ${y1}V${ym-rad}Q${x1} ${ym} ${x1+sx*rad} ${ym}H${x2-sx*rad}Q${x2} ${ym} ${x2} ${ym+rad}V${y2}`;
-  }
-  const k=Math.max(40,Math.abs(y2-y1)/2);
-  return `M${x1} ${y1}C${x1} ${y1+k} ${x2} ${y2-k} ${x2} ${y2}`;
+// The reporting chain above an agent, highlighted while it is hovered or selected: its own line and
+// every line up to the top (routes come from reportLines on the last paint).
+let routes=new Map(),hoverId=null;
+function chainD(id){
+  const out=[],n0=af().agents.length;
+  for(let a=agent(id),n=0;a?.reportsTo&&n<=n0;a=agent(a.reportsTo),n++)if(routes.has(a.id))out.push(routes.get(a.id));
+  return out.join('');
 }
-const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
+function paintChain(){
+  const el=$('#afCanvas .af-chain');if(!el)return;
+  const id=hoverId||(selected?.type==='agent'?selected.id:null);el.setAttribute('d',id?chainD(id):'');
+}
+const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world" style="--af-w:${CARD.w}px;--af-h:${CARD.h}px"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
   <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div>`;
 function paintZoom(){
   const z=$('#agentflowView .af-zoom');if(!z)return;
@@ -141,11 +152,17 @@ function paint(){
   cv.querySelector('.af-world').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.z})`;
   const g=GRID*view.z*(view.z<.45?4:view.z<.8?2:1);cv.style.backgroundSize=`${g}px ${g}px`;cv.style.backgroundPosition=`${view.x}px ${view.y}px`;
   cv.querySelector('.af-nodes').innerHTML=af().agents.map(a=>nodeHtml(a,pos.get(a.id),hits)).join('');
-  // Each line also gets a wide invisible twin, so it is easy to right-click.
-  const side=stacked(af()),lines=af().agents.filter(a=>a.reportsTo&&pos.has(a.reportsTo)).map(a=>{const d=linkPath(pos.get(a.reportsTo),pos.get(a.id),side.has(a.id));
-    return `<path class="af-ln${hits&&!(hits.has(a.id)&&hits.has(a.reportsTo))?' dim':''}" d="${d}"/><path class="af-hit" data-line="${esc(a.id)}" d="${d}"/>`}).join('');
+  // Close up the whole card; zoomed out (under 60%) just who it is, larger.
+  cv.classList.toggle('lod',view.z<.6);
+  // Each manager's lines are one bundle (see reportLines), drawn in at most two paths: what matches
+  // the search and what does not. A bundle's shared trunk and bus dim only when none of its reports match.
+  const lines=reportLines(af(),pos,stacked(af())),on=[],off=[];routes=lines.routes;
+  for(const q of lines.pieces)(hits&&!(q.owners||q.bundle).some(x=>hits.has(x))?off:on).push(q.d||pathOf(q.pts,q.radii));
+  // Each report's route also gets a wide invisible twin, so its line is easy to right-click.
+  const hit=[...routes].map(([id,d])=>`<path class="af-hit" data-line="${esc(id)}" d="${d}"/>`).join('');
   const m=drag?.mode==='link'&&pos.get(drag.id),ghost=m&&drag.px!=null?`<path class="ghost" d="M${m.x+CARD.w/2} ${m.y+CARD.h}L${drag.px} ${drag.py}"/>`:'';
-  cv.querySelector('.af-edges').innerHTML=lines+ghost;
+  cv.querySelector('.af-edges').innerHTML=`<path class="af-ln" d="${on.join('')}"/><path class="af-ln dim" d="${off.join('')}"/><path class="af-ln af-chain" d=""/>${hit}${ghost}`;
+  paintChain();
   const sc=$('#agentflowView .af-scale');if(sc)sc.textContent=Math.round(view.z*100)+'%';
   const empty=$('#agentflowView .af-empty-wrap');
   if(empty){empty.hidden=!!af().agents.length;if(!af().agents.length&&!empty.firstChild)empty.innerHTML=`<div class="af-empty">${icon('bot',28)}<strong>Build your agent org</strong><p>Add agents with a purpose, inputs and outputs, arrange who reports to whom, and link them to projects, cards and deadlines. Double-click the canvas to drop one anywhere.</p>

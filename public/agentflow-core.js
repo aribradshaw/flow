@@ -197,7 +197,7 @@ export function workQueue(db,agentId){
 
 // ---------- canvas layout ----------
 // Card size on the canvas and the spacing of the automatic tree.
-export const CARD={w:188,h:92},STEP={x:212,y:144};
+export const CARD={w:216,h:96},STEP={x:240,y:152};
 // A manager with STACK.min or more reports that have no reports of their own lists those in
 // columns of up to STACK.rows, indented under it, so a big team doesn't stretch the chart sideways.
 export const STACK={min:3,rows:6,y:CARD.h+20,indent:24};
@@ -259,6 +259,88 @@ export function positions(af){
     const p={x,y};out.set(a.id,p);taken.push(p);
   }
   return out;
+}
+// Reporting lines, consolidated per manager: one trunk down from the manager, one shared bus across
+// its reports and a short drop to each (a stacked column gets one spine with a stub per card), so
+// no segment is drawn twice. A report that sits above or beside its manager (arranged by hand)
+// gets its own curve instead. side: the ids drawn in stacked columns (stacked()).
+// Returns pieces [{pts, radii, owners}] (owners: the report ids a piece serves, null when shared by
+// the whole bundle; curve pieces carry d instead of pts) and routes: report id -> its own path from
+// the manager, through the shared segments (for hit areas and highlighting the chain).
+const BEND=8,near=(a,b)=>Math.abs(a-b)<.5;
+// A polyline with rounded corners: radii[i] is the radius at point i (0: a sharp corner).
+export function pathOf(pts,radii=[]){
+  const p=pts.filter((q,i)=>!i||!(near(q.x,pts[i-1].x)&&near(q.y,pts[i-1].y))),f=n=>Math.round(n*10)/10;
+  if(p.length<2)return '';
+  let d=`M${f(p[0].x)} ${f(p[0].y)}`;
+  for(let i=1;i<p.length-1;i++){
+    const a=p[i-1],b=p[i],c=p[i+1],l1=Math.hypot(b.x-a.x,b.y-a.y),l2=Math.hypot(c.x-b.x,c.y-b.y),r=Math.min(radii[pts.indexOf(b)]||0,l1,l2);
+    if(near((b.x-a.x)*(c.y-b.y),(b.y-a.y)*(c.x-b.x)))continue; // straight on
+    if(r<.5){d+=`L${f(b.x)} ${f(b.y)}`;continue}
+    d+=`L${f(b.x+(a.x-b.x)/l1*r)} ${f(b.y+(a.y-b.y)/l1*r)}Q${f(b.x)} ${f(b.y)} ${f(b.x+(c.x-b.x)/l2*r)} ${f(b.y+(c.y-b.y)/l2*r)}`;
+  }
+  const z=p.at(-1);return d+`L${f(z.x)} ${f(z.y)}`;
+}
+// A report arranged above or beside its manager: one curve between the facing edges.
+function curve(m,r){
+  const W=CARD.w,H=CARD.h,c=(x1,y1,x2,y2,h)=>{const k=Math.max(40,Math.abs(h?x2-x1:y2-y1)/2),s=h?Math.sign(x2-x1):Math.sign(y2-y1)||1;
+    return h?`M${x1} ${y1}C${x1+s*k} ${y1} ${x2-s*k} ${y2} ${x2} ${y2}`:`M${x1} ${y1}C${x1} ${y1+s*k} ${x2} ${y2-s*k} ${x2} ${y2}`};
+  if(r.y+H<=m.y)return c(m.x+W/2,m.y,r.x+W/2,r.y+H,false); // above: top to bottom
+  if(r.x>=m.x+W)return c(m.x+W,m.y+H/2,r.x,r.y+H/2,true); // to the right: side to side
+  if(r.x+W<=m.x)return c(m.x,m.y+H/2,r.x+W,r.y+H/2,true); // to the left
+  return c(m.x+W/2,m.y+H,r.x+W/2,r.y,false);
+}
+export function reportLines(af,pos,side=stacked(af)){
+  const pieces=[],routes=new Map(),byManager=new Map();
+  for(const a of af.agents)if(a.reportsTo&&a.reportsTo!==a.id&&pos.has(a.reportsTo)&&pos.has(a.id)){
+    if(!byManager.has(a.reportsTo))byManager.set(a.reportsTo,[]);byManager.get(a.reportsTo).push(a);
+  }
+  for(const [mid,reps] of byManager){
+    const m=pos.get(mid),x1=m.x+CARD.w/2,y1=m.y+CARD.h;
+    const below=[];
+    for(const a of reps){const r=pos.get(a.id);if(r.y-y1>=24)below.push(a);else{const d=curve(m,r);pieces.push({d,owners:[a.id]});routes.set(a.id,d)}}
+    if(!below.length)continue;
+    const ym=y1+Math.min(28,Math.min(...below.map(a=>pos.get(a.id).y-y1))/2),bundle=below.map(a=>a.id);
+    // Branches off the bus: a drop to the card(s) below one x, or a spine beside a stacked column.
+    const br=new Map();
+    for(const a of below){
+      const r=pos.get(a.id),s=side.has(a.id),x=s?r.x-STACK.indent/2:r.x+CARD.w/2,k=`${s?'s':'d'}${Math.round(x*2)}`;
+      if(!br.has(k))br.set(k,{x,spine:s,end:ym,stubs:[],owners:[]});
+      const b=br.get(k);b.owners.push(a.id);
+      if(s){const y=r.y+CARD.h/2;b.stubs.push({y,x:r.x,id:a.id});b.end=Math.max(b.end,y)}else b.end=Math.max(b.end,r.y);
+    }
+    const list=[...br.values()],xs=[x1,...list.map(b=>b.x)],xL=Math.min(...xs),xR=Math.max(...xs),bus=!near(xL,xR);
+    // The trunk runs straight on into a branch right below it (no corner, no bus end there).
+    const thru=list.find(b=>near(b.x,x1));
+    // Corner radius where the bus turns at either end.
+    const vlen=x=>near(x,x1)?(thru?0:ym-y1):Math.max(...list.filter(b=>near(b.x,x)).map(b=>b.end-ym));
+    const rad=x=>bus?Math.min(BEND,(xR-xL)/2,vlen(x)/2):0,rL=rad(xL),rR=rad(xR);
+    const rAt=x=>near(x,xL)?rL:near(x,xR)?rR:0;
+    // A branch from the bus outwards (spines end in a rounded turn into their deepest stub).
+    const tail=b=>{
+      if(!b.spine)return {pts:[{x:b.x,y:b.end}],radii:[0]};
+      const last=b.stubs.reduce((p,q)=>q.y>p.y?q:p),rb=Math.min(BEND,(b.end-ym)/2,last.x-b.x);
+      return {pts:[{x:b.x,y:b.end},{x:last.x,y:b.end}],radii:[rb,0]};
+    };
+    // The trunk: straight down to the bus, or turning into it where the manager sits at one end.
+    const tEnd=bus&&!thru&&(near(x1,xL)||near(x1,xR)),tR=tEnd?rAt(x1):0,tDir=near(x1,xL)?1:-1;
+    pieces.push({pts:[...(tEnd?[{x:x1+tDir*tR,y:ym}]:[]),{x:x1,y:ym},{x:x1,y:y1}],radii:[0,tR,0],owners:null,bundle});
+    if(bus)pieces.push({pts:[{x:xL+rL,y:ym},{x:xR-rR,y:ym}],radii:[],owners:null,bundle});
+    for(const b of list){
+      const t=tail(b),r=b===thru?0:rAt(b.x),dir=near(b.x,xL)?1:-1,head=r?[{x:b.x+dir*r,y:ym},{x:b.x,y:ym}]:[{x:b.x,y:ym}];
+      pieces.push({pts:[...head,...t.pts],radii:[...(r?[0,r]:[0]),...t.radii],owners:b.owners});
+      if(b.spine)for(const s of b.stubs)if(!near(s.y,b.end))pieces.push({pts:[{x:b.x,y:s.y},{x:s.x,y:s.y}],radii:[],owners:[s.id]});
+    }
+    // Each report's own route: down the trunk, along the bus, down its branch (into its stub).
+    const trunkR=tR;
+    for(const b of list)for(const id of b.owners){
+      const r=pos.get(id),s=b.stubs.find(q=>q.id===id),bR=b===thru?0:rAt(b.x),deep=s&&near(s.y,b.end);
+      const pts=[{x:x1,y:y1},{x:x1,y:ym},{x:b.x,y:ym},...(s?[{x:b.x,y:s.y},{x:r.x,y:s.y}]:[{x:b.x,y:r.y}])];
+      const radii=[0,trunkR,bR,...(s?[deep?tail(b).radii[0]:0,0]:[0])];
+      routes.set(id,pathOf(pts,radii));
+    }
+  }
+  return {pieces,routes};
 }
 // Save the drawn position of every agent that has none (before the first manual move), so
 // arranging one card never makes the others jump.

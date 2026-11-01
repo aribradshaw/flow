@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -177,6 +177,51 @@ test('canvas: pinning saves what is drawn; agents without a position go under th
   const ps=[...p.values()];
   for(const q of ps)for(const r of ps)if(q!==r)assert.ok(Math.abs(q.x-r.x)>=CARD.w||Math.abs(q.y-r.y)>=CARD.h,'no two cards overlap');
   unpin(af);assert.ok(!af.agents.some(placed));
+});
+
+// Straight segments of the drawn line pieces: [{x1,y1,x2,y2}] (corners are left out).
+const segs=pieces=>pieces.filter(q=>q.pts).flatMap(q=>q.pts.slice(1).map((b,i)=>({a:q.pts[i],b}))).filter(({a,b})=>a.x!==b.x||a.y!==b.y);
+// Two axis-aligned segments on one line that share more than a point.
+const overlap=(s,t)=>{
+  const h=s.a.y===s.b.y&&t.a.y===t.b.y&&s.a.y===t.a.y,v=s.a.x===s.b.x&&t.a.x===t.b.x&&s.a.x===t.a.x;
+  if(!h&&!v)return false;
+  const k=h?'x':'y',lo=Math.max(Math.min(s.a[k],s.b[k]),Math.min(t.a[k],t.b[k])),hi=Math.min(Math.max(s.a[k],s.b[k]),Math.max(t.a[k],t.b[k]));
+  return hi-lo>.5;
+};
+const noRepeats=pieces=>{const ss=segs(pieces);for(let i=0;i<ss.length;i++)for(let j=i+1;j<ss.length;j++)assert.ok(!overlap(ss[i],ss[j]),`segment drawn twice: ${JSON.stringify([ss[i],ss[j]])}`)};
+
+test('canvas: a manager\'s reporting lines are one trunk, one bus and a drop each, never drawn twice',()=>{
+  const af=seedAgentflow(),top=newAgent(af,{name:'Top'});
+  const leads=Array.from({length:4},(_,i)=>newAgent(af,{name:'L'+i,reportsTo:top.id}));
+  for(const l of leads.slice(0,2))newAgent(af,{name:'Sub of '+l.name,reportsTo:l.id}); // keeps L0, L1 out of a stack
+  const ics=Array.from({length:STACK.rows+3},(_,i)=>newAgent(af,{name:'IC'+i,reportsTo:leads[0].id}));
+  const pos=treeLayout(af),{pieces,routes}=reportLines(af,pos);
+  noRepeats(pieces);
+  assert.equal(routes.size,af.agents.length-1,'every report has its own route (for hit areas and the chain highlight)');
+  const T=pos.get(top.id),ym=T.y+CARD.h+(STEP.y-CARD.h)/2;
+  const bus=segs(pieces).filter(s=>s.a.y===ym&&s.b.y===ym&&Math.abs(s.a.x-s.b.x)>8);
+  assert.equal(bus.length,1,'one bus under the top manager');
+  const xs=leads.map(l=>pos.get(l.id).x+CARD.w/2);
+  assert.ok(Math.min(bus[0].a.x,bus[0].b.x)<=Math.min(...xs)+8&&Math.max(bus[0].a.x,bus[0].b.x)>=Math.max(...xs)-8,'the bus spans the reports (less the rounded corners)');
+  // The stacked team: one spine per column, a stub per card, entering the card's side.
+  const cols=new Set(ics.map(a=>pos.get(a.id).x));
+  const spines=segs(pieces).filter(s=>s.a.x===s.b.x&&[...cols].some(x=>s.a.x===x-STACK.indent/2));
+  assert.equal(spines.length,cols.size,'one spine per stacked column');
+  for(const a of ics){const r=pos.get(a.id);assert.ok(routes.get(a.id).endsWith(`L${r.x} ${r.y+CARD.h/2}`),'a stacked report\'s route ends at its side')}
+});
+
+test('canvas: one report is a single elbow; a report above or beside its manager gets its own curve',()=>{
+  const af=seedAgentflow(),m=newAgent(af,{name:'M'}),r=newAgent(af,{name:'R',reportsTo:m.id}),up=newAgent(af,{name:'Up',reportsTo:m.id});
+  const pos=new Map([[m.id,{x:0,y:200}],[r.id,{x:300,y:200+STEP.y}],[up.id,{x:400,y:0}]]);
+  const {pieces,routes}=reportLines(af,pos,new Set());
+  noRepeats(pieces);
+  assert.ok(pieces.some(q=>q.d&&q.owners.join()===up.id)&&/C/.test(routes.get(up.id)),'the report above is a curve of its own');
+  assert.ok(routes.get(r.id).startsWith(`M${CARD.w/2} ${200+CARD.h}`)&&routes.get(r.id).endsWith(`L${300+CARD.w/2} ${200+STEP.y}`)&&/Q/.test(routes.get(r.id)),'the one below is a rounded elbow from the manager to its top');
+  // A report straight below its manager is one straight line.
+  const pos2=new Map([[m.id,{x:0,y:0}],[r.id,{x:0,y:STEP.y}]]),one=reportLines({agents:[m,r]},pos2,new Set());
+  assert.equal(one.routes.get(r.id),`M${CARD.w/2} ${CARD.h}L${CARD.w/2} ${STEP.y}`);
+  noRepeats(one.pieces);
+  assert.equal(pathOf([{x:0,y:0},{x:0,y:20},{x:20,y:20}],[0,8,0]),'M0 0L0 12Q0 20 8 20L20 20','corners are rounded');
 });
 
 test('canvas: positions are kept through cleaning, clamped, and dropped when not numbers',()=>{
