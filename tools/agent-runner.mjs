@@ -162,13 +162,17 @@ function catalog(){
   }
   models.push(...(cfg.models||[]).filter(m=>m?.id).map(m=>({...m})));
   const byId=new Map(on.map(p=>[p.id,p])),seen=new Set();
-  return models.filter(m=>!seen.has(m.id)&&seen.add(m.id)).slice(0,500).map(m=>{
+  // Included (subscription or free) models first, so the server's model cap only ever trims metered ones.
+  const out=models.filter(m=>!seen.has(m.id)&&seen.add(m.id)).map(m=>{
     const p=byId.get(splitModel(m.id)[0]),provider=m.provider||p?.label||'',billing=billingOf(m.id,p?.driver||splitModel(m.id)[0],m.billing);
     return {id:m.id,label:m.label||m.id,...(provider?{provider:String(provider).slice(0,80)}:{}),...(billing==='included'||billing==='metered'?{billing}:{})};
   });
+  const rank=m=>m.billing==='metered'?1:0;
+  return out.map((m,i)=>[m,i]).sort((x,y)=>rank(x[0])-rank(y[0])||x[1]-y[1]).map(([m])=>m).slice(0,MODEL_CAP);
 }
 // Billing for a model id on an instance with this driver: the longest matching "billing" key, else
 // what an extra model in "models" says, else the driver's default.
+const MODEL_CAP=1500;   // the server's LIMITS.models
 const INCLUDED=new Set(['claudeAgent','codex','cursor','grok','antigravity']);
 function billingOf(id,driver,given){
   const over=Object.entries(cfg.billing||{}).filter(([k])=>id===k||id.startsWith(k.includes(':')?k:k+':')).sort((a,b)=>b[0].length-a[0].length)[0];

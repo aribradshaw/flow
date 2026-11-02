@@ -36,7 +36,7 @@ export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired
 export const WORKFLOW_STATUS={draft:'Draft',active:'Active',paused:'Paused'};
 export const TRIGGERS={manual:'Manual',schedule:'Schedule',event:'Event'};
 export const TRIGGER_HINT={manual:'Someone starts it',schedule:'e.g. Weekdays at 09:00',event:'e.g. A card enters UAT'};
-export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500,agentModels:10,jobs:500};
+export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:1500,agentModels:10,jobs:500};
 export const JOB_STATUS={ok:'OK',failed:'Failed',running:'Running',unknown:'Unknown'};
 // How a job's source reads as an agent's role when it is promoted (unknown sources: "<source> job").
 export const JOB_SOURCES={systemd:'systemd timer',cron:'Cron job',t3:'T3 schedule',vercel:'Vercel cron',railway:'Railway cron',aside:'Aside schedule',
