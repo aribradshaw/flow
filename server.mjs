@@ -36,6 +36,7 @@ const core=await import('./lib/sharing-core.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
 auth.useSessionStore(sessionStore({db:()=>cloud(),max:auth.SESSION_MAX}));
 const {shrinks,size}=await import('./public/sync-core.js');
+const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
 const appHost=auth.appOrigin?new URL(auth.appOrigin).host:'';
 
@@ -348,7 +349,7 @@ async function workspace(req,res){
         if(local){
           const r=await relay(req,raw);
           // Keep this computer's copy current too: it is the offline fallback.
-          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||''))await workspaces.put(id,{baseRev:(await workspaces.get(id))?.rev||0,data:b.data,by:'relay',owner:user.email})}catch{}}
+          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email})}}catch{}}
           if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return}
           json(res,503,{error:'Offline: the server could not be reached',offline:true});return;
         }
@@ -363,14 +364,17 @@ async function workspace(req,res){
         // Linked copies of shared records are not stored (they are re-projected on every read).
         const incoming=stripLinked(body.data),stored=w?stripLinked(w.data):null;
         if(w&&w.rev===body.baseRev&&shrinks(stored,incoming)&&!body.allowShrink){json(res,422,{error:`This save would remove most of the workspace (${size(stored)} → ${size(incoming)} things). Nothing was changed.`,shrink:true});return}
-        const data={...incoming,environment:{...(incoming.environment||{}),id:envId,ownerEmail:owner}};
+        // Runners are the server's (only runners.report changes them): a save never drops or rolls back
+        // what a runner reported, e.g. a tab running older code that saves runners without their jobs.
+        const kept=carryRunners(w?.data,incoming);
+        const data={...kept.data,environment:{...(kept.data.environment||{}),id:envId,ownerEmail:owner}};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80)});
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
         // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
         if(!user.token)await applyRecipientSave(envId,user,body.data).catch(e=>console.error('share write-back failed',e?.message));
         const v=user.token?{shared:''}:await withShares(envId,user,data);
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared});
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;

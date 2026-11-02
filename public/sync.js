@@ -93,6 +93,8 @@ async function push(){
       if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.dirty=edits!==e0;
         // Shared cards: the server re-projects them (refused edits come back), so read the result.
         if(d.shared){st.shared='';setTimeout(pull,400)}
+        // The server kept runners as they reported themselves (this copy was missing some): read them back.
+        if(d.runnersKept){st.shared='\u0000';setTimeout(pull,400)}
         persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;return}
       if(r?.status===409&&d.data){
         const merged=merge3(st.base??undefined,store.db,d.data);

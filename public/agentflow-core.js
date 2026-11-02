@@ -178,6 +178,36 @@ export function reportRunner(had,name,{models,jobs}={},now=new Date().toISOStrin
   const at=keep?had?.jobsReported:now;
   return {runner:{name:had?.name||want.name,models:want.models,jobs:keep?had?.jobs||[]:want.jobs,reported:now,...(at?{jobsReported:at}:{})},changed:true};
 }
+// Runners belong to the server: only runners.report changes them, so a whole-workspace save (a
+// browser, an import, a relay) must not drop or roll back what a runner reported. A browser running
+// older code may not know newer fields (it saved runners without their jobs), and a stale copy may
+// carry an older report. The runners a save keeps (stored: what the server has; incoming: what the
+// save holds), by name: a stored runner stays as stored unless the incoming copy has a newer report
+// (reported), and even then keeps its stored jobs if the incoming copy has none (no jobs field) or
+// older ones (jobsReported). Stored runners the save left out stay; new ones (an import) are added.
+// {runners, changed}: changed is true when the result differs from the incoming runners.
+const time=v=>{const t=Date.parse(v);return Number.isFinite(t)?t:0};
+export function keepRunners(stored,incoming){
+  const have=Array.isArray(stored)?stored.filter(r=>r&&typeof r.name==='string'):[],sent=Array.isArray(incoming)?incoming.filter(r=>r&&typeof r.name==='string'):[];
+  if(!have.length)return {runners:Array.isArray(incoming)?incoming:[],changed:false};
+  const key=r=>r.name.trim().toLowerCase(),byName=new Map(sent.map(r=>[key(r),r])),out=[];
+  for(const s of have){
+    const r=byName.get(key(s));byName.delete(key(s));
+    if(!r||time(r.reported)<=time(s.reported)){out.push(s);continue}
+    const jobsOld=s.jobs?.length&&(!Array.isArray(r.jobs)||time(r.jobsReported)<time(s.jobsReported));
+    out.push(jobsOld?{...r,jobs:s.jobs,...(s.jobsReported?{jobsReported:s.jobsReported}:{})}:r);
+  }
+  out.push(...[...byName.values()].slice(0,Math.max(0,LIMITS.runners-out.length)));
+  return {runners:out,changed:JSON.stringify(out)!==JSON.stringify(Array.isArray(incoming)?incoming:[])};
+}
+// keepRunners for whole workspaces: {data, changed}, data being incoming with the runners to keep
+// (incoming itself when nothing changed).
+export function carryRunners(stored,incoming){
+  const k=keepRunners(stored?.agentflow?.runners,incoming?.agentflow?.runners);
+  if(!k.changed||!incoming||typeof incoming!=='object')return {data:incoming,changed:false};
+  const af=incoming.agentflow&&typeof incoming.agentflow==='object'?incoming.agentflow:{};
+  return {data:{...incoming,agentflow:{...af,runners:k.runners}},changed:true};
+}
 export const runnerOf=(af,name)=>{const n=String(name??'').trim().toLowerCase();return n?(af?.runners||[]).find(r=>r.name.toLowerCase()===n)||null:null};
 // An agent's model ids in order. Agents not yet cleaned may only have model.
 const idsOf=a=>Array.isArray(a.models)&&a.models.length?a.models:a.model?[a.model]:[];

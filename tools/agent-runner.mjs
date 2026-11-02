@@ -98,7 +98,9 @@ async function flow(method,path,body){
   const r=await fetch(`${FLOW.url}/api/v1/envs/${encodeURIComponent(cfg.env)}${path}`,{method,signal:AbortSignal.timeout(30000),
     headers:{authorization:'Bearer '+FLOW.key,accept:'application/json',...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
   const d=await r.json().catch(()=>null);
-  if(!r.ok)throw Object.assign(new Error(`${method} ${path}: ${r.status} ${d?.error?.code||''} ${d?.error?.message||''}`.trim()),{code:d?.error?.code,status:r.status});
+  // Flow answers {error: message, code}; {error: {code, message}} is read too.
+  const e=d?.error,code=(typeof e==='object'?e?.code:d?.code)||'',msg=(typeof e==='object'?e?.message:e)||'';
+  if(!r.ok)throw Object.assign(new Error(`${method} ${path}: ${r.status} ${code} ${msg}`.replace(/\s+/g,' ').trim()),{code,status:r.status});
   return d;
 }
 async function all(path){

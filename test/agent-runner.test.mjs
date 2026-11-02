@@ -296,6 +296,11 @@ test('report falls back to models alone when the server rejects jobs',async()=>{
   assert.match(r.stdout,/server does not accept jobs yet/);
   assert.match(r.stdout,/reported \d+ models as "box" \(unchanged\)/);
 });
+test('report falls back on the error Flow itself answers with (an older server: jobs is not allowed)',async()=>{
+  const r=await reportAgainst(n=>n===1?[400,{error:'input.jobs: is not allowed',code:'invalid_input',details:['input.jobs: is not allowed']}]:[200,{changed:true}]);
+  assert.equal(r.code,0,r.stderr);assert.equal(r.bodies.length,2);assert.equal(r.bodies[1].jobs,undefined);
+  assert.match(r.stdout,/server does not accept jobs yet \(POST \/runners\/box: 400 invalid_input input\.jobs: is not allowed\)/);
+});
 test('report does not retry other errors',async()=>{
   const r=await reportAgainst(()=>[400,{error:{code:'validation_failed',message:'models[0].id: too long'}}]);
   assert.notEqual(r.code,0);assert.equal(r.bodies.length,1);
