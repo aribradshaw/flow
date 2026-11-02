@@ -820,13 +820,46 @@ body[data-tab=agentflow] #inspector{width:320px}
 .af-job-m b{max-width:calc(100% - 16px);overflow:hidden;font-size:12px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
 .af-job-m small{flex-basis:100%;overflow:hidden;font-size:11px;color:var(--muted);white-space:nowrap;text-overflow:ellipsis}
 .af-job-ai{display:flex;flex:none;color:#7a5bd0}
-.af-job-go{position:absolute;right:8px;top:50%;display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 8px;transform:translateY(-50%);opacity:0;border:1px solid var(--line2);border-radius:11px;background:#fff;font-size:11px;font-weight:600}
+.af-job-acts{position:absolute;right:8px;top:50%;display:flex;align-items:center;gap:4px;transform:translateY(-50%);opacity:0}
+.af-job-go{display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 8px;border:1px solid var(--line2);border-radius:11px;background:#fff;font-size:11px;font-weight:600}
+.af-job-i{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--line2);border-radius:50%;background:#fff;color:var(--muted)}
+.af-job-i:hover,.af-job-i[aria-expanded=true]{border-color:var(--accent-line);background:var(--flygon-tint);color:var(--accent)}
 .af-job-done{display:inline-flex;flex:none;align-items:center;gap:2px;height:16px;padding:0 6px 0 4px;border:1px solid;border-radius:8px;font-size:10px;font-weight:650;line-height:1}
 .af-job-done:hover{border-color:#2f8a4f;background:#e1f0e6}
 .af-job-go{color:var(--accent)}
 .af-job-go:hover{border-color:var(--accent-line);background:var(--flygon-tint)}
-.af-job:hover .af-job-go,.af-job-go:focus-visible{opacity:1}
-.af-job:not(.done):hover .af-jdot,.af-job:not(.done):focus-within .af-jdot{visibility:hidden}
+.af-job:hover .af-job-acts,.af-job:focus-within .af-job-acts,.af-job.open .af-job-acts{opacity:1}
+.af-job:hover .af-jdot,.af-job:focus-within .af-jdot,.af-job.open .af-jdot{visibility:hidden}
+.af-job.open{background:var(--flygon-tint);box-shadow:inset 2px 0 0 var(--accent)}
+.af-job.done .af-job-m{padding-right:10px}
+.af-tz{flex:none;margin-left:4px;padding:0 3px;border-radius:3px;background:var(--bg);color:var(--muted);font-size:9.5px;font-style:normal;font-weight:650;letter-spacing:.02em;vertical-align:1px}
+.af-jdrift{display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:#d48a1a;box-shadow:0 0 0 2px #fbeccf;vertical-align:1px}
+/* Job details: the tray's popover and the side panel's "Promoted from". */
+.af-jpop{position:absolute;z-index:8;display:flex;flex-direction:column;width:340px;max-width:calc(100% - 24px);max-height:calc(100% - 20px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px #141e1c29}
+.af-jpop[hidden]{display:none}
+.af-jpop.over{box-shadow:0 14px 40px #141e1c40}
+.af-jpop-h{display:flex;flex:none;align-items:center;gap:8px;padding:9px 6px 9px 12px;border-bottom:1px solid var(--line)}
+.af-jpop-h>.i{flex:none;color:var(--accent)}
+.af-jpop-h div{display:flex;flex-direction:column;min-width:0;line-height:1.3}
+.af-jpop-h b{overflow:hidden;font-size:12.5px;white-space:nowrap;text-overflow:ellipsis}
+.af-jpop-h small{overflow:hidden;font-size:11px;color:var(--faint);white-space:nowrap;text-overflow:ellipsis}
+.af-jpop-b{flex:1;min-height:0;overflow:auto;border:0;border-radius:0;background:#fff}
+.af-jpop-f{display:flex;flex:none;justify-content:flex-end;gap:6px;padding:7px 10px;border-top:1px solid var(--line);background:var(--bg);border-radius:0 0 8px 8px}
+.af-jobinfo .af-dim{color:var(--faint)}
+.af-when{display:block;color:var(--faint);font-size:10.5px}
+.af-jpop:focus{outline:none}
+.af-trigs{display:flex;flex-direction:column;gap:5px;margin:0;padding:0;list-style:none}
+.af-trigs li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;min-width:0}
+.af-trigs code{flex-basis:100%;width:fit-content;max-width:100%;overflow-wrap:anywhere}
+.af-tk{flex:none;padding:0 4px;border-radius:3px;background:#e6ebe9;color:var(--muted);font-size:9.5px;font-weight:700;line-height:15px;text-transform:uppercase;letter-spacing:.03em}
+.af-tt{color:var(--ink)}
+.af-orig{display:inline-flex;align-items:center;gap:3px;padding:0 6px 0 4px;border-radius:8px;font-size:10.5px;font-weight:650;line-height:16px;vertical-align:1px}
+.af-orig.o-repo{background:#e8eefb;color:#2f5aa8}.af-orig.o-platform{background:#efe8fb;color:#6a44b8}.af-orig.o-machine{background:#e4f1ea;color:#2f6b45}
+.af-drift{display:flex;align-items:flex-start;gap:6px;margin:8px 9px 0;padding:6px 8px;border:1px solid #f0d49c;border-radius:5px;background:#fdf5e4;color:#7a5410;line-height:1.4}
+.af-drift .i{flex:none;margin-top:2px;color:#d48a1a}
+.af-drift b{margin-right:3px}
+.af-flag{display:inline-flex;align-items:center;gap:3px;margin:0 4px 2px 0;padding:0 6px;border-radius:8px;background:#e6ebe9;color:var(--muted);font-size:10.5px;font-weight:600;line-height:16px}
+.af-flag.on{background:#e1f0e6;color:#2f6b45}.af-flag.ai{background:#efe8fb;color:#6a44b8}
 .af-job-done{border-color:#2f8a4f40;background:#eef6f0;color:#2f6b45}
 .af-job-done .i{color:#2f8a4f}
 body.af-jdrag,body.af-jdrag *{cursor:grabbing!important}

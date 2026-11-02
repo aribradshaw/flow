@@ -18,15 +18,21 @@
 //   reportsTo: another agent (the AgentFlow org chart); supervisor: a person card on a Flow chart.
 // workflow = {id,name,description,status,trigger,schedule,steps:[{id,agent,action,output}],
 //             projects[],cards[],items[],created,updated}
-// runner   = {name,models:[{id,label,provider?,billing?}],jobs:[job],reported,jobsReported?}: a machine or service that runs
+// runner   = {name,models:[{id,label,provider?,billing?}],jobs:[job],timezone?,reported,jobsReported?}: a machine or service that runs
 //   agents, as it reported itself (runners.report). Its name is what agents put in `runtime`, and its
 //   models are the choices for `models`. provider groups models for display (e.g. "Claude"); billing is
 //   'included' (a subscription or free) or 'metered' (paid per use). Flow never contacts a runner;
 //   the runner calls Flow.
-// job      = {id,name,source,group?,schedule,cron?,command?,ai,enabled,lastRun?,lastStatus,nextRun?}: a scheduled
-//   job the runner found (a systemd timer, a crontab line, a Vercel cron...). id is stable per runner;
-//   group is a display group ("Vercel · my-app"); ai: it starts an AI agent. jobsReported: when the
-//   jobs were last saved (see reportRunner for when a report is saved).
+// job      = {id,name,source,group?,schedule,cron?,timezone?,triggers?,origin?,file?,drift?,note?,command?,ai,enabled,
+//             lastRun?,lastStatus,nextRun?}: a scheduled job the runner found (a systemd timer, a crontab line, a
+//   Vercel cron...). id is stable per runner; group is a display group ("Vercel · my-app"); ai: it starts
+//   an AI agent. timezone: the zone its times are in (an IANA name, "UTC" or "local": the runner's own,
+//   see runner.timezone). triggers: [{kind, expr?, text?}], every rule it fires on, expr the raw
+//   expression as the scheduler holds it and text it in words. origin: where the schedule was read, a
+//   repo file (file: its repo-relative path), the hosting platform's API or the machine's scheduler.
+//   drift: how the platform's live schedule differs from the repo file. note: conditions the job's
+//   script applies itself ("exits when nothing changed"). jobsReported: when the jobs were last saved
+//   (see reportRunner for when a report is saved). runner.timezone: the runner machine's zone.
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
@@ -36,11 +42,14 @@ export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired
 export const WORKFLOW_STATUS={draft:'Draft',active:'Active',paused:'Paused'};
 export const TRIGGERS={manual:'Manual',schedule:'Schedule',event:'Event'};
 export const TRIGGER_HINT={manual:'Someone starts it',schedule:'e.g. Weekdays at 09:00',event:'e.g. A card enters UAT'};
-export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:1500,agentModels:10,jobs:500};
+export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:1500,agentModels:10,jobs:500,triggers:10};
 export const JOB_STATUS={ok:'OK',failed:'Failed',running:'Running',unknown:'Unknown'};
 // How a job's source reads as an agent's role when it is promoted (unknown sources: "<source> job").
 export const JOB_SOURCES={systemd:'systemd timer',cron:'Cron job',t3:'T3 schedule',vercel:'Vercel cron',railway:'Railway cron',aside:'Aside schedule',
   windows:'Windows scheduled task',claude:'Claude schedule',codex:'Codex automation',github:'GitHub Actions schedule',other:'Scheduled job'};
+// Where a job's schedule was read, and the kinds of rule (trigger) a job fires on.
+export const JOB_ORIGINS={repo:'Repo file',platform:'Platform',machine:'Machine'};
+export const JOB_TRIGGERS={cron:'Cron',calendar:'Calendar',interval:'Interval',logon:'At logon',boot:'At boot',once:'Once',rrule:'Recurrence rule',manual:'Manual',other:'Other'};
 export const BILLING={included:'Included',metered:'Metered'};
 // Ids of records shared in from another workspace. They are projected in on read and are not in
 // stored data, so links to them are kept even when the record is not present (e.g. on the server).
@@ -136,12 +145,24 @@ export function cleanJobLink(j){
 // trimmed and cut to its limit; group, cron, command, lastRun and nextRun are left out when empty
 // (or, for the times, not a date). enabled is true unless false; lastStatus is unknown unless known.
 const isoOr=v=>typeof v==='string'&&v.trim()&&!Number.isNaN(Date.parse(v))?v.trim().slice(0,40):'';
+// timezone is an IANA name ("America/Phoenix"), "UTC" or "local"; anything else is left out. triggers
+// keep up to LIMITS.triggers objects, an unknown kind as other, expr and text left out when empty.
+// origin is left out unless it is one of JOB_ORIGINS; drift, note and file when empty.
+export const cleanTz=v=>{const z=str(v,64).trim();return /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+)*$/.test(z)?z:''};
+export function cleanTriggers(v){
+  return (Array.isArray(v)?v:[]).filter(t=>t&&typeof t==='object').slice(0,LIMITS.triggers).map(t=>{
+    const expr=str(t.expr,200).trim(),text=str(t.text,200).trim();
+    return {kind:pick(t.kind,JOB_TRIGGERS,'other'),...(expr?{expr}:{}),...(text?{text}:{})};
+  });
+}
 export function cleanJobs(v){
   const seen=new Set();
   return (Array.isArray(v)?v:[]).filter(j=>j&&typeof j.id==='string'&&j.id.trim()).map(j=>({...j,id:j.id.trim().slice(0,200)}))
     .filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,LIMITS.jobs).map(j=>{
       const t=(k,n)=>str(j[k],n).trim(),group=t('group',120),cron=t('cron',120),command=t('command',300),lastRun=isoOr(j.lastRun),nextRun=isoOr(j.nextRun);
+      const timezone=cleanTz(j.timezone),triggers=cleanTriggers(j.triggers),origin=pick(j.origin,JOB_ORIGINS,''),file=t('file',200),drift=t('drift',200),note=t('note',500);
       return {id:j.id,name:t('name',120)||j.id.slice(0,120),source:t('source',40)||'other',...(group?{group}:{}),schedule:t('schedule',200),...(cron?{cron}:{}),
+        ...(timezone?{timezone}:{}),...(triggers.length?{triggers}:{}),...(origin?{origin}:{}),...(file?{file}:{}),...(drift?{drift}:{}),...(note?{note}:{}),
         ...(command?{command}:{}),ai:j.ai===true,enabled:j.enabled!==false,...(lastRun?{lastRun}:{}),lastStatus:pick(j.lastStatus,JOB_STATUS,'unknown'),...(nextRun?{nextRun}:{})};
     });
 }
@@ -155,7 +176,7 @@ export function cleanRunners(v){
         const provider=str(m.provider,80).trim();
         return {id:m.id.trim().slice(0,120),label:str(m.label,160).trim(),...(provider?{provider}:{}),...(Object.hasOwn(BILLING,m.billing)?{billing:m.billing}:{})};
       })
-        .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),jobs:cleanJobs(r.jobs),reported:iso(r.reported,new Date().toISOString()),
+        .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),jobs:cleanJobs(r.jobs),...(cleanTz(r.timezone)?{timezone:cleanTz(r.timezone)}:{}),reported:iso(r.reported,new Date().toISOString()),
         ...(isoOr(r.jobsReported)?{jobsReported:isoOr(r.jobsReported)}:{})};
     });
 }
@@ -164,20 +185,21 @@ export function cleanRunners(v){
 // another machine's jobs knows no models for it). jobs replace the old list too; left out, the
 // stored jobs stay. Not every report is saved: changed is false, and had comes back as it is, when nothing
 // changed but lastRun and nextRun, unless the jobs were last saved JOBS_STALE ago or more (then those
-// are refreshed). A changed lastStatus, job set or any other field always saves. jobsReported is set
-// whenever jobs are saved.
+// are refreshed). A changed lastStatus, job set or any other field (timezone, triggers, drift, note...)
+// always saves. jobsReported is set whenever jobs are saved. timezone (the runner machine's zone) is
+// kept as stored when left out.
 export const JOBS_STALE=6*3600e3;
 const steady=js=>JSON.stringify(js.map(({lastRun,nextRun,...j})=>j));
-export function reportRunner(had,name,{models,jobs}={},now=new Date().toISOString()){
-  const want=cleanRunners([{name,models:models===undefined?had?.models:models,jobs:jobs||[]}])[0],keep=jobs===undefined;
-  let changed=!had||JSON.stringify(had.models)!==JSON.stringify(want.models);
+export function reportRunner(had,name,{models,jobs,timezone}={},now=new Date().toISOString()){
+  const want=cleanRunners([{name,models:models===undefined?had?.models:models,jobs:jobs||[],timezone:timezone===undefined?had?.timezone:timezone}])[0],keep=jobs===undefined;
+  let changed=!had||JSON.stringify(had.models)!==JSON.stringify(want.models)||(had.timezone||'')!==(want.timezone||'');
   if(had&&!keep&&!changed){
     const old=had.jobs||[],stale=!had.jobsReported||Date.parse(now)-Date.parse(had.jobsReported)>=JOBS_STALE;
     changed=steady(old)!==steady(want.jobs)||(stale&&JSON.stringify(old)!==JSON.stringify(want.jobs));
   }
   if(!changed)return {runner:had,changed:false};
   const at=keep?had?.jobsReported:now;
-  return {runner:{name:had?.name||want.name,models:want.models,jobs:keep?had?.jobs||[]:want.jobs,reported:now,...(at?{jobsReported:at}:{})},changed:true};
+  return {runner:{name:had?.name||want.name,models:want.models,jobs:keep?had?.jobs||[]:want.jobs,...(want.timezone?{timezone:want.timezone}:{}),reported:now,...(at?{jobsReported:at}:{})},changed:true};
 }
 // Runners belong to the server: only runners.report changes them, so a whole-workspace save (a
 // browser, an import, a relay) must not drop or roll back what a runner reported. A browser running

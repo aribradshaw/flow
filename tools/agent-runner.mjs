@@ -50,8 +50,15 @@
 //              "repos": ["/path/to/repo"],       repos to read cron configs from (default: T3's projects)
 //              "exclude": ["certbot", "systemd:system:*"],   globs (* ?) or substrings, on id and name
 //              "include": ["logrotate"],         kept even when skipDistro or exclude would drop them
-//              "skipDistro": true}               skip stock distribution timers (apt-daily, fstrim, …)
+//              "skipDistro": true,               skip stock distribution timers (apt-daily, fstrim, …)
+//              "notes": {"report-publisher": "Exits early when nothing changed"},   notes by job id or name
+//                                                (globs or substrings); they win over notes found in READMEs
+//              "platform": true}                 read live crons from Railway and Vercel when a token is set
 //                                                "jobs": false reports no jobs (stored ones stay as they are)
+//     "railwayToken": "…",               optional (or RAILWAY_API_TOKEN): a Railway account or workspace token
+//     "railwayWorkspace": "…",           optional: the workspace id to list projects from
+//     "vercelToken": "…",                optional (or VERCEL_TOKEN): a Vercel access token
+//     "vercelTeam": "team_… or my-team", optional: the team (id or slug) that owns the projects
 //     "remotes": [{"name": "Laptop",             other machines, each reported as its own runner (jobs only)
 //                  "ssh": ["ssh", "-i", "~/.ssh/key", "-o", "BatchMode=yes", "me@laptop"],   the ssh command
 //                  "python": "C:\\Python\\python.exe",   optional: Python on it (for Aside and Codex runs)
@@ -61,6 +68,7 @@
 //                  "exclude": [], "include": [],     as in "jobs"; include also keeps a vendor task
 //                  "skipVendor": true,               skip vendor updater tasks (Adobe, Edge, Google, …)
 //                  "keepDone": false,                also report finished Aside routines and Codex one-shots
+//                  "notes": {},                      as in "jobs" (both apply; these win)
 //                  "timeout": 40,                    seconds for the whole remote
 //                  "enabled": true}]
 //   }
@@ -81,6 +89,19 @@
 //   vercel    vercel.json crons[] in each repo (and its services/* and apps/*), in UTC.
 //   railway   deploy.cronSchedule in railway*.json and railway*.toml there, in UTC.
 //   github    on.schedule crons in .github/workflows/*.yml, in UTC.
+// Every job carries its full schedule: timezone (this machine's zone from timedatectl or Node, an
+// OnCalendar line's own zone, CRON_TZ, UTC for repo crons, a remote's "timezone"), triggers (each rule
+// with its raw expression: every OnCalendar line, OnUnitActiveSec as an interval and OnBootSec as boot,
+// each cron line, each Windows trigger, an RRULE with its TZID), origin (repo, platform or machine) and,
+// for repo crons, file (the config's path in the repo). A repo cron may get a note: the first sentence
+// of its service folder's README (or its start script's or route's leading comment) that says it runs
+// every N minutes, exits, or applies a condition ("only when", "unchanged", "skips"); never a sentence
+// that mentions a secret. "notes" in the settings win.
+// Platform schedules: with "railwayToken" the runner asks Railway's GraphQL API for every service's cron
+// schedule and next run; with "vercelToken", Vercel's API for each project's crons. A repo cron matched
+// to a service (by name) or project (by .vercel/project.json, else by name) is reported as the platform
+// runs it (origin platform, its file kept), with "drift" saying how the repo file differs; a live cron
+// no repo file has is reported too. No token, nothing is asked.
 // Repo configs carry no last run; their next run is worked out from the cron expression. A job is
 // marked ai when it is a T3 task or its command runs an AI CLI (claude, codex, opencode, grok,
 // cursor-agent, agy, t3 thread, this runner). Commands are one line, with ~ for home and anything
@@ -182,12 +203,27 @@ function billingOf(id,driver,given){
   if(driver==='opencode')return splitModel(id)[1].startsWith('opencode/')?'included':'metered';
   return '';
 }
+// The job fields a server from before schedule details knows.
+const LEGACY=['id','name','source','group','schedule','cron','command','ai','enabled','lastRun','lastStatus','nextRun'];
+export const legacyJobs=jobs=>jobs.map(j=>Object.fromEntries(Object.entries(j).filter(([k])=>LEGACY.includes(k))));
+const NEWER=/timezone|triggers|origin|drift|note|file/;
+// POST a report; a server from before schedule details (it rejects timezone, triggers…) gets the
+// report again with the jobs' older fields only.
+async function postReport(path,body){
+  try{return {r:await flow('POST',path,body),body}}
+  catch(e){
+    if(e.status!==400||!NEWER.test(e.message)||!/additional|unknown|not allowed|unexpected/i.test(e.message))throw e;
+    log(`server does not accept schedule details yet (${e.message.slice(0,160)}); reporting jobs without them`);
+    const {timezone,...rest}=body,b={...rest,...(rest.jobs?{jobs:legacyJobs(rest.jobs)}:{})};
+    return {r:await flow('POST',path,b),body:b};
+  }
+}
 async function report(){
-  const models=catalog(),path=`/runners/${encodeURIComponent(cfg.name)}`;
+  const models=catalog(),path=`/runners/${encodeURIComponent(cfg.name)}`,timezone=localZone();
   let jobs;
   if(jobsOn(cfg)){try{jobs=await discoverJobs(cfg,{note:m=>log('jobs:',m)})}catch(e){log('job discovery failed:',e.message)}}
   let r;
-  try{r=await flow('POST',path,{models,...(jobs?{jobs}:{})})}
+  try{({r}=await postReport(path,{models,...(jobs?{jobs}:{}),timezone}))}
   catch(e){
     // A server from before jobs rejects the unknown field: report the models alone.
     if(!jobs||e.status!==400||!/jobs|additional|unknown|not allowed|unexpected/i.test(e.message))throw e;
@@ -443,41 +479,75 @@ export const parseTimerList=text=>String(text).split('\n').map(l=>l.trim().split
 const usec=n=>Number(n)>0?new Date(Number(n)/1000).toISOString():undefined;
 const showTime=v=>{const s=[].concat(v??'')[0];if(!s||s==='n/a')return undefined;const m=/^@(\d+)$/.exec(s);if(m)return new Date(m[1]*1000).toISOString();const t=Date.parse(s);return Number.isFinite(t)?new Date(t).toISOString():undefined};
 const execOf=v=>[].concat(v??[]).map(x=>/argv\[\]=(.*?)\s*;\s*(?:ignore_errors|$)/.exec(x)?.[1]||'').filter(Boolean).join(' && ');
-// One job per timer from the show blocks of the timer and its service.
-export function systemdJob({unit,service,next,last},timer={},svc={},{scope='user',group=''}={}){
+// The zone an OnCalendar spec names at its end ("*-*-* 06:00:00 Europe/Berlin", "… UTC"), or ''.
+export function calendarZone(spec){
+  const tok=clip(spec,200).split(' '),last=tok.at(-1)||'';
+  return tok.length>1&&!/[:*\d]/.test(last[0])&&(last.includes('/')||/^(UTC|GMT|[A-Z]{3,5})$/.test(last))?last:'';
+}
+// A timer's triggers: each OnCalendar line ('calendar'), and each monotonic setting: OnUnitActiveSec
+// and OnUnitInactiveSec as 'interval', OnBootSec and OnStartupSec as 'boot', others as 'other'.
+export function systemdTriggers(cal=[],mono=[]){
+  const kind=k=>/^On(Boot|Startup)Sec$/i.test(k)?'boot':/^OnUnit(Active|Inactive)Sec$/i.test(k)?'interval':'other';
+  return [...cal.map(c=>({kind:'calendar',expr:clip(c,200),text:humaniseOnCalendar(c)})),
+    ...mono.map(([k,v])=>{const key=k.replace(/USec$/,'Sec');return {kind:kind(key),expr:clip(`${key}=${v}`,200),text:clip(humaniseMonotonic([[key,v]]),200)}})].slice(0,10);
+}
+// One job per timer from the show blocks of the timer and its service. tz: the machine's zone (an
+// OnCalendar line that names its own zone wins).
+export function systemdJob({unit,service,next,last},timer={},svc={},{scope='user',group='',tz=''}={}){
   const cal=[].concat(timer.TimersCalendar??[]).map(v=>/OnCalendar=(.*?)\s*;/.exec(v)?.[1]).filter(Boolean);
   const mono=[].concat(timer.TimersMonotonic??[]).map(v=>/(On\w+)=(.*?)\s*;/.exec(v)).filter(Boolean).map(m=>[m[1],m[2]]);
+  const triggers=systemdTriggers(cal,mono),zone=cal.map(calendarZone).find(Boolean)||tz;
   const command=tidy(execOf(svc.ExecStart)),lastRun=last||showTime(timer.LastTriggerUSec),nextRun=next||showTime(timer.NextElapseUSecRealtime);
   const running=/^(active|activating|reloading|deactivating)$/.test(svc.ActiveState||'');
   const lastStatus=running?'running':!lastRun||!svc.Result?'unknown':svc.Result==='success'?'ok':'failed';
   return {id:`systemd:${scope}:${unit}`,name:clip(svc.Description||timer.Description||unit.replace(/\.timer$/,''),120),source:'systemd',group,
     schedule:clip(cal.length?cal.map(humaniseOnCalendar).join('; '):humaniseMonotonic(mono)||'Unknown',200),
-    ...(command?{command}:{}),ai:aiCommand(command),
+    ...(zone?{timezone:zone}:{}),...(triggers.length?{triggers}:{}),origin:'machine',...(command?{command}:{}),ai:aiCommand(command),
     enabled:timer.ActiveState?timer.ActiveState==='active':!/^(disabled|masked)/.test(timer.UnitFileState||''),
     ...(lastRun?{lastRun}:{}),lastStatus,...(nextRun?{nextRun}:{}),...(isDistroTimer(unit)?{distro:true}:{})};
 }
-// Crontab text to jobs (one a line; comments and VAR=value lines skipped). Times are local.
-export function crontabJobs(text,{group='',now=new Date()}={}){
-  const out=[];
+// Crontab text to jobs (one a line; comments and VAR=value lines skipped). Times are in tz (the
+// machine's zone), or in the zone a CRON_TZ= line sets for the lines after it (cronie).
+export function crontabJobs(text,{group='',now=new Date(),tz=''}={}){
+  const out=[];let zone='';
   for(const raw of String(text).split('\n')){
-    const line=raw.trim();
+    const line=raw.trim(),ctz=/^CRON_TZ\s*=\s*["']?([^"'\s]*)["']?$/.exec(line);
+    if(ctz){zone=validTz(ctz[1])?ctz[1]:'';continue}
     if(!line||line.startsWith('#')||/^[A-Za-z_]\w*\s*=/.test(line))continue;
     const w=line.split(/\s+/),n=w[0].startsWith('@')?1:5;
     if(w.length<=n)continue;
     const expr=w.slice(0,n).join(' '),command=w.slice(n).join(' ');
     if(n===5&&!parseCron(expr))continue;
-    const next=nextCron(expr,now);
+    const next=zone?nextCron(expr,now,{tz:zone}):nextCron(expr,now),schedule=humaniseCron(expr,{utc:zone==='UTC'}),z=zone||tz;
     out.push({id:`cron:user:${createHash('sha1').update(line).digest('hex').slice(0,12)}`,name:commandName(shortHome(command)),source:'cron',group,
-      schedule:humaniseCron(expr),cron:clip(expr,120),command:tidy(command),ai:aiCommand(command),enabled:true,lastStatus:'unknown',...(next?{nextRun:next}:{})});
+      schedule,cron:clip(expr,120),...(z?{timezone:z}:{}),triggers:[{kind:/^@reboot$/i.test(expr)?'boot':'cron',expr:clip(expr,200),text:schedule}],origin:'machine',
+      command:tidy(command),ai:aiCommand(command),enabled:true,lastStatus:'unknown',...(next?{nextRun:next}:{})});
   }
   return out;
 }
-// Repo cron configs. Vercel, Railway and GitHub run crons in UTC.
-const repoCron=(expr,now)=>{const next=nextCron(expr,now,{utc:true});return {schedule:humaniseCron(expr,{utc:true}),cron:clip(expr,120),ai:false,enabled:true,lastStatus:'unknown',...(next?{nextRun:next}:{})}};
-export function vercelJobs(text,{repo,now=new Date()}){
+// Repo cron configs. Vercel, Railway and GitHub run crons in UTC. file: the config's path in the repo.
+const cronTimes=(expr,now)=>{const next=nextCron(expr,now,{utc:true}),schedule=humaniseCron(expr,{utc:true});
+  return {schedule,cron:clip(expr,120),timezone:'UTC',triggers:[{kind:'cron',expr:clip(expr,200),text:schedule}],...(next?{nextRun:next}:{})}};
+const repoCron=(expr,now,file)=>({...cronTimes(expr,now),origin:'repo',...(file?{file:clip(file,200)}:{}),ai:false,enabled:true,lastStatus:'unknown'});
+// ctx (optional, for the note): read(path in the repo) gives a file's text or null; project: the
+// Vercel project the folder is linked to (.vercel/project.json).
+export function vercelJobs(text,{repo,file='vercel.json',dir='',ctx={},now=new Date()}){
   let d;try{d=JSON.parse(text)}catch{return []}
-  return (Array.isArray(d?.crons)?d.crons:[]).filter(c=>c?.path&&c?.schedule).map(c=>({id:clip(`vercel:${repo}:${c.path}`,200),name:clip(c.path,120),source:'vercel',
-    group:clip(`Vercel · ${repo}`,120),command:clip(`GET ${c.path}`,300),...repoCron(c.schedule,now)}));
+  return (Array.isArray(d?.crons)?d.crons:[]).filter(c=>c?.path&&c?.schedule).map(c=>{
+    const note=ctx.read?noteFrom(vercelEntry(c.path,dir,ctx.read),{comment:true}):'';
+    return {id:clip(`vercel:${repo}:${c.path}`,200),name:clip(c.path,120),source:'vercel',
+      group:clip(`Vercel · ${repo}`,120),command:clip(`GET ${c.path}`,300),...repoCron(c.schedule,now,file),...(note?{note}:{}),
+      _match:{platform:'vercel',name:basename(repo),projectId:ctx.project?.projectId||'',path:String(c.path)}};
+  });
+}
+// The source of a Vercel cron's route: api/…, app/api/…/route, pages/api/… (with src/), or ''.
+function vercelEntry(path,dir,read){
+  const p=String(path).split('?')[0].replace(/^\/+|\/+$/g,'');if(!p||p.includes('..'))return '';
+  const at=x=>dir?`${dir}/${x}`:x,ext=['ts','js','mjs','tsx','py','go'];
+  for(const base of ['','src/'])for(const c of [...ext.map(e=>`${base}${p}.${e}`),...ext.map(e=>`${base}${p}/index.${e}`),...['ts','js'].map(e=>`${base}app/${p}/route.${e}`),...['ts','js'].map(e=>`${base}pages/${p}.${e}`)]){
+    const t=read(at(c));if(t)return t;
+  }
+  return '';
 }
 // railway.json or railway.toml: deploy.cronSchedule (and startCommand for the summary).
 export function railwayConfig(text,toml=false){
@@ -491,10 +561,21 @@ export function railwayConfig(text,toml=false){
   }
   return out;
 }
-export function railwayJobs(text,{repo,service,file,toml=false,now=new Date()}){
+// ctx (optional, for the note): readme, the service folder's README text; read(path in the repo) for
+// the start command's script. alias: the service name Railway may know it by (railway.<alias>.json).
+export function railwayJobs(text,{repo,service,file,toml=false,alias='',ctx={},now=new Date()}){
   const c=railwayConfig(text,toml);if(!c.cronSchedule)return [];
+  const dir=file.includes('/')?file.slice(0,file.lastIndexOf('/')):'',script=entryScript(c.startCommand);
+  const note=noteFrom(ctx.readme||'')||(script&&ctx.read?noteFrom(ctx.read(dir?`${dir}/${script}`:script)||'',{comment:true}):'');
   return [{id:clip(`railway:${repo}:${file}`,200),name:clip(service,120),source:'railway',group:clip(`Railway · ${service}`,120),
-    ...(c.startCommand?{command:tidy(c.startCommand)}:{}),...repoCron(c.cronSchedule,now)}];
+    ...(c.startCommand?{command:tidy(c.startCommand)}:{}),...repoCron(c.cronSchedule,now,file),...(note?{note}:{}),
+    _match:{platform:'railway',names:[...new Set([service,alias,dir?basename(dir):'',repo].filter(Boolean))]}}];
+}
+// The script a start command runs ("node run.mjs" -> run.mjs), or ''.
+export function entryScript(cmd){
+  const w=String(cmd||'').trim().split(/\s+/).filter(x=>!/^[A-Za-z_]\w*=/.test(x));
+  const f=w.find((x,i)=>i<4&&/^[\w./-]+\.(m?js|cjs|ts|py|sh|rb)$/.test(x)&&!x.includes('..'));
+  return f?f.replace(/^\.\//,''):'';
 }
 // GitHub Actions: the workflow name and every on.schedule cron, by simple line reading.
 export function workflowCrons(text){
@@ -510,9 +591,52 @@ export function workflowCrons(text){
   return {name,crons};
 }
 export function workflowJobs(text,{repo,file,now=new Date()}){
-  const {name,crons}=workflowCrons(text);
+  const {name,crons}=workflowCrons(text),note=noteFrom(text,{comment:true});
   return crons.map((c,i)=>({id:clip(`github:${repo}:${file}${crons.length>1?`#${i+1}`:''}`,200),name:clip(`${name||file}${crons.length>1?` (${i+1})`:''}`,120),
-    source:'github',group:clip(`GitHub · ${repo}`,120),command:clip(`.github/workflows/${file}`,300),...repoCron(c,now)}));
+    source:'github',group:clip(`GitHub · ${repo}`,120),command:clip(`.github/workflows/${file}`,300),...repoCron(c,now,`.github/workflows/${file}`),...(note?{note}:{})}));
+}
+// A short note on conditions a job's script applies itself, read from a README or a script's leading
+// comment (comment: true), or ''. Conservative: the first sentence (in the first 4000 characters,
+// outside code blocks and headings) that says how often it runs, that it exits, or a condition ("only
+// when", "unless", "unchanged", "skips"…), plus, when that first one says no condition, the first that
+// does, if both fit in 200 characters. Sentences that mention secrets, tokens or credentials are never
+// used, and what looks like a secret is hidden.
+const NOTE_STRONG=/\b(only (when|if|on|after|while)|unless|unchanged|no (new )?changes?|nothing (new|changed|to do)|skips?|skipped|do(es)? not (run|publish|send|post)|no-?op|exits? (early|immediately|without|when|if|unless))\b/i;
+const NOTE_WEAK=/\b(every (\w+|\d+) (minutes?|hours?|seconds?|days?|weeks?)|and exits|then exits|retr(y|ies) (at|on) the next run)\b/i;
+const NOTE_SECRET=/(token|secret|password|passwd|credential|api[_ -]?key|private key|_URL\b|connection string|bearer)/i;
+// Code, not prose: braces, arrows, assignments, statements.
+const NOTE_CODE=/[{}<>]|=>|\s=\s|\b(function|const|let|import|export|return)\s/;
+export function noteFrom(text,{comment=false}={}){
+  let t=String(text??'').replace(/^﻿/,'');
+  if(comment){
+    // The leading comment: //, # (not a shebang) lines, a /* … */ block, or a Python docstring.
+    const lines=t.split('\n'),out=[];let i=0;
+    if(lines[0]?.startsWith('#!'))i++;
+    while(i<lines.length&&!lines[i].trim())i++;
+    const first=lines[i]?.trim()||'';
+    if(/^\/\*/.test(first)){const a=t.indexOf('/*'),end=t.indexOf('*/',a);t=end<0?'':t.slice(a+2,end).split('\n').map(l=>l.replace(/^\s*\*\s?/,'')).join('\n')}
+    else if(/^("{3}|'{3})/.test(first)){const q=first.slice(0,3),body=t.slice(t.indexOf(q)+3),end=body.indexOf(q);t=end<0?'':body.slice(0,end)}
+    else{for(;i<lines.length;i++){const m=/^\s*(\/\/+|#+)\s?(.*)$/.exec(lines[i]);if(!m)break;out.push(m[2])}t=out.join('\n')}
+  }
+  t=t.slice(0,4000).replace(/```[\s\S]*?(```|$)/g,'\n\n').replace(/<[^>]+>/g,' ').replace(/!?\[([^\]]*)\]\([^)]*\)/g,'$1').replace(/[`*_]{1,3}([^`*_\n]+)[`*_]{1,3}/g,'$1');
+  const paras=t.split(/\n\s*\n/).map(p=>p.split('\n').filter(l=>!/^\s*(#{1,6}\s|[-=]{3,}\s*$|\||@\w+)/.test(l)).map(l=>l.replace(/^\s*([-*+]|\d+\.)\s+/,'')).join(' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+  const sentences=paras.flatMap(p=>p.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)).map(x=>x.trim()).filter(x=>x.length>=12&&x.length<=200&&!NOTE_SECRET.test(x)&&!NOTE_CODE.test(x));
+  const strong=sentences.find(x=>NOTE_STRONG.test(x)),first=sentences.find(x=>NOTE_STRONG.test(x)||NOTE_WEAK.test(x));
+  if(!first)return '';
+  const end=x=>/[.!?]$/.test(x)?x:x+'.';
+  const both=strong&&first!==strong?`${end(first)} ${end(strong)}`:'';
+  return clip(redact(both&&both.length<=200?both:end(first)),200);
+}
+// Notes from the settings ("notes": {"<job id or name, a glob or substring>": "text"}) win over the
+// ones found: the first key that matches a job's id or name gives its note (text up to 500, secrets
+// hidden; "" removes the note found).
+export function applyNotes(jobs,notes){
+  const list=notes&&typeof notes==='object'&&!Array.isArray(notes)?Object.entries(notes).filter(([k,v])=>k&&typeof v==='string'):[];
+  if(!list.length)return jobs;
+  return jobs.map(j=>{
+    const hit=list.find(([k])=>matches(k,j.id)||matches(k,j.name));if(!hit)return j;
+    const note=clip(redact(hit[1]),500),{note:_,...rest}=j;return note?{...rest,note}:rest;
+  });
 }
 // T3 scheduled task schedules: {type:'interval',everyMs}, {type:'fixed_time',timeOfDay,weekdays?}, {type:'webhook'}.
 export function t3Schedule(s){
@@ -526,6 +650,12 @@ export function t3Schedule(s){
   }
   if(s?.type==='webhook')return 'On webhook';
   return 'Unknown';
+}
+// A T3 schedule as a trigger: the raw schedule JSON as T3 holds it, and it in words.
+export function t3Trigger(s){
+  const kind=s?.type==='interval'?'interval':s?.type==='fixed_time'?'calendar':'other';
+  let expr='';try{expr=s?JSON.stringify(s):''}catch{}
+  return {kind,...(expr?{expr:clip(expr,200)}:{}),text:t3Schedule(s)};
 }
 const anyTime=v=>{if(v==null||v==='')return undefined;const n=Number(v);const t=Number.isFinite(n)?(n>1e12?n:n*1000):Date.parse(v);return Number.isFinite(t)&&t>0?new Date(t).toISOString():undefined};
 const t3Status=s=>/^(succeeded|success|completed|ok|done)$/i.test(s||'')?'ok':/fail|error|timed?_?out|cancel/i.test(s||'')?'failed':/^(running|in_progress|started|active)$/i.test(s||'')?'running':'unknown';
@@ -542,7 +672,7 @@ async function openT3(t3Home,note){
   try{return new sqlite.DatabaseSync(file,{readOnly:true})}catch(e){note(`cannot open the T3 database: ${e.message}`);return null}
 }
 const columns=(db,table)=>new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name));
-function t3Jobs(db,note){
+function t3Jobs(db,note,tz=''){
   const cols=columns(db,'scheduled_tasks');
   if(!cols.has('task_id')){note('T3 has no scheduled_tasks table');return []}
   // Only these columns: the table also holds webhook tokens and secrets.
@@ -552,9 +682,9 @@ function t3Jobs(db,note){
   return db.prepare(`SELECT ${want.join(',')} FROM scheduled_tasks`).all().map(r=>{
     const ms=json(r.model_selection_json)||{},model=[ms.instanceId||ms.provider,ms.model].filter(x=>typeof x==='string'&&x).join(':');
     const prompt=String(r.prompt||'').split('\n').find(l=>l.trim())||'',lastRun=anyTime(r.last_run_at),nextRun=anyTime(r.next_run_at);
-    const project=titles.get(r.project_id);
+    const project=titles.get(r.project_id),sch=json(r.schedule_json),zone=[sch?.timezone,sch?.timeZone,sch?.tz].find(z=>typeof z==='string'&&z&&validTz(z))||tz;
     return {id:clip(`t3:${r.task_id}`,200),name:clip(r.title||prompt||r.task_id,120),source:'t3',group:clip(project?`T3 · ${project}`:'T3',120),
-      schedule:clip(t3Schedule(json(r.schedule_json)),200),command:clip(redact((model?`${model} · `:'')+prompt),300),ai:true,
+      schedule:clip(t3Schedule(sch),200),...(zone?{timezone:zone}:{}),triggers:[t3Trigger(sch)],origin:'machine',command:clip(redact((model?`${model} · `:'')+prompt),300),ai:true,
       enabled:r.enabled===undefined?true:!!Number(r.enabled),...(lastRun?{lastRun}:{}),lastStatus:lastRun?t3Status(r.last_run_status):'unknown',...(nextRun?{nextRun}:{})};
   });
 }
@@ -562,7 +692,7 @@ function t3Roots(db){
   const cols=columns(db,'projection_projects');if(!cols.has('workspace_root'))return [];
   return db.prepare(`SELECT workspace_root FROM projection_projects${cols.has('deleted_at')?' WHERE deleted_at IS NULL':''}`).all().map(r=>r.workspace_root).filter(Boolean);
 }
-function systemdJobs(scope,group,note){
+function systemdJobs(scope,group,note,tz=''){
   const base=scope==='user'?['--user']:[],sc=a=>run('systemctl',[...base,'--no-pager',...a],{timeout:5000});
   let timers=null;
   const r=sc(['list-timers','--all','--output=json']);
@@ -583,24 +713,32 @@ function systemdJobs(scope,group,note){
   const T=show('Id,Description,OnCalendar,TimersCalendar,TimersMonotonic,Unit,UnitFileState,ActiveState,LastTriggerUSec,NextElapseUSecRealtime,Result',timers.map(t=>t.unit));
   for(const t of timers)t.service||=[].concat(T.get(t.unit)?.Unit??'')[0]||t.unit.replace(/\.timer$/,'.service');
   const S=show('Id,ExecStart,Result,ActiveState,ExecMainStatus,Description',[...new Set(timers.map(t=>t.service))]);
-  return timers.map(t=>systemdJob(t,T.get(t.unit),S.get(t.service),{scope,group}));
+  return timers.map(t=>systemdJob(t,T.get(t.unit),S.get(t.service),{scope,group,tz}));
 }
 // The cron configs of one repo, from its files: [{dir, name, text}], dir '' for the root, e.g.
 // 'services/api', or '.github/workflows'. Used for local repos and for repos on a remote machine.
-export function repoFileJobs(repo,files,{sources=new Set(['vercel','railway','github']),now=new Date()}={}){
-  const out=[];
+// A README.md in a service's folder (and .vercel/project.json, with dir '<dir>/.vercel') may come
+// with them, for the note and the Vercel project; read(path in the repo), when given, reads other
+// files (the scripts crons run) for the note.
+export function repoFileJobs(repo,files,{sources=new Set(['vercel','railway','github']),now=new Date(),read=null}={}){
+  const out=[],of=(dir,re)=>files.find(f=>(f.dir||'')===dir&&re.test(f.name))?.text||'';
   for(const {dir='',name,text} of files){
     if(dir==='.github/workflows'){if(sources.has('github')&&/\.ya?ml$/.test(name))out.push(...workflowJobs(text,{repo,file:name,now}));continue}
-    if(sources.has('vercel')&&name==='vercel.json')out.push(...vercelJobs(text,{repo:dir?`${repo}/${dir}`:repo,now}));
+    const at=x=>dir?`${dir}/${x}`:x;
+    if(sources.has('vercel')&&name==='vercel.json'){
+      let project=null;try{project=JSON.parse(of(dir?`${dir}/.vercel`:'.vercel',/^project\.json$/)||'null')}catch{}
+      out.push(...vercelJobs(text,{repo:dir?`${repo}/${dir}`:repo,file:at(name),dir,ctx:{read,project},now}));
+    }
     if(sources.has('railway')&&/^railway(\.[\w.-]+)?\.(json|toml)$/.test(name)){
       // railway.<name>.json is a config for another service: "<repo> (<name>)".
       const extra=name.replace(/\.(json|toml)$/,'').replace(/^railway\.?/,''),base=dir?basename(dir):repo;
-      out.push(...railwayJobs(text,{repo,service:extra?`${base} (${extra})`:base,file:dir?`${dir}/${name}`:name,toml:name.endsWith('.toml'),now}));
+      out.push(...railwayJobs(text,{repo,service:extra?`${base} (${extra})`:base,alias:extra,file:at(name),toml:name.endsWith('.toml'),now,
+        ctx:{readme:extra?'':of(dir,/^readme\.md$/i),read}}));
     }
   }
   return out;
 }
-const REPO_FILE=/^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml))$/;
+const REPO_FILE=/^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml)|readme\.md)$/i;
 function repoJobs(roots,sources,note,now){
   const out=[],ls=d=>{try{return readdirSync(d)}catch{return []}},isDir=p=>{try{return statSync(p).isDirectory()}catch{return false}};
   const seen=new Set();
@@ -610,32 +748,196 @@ function repoJobs(roots,sources,note,now){
     const repo=basename(root);
     try{
       const dirs=[root,...['services','apps'].flatMap(s=>ls(join(root,s)).map(x=>join(root,s,x)).filter(isDir))],files=[];
-      for(const dir of dirs)for(const f of ls(dir).filter(f=>REPO_FILE.test(f)))files.push({dir:relative(root,dir),name:f,text:readFileSync(join(dir,f),'utf8')});
+      for(const dir of dirs){
+        const names=ls(dir).filter(f=>REPO_FILE.test(f));
+        // A README only matters next to a cron config.
+        if(!names.some(f=>!/^readme\.md$/i.test(f)))continue;
+        for(const f of names)files.push({dir:relative(root,dir),name:f,text:readFileSync(join(dir,f),'utf8').slice(0,200000)});
+        const vp=join(dir,'.vercel','project.json');
+        if(existsSync(vp))files.push({dir:relative(root,join(dir,'.vercel')),name:'project.json',text:readFileSync(vp,'utf8').slice(0,10000)});
+      }
       const wf=join(root,'.github','workflows');
       for(const f of ls(wf).filter(f=>/\.ya?ml$/.test(f)))files.push({dir:'.github/workflows',name:f,text:readFileSync(join(wf,f),'utf8')});
-      out.push(...repoFileJobs(repo,files,{sources,now}));
+      // Scripts named by crons, for their notes: inside the repo only, and small files only.
+      const read=rel=>{try{const p=join(root,rel);if(relative(root,p).startsWith('..')||statSync(p).size>200000)return null;return readFileSync(p,'utf8')}catch{return null}};
+      out.push(...repoFileJobs(repo,files,{sources,now,read}));
     }catch(e){note(`${repo}: ${e.message}`)}
   }
   return out;
+}
+// ---------- platform schedules (Railway, Vercel) ----------
+// With a token in the settings, the live cron schedules are read from the hosting platform and
+// matched to the repo's cron configs: a matched job is reported as the platform runs it (origin
+// 'platform', its file kept), with drift saying how the repo file differs; a live cron no repo file
+// has is reported too. Without a token nothing is asked. Matching and comparing are pure (below).
+// Two cron lines are the same schedule when they fire at the same times ("*/5" and "0-59/5").
+export function sameCron(a,b){
+  const x=String(a??'').trim().replace(/\s+/g,' '),y=String(b??'').trim().replace(/\s+/g,' ');
+  if(x===y)return true;
+  const p=parseCron(x),q=parseCron(y);if(!p||!q)return false;
+  const sets=c=>JSON.stringify(['min','hour','dom','mon','dow'].map(k=>[...c[k]].sort((m,n)=>m-n)).concat([c.domStar,c.dowStar]));
+  return sets(p)===sets(q);
+}
+// How a repo file's cron differs from the platform's live one: '' when they agree. live null or ''
+// means the platform has no cron for it.
+export function scheduleDrift({platform='Railway',file='',fileExpr='',live=null}={}){
+  const f=file||'the repo file',ex=String(fileExpr||'').trim();
+  if(live==null||!String(live).trim())return clip(`${platform} has no cron schedule for it; ${f} has ${ex||'one'}${ex?` (${humaniseCron(ex,{utc:true})})`:''}`,200);
+  if(!ex)return clip(`${f} has no cron schedule; ${platform} runs ${String(live).trim()}`,200);
+  if(sameCron(ex,live))return '';
+  return clip(`${platform} runs ${String(live).trim()} (${humaniseCron(live,{utc:true})}); ${f} has ${ex} (${humaniseCron(ex,{utc:true})})`,200);
+}
+const norm=s=>String(s??'').toLowerCase().replace(/[^a-z0-9]+/g,'');
+// Railway's GraphQL answer to services: [{projectId, project, serviceId, service, environment,
+// cronSchedule, nextRun, startCommand}], one a service (its production instance, else the one with a
+// cron, else the first).
+export function railwayServices(data){
+  const edges=x=>Array.isArray(x?.edges)?x.edges.map(e=>e?.node).filter(Boolean):[];
+  const projects=[...edges(data?.projects),...edges(data?.me?.projects)],out=[],seen=new Set();
+  for(const p of projects){
+    if(!p?.id||seen.has(p.id))continue;seen.add(p.id);
+    const envs=new Map(edges(p.environments).map(e=>[e.id,e.name||'']));
+    for(const sv of edges(p.services)){
+      const inst=edges(sv.serviceInstances),prod=x=>/^prod/i.test(envs.get(x.environmentId)||'');
+      const i=inst.find(x=>prod(x)&&x.cronSchedule)||inst.find(x=>x.cronSchedule)||inst.find(prod)||inst[0]||{};
+      out.push({projectId:p.id,project:p.name||'',serviceId:sv.id||'',service:sv.name||'',environment:envs.get(i.environmentId)||'',
+        cronSchedule:i.cronSchedule||'',nextRun:anyTime(i.nextCronRunAt)||'',startCommand:i.startCommand||''});
+    }
+  }
+  return out;
+}
+// Vercel projects (as /v9/projects lists them, or one project) to [{projectId, project, path,
+// schedule, enabled, known}]: known is false when the answer had no crons field (nothing can be said).
+export function vercelCrons(projects){
+  const out=[];
+  for(const p of Array.isArray(projects)?projects:[]){
+    if(!p?.id)continue;
+    if(!p.crons||typeof p.crons!=='object'){out.push({projectId:p.id,project:p.name||'',known:false});continue}
+    const enabled=!p.crons.disabledAt;
+    for(const d of Array.isArray(p.crons.definitions)?p.crons.definitions:[])if(d?.path&&d?.schedule)
+      out.push({projectId:p.id,project:p.name||'',path:String(d.path),schedule:String(d.schedule),enabled,known:true});
+    if(!(p.crons.definitions||[]).length)out.push({projectId:p.id,project:p.name||'',known:true,enabled,none:true});
+  }
+  return out;
+}
+const asPlatform=(j,expr,now,platform,nextRun)=>{
+  const t=cronTimes(expr,now);
+  return {...j,...t,origin:'platform',...(nextRun?{nextRun}:{}),_drift:platform};
+};
+// Repo jobs (with _match) and the platform's live crons to the jobs to report: matched ones as the
+// platform runs them, with drift; the rest as they were; then the platform's crons no file matched.
+export function mergePlatform(jobs,{railway=null,vercel=null}={},{now=new Date()}={}){
+  const used=new Set(),out=[];
+  for(const j of jobs){
+    const m=j._match;
+    if(m?.platform==='railway'&&railway){
+      const names=new Set(m.names.map(norm)),hits=railway.filter(s=>names.has(norm(s.service)));
+      // A name several projects use: the one named like the repo, else the one with a cron.
+      const s=hits.length===1?hits[0]:hits.find(x=>names.has(norm(x.project))&&x.cronSchedule)||hits.find(x=>x.cronSchedule)||hits[0];
+      if(s){used.add(s.serviceId||s.service);
+        const drift=scheduleDrift({platform:'Railway',file:j.file,fileExpr:j.cron,live:s.cronSchedule||null});
+        out.push(s.cronSchedule?{...asPlatform(j,s.cronSchedule,now,'railway',s.nextRun),...(drift?{drift}:{})}:{...j,...(drift?{drift}:{})});continue}
+    }
+    if(m?.platform==='vercel'&&vercel){
+      const proj=vercel.filter(v=>m.projectId?v.projectId===m.projectId:norm(v.project)===norm(m.name));
+      if(proj.length&&proj.every(v=>v.known!==false)){
+        const v=proj.find(x=>x.path===m.path);
+        if(v){used.add(`${v.projectId}${v.path}`);
+          const drift=scheduleDrift({platform:'Vercel',file:j.file,fileExpr:j.cron,live:v.schedule});
+          out.push({...asPlatform(j,v.schedule,now,'vercel'),enabled:v.enabled!==false&&j.enabled!==false,...(drift?{drift}:v.enabled===false?{drift:'Crons are turned off for this project on Vercel'}:{})});continue}
+        out.push({...j,drift:clip(`Not among ${proj[0].project||'the project'}'s live crons on Vercel; ${j.file||'vercel.json'} has ${j.cron} (not deployed yet?)`,200)});continue;
+      }
+    }
+    out.push(j);
+  }
+  for(const s of railway||[])if(s.cronSchedule&&!used.has(s.serviceId||s.service))
+    out.push({id:clip(`railway:${s.project}/${s.service}`,200),name:clip(s.service,120),source:'railway',group:clip(`Railway · ${s.service}`,120),
+      ...cronTimes(s.cronSchedule,now),origin:'platform',...(s.nextRun?{nextRun:s.nextRun}:{}),...(s.startCommand?{command:tidy(s.startCommand)}:{}),
+      note:clip(`Only on Railway (project ${s.project}${s.environment?`, ${s.environment}`:''}): no repo file has this cron`,200),ai:aiCommand(s.startCommand),enabled:true,lastStatus:'unknown'});
+  for(const v of vercel||[])if(v.path&&!used.has(`${v.projectId}${v.path}`))
+    out.push({id:clip(`vercel:${v.project}:${v.path}`,200),name:clip(v.path,120),source:'vercel',group:clip(`Vercel · ${v.project}`,120),
+      ...cronTimes(v.schedule,now),origin:'platform',command:clip(`GET ${v.path}`,300),
+      note:clip(`Only on Vercel (project ${v.project}): no vercel.json read here has this cron`,200),ai:false,enabled:v.enabled!==false,lastStatus:'unknown'});
+  return out.map(({_drift,...j})=>j);
+}
+const RAILWAY_API='https://backboard.railway.com/graphql/v2';
+const RAILWAY_Q=(next=true,ws=false)=>`query${ws?'($w:String!)':''}{projects${ws?'(workspaceId:$w)':''}{edges{node{id name environments{edges{node{id name}}}services{edges{node{id name serviceInstances{edges{node{environmentId cronSchedule startCommand${next?' nextCronRunAt':''}}}}}}}}}}}`;
+async function railwayLive(token,{workspace='',note=()=>{}}={}){
+  const ask=async q=>{
+    const r=await fetch(RAILWAY_API,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${token}`},body:JSON.stringify({query:q,...(workspace?{variables:{w:workspace}}:{})}),signal:AbortSignal.timeout(20000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok&&!d?.data)throw new Error(`HTTP ${r.status}${d?.errors?.[0]?.message?`: ${clip(d.errors[0].message,160)}`:''}`);
+    return d;
+  };
+  let d=await ask(RAILWAY_Q(true,!!workspace));
+  // An API without nextCronRunAt: ask again without it.
+  if(d?.errors?.length&&!d?.data?.projects&&/nextCronRunAt/.test(JSON.stringify(d.errors)))d=await ask(RAILWAY_Q(false,!!workspace));
+  if(d?.errors?.length&&!d?.data?.projects)throw new Error(clip(d.errors.map(e=>e.message).join('; '),200));
+  return railwayServices(d.data);
+}
+async function vercelLive(token,{team='',note=()=>{},want=[]}={}){
+  const q=team?`${/^team_/.test(team)?'teamId':'slug'}=${encodeURIComponent(team)}`:'';
+  const get=async path=>{
+    const r=await fetch(`https://api.vercel.com${path}${path.includes('?')?'&':'?'}${q}`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(`HTTP ${r.status}${d?.error?.message?`: ${clip(d.error.message,160)}`:''}`);
+    return d;
+  };
+  const projects=[];let until='';
+  for(let page=0;page<10;page++){
+    const d=await get(`/v9/projects?limit=100${until?`&until=${until}`:''}`);
+    projects.push(...(Array.isArray(d?.projects)?d.projects:[]));
+    until=d?.pagination?.next;if(!until)break;
+  }
+  // A list without crons: read the projects the repos are linked to one by one.
+  const ids=new Set(want.map(w=>w.projectId).filter(Boolean)),names=new Set(want.map(w=>norm(w.name)));
+  for(const [i,p] of projects.entries())if(!p.crons&&(ids.has(p.id)||names.has(norm(p.name)))){
+    try{projects[i]=await get(`/v9/projects/${encodeURIComponent(p.id)}`)}catch(e){note(`Vercel project ${p.name}: ${e.message}`)}
+  }
+  return vercelCrons(projects);
+}
+// The platform pass: reads what the tokens allow and merges it into jobs. Failures are noted.
+export async function platformJobs(jobs,c={},{note=()=>{},now=new Date(),env=process.env}={}){
+  const o=c.jobs&&typeof c.jobs==='object'?c.jobs:{};
+  const rt=c.railwayToken||env.RAILWAY_API_TOKEN||'',vt=c.vercelToken||env.VERCEL_TOKEN||'';
+  if(o.platform===false||(!rt&&!vt))return jobs;
+  const live={};
+  if(rt){
+    try{live.railway=await railwayLive(rt,{workspace:c.railwayWorkspace||'',note})}catch(e){note(`Railway API: ${e.message}`)}
+  }
+  if(vt){
+    try{live.vercel=await vercelLive(vt,{team:c.vercelTeam||'',note,want:jobs.filter(j=>j._match?.platform==='vercel').map(j=>j._match)})}catch(e){note(`Vercel API: ${e.message}`)}
+  }
+  return mergePlatform(jobs,live,{now});
+}
+// A job as it is reported: without the fields used while discovering.
+const bare=({distro,_match,...j})=>j;
+// This machine's time zone: timedatectl's, else Node's.
+let ZONE=null;
+export function localZone(){
+  if(ZONE!==null)return ZONE;
+  const r=run('timedatectl',['show','-p','Timezone','--value'],{timeout:3000}),t=r.status===0?r.stdout.trim():'';
+  ZONE=t&&validTz(t)?t:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
+  return ZONE;
 }
 export const jobsOn=c=>c?.jobs!==false&&c?.jobs?.enabled!==false;
 const SOURCES=['systemd','cron','t3','vercel','railway','github'];
 // Every scheduled job this machine knows of, filtered, deduplicated by id and capped at 500.
 export async function discoverJobs(c={},{note=()=>{}}={}){
   const o=c.jobs&&typeof c.jobs==='object'?c.jobs:{},sources=new Set(Array.isArray(o.sources)?o.sources:SOURCES);
-  const runner=clip(c.name||hostname(),100),now=new Date(),jobs=[];
+  const runner=clip(c.name||hostname(),100),now=new Date(),jobs=[],tz=localZone();
   const step=(label,fn)=>{try{jobs.push(...fn())}catch(e){note(`${label}: ${e.message}`)}};
-  if(sources.has('systemd')){step('systemd user timers',()=>systemdJobs('user',runner,note));step('systemd system timers',()=>systemdJobs('system',`${runner} · system`,note))}
+  if(sources.has('systemd')){step('systemd user timers',()=>systemdJobs('user',runner,note,tz));step('systemd system timers',()=>systemdJobs('system',`${runner} · system`,note,tz))}
   if(sources.has('cron'))step('crontab',()=>{
     const r=run('crontab',['-l'],{timeout:5000});
     if(r.error?.code==='ENOENT')return [];
     if(r.status!==0){if(!/no crontab/i.test(r.stderr))note(`crontab -l: ${clip(r.stderr,160)}`);return []}
-    return crontabJobs(r.stdout,{group:runner,now});
+    return crontabJobs(r.stdout,{group:runner,now,tz});
   });
   const wantRepos=['vercel','railway','github'].some(s=>sources.has(s));
   const db=sources.has('t3')||(wantRepos&&!Array.isArray(o.repos))?await openT3(tilde(c.t3Home||'~/.t3'),note):null;
   try{
-    if(db&&sources.has('t3'))step('T3 tasks',()=>t3Jobs(db,note));
+    if(db&&sources.has('t3'))step('T3 tasks',()=>t3Jobs(db,note,tz));
     if(wantRepos){
       let roots=Array.isArray(o.repos)?o.repos:[];
       if(!Array.isArray(o.repos)&&db)try{roots=t3Roots(db)}catch(e){note(`T3 projects: ${e.message}`)}
@@ -643,17 +945,19 @@ export async function discoverJobs(c={},{note=()=>{}}={}){
     }
   }finally{db?.close()}
   const seen=new Set();
-  return filterJobs(jobs,{include:o.include||[],exclude:o.exclude||[],skipDistro:o.skipDistro!==false})
-    .filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,500).map(({distro,...j})=>j);
+  const found=filterJobs(jobs,{include:o.include||[],exclude:o.exclude||[],skipDistro:o.skipDistro!==false}).filter(j=>!seen.has(j.id)&&seen.add(j.id));
+  const merged=await platformJobs(found,c,{note,now}),seen2=new Set();
+  return applyNotes(filterJobs(merged,{include:o.include||[],exclude:o.exclude||[],skipDistro:false}).filter(j=>!seen2.has(j.id)&&seen2.add(j.id)).slice(0,500).map(bare),o.notes);
 }
-// The `jobs` table: one line a job, grouped.
+// The `jobs` table: one line a job, grouped. TZ is the zone the job's schedule is in, ORIGIN where it
+// was read (repo, platform or machine; "!" marks drift from the repo file).
 // Times are shown in tz (a remote's "timezone"), else in this machine's.
 const when=(iso,tz='')=>{if(!iso)return '';const d=wf(wallOf(Date.parse(iso),tz));return `${d.y}-${pad2(d.mo)}-${pad2(d.d)} ${hm(d.h,d.mi)}`};
 export function jobsTable(jobs,{tz=''}={}){
   if(!jobs.length)return 'No scheduled jobs found.';
   const rows=[...jobs].sort((a,b)=>(a.group||'').localeCompare(b.group||'')||a.name.localeCompare(b.name))
-    .map(j=>[j.group||'',j.source,j.name,j.schedule,j.enabled===false?'off':'on',j.ai?'ai':'',when(j.lastRun,tz),j.lastStatus||'',when(j.nextRun,tz)]);
-  const head=['GROUP','SOURCE','NAME','SCHEDULE','ON','AI','LAST RUN','STATUS','NEXT RUN'],cap=[30,8,44,34,3,2,16,7,16];
+    .map(j=>[j.group||'',j.source,j.name,j.schedule,j.timezone||'',`${j.origin||''}${j.drift?'!':''}`,j.enabled===false?'off':'on',j.ai?'ai':'',when(j.lastRun,tz),j.lastStatus||'',when(j.nextRun,tz)]);
+  const head=['GROUP','SOURCE','NAME','SCHEDULE','TZ','ORIGIN','ON','AI','LAST RUN','STATUS','NEXT RUN'],cap=[30,8,44,34,20,9,3,2,16,7,16];
   const cut=(s,n)=>s.length>n?s.slice(0,n-1)+'~':s;
   const w=head.map((h,i)=>Math.min(cap[i],Math.max(h.length,...rows.map(r=>r[i].length))));
   return [head,...rows].map(r=>r.map((x,i)=>cut(x,w[i]).padEnd(w[i])).join('  ').trimEnd()).join('\n');
@@ -807,6 +1111,17 @@ export function humaniseWinTrigger(t={}){
     default:return 'Custom trigger';
   }
 }
+// A trigger as {kind, expr, text}: expr is the trigger as Task Scheduler holds it (its type, start
+// boundary, intervals, days and repetition), text it in words.
+const WIN_KIND={Daily:'calendar',Weekly:'calendar',Monthly:'calendar',MonthlyDOW:'calendar',Logon:'logon',Boot:'boot'};
+export function winTrigger(t={}){
+  const type=String(t.type||'').replace(/^MSFT_Task/,'').replace(/Trigger$/,'')||'Custom',rep=isoDuration(t.interval),dur=isoDuration(t.duration);
+  const kind=type==='Time'?(rep?'interval':'once'):type==='Daily'&&rep&&(!dur||dur.ms>=23*36e5)?'interval':WIN_KIND[type]||'other';
+  const days=[0,1,2,3,4,5,6].filter(i=>(+t.dow||0)&(1<<i)).map(i=>DAYS[i]);
+  const expr=[`${type}Trigger`,t.start&&`start ${t.start}`,+t.days>1&&`every ${+t.days} days`,+t.weeks>1&&`every ${+t.weeks} weeks`,days.length&&`on ${days.join(',')}`,
+    +t.dom&&`days-of-month mask ${+t.dom}`,+t.wom&&`weeks-of-month mask ${+t.wom}`,t.interval&&`repeat ${t.interval}${t.duration?` for ${t.duration}`:''}`,t.enabled===false&&'(disabled)'].filter(Boolean).join(', ');
+  return {kind,expr:clip(expr,200),text:clip(humaniseWinTrigger(t)+(t.enabled===false?' (off)':''),200)};
+}
 export function humaniseWinTriggers(list){
   const on=(Array.isArray(list)?list:[list]).filter(Boolean);
   if(!on.length)return 'On demand';
@@ -832,14 +1147,15 @@ export function winStatus(state,result,last){
 }
 // Windows paths under the user's profile as ~, and secrets hidden, as tidy does for local commands.
 const winTidy=(s,profile)=>{let x=String(s??'');if(profile)x=x.replace(new RegExp(profile.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),'~');return clip(redact(x),300)};
-export function windowsJobs(tasks,{group='',profile='',include=[],exclude=[],skipVendor=true}={}){
+export function windowsJobs(tasks,{group='',profile='',include=[],exclude=[],skipVendor=true,tz=''}={}){
   return (Array.isArray(tasks)?tasks:[]).filter(t=>t?.name).flatMap(t=>{
     const path=`${t.path||'\\'}${t.name}`,hit=list=>list.some(x=>matches(x,path)||matches(x,t.name));
     if(!hit(include)&&((skipVendor&&isVendorTask(path))||hit(exclude)))return [];
     const command=winTidy((Array.isArray(t.actions)?t.actions:[t.actions]).filter(Boolean).map(a=>/ComHandler/.test(a.type||'')?'COM handler':[a.exe,a.args].filter(Boolean).join(' ')).filter(Boolean).join(' && '),profile);
     const lastRun=anyTime(t.last),nextRun=anyTime(t.next);
+    const trig=(Array.isArray(t.triggers)?t.triggers:[t.triggers]).filter(Boolean).slice(0,10).map(winTrigger);
     return [{id:clip(`windows:${path}`,200),name:clip(t.name,120),source:'windows',group:clip(group,120),schedule:humaniseWinTriggers(t.triggers),
-      ...(command?{command}:{}),ai:aiCommand(command),enabled:String(t.state)!=='Disabled',...(lastRun?{lastRun}:{}),
+      ...(tz?{timezone:tz}:{}),triggers:trig.length?trig:[{kind:'manual',text:'On demand'}],origin:'machine',...(command?{command}:{}),ai:aiCommand(command),enabled:String(t.state)!=='Disabled',...(lastRun?{lastRun}:{}),
       lastStatus:winStatus(t.state,t.result,lastRun),...(nextRun&&String(t.state)!=='Disabled'?{nextRun}:{})}];
   });
 }
@@ -851,16 +1167,24 @@ export function windowsJobs(tasks,{group='',profile='',include=[],exclude=[],ski
 // passed is stale (Aside is not running, or it missed it): its status is unknown.
 const unix=v=>v==null||v===''?undefined:anyTime(+v>1e12?+v:+v*1000);
 const STALE_GRACE=15*60e3;
-export function asideJobs(routines,{group='',tz='',now=Date.now()}={}){
+// A rule as a trigger, and the zone its times are in: its DTSTART TZID, else tz (a UTC start
+// without BYHOUR is shown in tz).
+export function rruleTrigger(text,{tz='',anchor=Date.now()}={}){
+  const raw=String(text??'').replace(/\\n/g,'\n').split(/[\r\n]+/).map(x=>x.trim()).filter(Boolean).join(' '),r=parseRRule(text);
+  const zone=r?.tz&&!(r.tz==='UTC'&&!r.by.hour&&tz)?r.tz:tz;
+  return {trigger:{kind:'rrule',...(raw?{expr:clip(raw,200)}:{}),text:humaniseRRule(text,{tz,anchor})},zone};
+}
+export function asideJobs(routines,{group='',tz='',zone=tz,now=Date.now()}={}){
   return (Array.isArray(routines)?routines:[]).filter(r=>r?.id).map(r=>{
     const next=anyTime(r.next_run_at),stale=r.status==='active'&&next&&Date.parse(next)<now-STALE_GRACE,l=r.last||{};
     const waiting=l.status==='suspended',lastRun=unix(l.started);
     const lastStatus=stale||!r.last?'unknown':waiting?'running':l.status==='errored'||l.aborted||/^(aborted|interrupted)$/.test(l.status||'')?'failed'
       :l.status==='idle'||l.finished?'ok':l.started?'running':'unknown';
     const model=[r.model?.provider,r.model?.modelId].filter(Boolean).join('/');
-    const prompt=clip(String(r.prompt||'').split('\n').find(x=>x.trim())||'',200);
+    const prompt=clip(String(r.prompt||'').split('\n').find(x=>x.trim())||'',200),anchor=unix(r.created_at)?Date.parse(unix(r.created_at)):now;
+    const rt=rruleTrigger(r.rrule,{tz,anchor}),z=rt.zone||zone;
     return {id:clip(`aside:${r.id}`,200),name:clip(r.name||prompt||r.id,120),source:'aside',group:clip(group,120),
-      schedule:clip(humaniseRRule(r.rrule,{tz,anchor:unix(r.created_at)?Date.parse(unix(r.created_at)):now})+(stale?' (stale)':''),200),
+      schedule:clip(humaniseRRule(r.rrule,{tz,anchor})+(stale?' (stale)':''),200),...(z?{timezone:z}:{}),triggers:[rt.trigger],origin:'machine',
       command:clip(redact([waiting&&'Waiting for approval',model,prompt].filter(Boolean).join(' · ')),300),ai:true,enabled:r.status==='active',
       ...(lastRun?{lastRun}:{}),lastStatus,...(next&&!stale&&r.status==='active'?{nextRun:next}:{})};
   });
@@ -880,12 +1204,13 @@ export function skillSummary(md){
   const line=(fm?text.slice(fm[0].length):text).split('\n').map(l=>l.trim()).find(Boolean)||'';
   return clip(line.replace(/^#+\s*/,''),300);
 }
-export function claudeJobs(tasks,{group='',tz='',skills={},now=new Date()}={}){
+export function claudeJobs(tasks,{group='',tz='',zone=tz,skills={},now=new Date()}={}){
   return (Array.isArray(tasks)?tasks:[]).filter(t=>t?.id).map(t=>{
     const expr=clip(t.cronExpression,120),enabled=t.enabled!==false,lastRun=anyTime(t.lastRunAt),next=enabled&&expr?nextCron(expr,now,{tz}):null;
     const what=skills[t.id]!==undefined?skillSummary(skills[t.id]):'';
+    const schedule=expr?humaniseCron(expr):'On demand';
     return {id:clip(`claude:${t.id}`,200),name:clip(t.displayName||t.id,120),source:'claude',group:clip(group,120),
-      schedule:expr?humaniseCron(expr):'On demand',...(expr?{cron:expr}:{}),...(what?{command:clip(redact(what),300)}:{}),ai:true,enabled,
+      schedule,...(expr?{cron:expr}:{}),...(zone?{timezone:zone}:{}),triggers:[expr?{kind:'cron',expr,text:schedule}:{kind:'manual',text:schedule}],origin:'machine',...(what?{command:clip(redact(what),300)}:{}),ai:true,enabled,
       ...(lastRun?{lastRun}:{}),lastStatus:'unknown',...(next?{nextRun:next}:{})};
   });
 }
@@ -924,24 +1249,25 @@ function tomlValue(v){
 // so its last run is not known. Its schedule is an RRULE (no DTSTART: it counts from when the
 // automation was created), a cron line, or times. A one-shot whose runs are used up is skipped, or with keepDone
 // marked "(done)".
-export function codexJobs(automations,{group='',tz='',runs={},now=Date.now(),keepDone=false}={}){
+export function codexJobs(automations,{group='',tz='',zone=tz,runs={},now=Date.now(),keepDone=false}={}){
   const out=[];
   for(const a of Array.isArray(automations)?automations:[]){
     const id=String(a?.id||'').trim();if(!id)continue;
     const anchor=+a.created_at||+a.updated_at||now,anchorMs=anchor>1e12?anchor:anchor*1000;
-    let schedule='',next=null,done=false;
-    if(a.rrule){const x=rruleNext(a.rrule,{tz,anchor:anchorMs,now});schedule=humaniseRRule(a.rrule,{tz,anchor:anchorMs});next=x?.next||null;done=!!x?.done}
-    else if(a.cron){schedule=humaniseCron(a.cron);next=nextCron(a.cron,new Date(now),{tz})}
+    let schedule='',next=null,done=false,triggers=[],z=zone;
+    if(a.rrule){const x=rruleNext(a.rrule,{tz,anchor:anchorMs,now}),rt=rruleTrigger(a.rrule,{tz,anchor:anchorMs});schedule=rt.trigger.text;triggers=[rt.trigger];z=rt.zone||zone;next=x?.next||null;done=!!x?.done}
+    else if(a.cron){schedule=humaniseCron(a.cron);triggers=[{kind:'cron',expr:clip(a.cron,200),text:schedule}];next=nextCron(a.cron,new Date(now),{tz})}
     else if(Array.isArray(a.times)&&a.times.length){
       const ts=a.times.map(anyTime).filter(Boolean).sort();next=ts.find(t=>Date.parse(t)>now)||null;done=!next;
       schedule=ts.length===1?`Once ${dateIn(Date.parse(ts[0]),tz)}`:`${ts.length} set times`;
-    }else schedule=a.kind==='heartbeat'?'Heartbeat':'Unknown';
+      triggers=ts.slice(0,10).map(t=>({kind:'once',expr:t,text:`Once ${dateIn(Date.parse(t),tz)}`}));
+    }else{schedule=a.kind==='heartbeat'?'Heartbeat':'Unknown';triggers=[{kind:'other',...(a.kind?{expr:clip(`kind = ${a.kind}`,200)}:{}),text:schedule}]}
     if(done&&!keepDone)continue;
     const enabled=String(a.status||'ACTIVE').toUpperCase()==='ACTIVE',r=runs[id],lastRun=Array.isArray(r)&&r[1]?unix(r[1]):undefined;
     const model=a.model?`codex:${a.model}${a.reasoning_effort?` (${a.reasoning_effort})`:''}`:'';
     const prompt=clip(String(a.prompt||'').split('\n').find(x=>x.trim())||'',200);
     out.push({id:clip(`codex:${id}`,200),name:clip(a.name||a.title||id,120),source:'codex',group:clip(group,120),schedule:clip(schedule+(done?' (done)':''),200),
-      ...(a.cron?{cron:clip(a.cron,120)}:{}),command:clip(redact([model,prompt].filter(Boolean).join(' · ')),300),ai:true,enabled,
+      ...(a.cron?{cron:clip(a.cron,120)}:{}),...(z?{timezone:z}:{}),triggers,origin:'machine',command:clip(redact([model,prompt].filter(Boolean).join(' · ')),300),ai:true,enabled,
       ...(lastRun?{lastRun}:{}),lastStatus:'unknown',...(next&&enabled?{nextRun:next}:{})});
   }
   return out;
@@ -986,7 +1312,8 @@ if($CFG.repos){ $out.repos=@(foreach($r in @($CFG.repos)){ try {
   $dirs=@($root)+@(foreach($s in 'services','apps'){ $p=Join-Path $root $s; if(Test-Path -LiteralPath $p -PathType Container){ Get-ChildItem -LiteralPath $p -Directory | ForEach-Object { $_.FullName } } })
   $files=@()
   foreach($d in $dirs){ $rel=$d.Substring($root.Length).TrimStart('\').Replace('\','/')
-    foreach($f in @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml))$' })){ $files+=[ordered]@{ dir=$rel; name=$f.Name; text=(Head $f.FullName 200000) } } }
+    foreach($f in @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml))$' })){ $files+=[ordered]@{ dir=$rel; name=$f.Name; text=(Head $f.FullName 200000) } }
+    $rm=Join-Path $d 'README.md'; if(($files | Where-Object { $_.dir -eq $rel }) -and (Test-Path -LiteralPath $rm -PathType Leaf)){ $files+=[ordered]@{ dir=$rel; name='README.md'; text=(Head $rm 20000) } } }
   $wf=Join-Path $root '.github\workflows'
   if(Test-Path -LiteralPath $wf){ foreach($f in @(Get-ChildItem -LiteralPath $wf -File | Where-Object { $_.Name -match '\.ya?ml$' })){ $files+=[ordered]@{ dir='.github/workflows'; name=$f.Name; text=(Head $f.FullName 200000) } } }
   [ordered]@{ repo=(Split-Path $root -Leaf); files=$files }
@@ -1113,21 +1440,22 @@ export function remotePlan(remote={}){
   return {sources,repos,pySources,psSources,needsPython:!py&&sources.has('aside')};
 }
 // Raw script output to jobs, filtered ("include", "exclude", "skipVendor") and capped like local ones.
-export function remoteJobs(remote,raw,{now=Date.now(),note=()=>{}}={}){
+// zone: the remote's time zone for the jobs' timezone (its "timezone", else this machine's).
+export function remoteJobs(remote,raw,{now=Date.now(),note=()=>{},zone=remote.timezone||'',notes={}}={}){
   const name=clip(remote.name,100),tz=remote.timezone||'',plan=remotePlan(remote),jobs=[];
   const ps=raw.ps||{},py=raw.py||{},profile=ps.home||py.home||'';
   for(const e of [...(ps.errors||[]),...(py.errors||[])])note(`${name}: ${e}`);
   const step=(label,fn)=>{try{jobs.push(...fn())}catch(e){note(`${name} ${label}: ${e.message}`)}};
   const o={include:remote.include||[],exclude:remote.exclude||[]};
-  if(plan.sources.has('windows')&&ps.windows)step('windows',()=>windowsJobs(ps.windows,{group:name,profile,skipVendor:remote.skipVendor!==false,...o}));
-  if(plan.sources.has('aside')&&py.aside)step('aside',()=>asideJobs(py.aside,{group:`${name} · Aside`,tz,now}));
+  if(plan.sources.has('windows')&&ps.windows)step('windows',()=>windowsJobs(ps.windows,{group:name,profile,skipVendor:remote.skipVendor!==false,tz:zone,...o}));
+  if(plan.sources.has('aside')&&py.aside)step('aside',()=>asideJobs(py.aside,{group:`${name} · Aside`,tz,zone,now}));
   const claude=py.claude||ps.claude,codex=py.codex||ps.codex;
-  if(plan.sources.has('claude-desktop')&&claude)step('claude',()=>claudeJobs(claudeTasks({scheduledTasks:claude.tasks}),{group:`${name} · Claude`,tz,skills:claude.skills||{},now:new Date(now)}));
+  if(plan.sources.has('claude-desktop')&&claude)step('claude',()=>claudeJobs(claudeTasks({scheduledTasks:claude.tasks}),{group:`${name} · Claude`,tz,zone,skills:claude.skills||{},now:new Date(now)}));
   if(plan.sources.has('codex')&&codex)step('codex',()=>codexJobs((codex.automations||[]).map(a=>({id:a.dir,...parseToml(a.text)})),
-    {group:`${name} · Codex`,tz,runs:codex.runs||{},now,keepDone:!!remote.keepDone}));
+    {group:`${name} · Codex`,tz,zone,runs:codex.runs||{},now,keepDone:!!remote.keepDone}));
   for(const r of Array.isArray(ps.repos)?ps.repos:[])step(`repo ${r.repo}`,()=>repoFileJobs(r.repo,r.files||[],{sources:plan.sources,now:new Date(now)}));
   const seen=new Set();
-  return filterJobs(jobs,{...o,skipDistro:false}).filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,500);
+  return applyNotes(filterJobs(jobs,{...o,skipDistro:false}).filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,500).map(bare),{...notes,...remote.notes});
 }
 // spawn with a time limit (spawnSync would hold up the pass); {status, stdout, stderr, timedOut}.
 function runAsync(bin,argv,{input='',timeout=40000}={}){
@@ -1156,6 +1484,7 @@ async function overSsh(remote,command,script,deadline){
   }
 }
 // Every job a remote machine has, or throws (nothing reachable). Parts that fail are noted.
+const notesOf=c=>c?.jobs&&typeof c.jobs==='object'&&c.jobs.notes||{};
 export async function discoverRemote(remote,{note=()=>{},now=Date.now()}={}){
   if(!remote?.name||!Array.isArray(remote.ssh)||!remote.ssh.length)throw new Error('a remote needs "name" and "ssh" (the ssh command as a list)');
   if(remote.timezone&&!validTz(remote.timezone))note(`${remote.name}: unknown timezone "${remote.timezone}"; using this machine's`);
@@ -1170,7 +1499,7 @@ export async function discoverRemote(remote,{note=()=>{},now=Date.now()}={}){
   if(py.status==='rejected')note(`${r.name} Python: ${py.reason.message}`);
   if(ps.status==='rejected'&&(py.status==='rejected'||!plan.pySources.length))throw new Error(ps.reason.message);
   if(py.status==='rejected'&&!plan.psSources.length&&!plan.repos.length)throw new Error(py.reason.message);
-  return remoteJobs(r,{ps:ps.value||{},py:py.value||{}},{now,note});
+  return remoteJobs(r,{ps:ps.value||{},py:py.value||{}},{now,note,zone:r.timezone||localZone(),notes:notesOf(cfg)});
 }
 const REMOTE_EVERY=15*60e3;
 const remotesOf=c=>(Array.isArray(c?.remotes)?c.remotes:[]).filter(x=>x&&x.enabled!==false);
@@ -1189,7 +1518,7 @@ async function reportRemotes({force=false}={}){
     try{jobs=await discoverRemote(rm,{note:m=>log('jobs:',m)})}
     catch(e){log(`remote "${name}": ${e.message}`);mark({error:clip(e.message,200)});continue}
     try{
-      const r=await flow('POST',`/runners/${encodeURIComponent(name)}`,{jobs});
+      const {r}=await postReport(`/runners/${encodeURIComponent(name)}`,{jobs,timezone:validTz(rm.timezone)&&rm.timezone?rm.timezone:localZone()});
       log(`reported ${jobs.length} jobs as "${name}"${r.changed?'':' (unchanged)'}`);mark({jobs:jobs.length});
     }catch(e){
       log(e.status===400&&/models/i.test(e.message)?`remote "${name}": this Flow server needs models in runners.report; update Flow to report remotes (${clip(e.message,120)})`:`remote "${name}": ${e.message}`);

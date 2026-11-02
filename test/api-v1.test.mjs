@@ -381,6 +381,19 @@ test('AgentFlow: runners report scheduled jobs; agents carry a schedule and the 
   assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{id:'x',lastStatus:'exploded'}]})).status,400,'lastStatus is ok, failed, running or unknown');
   assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{id:'x',source:'s'.repeat(41)}]})).status,400,'source is up to 40 characters');
   assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{name:'no id'}]})).status,400,'jobs need an id');
+  // The full schedule: zone, triggers with raw expressions, where it was read, drift and a note.
+  const rail={id:'railway:votes:services/pub/railway.json',name:'pub',source:'railway',schedule:'Every 5 min',cron:'*/5 * * * *',timezone:'UTC',
+    triggers:[{kind:'cron',expr:'*/5 * * * *',text:'Every 5 min'}],origin:'platform',file:'services/pub/railway.json',drift:'Railway runs */10 * * * *; railway.json has */5 * * * *',note:'Exits early when nothing changed.'};
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[rail],timezone:'America/Phoenix'});
+  assert.deepEqual([r.status,r.body.changed,r.body.runner.timezone],[200,true,'America/Phoenix']);
+  assert.deepEqual(r.body.runner.jobs[0],{...rail,ai:false,enabled:true,lastStatus:'unknown'});
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{...rail,note:'Only on weekdays.'}]});
+  assert.deepEqual([r.body.changed,r.body.runner.timezone,r.body.runner.jobs[0].note],[true,'America/Phoenix','Only on weekdays.'],'a new note is saved; the zone stays');
+  for(const [bad,why] of [[{timezone:'x'.repeat(65)},'timezone up to 64'],[{origin:'moon'},'origin is repo, platform or machine'],[{triggers:[{kind:'hourly'}]},'trigger kinds'],
+    [{triggers:Array.from({length:11},()=>({kind:'cron'}))},'up to 10 triggers'],[{triggers:[{kind:'cron',expr:'x'.repeat(201)}]},'expr up to 200'],[{note:'n'.repeat(501)},'note up to 500'],
+    [{drift:'d'.repeat(201)},'drift up to 200'],[{file:'f'.repeat(201)},'file up to 200']])
+    assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{...rail,...bad}]})).status,400,why);
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[backup(),jobs[1],jobs[2]]});assert.equal(r.status,200);
 
   // Agents: schedule, the job link, and automations.
   r=await op('agents.create',{env:ENV,name:'Nightly backup',kind:'automation',live:true,schedule:'Daily 22:30',job:{runner:'Jobs box',id:'systemd:backup.timer'}});

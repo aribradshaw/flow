@@ -14,7 +14,8 @@ import {humaniseOnCalendar,humaniseMonotonic,humaniseDuration,humaniseCron,nextC
   workflowCrons,workflowJobs,crontabJobs,isDistroTimer,filterJobs,matches,redact,aiCommand,commandName,parseShow,parseTimerList,
   systemdJob,t3Schedule,dayPhrase,jobsTable,discoverJobs,parseRRule,rruleNext,humaniseRRule,isoDuration,humaniseWinTrigger,humaniseWinTriggers,
   isVendorTask,winStatus,windowsJobs,asideJobs,claudeTasks,claudeJobs,skillSummary,parseToml,codexJobs,remotePlan,remoteJobs,repoFileJobs,
-  psScript,pyScript,wallOf,wallToMs} from '../tools/agent-runner.mjs';
+  psScript,pyScript,wallOf,wallToMs,calendarZone,systemdTriggers,winTrigger,rruleTrigger,noteFrom,applyNotes,entryScript,t3Trigger,sameCron,scheduleDrift,
+  mergePlatform,railwayServices,vercelCrons,platformJobs,legacyJobs} from '../tools/agent-runner.mjs';
 import {spawnSync} from 'node:child_process';
 
 const RUNNER=fileURLToPath(new URL('../tools/agent-runner.mjs',import.meta.url));
@@ -114,7 +115,8 @@ test('vercel.json crons',()=>{
   const jobs=vercelJobs(JSON.stringify({crons:[{path:'/api/cron/digest',schedule:'0 14 * * *'},{path:'/api/sync',schedule:'*/5 * * * *'},{path:'/bad'}]}),{repo:'shop',now:NOW});
   assert.equal(jobs.length,2);
   assert.deepEqual(jobs[0],{id:'vercel:shop:/api/cron/digest',name:'/api/cron/digest',source:'vercel',group:'Vercel · shop',command:'GET /api/cron/digest',
-    schedule:'Daily 14:00 UTC',cron:'0 14 * * *',ai:false,enabled:true,lastStatus:'unknown',nextRun:'2026-11-01T14:00:00.000Z'});
+    schedule:'Daily 14:00 UTC',cron:'0 14 * * *',timezone:'UTC',triggers:[{kind:'cron',expr:'0 14 * * *',text:'Daily 14:00 UTC'}],nextRun:'2026-11-01T14:00:00.000Z',
+    origin:'repo',file:'vercel.json',ai:false,enabled:true,lastStatus:'unknown',_match:{platform:'vercel',name:'shop',projectId:'',path:'/api/cron/digest'}});
   assert.equal(jobs[1].schedule,'Every 5 min');
   assert.deepEqual(vercelJobs('{"framework":"nextjs"}',{repo:'x'}),[]);
   assert.deepEqual(vercelJobs('not json',{repo:'x'}),[]);
@@ -226,7 +228,7 @@ LastTriggerUSec=
   const svc={Id:'backup.service',Description:'Nightly backup',ExecStart:'{ path=/usr/bin/codex ; argv[]=/usr/bin/codex exec --token s3cret nightly ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }',Result:'exit-code',ActiveState:'failed'};
   const j=systemdJob({unit:'backup.timer',service:'backup.service'},b,svc,{scope:'system',group:'box · system'});
   assert.deepEqual(j,{id:'systemd:system:backup.timer',name:'Nightly backup',source:'systemd',group:'box · system',schedule:'Daily 22:30',
-    command:'/usr/bin/codex exec --token *** nightly',ai:true,enabled:true,lastRun:new Date(1793508600e3).toISOString(),lastStatus:'failed',nextRun:new Date(1793595000e3).toISOString()});
+    triggers:[{kind:'calendar',expr:'*-*-* 22:30:00',text:'Daily 22:30'}],origin:'machine',command:'/usr/bin/codex exec --token *** nightly',ai:true,enabled:true,lastRun:new Date(1793508600e3).toISOString(),lastStatus:'failed',nextRun:new Date(1793595000e3).toISOString()});
   const q=systemdJob({unit:'poll.timer',service:'poll.service'},p,{Result:'success',ActiveState:'inactive'},{group:'box'});
   assert.equal(q.schedule,'Every 5 min');assert.equal(q.enabled,false);assert.equal(q.lastStatus,'unknown');assert.equal(q.lastRun,undefined);
   assert.equal(systemdJob({unit:'poll.timer',last:'2026-11-01T00:00:00.000Z'},p,{Result:'success',ActiveState:'activating'}).lastStatus,'running');
@@ -411,7 +413,7 @@ test('Windows tasks to jobs: vendor tasks skipped, status from the last result',
   const jobs=windowsJobs(tasks,{group:'Laptop',profile:'C:\\Users\\Pat'});
   assert.deepEqual(jobs.map(j=>j.id),['windows:\\Nightly backup','windows:\\Agent nudge']);
   assert.deepEqual(jobs[0],{id:'windows:\\Nightly backup',name:'Nightly backup',source:'windows',group:'Laptop',schedule:'Daily 02:00',
-    command:'powershell.exe -File ~\\scripts\\backup.ps1 -Token ***',ai:false,enabled:true,lastRun:'2026-11-01T10:00:00.000Z',lastStatus:'ok',nextRun:'2026-11-02T10:00:00.000Z'});
+    triggers:[{kind:'calendar',expr:'DailyTrigger, start 2026-01-01T02:00:00',text:'Daily 02:00'}],origin:'machine',command:'powershell.exe -File ~\\scripts\\backup.ps1 -Token ***',ai:false,enabled:true,lastRun:'2026-11-01T10:00:00.000Z',lastStatus:'ok',nextRun:'2026-11-02T10:00:00.000Z'});
   assert.deepEqual([jobs[1].enabled,jobs[1].ai,'nextRun' in jobs[1]],[false,true,false],'disabled: no next run');
   assert.deepEqual(windowsJobs(tasks,{include:['*McAfee Updater'],exclude:['Nightly*']}).map(j=>j.name),['Agent nudge','McAfee Updater'],'include keeps, exclude drops');
   assert.equal(windowsJobs(tasks,{skipVendor:false}).length,4);
@@ -423,7 +425,8 @@ test('Aside routines to jobs',()=>{
     model:{provider:'gateway',modelId:'vendor/model-1'},last:{status:'idle',started:1793552408,finished:1793552500,aborted:null},...o});
   const [a,b,c,d,e]=asideJobs([r(),r({id:'r2',status:'paused',next_run_at:null}),r({id:'r3',next_run_at:'2026-10-24T16:00:00.000Z'}),
     r({id:'r4',last:{status:'suspended',started:1793552408}}),r({id:'r5',last:{status:'errored',started:1793552408,finished:1793552410,aborted:1793552410}})],{group:'Laptop · Aside',tz:PHX,now});
-  assert.deepEqual(a,{id:'aside:r1',name:'Ad check',source:'aside',group:'Laptop · Aside',schedule:'Daily 09:00, 7 times',command:'gateway/vendor/model-1 · Check the ads.',
+  assert.deepEqual(a,{id:'aside:r1',name:'Ad check',source:'aside',group:'Laptop · Aside',schedule:'Daily 09:00, 7 times',timezone:PHX,
+    triggers:[{kind:'rrule',expr:'DTSTART;TZID=America/Phoenix:20261027T090000 RRULE:FREQ=DAILY;COUNT=7',text:'Daily 09:00, 7 times'}],origin:'machine',command:'gateway/vendor/model-1 · Check the ads.',
     ai:true,enabled:true,lastRun:'2026-11-01T17:00:08.000Z',lastStatus:'ok',nextRun:'2026-11-02T16:00:00.000Z'});
   assert.deepEqual([b.enabled,'nextRun' in b],[false,false],'paused');
   assert.deepEqual([c.schedule,c.lastStatus,'nextRun' in c],['Daily 09:00, 7 times (stale)','unknown',false],'next_run_at in the past: stale');
@@ -443,6 +446,7 @@ test('Claude desktop scheduled tasks to jobs',()=>{
   const skills={'morning-digest':'---\nname: morning-digest\ndescription: "Summarise the inbox and calendar each morning"\n---\n\n# Morning digest\nRead the inbox.'};
   const [a,b]=claudeJobs(tasks,{group:'Laptop · Claude',tz:PHX,skills,now:new Date('2026-11-01T15:00:00Z')});
   assert.deepEqual(a,{id:'claude:morning-digest',name:'Morning digest',source:'claude',group:'Laptop · Claude',schedule:'Daily 07:30',cron:'30 7 * * *',
+    timezone:PHX,triggers:[{kind:'cron',expr:'30 7 * * *',text:'Daily 07:30'}],origin:'machine',
     command:'Summarise the inbox and calendar each morning',ai:true,enabled:true,lastRun:'2026-11-01T14:37:55.721Z',lastStatus:'unknown',nextRun:'2026-11-02T14:30:00.000Z'});
   assert.deepEqual([b.enabled,'nextRun' in b,'command' in b,b.schedule],[false,false,false,'Mondays 09:00']);
   assert.equal(skillSummary('# Check replies\nMore text'),'Check replies');
@@ -462,7 +466,8 @@ test('Codex automation.toml and automations to jobs',()=>{
     {id:'once-later',kind:'heartbeat',name:'Once later',status:'ACTIVE',rrule:'FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=4;BYHOUR=9;BYMINUTE=0;COUNT=1',created_at:created}];
   const jobs=codexJobs(autos,{group:'Laptop · Codex',tz:PHX,runs:{'daily-brief':[3,1793574773]},now});
   assert.deepEqual(jobs.map(j=>j.id),['codex:daily-brief','codex:nudge','codex:once-later'],'a used-up one-shot is skipped');
-  assert.deepEqual(jobs[0],{id:'codex:daily-brief',name:'Daily brief',source:'codex',group:'Laptop · Codex',schedule:'Daily 09:15, 16:15',
+  assert.deepEqual(jobs[0],{id:'codex:daily-brief',name:'Daily brief',source:'codex',group:'Laptop · Codex',schedule:'Daily 09:15, 16:15',timezone:PHX,
+    triggers:[{kind:'rrule',expr:'DTSTART;TZID=America/Phoenix:20260801T090000 RRULE:FREQ=DAILY;BYHOUR=9,16;BYMINUTE=15',text:'Daily 09:15, 16:15'}],origin:'machine',
     command:'codex:gpt-x (medium) · Line one with "quotes" and café',ai:true,enabled:true,lastRun:'2026-11-01T23:12:53.000Z',lastStatus:'unknown',nextRun:'2026-11-02T16:15:00.000Z'});
   assert.deepEqual([jobs[1].enabled,jobs[1].schedule,'nextRun' in jobs[1]],[false,'Every 6 h',false]);
   assert.deepEqual([jobs[2].schedule,jobs[2].nextRun],['Once Nov 4 09:00','2026-11-04T16:00:00.000Z']);
@@ -524,7 +529,8 @@ test('report sends each remote as its own runner, jobs only, and notes when it r
   assert.equal(r.code,0,r.stderr);
   assert.deepEqual(r.paths,['/api/v1/envs/default-workspace/runners/box','/api/v1/envs/default-workspace/runners/Laptop']);
   assert.ok(Array.isArray(r.bodies[0].models));
-  assert.deepEqual(Object.keys(r.bodies[1]),['jobs'],'no models: the server keeps what it has');
+  assert.deepEqual(Object.keys(r.bodies[1]),['jobs','timezone'],'no models: the server keeps what it has');
+  assert.equal(r.bodies[1].timezone,PHX,'the remote\'s zone');assert.ok(r.bodies[0].timezone,'this machine\'s zone');
   assert.deepEqual(r.bodies[1].jobs.map(j=>j.id).sort(),['aside:r1','windows:\\Backup']);
   assert.match(r.stdout,/remote "box" has this runner's name; skipped/);
   assert.match(r.stdout,/reported 2 jobs as "Laptop"/);
@@ -538,4 +544,164 @@ test('a remote that cannot be reached is logged and skipped',async()=>{
 test('an older server that needs models: the remote is skipped with a note',async()=>{
   const r=await reportAgainst(n=>n===1?[200,{changed:true}]:[400,{error:'input.models: is required',code:'invalid_input'}],home=>({remotes:[fakeRemote(home)]}));
   assert.equal(r.code,0,r.stderr);assert.match(r.stdout,/this Flow server needs models in runners\.report; update Flow/);
+});
+
+// ---------- schedule details: triggers, zones, notes, platform drift ----------
+test('systemd triggers: each OnCalendar line and monotonic setting, and an OnCalendar zone',()=>{
+  assert.deepEqual(systemdTriggers(['Mon..Fri *-*-* 09:00:00','Sat *-*-01..07 20:00:00','*-*-* 06:00:00 Europe/Berlin'],[['OnUnitActiveUSec','5min'],['OnBootSec','2min'],['OnActiveSec','1h']]),[
+    {kind:'calendar',expr:'Mon..Fri *-*-* 09:00:00',text:'Weekdays 09:00'},{kind:'calendar',expr:'Sat *-*-01..07 20:00:00',text:'First Saturday monthly 20:00'},
+    {kind:'calendar',expr:'*-*-* 06:00:00 Europe/Berlin',text:'Daily 06:00 Europe/Berlin'},
+    {kind:'interval',expr:'OnUnitActiveSec=5min',text:'Every 5 min'},{kind:'boot',expr:'OnBootSec=2min',text:'2 min after boot'},{kind:'other',expr:'OnActiveSec=1h',text:'1 h after the timer starts'}]);
+  assert.deepEqual(['*-*-* 06:00:00 Europe/Berlin','daily','Mon *-*-* 09:00 UTC','*-*-* 22:30:00'].map(calendarZone),['Europe/Berlin','','UTC','']);
+  const timer={TimersCalendar:['{ OnCalendar=*-*-* 22:30:00 ; next_elapse=@1 }','{ OnCalendar=*-*-* 06:00:00 UTC ; next_elapse=@1 }']};
+  const j=systemdJob({unit:'two.timer'},timer,{},{tz:PHX});
+  assert.deepEqual([j.timezone,j.triggers.map(t=>t.expr),j.origin],['UTC',['*-*-* 22:30:00','*-*-* 06:00:00 UTC'],'machine'],'a zone on an OnCalendar line wins');
+  assert.equal(systemdJob({unit:'one.timer'},{TimersCalendar:'{ OnCalendar=daily ; next_elapse=@1 }'},{},{tz:PHX}).timezone,PHX,'else the machine zone');
+});
+test('crontab: machine zone, CRON_TZ, @reboot as a boot trigger',()=>{
+  const [a,b,c]=crontabJobs('*/5 * * * * run a\nCRON_TZ=UTC\n30 6 * * * run b\n@reboot run c\n',{tz:PHX,now:NOW});
+  assert.deepEqual([a.timezone,a.triggers,a.origin],[PHX,[{kind:'cron',expr:'*/5 * * * *',text:'Every 5 min'}],'machine']);
+  assert.deepEqual([b.timezone,b.schedule,b.nextRun],['UTC','Daily 06:30 UTC','2026-11-02T06:30:00.000Z'],'CRON_TZ sets the zone of the lines after it');
+  assert.deepEqual(c.triggers,[{kind:'boot',expr:'@reboot',text:'At boot'}]);
+});
+test('repo crons: UTC, origin repo, the file; T3 triggers',()=>{
+  const [r]=railwayJobs(JSON.stringify({deploy:{cronSchedule:'*/5 * * * *',startCommand:'node run.mjs'}}),{repo:'votes',service:'pub',file:'services/pub/railway.json',now:NOW});
+  assert.deepEqual([r.timezone,r.origin,r.file,r.triggers],['UTC','repo','services/pub/railway.json',[{kind:'cron',expr:'*/5 * * * *',text:'Every 5 min'}]]);
+  const [g]=workflowJobs("on:\n  schedule:\n    - cron: '0 6 * * 1'\n",{repo:'shop',file:'w.yml',now:NOW});
+  assert.deepEqual([g.file,g.timezone,g.origin],['.github/workflows/w.yml','UTC','repo']);
+  const files=[{dir:'apps/web',name:'vercel.json',text:JSON.stringify({crons:[{path:'/api/x',schedule:'0 5 * * *'}]})},{dir:'apps/web/.vercel',name:'project.json',text:JSON.stringify({projectId:'prj_1',orgId:'team_1'})}];
+  const [v]=repoFileJobs('shop',files,{now:NOW});
+  assert.deepEqual([v.file,v._match.projectId,v._match.path],['apps/web/vercel.json','prj_1','/api/x'],'the Vercel project the folder is linked to');
+  assert.deepEqual(t3Trigger({type:'interval',everyMs:300000}),{kind:'interval',expr:'{"type":"interval","everyMs":300000}',text:'Every 5 min'});
+  assert.deepEqual(t3Trigger({type:'fixed_time',timeOfDay:'08:00',weekdays:[1,2,3,4,5]}).kind,'calendar');
+  assert.deepEqual(t3Trigger({type:'webhook'}),{kind:'other',expr:'{"type":"webhook"}',text:'On webhook'});
+});
+test('Windows triggers with their raw text, from Task Scheduler JSON',()=>{
+  // As the PowerShell script sends them (COM API values).
+  const task=JSON.parse(String.raw`{"path":"\\","name":"Backup uploads","state":"Ready","result":0,"triggers":[
+    {"type":"MSFT_TaskTimeTrigger","start":"2026-10-15T08:51:32-07:00","enabled":true,"days":null,"weeks":null,"dow":null,"dom":null,"wom":null,"interval":"PT15M","duration":""},
+    {"type":"MSFT_TaskLogonTrigger","start":"","enabled":true,"interval":"","duration":""},
+    {"type":"MSFT_TaskWeeklyTrigger","start":"2026-01-01T09:00:00","enabled":true,"weeks":2,"dow":62,"interval":"PT1H","duration":"PT8H"},
+    {"type":"MSFT_TaskDailyTrigger","start":"2026-01-01T18:58:38","enabled":false,"days":1,"interval":"PT1H","duration":"P1D"},
+    {"type":"MSFT_TaskTimeTrigger","start":"2026-11-26T14:04:25","enabled":true},
+    {"type":"MSFT_TaskBootTrigger","enabled":true},{"type":"MSFT_TaskMonthlyDOWTrigger","start":"2026-01-01T09:00:00","wom":1,"dow":2,"enabled":true},{"type":"MSFT_TaskEventTrigger","enabled":true}],
+    "actions":[{"type":"MSFT_TaskExecAction","exe":"powershell.exe","args":"-File up.ps1"}]}`);
+  const [j]=windowsJobs([task],{group:'Laptop',tz:PHX});
+  assert.equal(j.timezone,PHX);
+  assert.deepEqual(j.triggers,[
+    {kind:'interval',expr:'TimeTrigger, start 2026-10-15T08:51:32-07:00, repeat PT15M',text:'Every 15 min'},
+    {kind:'logon',expr:'LogonTrigger',text:'At logon'},
+    {kind:'calendar',expr:'WeeklyTrigger, start 2026-01-01T09:00:00, every 2 weeks, on Mon,Tue,Wed,Thu,Fri, repeat PT1H for PT8H',text:'Every 2 weeks, Weekdays 09:00, then every 1 h for 8 h'},
+    {kind:'interval',expr:'DailyTrigger, start 2026-01-01T18:58:38, repeat PT1H for P1D, (disabled)',text:'Hourly (off)'},
+    {kind:'once',expr:'TimeTrigger, start 2026-11-26T14:04:25',text:`Once Nov 26${new Date().getFullYear()===2026?'':' 2026'} 14:04`},
+    {kind:'boot',expr:'BootTrigger',text:'At boot'},
+    {kind:'calendar',expr:'MonthlyDOWTrigger, start 2026-01-01T09:00:00, on Mon, weeks-of-month mask 1',text:'First Monday monthly 09:00'},
+    {kind:'other',expr:'EventTrigger',text:'On an event'}]);
+  assert.deepEqual(windowsJobs([{...task,triggers:[]}])[0].triggers,[{kind:'manual',text:'On demand'}],'no triggers: on demand');
+  assert.equal(winTrigger({type:'MSFT_TaskTimeTrigger',start:'2026-01-01T00:00:00',interval:'PT30M'}).kind,'interval');
+});
+test('RFC 5545 triggers keep the raw rule and its TZID',()=>{
+  const at=Date.parse('2026-09-12T16:00:00Z');
+  assert.deepEqual(rruleTrigger('DTSTART;TZID=Europe/London:20261006T090000\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE',{tz:PHX,anchor:at}),
+    {trigger:{kind:'rrule',expr:'DTSTART;TZID=Europe/London:20261006T090000 RRULE:FREQ=WEEKLY;BYDAY=MO,WE',text:'Mon, Wed 09:00 Europe/London'},zone:'Europe/London'});
+  assert.equal(rruleTrigger('FREQ=DAILY;BYHOUR=9',{tz:PHX}).zone,PHX,'no DTSTART: the machine zone');
+  assert.equal(rruleTrigger('DTSTART:20261006T160000Z\\nRRULE:FREQ=DAILY',{tz:PHX}).zone,PHX,'a UTC start without BYHOUR reads in the machine zone');
+  assert.equal(rruleTrigger('DTSTART:20261006T160000Z\nRRULE:FREQ=DAILY;BYHOUR=16',{tz:PHX}).zone,'UTC','with BYHOUR the hours are UTC');
+  const [a]=asideJobs([{id:'r',name:'R',rrule:'DTSTART;TZID=Europe/London:20261006T090000\nRRULE:FREQ=DAILY',status:'active'}],{tz:PHX,now:Date.parse('2026-11-02T01:00:00Z')});
+  assert.deepEqual([a.timezone,a.triggers[0].kind],['Europe/London','rrule']);
+  const [c]=codexJobs([{id:'t',kind:'heartbeat',name:'T',status:'ACTIVE',times:['2026-11-05T16:00:00Z']}],{tz:PHX,now:Date.parse('2026-11-02T01:00:00Z')});
+  assert.deepEqual([c.timezone,c.triggers],[PHX,[{kind:'once',expr:'2026-11-05T16:00:00.000Z',text:'Once Nov 5 09:00'}]]);
+});
+test('notes: the first sentence that states a condition, conservatively; settings win',()=>{
+  const readme=`# Report publisher\n\nThis private cron service runs every five minutes and exits. It checks two revision IDs.\nUnchanged revisions do not run the aggregate query.\n\n## Variables\n\n- \`SYNC_TOKEN\`: the shared secret it only sends when posting.\n`;
+  assert.equal(noteFrom(readme),'This private cron service runs every five minutes and exits. Unchanged revisions do not run the aggregate query.');
+  assert.equal(noteFrom('# Shop\n\nA small web shop. It sells socks.\n'),'','nothing about when or whether it runs: no note');
+  assert.equal(noteFrom('Posts the report only when the totals changed. Then it also runs every five minutes.'),'Posts the report only when the totals changed.','a condition first: just it');
+  assert.equal(noteFrom('Skips the run unless the API token is set.'),'','sentences about secrets are never used');
+  assert.equal(noteFrom('```\nexits when unchanged\n```\n\nNothing here.'),'','code blocks are ignored');
+  assert.equal(noteFrom('Exits early if { "a": 1 } is unchanged.'),'','code-like sentences are ignored');
+  assert.equal(noteFrom(`Runs every five minutes and exits. ${'Long '.repeat(40)}skips unchanged rows.`),'Runs every five minutes and exits.','two sentences only when both fit');
+  assert.equal(noteFrom('#!/usr/bin/env node\n// Nightly sync. Does not run on weekends.\nimport x from "y";\n// Exits when unchanged.\n',{comment:true}),'Does not run on weekends.','a script: only its leading comment');
+  assert.equal(noteFrom('/**\n * Purges rows only after the 30-day window has passed.\n */\nexport default 1',{comment:true}),'Purges rows only after the 30-day window has passed.');
+  assert.equal(noteFrom('\x22\x22\x22Retries at the next run when the upload fails.\x22\x22\x22\nimport os',{comment:true}),'Retries at the next run when the upload fails.');
+  assert.equal(entryScript('node run.mjs'),'run.mjs');assert.equal(entryScript('NODE_ENV=production node ./scripts/job.js --once'),'scripts/job.js');assert.equal(entryScript('npm start'),'');
+  const dir=mkdtempSync(join(tmpdir(),'runner-notes-'));
+  try{
+    const files=[{dir:'services/pub',name:'railway.json',text:JSON.stringify({deploy:{cronSchedule:'*/5 * * * *',startCommand:'node run.mjs'}})},{dir:'services/pub',name:'README.md',text:readme},
+      {dir:'services/api',name:'railway.json',text:JSON.stringify({deploy:{cronSchedule:'0 1 * * *',startCommand:'node job.mjs'}})},{dir:'',name:'vercel.json',text:JSON.stringify({crons:[{path:'/api/cron/purge',schedule:'0 3 * * *'}]})}];
+    const read=rel=>({'services/api/job.mjs':'// Sends the digest only when there are new rows.\n','app/api/cron/purge/route.ts':'// Exits early when nothing changed.\nexport {}'})[rel]||null;
+    const jobs=repoFileJobs('votes',files,{now:NOW,read});
+    assert.deepEqual(jobs.map(j=>j.note),['This private cron service runs every five minutes and exits. Unchanged revisions do not run the aggregate query.','Sends the digest only when there are new rows.','Exits early when nothing changed.'],'README, else the start script, and a Vercel route\'s comment');
+    const n=applyNotes(jobs,{'services/api':'Runs only on weekdays, token=abc123secret here.','*/api/cron/*':''});
+    assert.deepEqual(n.map(j=>j.note),[jobs[0].note,'Runs only on weekdays, token=*** here.',undefined],'settings win by id substring or glob; "" removes a note; secrets hidden');
+  }finally{rmSync(dir,{recursive:true,force:true})}
+});
+test('platform drift: same cron, drift text, and matching live schedules',()=>{
+  assert.ok(sameCron('*/5 * * * *','0-59/5  *  * * *'));assert.ok(!sameCron('*/5 * * * *','*/10 * * * *'));assert.ok(sameCron('0 0 * * 0','0 0 * * 7'));
+  assert.equal(scheduleDrift({platform:'Railway',file:'railway.json',fileExpr:'*/5 * * * *',live:'0-59/5 * * * *'}),'');
+  assert.equal(scheduleDrift({platform:'Railway',file:'railway.json',fileExpr:'*/5 * * * *',live:'*/10 * * * *'}),'Railway runs */10 * * * * (Every 10 min); railway.json has */5 * * * * (Every 5 min)');
+  assert.equal(scheduleDrift({platform:'Railway',file:'railway.json',fileExpr:'0 3 * * *',live:null}),'Railway has no cron schedule for it; railway.json has 0 3 * * * (Daily 03:00 UTC)');
+  // Railway's GraphQL answer.
+  const gql={projects:{edges:[{node:{id:'p1',name:'votes',environments:{edges:[{node:{id:'e1',name:'production'}},{node:{id:'e2',name:'staging'}}]},services:{edges:[
+    {node:{id:'s1',name:'report-publisher',serviceInstances:{edges:[{node:{environmentId:'e2',cronSchedule:'*/1 * * * *'}},{node:{environmentId:'e1',cronSchedule:'*/10 * * * *',nextCronRunAt:'2026-11-01T12:10:00Z',startCommand:'node run.mjs'}}]}}},
+    {node:{id:'s2',name:'web',serviceInstances:{edges:[{node:{environmentId:'e1',cronSchedule:null}}]}}},
+    {node:{id:'s3',name:'cleanup',serviceInstances:{edges:[{node:{environmentId:'e1',cronSchedule:'0 4 * * *'}}]}}},
+    {node:{id:'s4',name:'importer',serviceInstances:{edges:[{node:{environmentId:'e1',cronSchedule:''}}]}}}]}}}]}};
+  const live=railwayServices(gql);
+  assert.deepEqual(live[0],{projectId:'p1',project:'votes',serviceId:'s1',service:'report-publisher',environment:'production',cronSchedule:'*/10 * * * *',nextRun:'2026-11-01T12:10:00.000Z',startCommand:'node run.mjs'},'the production instance');
+  const rail=(svc,expr,file)=>railwayJobs(JSON.stringify({deploy:{cronSchedule:expr,startCommand:'node run.mjs'}}),{repo:'votes',service:svc,file,now:NOW})[0];
+  const repo=[rail('report-publisher','*/5 * * * *','services/report-publisher/railway.json'),rail('importer','0 2 * * *','services/importer/railway.json'),rail('other','0 1 * * *','services/other/railway.json')];
+  // Vercel: a project with crons, and one whose list entry has none (unknown).
+  const vp=vercelCrons([{id:'prj_1',name:'shop',crons:{enabledAt:1,disabledAt:null,definitions:[{host:'shop.example',path:'/api/a',schedule:'0 5 * * *'},{path:'/api/new',schedule:'0 6 * * *'}]}},{id:'prj_2',name:'blog'}]);
+  assert.deepEqual(vp.map(v=>[v.project,v.path,v.known]),[['shop','/api/a',true],['shop','/api/new',true],['blog',undefined,false]]);
+  const vfiles=[{dir:'',name:'vercel.json',text:JSON.stringify({crons:[{path:'/api/a',schedule:'0 4 * * *'},{path:'/api/gone',schedule:'0 7 * * *'}]})}];
+  const vj=repoFileJobs('shop',vfiles,{now:NOW}),bj=repoFileJobs('blog',vfiles,{now:NOW});
+  const out=mergePlatform([...repo,...vj,...bj],{railway:live,vercel:vp},{now:NOW});
+  const by=id=>out.find(j=>j.id===id);
+  const pub=by('railway:votes:services/report-publisher/railway.json');
+  assert.deepEqual([pub.origin,pub.file,pub.cron,pub.schedule,pub.nextRun,pub.drift],['platform','services/report-publisher/railway.json','*/10 * * * *','Every 10 min','2026-11-01T12:10:00.000Z',
+    'Railway runs */10 * * * * (Every 10 min); services/report-publisher/railway.json has */5 * * * * (Every 5 min)'],'reported as Railway runs it, with drift');
+  const imp=by('railway:votes:services/importer/railway.json');
+  assert.deepEqual([imp.origin,imp.cron,imp.drift],['repo','0 2 * * *','Railway has no cron schedule for it; services/importer/railway.json has 0 2 * * * (Daily 02:00 UTC)']);
+  assert.deepEqual([by('railway:votes:services/other/railway.json').origin,'drift' in by('railway:votes:services/other/railway.json')],['repo',false],'no live service by that name: as it was');
+  const only=by('railway:votes/cleanup');
+  assert.deepEqual([only.origin,only.cron,only.timezone,'file' in only],['platform','0 4 * * *','UTC',false],'a live cron no repo file has');
+  assert.deepEqual([by('vercel:shop:/api/a').origin,by('vercel:shop:/api/a').drift],['platform','Vercel runs 0 5 * * * (Daily 05:00 UTC); vercel.json has 0 4 * * * (Daily 04:00 UTC)']);
+  assert.match(by('vercel:shop:/api/gone').drift,/^Not among shop's live crons on Vercel; vercel\.json has 0 7 \* \* \*/);
+  assert.equal(by('vercel:shop:/api/new').origin,'platform');
+  assert.deepEqual([by('vercel:blog:/api/a').origin,'drift' in by('vercel:blog:/api/a')],['repo',false],'no crons in the answer: nothing said');
+  assert.ok(out.every(j=>!('_drift' in j)));
+  assert.deepEqual(mergePlatform(repo,{},{now:NOW}),repo,'no platform data: unchanged');
+});
+test('platformJobs asks only with a token, and reads Railway and Vercel defensively',async()=>{
+  const repo=railwayJobs(JSON.stringify({deploy:{cronSchedule:'*/5 * * * *'}}),{repo:'votes',service:'pub',file:'railway.json',now:NOW});
+  const real=globalThis.fetch,calls=[];
+  try{
+    globalThis.fetch=async(url,o={})=>{calls.push([String(url),o.headers?.authorization]);
+      if(String(url).includes('railway'))return new Response(JSON.stringify({data:{projects:{edges:[{node:{id:'p',name:'votes',environments:{edges:[]},services:{edges:[{node:{id:'s',name:'pub',serviceInstances:{edges:[{node:{cronSchedule:'*/5 * * * *',nextCronRunAt:'2026-11-01T12:05:00Z'}}]}}}]}}}]}}}));
+      if(String(url).includes('/v9/projects?'))return new Response(JSON.stringify({projects:[{id:'prj',name:'shop'}],pagination:{next:null}}));
+      if(String(url).includes('/v9/projects/prj'))return new Response(JSON.stringify({id:'prj',name:'shop',crons:{definitions:[{path:'/api/a',schedule:'0 5 * * *'}]}}));
+      return new Response('{}',{status:404});
+    };
+    assert.deepEqual(await platformJobs(repo,{},{env:{},now:NOW}),repo,'no token: nothing asked');assert.equal(calls.length,0);
+    const v=vercelJobs(JSON.stringify({crons:[{path:'/api/a',schedule:'0 5 * * *'}]}),{repo:'shop',now:NOW});
+    const out=await platformJobs([...repo,...v],{},{env:{RAILWAY_API_TOKEN:'rw',VERCEL_TOKEN:'vt'},now:NOW});
+    assert.deepEqual(out.map(j=>[j.id,j.origin,j.drift||'',j.nextRun]),[['railway:votes:railway.json','platform','','2026-11-01T12:05:00.000Z'],['vercel:shop:/api/a','platform','','2026-11-02T05:00:00.000Z']]);
+    assert.deepEqual(calls.map(c=>c[1]),['Bearer rw','Bearer vt','Bearer vt'],'tokens as bearer tokens');
+    assert.ok(calls[2][0].endsWith('/v9/projects/prj?'),'a list without crons: the linked project is read');
+    globalThis.fetch=async()=>{throw new Error('offline')};
+    const notes=[];assert.deepEqual(await platformJobs(repo,{railwayToken:'x'},{env:{},note:n=>notes.push(n),now:NOW}),repo.map(({_drift,...j})=>j));
+    assert.deepEqual(notes,['Railway API: offline'],'a failure is noted, the repo jobs stay');
+  }finally{globalThis.fetch=real}
+});
+test('the jobs table shows TZ and ORIGIN; older servers get the older fields',async()=>{
+  const t=jobsTable([{id:'a',name:'Pub',source:'railway',group:'g',schedule:'Every 10 min',timezone:'UTC',origin:'platform',drift:'x',ai:false,enabled:true,lastStatus:'unknown'}]).split('\n');
+  assert.match(t[0],/SCHEDULE\s+TZ\s+ORIGIN\s+ON/);assert.match(t[1],/Every 10 min\s+UTC\s+platform!\s+on/);
+  assert.deepEqual(legacyJobs([{id:'a',name:'A',source:'x',schedule:'s',timezone:'UTC',triggers:[],origin:'repo',file:'f',drift:'d',note:'n',ai:false,enabled:true,lastStatus:'ok'}]),
+    [{id:'a',name:'A',source:'x',schedule:'s',ai:false,enabled:true,lastStatus:'ok'}]);
+  const r=await reportAgainst(n=>n===1?[400,{error:'input.jobs[0].timezone: is not allowed',code:'invalid_input'}]:[200,{changed:true}]);
+  assert.equal(r.code,0,r.stderr);assert.equal(r.bodies.length,2);
+  assert.ok(r.bodies[0].timezone&&r.bodies[0].jobs[0].triggers);
+  assert.deepEqual([r.bodies[1].timezone,r.bodies[1].jobs[0].triggers,r.bodies[1].jobs[0].id],[undefined,undefined,'vercel:repo:/api/x'],'sent again without the newer fields');
+  assert.match(r.stdout,/server does not accept schedule details yet/);
 });

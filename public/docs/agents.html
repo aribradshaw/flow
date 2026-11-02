@@ -1810,7 +1810,7 @@
     &quot;env&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].jobs</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>items[].reported</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].jobsReported</code></td><td>string</td><td></td><td></td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].jobs</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>items[].timezone</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].reported</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].jobsReported</code></td><td>string</td><td></td><td></td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;items&quot;: {
@@ -1871,6 +1871,55 @@
                 &quot;cron&quot;: {
                   &quot;type&quot;: &quot;string&quot;
                 },
+                &quot;timezone&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;triggers&quot;: {
+                  &quot;type&quot;: &quot;array&quot;,
+                  &quot;items&quot;: {
+                    &quot;type&quot;: &quot;object&quot;,
+                    &quot;properties&quot;: {
+                      &quot;kind&quot;: {
+                        &quot;enum&quot;: [
+                          &quot;cron&quot;,
+                          &quot;calendar&quot;,
+                          &quot;interval&quot;,
+                          &quot;logon&quot;,
+                          &quot;boot&quot;,
+                          &quot;once&quot;,
+                          &quot;rrule&quot;,
+                          &quot;manual&quot;,
+                          &quot;other&quot;
+                        ]
+                      },
+                      &quot;expr&quot;: {
+                        &quot;type&quot;: &quot;string&quot;
+                      },
+                      &quot;text&quot;: {
+                        &quot;type&quot;: &quot;string&quot;
+                      }
+                    },
+                    &quot;required&quot;: [
+                      &quot;kind&quot;
+                    ]
+                  }
+                },
+                &quot;origin&quot;: {
+                  &quot;enum&quot;: [
+                    &quot;repo&quot;,
+                    &quot;platform&quot;,
+                    &quot;machine&quot;
+                  ]
+                },
+                &quot;file&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;drift&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;note&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
                 &quot;command&quot;: {
                   &quot;type&quot;: &quot;string&quot;
                 },
@@ -1905,6 +1954,9 @@
                 &quot;lastStatus&quot;
               ]
             }
+          },
+          &quot;timezone&quot;: {
+            &quot;type&quot;: &quot;string&quot;
           },
           &quot;reported&quot;: {
             &quot;type&quot;: &quot;string&quot;
@@ -1958,7 +2010,7 @@
 }</code></pre></section>
 <section class="op" id="op-runners-report"><h3><code>runners.report</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/runners/{runner}</code> <span class="muted">MCP <code>runners_report</code></span></p>
-<p class="summary">Report a runner and its models</p><p>A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>runner</code></td><td>string</td><td><span class="req">required</span></td><td>Runner name, e.g. Home server.</td></tr><tr><td><code>models</code></td><td>object[]</td><td></td><td>The models this runner can run (replaces the stored list; leave out to keep it).</td></tr><tr><td><code>models[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].label</code></td><td>string</td><td></td><td></td></tr><tr><td><code>models[].provider</code></td><td>string</td><td></td><td>Display group, e.g. Claude or OpenCode.</td></tr><tr><td><code>models[].billing</code></td><td>enum</td><td></td><td>included (a subscription or free) or metered (paid per use). One of <code>included</code>, <code>metered</code>.</td></tr><tr><td><code>jobs</code></td><td>object[]</td><td></td><td>Scheduled jobs on this runner (replaces the stored list; leave out to keep it, [] to clear).</td></tr><tr><td><code>jobs[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable per runner, e.g. systemd:backup.timer or vercel:my-app:/api/cron/sync.</td></tr><tr><td><code>jobs[].name</code></td><td>string</td><td></td><td>Defaults to the id.</td></tr><tr><td><code>jobs[].source</code></td><td>string</td><td></td><td>Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, codex, github or other (any text; defaults to other).</td></tr><tr><td><code>jobs[].group</code></td><td>string</td><td></td><td>Display group, e.g. &quot;Home server&quot; or &quot;Vercel · my-app&quot;.</td></tr><tr><td><code>jobs[].schedule</code></td><td>string</td><td></td><td>When, in words, e.g. &quot;Daily 22:30&quot; or &quot;Every 5 min&quot;.</td></tr><tr><td><code>jobs[].cron</code></td><td>string</td><td></td><td>The cron expression, when there is one.</td></tr><tr><td><code>jobs[].command</code></td><td>string</td><td></td><td>A short summary of what it runs.</td></tr><tr><td><code>jobs[].ai</code></td><td>boolean</td><td></td><td>It starts an AI agent (promoted as an AI agent rather than an automation).</td></tr><tr><td><code>jobs[].enabled</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>jobs[].lastRun</code></td><td>string</td><td></td><td>ISO time of the last run.</td></tr><tr><td><code>jobs[].lastStatus</code></td><td>enum</td><td></td><td>One of <code>ok</code>, <code>failed</code>, <code>running</code>, <code>unknown</code>.</td></tr><tr><td><code>jobs[].nextRun</code></td><td>string</td><td></td><td>ISO time of the next run.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Report a runner and its models</p><p>A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. A job can carry its full schedule: its timezone, every trigger with its raw expression, where it was read (origin, and the repo file), drift from the live schedule on the platform, and a note on conditions its script applies. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>runner</code></td><td>string</td><td><span class="req">required</span></td><td>Runner name, e.g. Home server.</td></tr><tr><td><code>models</code></td><td>object[]</td><td></td><td>The models this runner can run (replaces the stored list; leave out to keep it).</td></tr><tr><td><code>models[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>models[].label</code></td><td>string</td><td></td><td></td></tr><tr><td><code>models[].provider</code></td><td>string</td><td></td><td>Display group, e.g. Claude or OpenCode.</td></tr><tr><td><code>models[].billing</code></td><td>enum</td><td></td><td>included (a subscription or free) or metered (paid per use). One of <code>included</code>, <code>metered</code>.</td></tr><tr><td><code>jobs</code></td><td>object[]</td><td></td><td>Scheduled jobs on this runner (replaces the stored list; leave out to keep it, [] to clear).</td></tr><tr><td><code>jobs[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable per runner, e.g. systemd:backup.timer or vercel:my-app:/api/cron/sync.</td></tr><tr><td><code>jobs[].name</code></td><td>string</td><td></td><td>Defaults to the id.</td></tr><tr><td><code>jobs[].source</code></td><td>string</td><td></td><td>Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, codex, github or other (any text; defaults to other).</td></tr><tr><td><code>jobs[].group</code></td><td>string</td><td></td><td>Display group, e.g. &quot;Home server&quot; or &quot;Vercel · my-app&quot;.</td></tr><tr><td><code>jobs[].schedule</code></td><td>string</td><td></td><td>When, in words, e.g. &quot;Daily 22:30&quot; or &quot;Every 5 min&quot;.</td></tr><tr><td><code>jobs[].cron</code></td><td>string</td><td></td><td>The cron expression, when there is one.</td></tr><tr><td><code>jobs[].timezone</code></td><td>string</td><td></td><td>The zone its times are in: an IANA name such as America/Phoenix, &quot;UTC&quot;, or &quot;local&quot; (the runner&#39;s own; see timezone on the runner).</td></tr><tr><td><code>jobs[].triggers</code></td><td>object[]</td><td></td><td>Every rule it fires on, e.g. each OnCalendar line of a systemd timer or each trigger of a Windows task.</td></tr><tr><td><code>jobs[].origin</code></td><td>enum</td><td></td><td>Where the schedule was read: repo (a config file in a repo; see file), platform (the hosting platform&#39;s API) or machine (the machine&#39;s own scheduler). One of <code>repo</code>, <code>platform</code>, <code>machine</code>.</td></tr><tr><td><code>jobs[].file</code></td><td>string</td><td></td><td>The repo-relative path of the config it came from, e.g. services/worker/railway.json.</td></tr><tr><td><code>jobs[].drift</code></td><td>string</td><td></td><td>How the platform&#39;s live schedule differs from the repo file, when it does.</td></tr><tr><td><code>jobs[].note</code></td><td>string</td><td></td><td>Conditions the job&#39;s script applies itself, e.g. &quot;Exits early when nothing changed&quot;.</td></tr><tr><td><code>jobs[].command</code></td><td>string</td><td></td><td>A short summary of what it runs.</td></tr><tr><td><code>jobs[].ai</code></td><td>boolean</td><td></td><td>It starts an AI agent (promoted as an AI agent rather than an automation).</td></tr><tr><td><code>jobs[].enabled</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>jobs[].lastRun</code></td><td>string</td><td></td><td>ISO time of the last run.</td></tr><tr><td><code>jobs[].lastStatus</code></td><td>enum</td><td></td><td>One of <code>ok</code>, <code>failed</code>, <code>running</code>, <code>unknown</code>.</td></tr><tr><td><code>jobs[].nextRun</code></td><td>string</td><td></td><td>ISO time of the next run.</td></tr><tr><td><code>timezone</code></td><td>string</td><td></td><td>The runner machine&#39;s time zone (an IANA name), which jobs with timezone &quot;local&quot; are in. Left out, the stored one stays.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -2045,6 +2097,72 @@
             &quot;maxLength&quot;: 120,
             &quot;description&quot;: &quot;The cron expression, when there is one.&quot;
           },
+          &quot;timezone&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 64,
+            &quot;description&quot;: &quot;The zone its times are in: an IANA name such as America/Phoenix, \&quot;UTC\&quot;, or \&quot;local\&quot; (the runner&#39;s own; see timezone on the runner).&quot;
+          },
+          &quot;triggers&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;maxItems&quot;: 10,
+            &quot;description&quot;: &quot;Every rule it fires on, e.g. each OnCalendar line of a systemd timer or each trigger of a Windows task.&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;properties&quot;: {
+                &quot;kind&quot;: {
+                  &quot;enum&quot;: [
+                    &quot;cron&quot;,
+                    &quot;calendar&quot;,
+                    &quot;interval&quot;,
+                    &quot;logon&quot;,
+                    &quot;boot&quot;,
+                    &quot;once&quot;,
+                    &quot;rrule&quot;,
+                    &quot;manual&quot;,
+                    &quot;other&quot;
+                  ],
+                  &quot;description&quot;: &quot;cron, calendar (a calendar rule such as systemd OnCalendar or a daily or weekly trigger), interval, logon, boot, once, rrule (RFC 5545), manual or other.&quot;
+                },
+                &quot;expr&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;maxLength&quot;: 200,
+                  &quot;description&quot;: &quot;The raw expression as the scheduler holds it, e.g. \&quot;*/5 * * * *\&quot; or \&quot;Mon *-*-* 09:00:00\&quot;.&quot;
+                },
+                &quot;text&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;maxLength&quot;: 200,
+                  &quot;description&quot;: &quot;It in words, e.g. \&quot;Every 5 min\&quot;.&quot;
+                }
+              },
+              &quot;required&quot;: [
+                &quot;kind&quot;
+              ],
+              &quot;additionalProperties&quot;: false
+            }
+          },
+          &quot;origin&quot;: {
+            &quot;enum&quot;: [
+              &quot;repo&quot;,
+              &quot;platform&quot;,
+              &quot;machine&quot;
+            ],
+            &quot;description&quot;: &quot;Where the schedule was read: repo (a config file in a repo; see file), platform (the hosting platform&#39;s API) or machine (the machine&#39;s own scheduler).&quot;
+          },
+          &quot;file&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 200,
+            &quot;description&quot;: &quot;The repo-relative path of the config it came from, e.g. services/worker/railway.json.&quot;
+          },
+          &quot;drift&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 200,
+            &quot;description&quot;: &quot;How the platform&#39;s live schedule differs from the repo file, when it does.&quot;
+          },
+          &quot;note&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 500,
+            &quot;description&quot;: &quot;Conditions the job&#39;s script applies itself, e.g. \&quot;Exits early when nothing changed\&quot;.&quot;
+          },
           &quot;command&quot;: {
             &quot;type&quot;: &quot;string&quot;,
             &quot;maxLength&quot;: 300,
@@ -2082,6 +2200,11 @@
         ],
         &quot;additionalProperties&quot;: false
       }
+    },
+    &quot;timezone&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 64,
+      &quot;description&quot;: &quot;The runner machine&#39;s time zone (an IANA name), which jobs with timezone \&quot;local\&quot; are in. Left out, the stored one stays.&quot;
     }
   },
   &quot;required&quot;: [
@@ -2089,7 +2212,7 @@
     &quot;runner&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>runner</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.jobs</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>runner.reported</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.jobsReported</code></td><td>string</td><td></td><td></td></tr><tr><td><code>changed</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>runner</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.name</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.models</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.jobs</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>runner.timezone</code></td><td>string</td><td></td><td></td></tr><tr><td><code>runner.reported</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>runner.jobsReported</code></td><td>string</td><td></td><td></td></tr><tr><td><code>changed</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -2152,6 +2275,55 @@
               &quot;cron&quot;: {
                 &quot;type&quot;: &quot;string&quot;
               },
+              &quot;timezone&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              &quot;triggers&quot;: {
+                &quot;type&quot;: &quot;array&quot;,
+                &quot;items&quot;: {
+                  &quot;type&quot;: &quot;object&quot;,
+                  &quot;properties&quot;: {
+                    &quot;kind&quot;: {
+                      &quot;enum&quot;: [
+                        &quot;cron&quot;,
+                        &quot;calendar&quot;,
+                        &quot;interval&quot;,
+                        &quot;logon&quot;,
+                        &quot;boot&quot;,
+                        &quot;once&quot;,
+                        &quot;rrule&quot;,
+                        &quot;manual&quot;,
+                        &quot;other&quot;
+                      ]
+                    },
+                    &quot;expr&quot;: {
+                      &quot;type&quot;: &quot;string&quot;
+                    },
+                    &quot;text&quot;: {
+                      &quot;type&quot;: &quot;string&quot;
+                    }
+                  },
+                  &quot;required&quot;: [
+                    &quot;kind&quot;
+                  ]
+                }
+              },
+              &quot;origin&quot;: {
+                &quot;enum&quot;: [
+                  &quot;repo&quot;,
+                  &quot;platform&quot;,
+                  &quot;machine&quot;
+                ]
+              },
+              &quot;file&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              &quot;drift&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              &quot;note&quot;: {
+                &quot;type&quot;: &quot;string&quot;
+              },
               &quot;command&quot;: {
                 &quot;type&quot;: &quot;string&quot;
               },
@@ -2186,6 +2358,9 @@
               &quot;lastStatus&quot;
             ]
           }
+        },
+        &quot;timezone&quot;: {
+          &quot;type&quot;: &quot;string&quot;
         },
         &quot;reported&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -2231,7 +2406,7 @@
 }</code></pre><h4>Example: With scheduled jobs</h4><pre><code>curl -sS -X POST &quot;$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server&quot; \
   -H &quot;Authorization: Bearer $FLOW_API_KEY&quot; \
   -H &#39;Content-Type: application/json&#39; \
-  -d &#39;{&quot;models&quot;:[{&quot;id&quot;:&quot;claudeAgent:claude-sonnet-5-5&quot;,&quot;label&quot;:&quot;Claude · Sonnet 5.5&quot;}],&quot;jobs&quot;:[{&quot;id&quot;:&quot;systemd:backup.timer&quot;,&quot;name&quot;:&quot;Nightly backup&quot;,&quot;source&quot;:&quot;systemd&quot;,&quot;group&quot;:&quot;Home server&quot;,&quot;schedule&quot;:&quot;Daily 22:30&quot;,&quot;cron&quot;:&quot;30 22 * * *&quot;,&quot;command&quot;:&quot;restic backup /srv&quot;,&quot;ai&quot;:false,&quot;enabled&quot;:true,&quot;lastRun&quot;:&quot;2026-10-29T17:00:00.000Z&quot;,&quot;lastStatus&quot;:&quot;ok&quot;,&quot;nextRun&quot;:&quot;2026-10-30T22:30:00.000Z&quot;}]}&#39;</code></pre><pre class="out"><code>{
+  -d &#39;{&quot;models&quot;:[{&quot;id&quot;:&quot;claudeAgent:claude-sonnet-5-5&quot;,&quot;label&quot;:&quot;Claude · Sonnet 5.5&quot;}],&quot;jobs&quot;:[{&quot;id&quot;:&quot;systemd:backup.timer&quot;,&quot;name&quot;:&quot;Nightly backup&quot;,&quot;source&quot;:&quot;systemd&quot;,&quot;group&quot;:&quot;Home server&quot;,&quot;schedule&quot;:&quot;Daily 22:30&quot;,&quot;cron&quot;:&quot;30 22 * * *&quot;,&quot;timezone&quot;:&quot;America/Phoenix&quot;,&quot;triggers&quot;:[{&quot;kind&quot;:&quot;calendar&quot;,&quot;expr&quot;:&quot;*-*-* 22:30:00&quot;,&quot;text&quot;:&quot;Daily 22:30&quot;}],&quot;origin&quot;:&quot;machine&quot;,&quot;command&quot;:&quot;restic backup /srv&quot;,&quot;ai&quot;:false,&quot;enabled&quot;:true,&quot;lastRun&quot;:&quot;2026-10-29T17:00:00.000Z&quot;,&quot;lastStatus&quot;:&quot;ok&quot;,&quot;nextRun&quot;:&quot;2026-10-30T22:30:00.000Z&quot;}]}&#39;</code></pre><pre class="out"><code>{
   &quot;rev&quot;: 60,
   &quot;runner&quot;: {
     &quot;name&quot;: &quot;Home server&quot;,
@@ -2251,6 +2426,15 @@
         &quot;group&quot;: &quot;Home server&quot;,
         &quot;schedule&quot;: &quot;Daily 22:30&quot;,
         &quot;cron&quot;: &quot;30 22 * * *&quot;,
+        &quot;timezone&quot;: &quot;America/Phoenix&quot;,
+        &quot;triggers&quot;: [
+          {
+            &quot;kind&quot;: &quot;calendar&quot;,
+            &quot;expr&quot;: &quot;*-*-* 22:30:00&quot;,
+            &quot;text&quot;: &quot;Daily 22:30&quot;
+          }
+        ],
+        &quot;origin&quot;: &quot;machine&quot;,
         &quot;command&quot;: &quot;restic backup /srv&quot;,
         &quot;ai&quot;: false,
         &quot;enabled&quot;: true,

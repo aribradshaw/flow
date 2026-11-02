@@ -9,7 +9,7 @@ import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
   canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,
-  jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,cardH} from './agentflow-core.js';
+  jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,JOB_ORIGINS,JOB_TRIGGERS,cardH} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -52,6 +52,8 @@ export function mount(opts){
     if(e.target.closest('.af-scroll')&&!e.target.closest('button,a,input')&&selected)select(null);
   });
   el.addEventListener('pointerdown',canvasDown);
+  // A press outside the open job details (and outside the job rows, which switch them) closes them.
+  document.addEventListener('pointerdown',e=>{if(jobPop&&!e.target.closest?.('.af-jpop,.af-tray [data-jid],.cm'))closeJob()},true);
   el.addEventListener('pointermove',canvasMove);
   el.addEventListener('pointerup',canvasUp);
   el.addEventListener('contextmenu',contextMenu);
@@ -177,7 +179,7 @@ function paintChain(){
   const id=hoverId||(selected?.type==='agent'?selected.id:null);el.setAttribute('d',id?chainD(id):'');
 }
 const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world" style="--af-w:${CARD.w}px;--af-h:${CARD.h}px;--af-ha:${CARD.auto}px"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
-  <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div><aside class="af-tray" aria-label="Scheduled jobs" hidden></aside>`;
+  <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div><aside class="af-tray" aria-label="Scheduled jobs" hidden></aside><div class="af-jpop" role="dialog" aria-label="Job details" tabindex="-1" hidden></div>`;
 function paintZoom(){
   const z=$('#agentflowView .af-zoom');if(!z)return;
   z.innerHTML=ib('minus','Zoom out',{key:keyLabel('agentflow.zoomOut'),attrs:'data-afz="out" data-tip-pos="top"'})+`<button type="button" class="af-scale" data-afz="reset" data-tip="Reset to 100%" data-tip-pos="top">${Math.round(view.z*100)}%</button>`
@@ -200,6 +202,27 @@ function rel(iso){
   const s=(t-Date.now())/1000,a=Math.abs(s),v=a<90?'':a<5400?`${Math.round(a/60)} min`:a<129600?`${Math.round(a/3600)} h`:`${Math.round(a/86400)} days`;
   return !v?(s<0?'just now':'in a moment'):s<0?`${v} ago`:`in ${v}`;
 }
+// Time zones. A job's zone: its timezone ("UTC", an IANA name), "local" read as its runner's zone when
+// the runner reported one, '' when not reported. The row names the zone only when it is not the
+// viewer's own and the schedule has a time of day that does not already say it.
+const viewerZone=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch{return ''}})();
+const jobZone=j=>{const z=j.timezone||'';return z==='local'?runnerOf(af(),j.runner)?.timezone||'local':z};
+function zoneShort(z,at=Date.now()){
+  if(!z||z==='local'||z==='UTC')return z;
+  try{return new Intl.DateTimeFormat('en-US',{timeZone:z,timeZoneName:'short'}).formatToParts(new Date(at)).find(p=>p.type==='timeZoneName')?.value||z}catch{return z}
+}
+function zoneTag(j){
+  const z=jobZone(j),s=j.schedule||'';
+  if(!z||z==='local'||z===viewerZone||!/\d:\d\d/.test(s))return '';
+  const t=zoneShort(z);return s.includes(t)||s.includes(z)?'':t;
+}
+// "Nov 2, 15:30 MST", and in the job's zone too when that is another one.
+function when(iso,z){
+  const t=Date.parse(iso);if(!Number.isFinite(t))return '';
+  const o={month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZoneName:'short'},f=zz=>{try{return new Intl.DateTimeFormat('en-US',{...o,...(zz?{timeZone:zz}:{})}).format(new Date(t))}catch{return ''}};
+  const there=z&&z!=='local'&&z!==viewerZone?f(z):'';
+  return f('')+(there&&there!==f('')?` · ${there}`:'');
+}
 const jobTip=j=>[j.lastRun?`Last run ${rel(j.lastRun)}: ${JOB_STATUS[j.lastStatus]}`:`Last run: ${j.lastStatus==='unknown'?'not reported':JOB_STATUS[j.lastStatus]}`,j.nextRun?`Next run ${rel(j.nextRun)}`:'',j.enabled?'':'Disabled on the runner'].filter(Boolean).join('\n');
 const jobCount=()=>(af().runners||[]).reduce((n,r)=>n+(r.jobs?.length||0),0);
 function trayButton(){
@@ -208,17 +231,20 @@ function trayButton(){
 }
 const groupOpen=g=>typeof ui.jobGroups?.[g.key]==='boolean'?ui.jobGroups[g.key]:g.jobs.length<=BIG_GROUP;
 const jobKey=(runner,id)=>`${runner.toLowerCase()}\u0001${id}`;
+// The job whose details are open (a popover beside the tray): {runner, id}, or null.
+let jobPop=null;
+const popOf=(runner,id)=>!!jobPop&&jobPop.id===id&&jobPop.runner.toLowerCase()===String(runner).toLowerCase();
 function jobRow(j,promoted){
-  const by=promoted.get(jobKey(j.runner,j.id));
-  return `<li class="af-job${j.enabled?'':' off'}${by?' done':''}" data-jr="${esc(j.runner)}" data-jid="${esc(j.id)}">
+  const by=promoted.get(jobKey(j.runner,j.id)),tag=zoneTag(j),open=popOf(j.runner,j.id);
+  return `<li class="af-job${j.enabled?'':' off'}${by?' done':''}${open?' open':''}" data-jr="${esc(j.runner)}" data-jid="${esc(j.id)}">
     <span class="af-job-ic" data-tip="${esc(sourceName(j))}">${icon(jobIcon(j),13)}</span>
-    <span class="af-job-m"><b data-tip="${esc(`${j.name}${j.command?`\n${j.command}`:''}`)}">${esc(j.name)}</b>${j.ai?`<i class="af-job-ai" data-tip="Starts an AI agent">${icon('sparkle',10)}</i>`:''}<span class="af-job-s"><small>${esc(j.schedule||j.cron||'No schedule reported')}</small>${by?`<button type="button" class="af-job-done" data-af="goAgent" data-id="${esc(by.id)}" data-tip="${esc(`In the org as ${by.name}`)}">${icon('check',10)}Promoted</button>`:''}</span></span>
+    <span class="af-job-m"><b data-tip="${esc(`${j.name}${j.command?`\n${j.command}`:''}\nClick for the full schedule`)}">${esc(j.name)}</b>${j.ai?`<i class="af-job-ai" data-tip="Starts an AI agent">${icon('sparkle',10)}</i>`:''}<span class="af-job-s"><small>${esc(j.schedule||j.cron||'No schedule reported')}${tag?`<em class="af-tz" data-tip="${esc(`Times in ${jobZone(j)}`)}">${esc(tag)}</em>`:''}${j.drift?`<i class="af-jdrift" data-tip="${esc(`Drift: ${j.drift}`)}" aria-label="Schedule drift"></i>`:''}</small>${by?`<button type="button" class="af-job-done" data-af="goAgent" data-id="${esc(by.id)}" data-tip="${esc(`In the org as ${by.name}`)}">${icon('check',10)}Promoted</button>`:''}</span></span>
     <i class="af-jdot s-${j.lastStatus}" data-tip="${esc(jobTip(j))}" aria-label="${esc(JOB_STATUS[j.lastStatus])}"></i>
-    ${by?'':`<button type="button" class="af-job-go" data-af="promote" data-tip="Add to the org (top level).\nOr drag it onto an agent to report there">Promote</button>`}</li>`;
+    <span class="af-job-acts"><button type="button" class="af-job-i" data-af="jinfo" aria-expanded="${open}" aria-label="Schedule details" data-tip="Schedule details">${icon('info',12)}</button>${by?'':`<button type="button" class="af-job-go" data-af="promote" data-tip="Add to the org (top level).\nOr drag it onto an agent to report there">Promote</button>`}</span></li>`;
 }
 function trayHtml(){
   const all=jobGroups(af()),total=all.reduce((n,g)=>n+g.jobs.length,0);
-  const q=ui.q.trim().toLowerCase(),hit=j=>[j.name,j.schedule,j.command||'',j.group||'',j.source,j.cron||''].some(x=>x.toLowerCase().includes(q));
+  const q=ui.q.trim().toLowerCase(),hit=j=>[j.name,j.schedule,j.command||'',j.group||'',j.source,j.cron||'',j.timezone||'',j.file||'',j.note||'',j.drift||'',...(j.triggers||[]).map(t=>t.expr||'')].some(x=>x.toLowerCase().includes(q));
   const groups=q?all.map(g=>({...g,jobs:g.jobs.filter(hit)})).filter(g=>g.jobs.length):all;
   const promoted=new Map(af().agents.filter(a=>a.job).map(a=>[jobKey(a.job.runner,a.job.id),a]));
   const head=`<div class="af-tray-h">${icon('clock',13)}<strong>Scheduled</strong><em>${total?plural(total,'job'):''}</em><span class="sp"></span>${ib('x','Hide scheduled jobs',{attrs:'data-af="tray"'})}</div>`;
@@ -238,10 +264,78 @@ function paintTray(){
   t.hidden=!ui.tray;
   const cv=$('#afCanvas');if(ui.tray&&cv)t.style.top=cv.offsetTop+10+'px';
   if(!ui.tray){if(t.drawn){t.innerHTML='';t.drawn=''}return}
-  const html=trayHtml();if(html===t.drawn)return;
-  const top=t.querySelector('.af-tray-l')?.scrollTop||0;
-  t.innerHTML=html;t.drawn=html;const l=t.querySelector('.af-tray-l');if(l)l.scrollTop=top;
+  const html=trayHtml();
+  if(html!==t.drawn){
+    const top=t.querySelector('.af-tray-l')?.scrollTop||0;
+    t.innerHTML=html;t.drawn=html;const l=t.querySelector('.af-tray-l');if(l){l.scrollTop=top;l.addEventListener('scroll',placePop,{passive:true})}
+  }
+  paintPop();
 }
+// ---------- job details: the full schedule, where it was read, and what the runner knows ----------
+// Shared by the tray's popover and the side panel's "Promoted from". j has its runner's name.
+const ORIGIN_ICON={repo:'branch',platform:'cloud',machine:'server'};
+function jobTriggers(j){
+  const ts=j.triggers?.length?j.triggers:j.cron?[{kind:'cron',expr:j.cron,text:j.schedule}]:[];
+  if(!ts.length)return '<span class="af-dim">None reported</span>';
+  return `<ul class="af-trigs">${ts.map(t=>`<li><span class="af-tk">${esc(JOB_TRIGGERS[t.kind]||t.kind)}</span>${t.text?`<span class="af-tt">${esc(t.text)}</span>`:''}${t.expr?`<code>${esc(t.expr)}</code>`:''}</li>`).join('')}</ul>`;
+}
+function zoneHtml(j){
+  const z=jobZone(j),r=runnerOf(af(),j.runner);
+  if(!z)return '<span class="af-dim">Not reported</span>';
+  if(z==='local')return `Local time on ${esc(j.runner)} <span class="af-dim">(zone not reported)</span>`;
+  const s=zoneShort(z);
+  return `<b>${esc(z)}</b>${s&&s!==z?` <span class="af-dim">${esc(s)}</span>`:''}${j.timezone==='local'||(r?.timezone&&r.timezone===z&&z!=='UTC')?` <span class="af-dim">· ${esc(j.runner)}'s zone</span>`:''}${z!==viewerZone&&viewerZone?` <span class="af-dim">· you: ${esc(zoneShort(viewerZone))}</span>`:''}`;
+}
+function originHtml(j){
+  if(!j.origin)return j.file?`<code>${esc(j.file)}</code>`:'';
+  const t={repo:'Read from a config file in the repo',platform:'Read from the hosting platform\'s live settings',machine:'Read from the machine\'s own scheduler'}[j.origin];
+  return `<span class="af-orig o-${j.origin}" data-tip="${esc(t)}">${icon(ORIGIN_ICON[j.origin],10)}${esc(JOB_ORIGINS[j.origin])}</span>${j.file?` <code>${esc(j.file)}</code>`:''}`;
+}
+const timeHtml=(iso,z)=>iso?`<span>${esc(rel(iso))}</span><small class="af-when">${esc(when(iso,z))}</small>`:'';
+function jobDetails(j){
+  const row=(k,v,cls='')=>v?`<dt>${k}</dt><dd${cls?` class="${cls}"`:''}>${v}</dd>`:'',z=jobZone(j);
+  const [bg,fg]=colorOf({ok:'green',failed:'red',running:'blue'}[j.lastStatus]||'slate');
+  return `${j.drift?`<div class="af-drift">${icon('alert',12)}<span><b>Drift</b> ${esc(j.drift)}</span></div>`:''}<dl>
+    ${row('Schedule',`<b>${esc(j.schedule||'No schedule reported')}</b>`)}${row('Triggers',jobTriggers(j))}${row('Time zone',zoneHtml(j))}
+    ${row('Origin',originHtml(j))}${row('Note',j.note?esc(j.note):'')}${row('Runs',j.command?`<code>${esc(j.command)}</code>`:'')}
+    ${row('Last run',`<span class="pill" style="background:${bg};color:${fg}">${esc(JOB_STATUS[j.lastStatus])}</span>${j.lastRun?` ${timeHtml(j.lastRun,z)}`:''}`)}
+    ${row('Next run',j.nextRun?timeHtml(j.nextRun,z):j.enabled?'<span class="af-dim">Not reported</span>':'')}
+    ${row('Source',esc(`${sourceName(j)} · ${j.runner}${j.group&&j.group!==j.runner?` · ${j.group}`:''}`))}
+    ${row('Flags',`<span class="af-flag${j.enabled?' on':''}">${j.enabled?'Enabled':'Disabled on the runner'}</span>${j.ai?`<span class="af-flag ai">${icon('sparkle',10)}Starts an AI agent</span>`:'<span class="af-flag">No AI</span>'}`)}</dl>`;
+}
+function popHtml(j){
+  const by=promotedAgent(af(),j.runner,j.id);
+  return `<div class="af-jpop-h">${icon(jobIcon(j),14)}<div><b>${esc(j.name)}</b><small>${esc(sourceName(j))} · ${esc(j.runner)}</small></div><span class="sp"></span>${ib('x','Close',{attrs:'data-af="jclose"'})}</div>
+    <div class="af-jobinfo af-jpop-b">${jobDetails(j)}</div>
+    <div class="af-jpop-f">${by?`<button type="button" class="txt" data-af="goAgent" data-id="${esc(by.id)}">${icon('check',12)}In the org as ${esc(by.name)}</button>`
+      :`<button type="button" class="txt primary-txt" data-af="promote">${icon('plus',12)}Promote to org</button>`}</div>`;
+}
+const rowOf=(runner,id)=>[...document.querySelectorAll('#agentflowView .af-tray [data-jid]')].find(r=>r.dataset.jid===id&&r.dataset.jr.toLowerCase()===runner.toLowerCase())||null;
+function paintPop(){
+  const p=$('#agentflowView .af-jpop');if(!p)return;
+  const j=jobPop&&ui.tray?jobOf(af(),jobPop.runner,jobPop.id):null,row=j&&rowOf(jobPop.runner,jobPop.id);
+  if(!j||!row){if(jobPop&&(!j||!ui.tray))jobPop=null;p.hidden=true;if(p.drawn){p.innerHTML='';p.drawn=''}return}
+  const runner=runnerOf(af(),jobPop.runner)?.name||jobPop.runner,html=popHtml({...j,runner});
+  p.dataset.jr=runner;p.dataset.jid=j.id;
+  if(html!==p.drawn){p.innerHTML=html;p.drawn=html}
+  p.hidden=false;placePop();
+}
+// Beside the tray, level with the job's row (inside the view, over the tray when there is no room).
+function placePop(){
+  const p=$('#agentflowView .af-jpop'),v=$('#agentflowView'),t=$('#agentflowView .af-tray');if(!p||p.hidden||!jobPop||!t)return;
+  const row=rowOf(jobPop.runner,jobPop.id);if(!row)return;
+  const V=v.getBoundingClientRect(),T=t.getBoundingClientRect(),R=row.getBoundingClientRect(),w=p.offsetWidth,h=p.offsetHeight;
+  const room=V.right-T.right-16>=w,left=room?T.right-V.left+8:Math.max(8,T.left-V.left+12);
+  const top=Math.max(T.top-V.top,Math.min(R.top-V.top-10,V.height-h-10));
+  p.style.left=left+'px';p.style.top=Math.max(8,top)+'px';
+  p.classList.toggle('over',!room);
+}
+function toggleJob(runner,id){
+  jobPop=popOf(runner,id)?null:{runner,id};
+  paintTray();
+  if(jobPop)$('#agentflowView .af-jpop')?.focus({preventScroll:true});
+}
+function closeJob(){if(!jobPop)return false;const k=jobPop;jobPop=null;paintTray();rowOf(k.runner,k.id)?.querySelector('[data-af=jinfo]')?.focus({preventScroll:true});return true}
 // Promote a job (promoteJob): select the new agent and open its side panel. One undo step. A job
 // already in the org selects the agent it became instead.
 function promote(runner,jobId,opts={}){
@@ -268,7 +362,8 @@ function jobMove(e){
 }
 function jobUp(e,d){
   d.ghost?.remove();d.card?.classList.remove('drop');document.body.classList.remove('af-jdrag');
-  if(!d.moved)return;
+  // A click (no drag) on a row opens or closes its details.
+  if(!d.moved){if(e.type==='pointerup')toggleJob(d.runner,d.id);return}
   if(d.over){promote(d.runner,d.id,{reportsTo:d.over});return}
   if(d.canvas){const p=toWorld(e);promote(d.runner,d.id,{x:snap(p.x-CARD.w/2),y:snap(p.y-CARD.h/2)})}
 }
@@ -435,8 +530,10 @@ function action(name,b){
     clear(){ui.q='';keepUi();render()},
     tray(){ui.tray=!ui.tray;keepUi();render()},
     jgroup(){const g=jobGroups(af()).find(x=>x.key===b.dataset.k);if(!g)return;ui.jobGroups={...ui.jobGroups,[g.key]:!groupOpen(g)};keepUi();paintTray()},
-    promote(){const j=jobAt(b);if(j)promote(j.runner,j.id)},
-    goAgent(){const id=b.dataset.id;if(agent(id)){centerOn=id;select('agent',id)}},
+    promote(){const j=jobAt(b);if(j){jobPop=null;promote(j.runner,j.id)}},
+    jinfo(){const j=jobAt(b);if(j)toggleJob(j.runner,j.id)},
+    jclose(){closeJob()},
+    goAgent(){const id=b.dataset.id;if(agent(id)){if(b.closest('.af-jpop'))jobPop=null;centerOn=id;select('agent',id)}},
     addAgent:()=>addAgent(),
     addWorkflow:()=>addWorkflow(),
     starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
@@ -653,13 +750,8 @@ function jobHtml(a){
   if(!a.job)return '';
   const j=jobOf(af(),a.job.runner,a.job.id);
   if(!j)return `<label>Promoted from</label><div class="dc-hint">${esc(a.job.runner)} no longer reports this job (${esc(a.job.id)}).</div>`;
-  const row=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
-  const [bg,fg]=colorOf({ok:'green',failed:'red',running:'blue'}[j.lastStatus]||'slate');
-  return `<label>Promoted from</label><div class="af-jobinfo"><div class="af-jobinfo-h">${icon(jobIcon(j),13)}<b>${esc(j.name)}</b>${j.enabled?'':'<span class="af-off">Off</span>'}</div><dl>
-    ${row('Source',esc(`${sourceName(j)} · ${a.job.runner}${j.group&&j.group!==a.job.runner?` · ${j.group}`:''}`))}${row('Schedule',esc(j.schedule))}${row('Cron',j.cron?`<code>${esc(j.cron)}</code>`:'')}
-    ${row('Runs',j.command?`<code>${esc(j.command)}</code>`:'')}
-    ${row('Last run',`<span class="pill" style="background:${bg};color:${fg}">${esc(JOB_STATUS[j.lastStatus])}</span>${j.lastRun?` <span data-tip="${esc(j.lastRun)}">${esc(rel(j.lastRun))}</span>`:''}`)}
-    ${row('Next run',j.nextRun?`<span data-tip="${esc(j.nextRun)}">${esc(rel(j.nextRun))}</span>`:'')}</dl></div>`;
+  const runner=runnerOf(af(),a.job.runner)?.name||a.job.runner;
+  return `<label>Promoted from</label><div class="af-jobinfo"><div class="af-jobinfo-h">${icon(jobIcon(j),13)}<b>${esc(j.name)}</b>${j.enabled?'':'<span class="af-off">Off</span>'}</div>${jobDetails({...j,runner})}</div>`;
 }
 // The switch a runner obeys. It stays off until someone turns it on, whatever the status says.
 function liveHtml(a,why){
@@ -887,7 +979,7 @@ export function inspectorKey(e){
   if(m){e.preventDefault();addTo(m[1])}else if(e.target.tagName==='INPUT')e.preventDefault();
 }
 export function key(e){
-  if(e.key==='Escape'){if(selected&&!menuOpen())select(null);return}
+  if(e.key==='Escape'){if(menuOpen())return;if(closeJob())return;if(selected)select(null);return}
   if(matches(e,'agentflow.delete')&&sel()){e.preventDefault();removeSelected();return}
   if(matches(e,'agentflow.addAgent')){e.preventDefault();addAgent()}
   else if(matches(e,'agentflow.addWorkflow')){e.preventDefault();addWorkflow()}

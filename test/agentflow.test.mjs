@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
   workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName,
-  cleanJobs,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
+  cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -424,6 +424,35 @@ test('reporting jobs: only real changes are saved; lastRun and nextRun alone wai
   assert.deepEqual([r.changed,r.runner.name,r.runner.models,r.runner.jobs.length],[true,'Laptop',[],1],'a new runner with jobs only');
   r=reportRunner({...had,jobsReported:undefined},'Home',{models,jobs:[j({nextRun:later(30)})]},later(1));assert.ok(r.changed,'never saved before: saved');
   assert.equal(reportRunner(null,'X',{models}).runner.jobsReported,undefined,'no jobs, no jobsReported');
+});
+
+test('job schedule details are cleaned: timezone, triggers, origin, file, drift and note',()=>{
+  const [a,b]=cleanJobs([job('a',{timezone:' America/Phoenix ',triggers:[{kind:'calendar',expr:' Mon *-*-* 09:00:00 ',text:'Mondays 09:00'},{kind:'nope',expr:'x'.repeat(300)},{kind:'logon'},null,'x'],
+    origin:'repo',file:' services/a/railway.json ',drift:' Railway runs */10 * * * * ',note:'n'.repeat(600)}),
+    job('b',{timezone:'not a zone!',triggers:'cron',origin:'moon',file:'',drift:'   ',note:''})]);
+  assert.deepEqual([a.timezone,a.origin,a.file,a.drift,a.note.length],['America/Phoenix','repo','services/a/railway.json','Railway runs */10 * * * *',500]);
+  assert.deepEqual(a.triggers,[{kind:'calendar',expr:'Mon *-*-* 09:00:00',text:'Mondays 09:00'},{kind:'other',expr:'x'.repeat(200)},{kind:'logon'}],'an unknown kind is other; empty expr and text are left out');
+  for(const k of ['timezone','triggers','origin','file','drift','note'])assert.ok(!(k in b),`${k} left out when empty or invalid`);
+  assert.deepEqual(['UTC','local','Etc/GMT+7','America/Argentina/Buenos_Aires','',' ','12:00','a b','x/'].map(cleanTz),['UTC','local','Etc/GMT+7','America/Argentina/Buenos_Aires','','','','',''],'timezone: an IANA name, UTC or local');
+  assert.equal(cleanTriggers(Array.from({length:15},()=>({kind:'cron',expr:'* * * * *'}))).length,LIMITS.triggers);
+  const r=cleanRunners([{name:'Home',timezone:'America/Phoenix'},{name:'Old',timezone:'??'}]);
+  assert.deepEqual([r[0].timezone,'timezone' in r[1]],['America/Phoenix',false],'a runner may report its zone');
+});
+
+test('reporting schedule details: they are normal fields; the runner zone stays when left out',()=>{
+  const T0='2026-11-01T10:00:00.000Z',later=h=>new Date(Date.parse(T0)+h*3600e3).toISOString(),models=[];
+  const j=(o={})=>job('rail',{timezone:'UTC',triggers:[{kind:'cron',expr:'*/5 * * * *',text:'Every 5 min'}],origin:'repo',file:'railway.json',lastRun:T0,nextRun:later(1),...o});
+  let r=reportRunner(null,'Home',{models,jobs:[j()],timezone:'America/Phoenix'},T0);
+  assert.equal(r.runner.timezone,'America/Phoenix');const had=r.runner;
+  r=reportRunner(had,'Home',{models,jobs:[j({nextRun:later(2)})]},later(1));
+  assert.equal(r.changed,false,'only the times moved, zone left out: nothing saved');
+  for(const [o,why] of [[{drift:'Railway runs */10 * * * *'},'drift'],[{note:'Exits when unchanged.'},'note'],[{timezone:'America/Phoenix'},'timezone'],
+    [{triggers:[{kind:'cron',expr:'*/10 * * * *'}]},'triggers'],[{origin:'platform'},'origin'],[{file:'services/x/railway.json'},'file']])
+    assert.ok(reportRunner(had,'Home',{models,jobs:[j(o)]},later(1)).changed,`a changed ${why} is saved`);
+  r=reportRunner(had,'Home',{models,jobs:[j()],timezone:'UTC'},later(1));
+  assert.deepEqual([r.changed,r.runner.timezone],[true,'UTC'],'a new runner zone is saved');
+  r=reportRunner(had,'Home',{jobs:[j({drift:'x'})]},later(1));
+  assert.equal(r.runner.timezone,'America/Phoenix','left out, the zone stays');
 });
 
 test('automations: never live, no model needed, their schedule on the card, shorter cards',()=>{

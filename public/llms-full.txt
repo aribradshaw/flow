@@ -168,21 +168,36 @@ A runner can also tell Flow which scheduled jobs it found: systemd timers, cront
 | `group` | A display group, up to 120 characters, e.g. "Home server" or "Vercel · my-app". |
 | `schedule` | When, in words, up to 200 characters: "Daily 22:30", "Every 5 min". |
 | `cron` | The cron expression, when there is one (up to 120). |
+| `timezone` | The zone its times are in, up to 64 characters: an IANA name such as `America/Phoenix`, `UTC`, or `local` (the runner's own zone; see below). |
+| `triggers` | Every rule it fires on, up to 10: `{kind, expr, text}`. `kind` is `cron`, `calendar` (a calendar rule such as a systemd `OnCalendar` line or a daily or weekly Windows trigger), `interval`, `logon`, `boot`, `once`, `rrule` (RFC 5545), `manual` or `other`; `expr` is the raw expression as the scheduler holds it (up to 200), such as `*/5 * * * *`, `Mon *-*-* 09:00:00` or `OnUnitActiveSec=5min`; `text` is it in words (up to 200). |
+| `origin` | Where the schedule was read: `repo` (a config file in a repo), `platform` (the hosting platform's API) or `machine` (the machine's own scheduler). |
+| `file` | The repo-relative path of the config it came from (up to 200), such as `services/worker/railway.json`. |
+| `drift` | How the platform's live schedule differs from the repo file, when it does (up to 200). |
+| `note` | Conditions the job's script applies itself, such as "Exits early when nothing changed" (up to 500). |
 | `command` | A short summary of what it runs (up to 300). |
 | `ai` | `true` when the job starts an AI agent. |
 | `enabled` | `false` when it is switched off on the runner (default `true`). |
 | `lastRun`, `nextRun` | ISO times. |
 | `lastStatus` | `ok`, `failed`, `running` or `unknown` (the default). |
 
-`jobs` replaces the stored list. Leave it out to keep the stored jobs, or send `[]` to clear them. `models` is optional too: leave it out to keep the stored models, as a runner does when it reports the jobs of another machine it reaches over SSH. To keep writes down, a report is not saved when the only changes are `lastRun` and `nextRun`, unless the jobs were last saved six hours ago or more. A changed `lastStatus`, a job added or removed, or any other field always saves. The runner's `jobsReported` is when its jobs were last saved, and the response's `changed` says whether this report was.
+The report can also say the runner machine's `timezone` (an IANA name), which jobs with `timezone: "local"` are in; left out, the stored one stays. `jobs` replaces the stored list. Leave it out to keep the stored jobs, or send `[]` to clear them. `models` is optional too: leave it out to keep the stored models, as a runner does when it reports the jobs of another machine it reaches over SSH. To keep writes down, a report is not saved when the only changes are `lastRun` and `nextRun`, unless the jobs were last saved six hours ago or more. A changed `lastStatus`, a job added or removed, or any other field (a new trigger, drift or note) always saves. The runner's `jobsReported` is when its jobs were last saved, and the response's `changed` says whether this report was.
 
 ```sh
-flow runners report --input '{"runner":"Home server","models":[],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","lastStatus":"ok","lastRun":"2026-11-01T22:30:00Z","nextRun":"2026-11-02T22:30:00Z"}]}'
+flow runners report --input '{"runner":"Home server","models":[],"timezone":"America/Phoenix","jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","timezone":"America/Phoenix","triggers":[{"kind":"calendar","expr":"*-*-* 22:30:00","text":"Daily 22:30"}],"origin":"machine","command":"restic backup /srv","lastStatus":"ok","lastRun":"2026-11-02T05:30:00Z","nextRun":"2026-11-03T05:30:00Z"}]}'
 ```
 
-In the app, **Scheduled** in the org chart's toolbar opens a tray on the left of the canvas. It lists every runner's jobs by runner and group, each with its source icon, name, schedule and a dot for the last run (green OK, red failed, grey unknown). Hover the dot for the last and next run. A group with more than eight jobs starts collapsed to a chip such as "59 jobs" that opens it. Search filters the tray too. Whether the tray is open, and which groups you opened or closed, is remembered on this device.
+In the app, **Scheduled** in the org chart's toolbar opens a tray on the left of the canvas. It lists every runner's jobs by runner and group, each with its source icon, name, schedule and a dot for the last run (green OK, red failed, grey unknown). Hover the dot for the last and next run. A row names the time zone (such as `UTC`) only when it is not yours and the schedule has a time of day, and shows an amber dot when the schedule has drifted from its repo file. Click a row, or its **i**, for the job's details: the schedule in words, every trigger with its raw expression, the time zone (always named; a `local` job shows its runner's zone), where it was read (**Repo file** with the file's path, **Platform** or **Machine**), drift in amber, the note, the command, the last run and its status, the next run (when, in your time and the job's zone), whether it starts an AI agent and whether it is enabled. **Promote to org** is there too. Escape or a click elsewhere closes it. A group with more than eight jobs starts collapsed to a chip such as "59 jobs" that opens it. Search filters the tray too. Whether the tray is open, and which groups you opened or closed, is remembered on this device.
 
-The reference runner (`tools/agent-runner.mjs`) reports the jobs it finds with every `report` and `tick`: systemd user and system timers (stock distribution timers such as apt-daily, fstrim and logrotate are skipped), the user's crontab, T3 scheduled tasks (read only from T3's database; needs Node 22.5+ for `node:sqlite`), and cron configs in your repos: `vercel.json` crons, `cronSchedule` in `railway.json`/`railway.toml`, and `on.schedule` in GitHub Actions workflows. Repos default to your T3 projects' folders. Commands are summarised on one line with anything that looks like a secret hidden. Run `node tools/agent-runner.mjs jobs` (or `jobs --json`) to see the list without contacting Flow, and tune it with `"jobs"` in `runner.json`: `sources`, `repos`, `exclude`, `include` (keeps a job even when `skipDistro` or `exclude` would drop it) and `skipDistro`; `"jobs": false` stops reporting jobs and leaves the stored list as it is.
+The reference runner (`tools/agent-runner.mjs`) reports the jobs it finds with every `report` and `tick`: systemd user and system timers (stock distribution timers such as apt-daily, fstrim and logrotate are skipped), the user's crontab, T3 scheduled tasks (read only from T3's database; needs Node 22.5+ for `node:sqlite`), and cron configs in your repos: `vercel.json` crons, `cronSchedule` in `railway.json`/`railway.toml`, and `on.schedule` in GitHub Actions workflows. Repos default to your T3 projects' folders. Commands are summarised on one line with anything that looks like a secret hidden. Every job comes with its full schedule: its `timezone` (this machine's zone, from `timedatectl` or Node; the zone an `OnCalendar` line names; a crontab's `CRON_TZ`; UTC for repo crons), its `triggers` (each `OnCalendar` line as a calendar trigger, `OnUnitActiveSec` as an interval and `OnBootSec` as boot; each crontab line; T3's schedule as T3 holds it), its `origin`, and for repo crons the `file`. Run `node tools/agent-runner.mjs jobs` (or `jobs --json`, with every field) to see the list without contacting Flow; the table has **TZ** and **ORIGIN** columns, and `!` after the origin marks drift. Tune it with `"jobs"` in `runner.json`: `sources`, `repos`, `exclude`, `include` (keeps a job even when `skipDistro` or `exclude` would drop it), `skipDistro` and `notes`; `"jobs": false` stops reporting jobs and leaves the stored list as it is.
+
+**Notes.** For a Railway cron, the runner reads the README in the service's folder (else its start command's script, and for a Vercel cron its route's source) and takes the first sentence that says it runs every N minutes, exits, or applies a condition ("only when", "unless", "unchanged", "skips", "does not run"), plus the first condition after it when both fit in 200 characters. It never uses a sentence that mentions a token, secret, password or credential, and hides anything that looks like one. `"notes": {"<job id or name>": "text"}` in `"jobs"` (globs or substrings, first match) wins; `""` removes a note.
+
+**Platform schedules.** A repo file says what should run; the platform says what does. With a token, the runner reads the live cron schedules and matches them to the repo's cron configs:
+
+- `railwayToken` (or `RAILWAY_API_TOKEN`): every service's cron schedule and next run from Railway's GraphQL API, matched to `railway.json` configs by service name (`railwayWorkspace` picks a workspace's projects).
+- `vercelToken` (or `VERCEL_TOKEN`): each project's crons from Vercel's API, matched to `vercel.json` by the folder's `.vercel/project.json` link, else by project name (`vercelTeam`, a team id or slug, for team projects).
+
+A matched job is reported as the platform runs it (origin `platform`, with its `file` kept) and its next run from the platform, and `drift` says how the file differs, such as "Railway runs `*/10 * * * *` (Every 10 min); services/worker/railway.json has `*/5 * * * *` (Every 5 min)", or that the platform has no cron for it. A live cron that no repo file has is reported too. Without a token nothing is asked; `"platform": false` in `"jobs"` turns it off. Put tokens only in your own `runner.json` (or the environment), never in a repo.
 
 #### Remote machines
 
@@ -194,14 +209,14 @@ The reference runner can also read the scheduled jobs of other machines over SSH
 ```
 
 - `ssh` is the ssh command as a list, ending with the host. Use a key and `BatchMode=yes` so it never asks for a password. The remote's login shell may be `cmd.exe`: the runner sends its scripts on stdin, PowerShell through `powershell -EncodedCommand`, and Python when `python` (the path to `python.exe` on the remote) is set. Both scripts only read.
-- `timezone` is the remote's time zone (an IANA name). Its cron lines and schedules are read in that zone. It defaults to the runner's own.
+- `timezone` is the remote's time zone (an IANA name). Its cron lines and schedules are read in that zone, and its jobs and runner report it. It defaults to the runner's own.
 - `sources` picks what to read (all by default):
-  - `windows`: Task Scheduler tasks outside `\Microsoft\`, with their triggers in words ("Daily 18:00", "Every 15 min", "At logon", "On demand"), last and next run, and status from the last result. Vendor updater tasks (Adobe, Edge, Google, Zoom, McAfee, HP, OneDrive and so on) are skipped unless `skipVendor` is `false` or `include` names them.
-  - `aside`: Aside routines, active and paused (`keepDone` adds completed ones). Each shows its schedule from its RRULE (one-shots as "Once Nov 1 18:00"), its model and prompt, and its last run. A routine waiting for approval shows as running, with "Waiting for approval". One whose next run has already passed is marked "(stale)". Needs `python`: Aside's database is copied to a temporary folder, read and removed.
+  - `windows`: Task Scheduler tasks outside `\Microsoft\`, with their triggers in words ("Daily 18:00", "Every 15 min", "At logon", "On demand") and each trigger's raw settings (its type, start, days and repetition, such as `TimeTrigger, start 2026-10-15T08:51:32-07:00, repeat PT15M`), last and next run, and status from the last result. Vendor updater tasks (Adobe, Edge, Google, Zoom, McAfee, HP, OneDrive and so on) are skipped unless `skipVendor` is `false` or `include` names them.
+  - `aside`: Aside routines, active and paused (`keepDone` adds completed ones). Each shows its schedule from its RRULE (one-shots as "Once Nov 1 18:00"; the raw rule and its TZID are its trigger and zone), its model and prompt, and its last run. A routine waiting for approval shows as running, with "Waiting for approval". One whose next run has already passed is marked "(stale)". Needs `python`: Aside's database is copied to a temporary folder, read and removed.
   - `claude-desktop`: Claude desktop scheduled tasks, with what each one does taken from its `SKILL.md`.
   - `codex`: Codex automations, from their RRULE or cron line and status. One-shots whose runs are used up are skipped (`keepDone` keeps them, marked "(done)"). With `python`, the last run of each cron automation comes from Codex's database.
   - `vercel`, `railway`, `github`: cron configs in the repos listed in `repos` (paths on the remote).
-- `include`, `exclude` work as in `"jobs"`. `timeout` is in seconds for the whole remote (40 by default), and `enabled: false` turns a remote off.
+- `include`, `exclude` and `notes` work as in `"jobs"`. `timeout` is in seconds for the whole remote (40 by default), and `enabled: false` turns a remote off.
 
 `tick` reads the remotes after its own pass, at most every 15 minutes, and keeps the time in its state file. `report` reads them every time. A remote that cannot be reached is logged and tried again next time, after one retry if the connection fails, and it never holds up the local pass. Run `node tools/agent-runner.mjs jobs --remote Laptop` to see a remote's jobs without contacting Flow, or `jobs --all` for this machine and every remote.
 
@@ -218,7 +233,7 @@ The new agent is selected and its side panel opens. Undo removes it again. A job
 
 ### Automations
 
-An automation (`kind: "automation"`) is a scripted job in the org with no AI in it. It runs on its own schedule, outside Flow, so it has no runner, no models and no Live switch: `live` is always false, and a runner never works it. Its card is shorter and grey, with a gear, and shows its schedule (and its job's last status) where an AI agent's card shows its runner and model. Its side panel has a **Schedule** section with the schedule, and, when it came from a runner job, that job's source, schedule, cron line, command and last and next run (read-only, as the runner reports them). An AI agent's `schedule` is under **Runs on**, and its card shows a small clock when it has one.
+An automation (`kind: "automation"`) is a scripted job in the org with no AI in it. It runs on its own schedule, outside Flow, so it has no runner, no models and no Live switch: `live` is always false, and a runner never works it. Its card is shorter and grey, with a gear, and shows its schedule (and its job's last status) where an AI agent's card shows its runner and model. Its side panel has a **Schedule** section with the schedule, and, when it came from a runner job, the same details as the Scheduled tray shows for it under **Promoted from**: triggers with their raw expressions, time zone, origin and file, drift, note, command, last and next run (read-only, as the runner reports them). An AI agent's `schedule` is under **Runs on**, and its card shows a small clock when it has one.
 
 The brief lists `Schedule: …` and `Promoted from: <runner> · <job name>` under Runtime.
 
@@ -2633,6 +2648,7 @@ Machines or services that run agents, with the models each one offers, as they l
 | `items[].name` | string | yes |  |
 | `items[].models` | object[] | yes |  |
 | `items[].jobs` | object[] |  |  |
+| `items[].timezone` | string |  |  |
 | `items[].reported` | string | yes |  |
 | `items[].jobsReported` | string |  |  |
 | `nextCursor` | string | null | yes |  |
@@ -2673,7 +2689,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.
+A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. A job can carry its full schedule: its timezone, every trigger with its raw expression, where it was read (origin, and the repo file), drift from the live schedule on the platform, and a note on conditions its script applies. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.
 
 **Input**
 
@@ -2693,12 +2709,19 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `jobs[].group` | string |  | Display group, e.g. "Home server" or "Vercel · my-app". |
 | `jobs[].schedule` | string |  | When, in words, e.g. "Daily 22:30" or "Every 5 min". |
 | `jobs[].cron` | string |  | The cron expression, when there is one. |
+| `jobs[].timezone` | string |  | The zone its times are in: an IANA name such as America/Phoenix, "UTC", or "local" (the runner's own; see timezone on the runner). |
+| `jobs[].triggers` | object[] |  | Every rule it fires on, e.g. each OnCalendar line of a systemd timer or each trigger of a Windows task. |
+| `jobs[].origin` | enum |  | Where the schedule was read: repo (a config file in a repo; see file), platform (the hosting platform's API) or machine (the machine's own scheduler). One of `repo`, `platform`, `machine`. |
+| `jobs[].file` | string |  | The repo-relative path of the config it came from, e.g. services/worker/railway.json. |
+| `jobs[].drift` | string |  | How the platform's live schedule differs from the repo file, when it does. |
+| `jobs[].note` | string |  | Conditions the job's script applies itself, e.g. "Exits early when nothing changed". |
 | `jobs[].command` | string |  | A short summary of what it runs. |
 | `jobs[].ai` | boolean |  | It starts an AI agent (promoted as an AI agent rather than an automation). |
 | `jobs[].enabled` | boolean |  |  |
 | `jobs[].lastRun` | string |  | ISO time of the last run. |
 | `jobs[].lastStatus` | enum |  | One of `ok`, `failed`, `running`, `unknown`. |
 | `jobs[].nextRun` | string |  | ISO time of the next run. |
+| `timezone` | string |  | The runner machine's time zone (an IANA name), which jobs with timezone "local" are in. Left out, the stored one stays. |
 
 **Output**
 
@@ -2709,6 +2732,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `runner.name` | string | yes |  |
 | `runner.models` | object[] | yes |  |
 | `runner.jobs` | object[] |  |  |
+| `runner.timezone` | string |  |  |
 | `runner.reported` | string | yes |  |
 | `runner.jobsReported` | string |  |  |
 | `changed` | boolean | yes |  |
@@ -2748,7 +2772,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
 curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","ai":false,"enabled":true,"lastRun":"2026-10-29T17:00:00.000Z","lastStatus":"ok","nextRun":"2026-10-30T22:30:00.000Z"}]}'
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","timezone":"America/Phoenix","triggers":[{"kind":"calendar","expr":"*-*-* 22:30:00","text":"Daily 22:30"}],"origin":"machine","command":"restic backup /srv","ai":false,"enabled":true,"lastRun":"2026-10-29T17:00:00.000Z","lastStatus":"ok","nextRun":"2026-10-30T22:30:00.000Z"}]}'
 ```
 
 ```json
@@ -2772,6 +2796,15 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
         "group": "Home server",
         "schedule": "Daily 22:30",
         "cron": "30 22 * * *",
+        "timezone": "America/Phoenix",
+        "triggers": [
+          {
+            "kind": "calendar",
+            "expr": "*-*-* 22:30:00",
+            "text": "Daily 22:30"
+          }
+        ],
+        "origin": "machine",
         "command": "restic backup /srv",
         "ai": false,
         "enabled": true,

@@ -2380,6 +2380,7 @@ Machines or services that run agents, with the models each one offers, as they l
 | `items[].name` | string | yes |  |
 | `items[].models` | object[] | yes |  |
 | `items[].jobs` | object[] |  |  |
+| `items[].timezone` | string |  |  |
 | `items[].reported` | string | yes |  |
 | `items[].jobsReported` | string |  |  |
 | `nextCursor` | string | null | yes |  |
@@ -2420,7 +2421,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.
+A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. A job can carry its full schedule: its timezone, every trigger with its raw expression, where it was read (origin, and the repo file), drift from the live schedule on the platform, and a note on conditions its script applies. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 1500 models and 500 jobs each.
 
 **Input**
 
@@ -2440,12 +2441,19 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `jobs[].group` | string |  | Display group, e.g. "Home server" or "Vercel · my-app". |
 | `jobs[].schedule` | string |  | When, in words, e.g. "Daily 22:30" or "Every 5 min". |
 | `jobs[].cron` | string |  | The cron expression, when there is one. |
+| `jobs[].timezone` | string |  | The zone its times are in: an IANA name such as America/Phoenix, "UTC", or "local" (the runner's own; see timezone on the runner). |
+| `jobs[].triggers` | object[] |  | Every rule it fires on, e.g. each OnCalendar line of a systemd timer or each trigger of a Windows task. |
+| `jobs[].origin` | enum |  | Where the schedule was read: repo (a config file in a repo; see file), platform (the hosting platform's API) or machine (the machine's own scheduler). One of `repo`, `platform`, `machine`. |
+| `jobs[].file` | string |  | The repo-relative path of the config it came from, e.g. services/worker/railway.json. |
+| `jobs[].drift` | string |  | How the platform's live schedule differs from the repo file, when it does. |
+| `jobs[].note` | string |  | Conditions the job's script applies itself, e.g. "Exits early when nothing changed". |
 | `jobs[].command` | string |  | A short summary of what it runs. |
 | `jobs[].ai` | boolean |  | It starts an AI agent (promoted as an AI agent rather than an automation). |
 | `jobs[].enabled` | boolean |  |  |
 | `jobs[].lastRun` | string |  | ISO time of the last run. |
 | `jobs[].lastStatus` | enum |  | One of `ok`, `failed`, `running`, `unknown`. |
 | `jobs[].nextRun` | string |  | ISO time of the next run. |
+| `timezone` | string |  | The runner machine's time zone (an IANA name), which jobs with timezone "local" are in. Left out, the stored one stays. |
 
 **Output**
 
@@ -2456,6 +2464,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `runner.name` | string | yes |  |
 | `runner.models` | object[] | yes |  |
 | `runner.jobs` | object[] |  |  |
+| `runner.timezone` | string |  |  |
 | `runner.reported` | string | yes |  |
 | `runner.jobsReported` | string |  |  |
 | `changed` | boolean | yes |  |
@@ -2495,7 +2504,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
 curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","ai":false,"enabled":true,"lastRun":"2026-10-29T17:00:00.000Z","lastStatus":"ok","nextRun":"2026-10-30T22:30:00.000Z"}]}'
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","timezone":"America/Phoenix","triggers":[{"kind":"calendar","expr":"*-*-* 22:30:00","text":"Daily 22:30"}],"origin":"machine","command":"restic backup /srv","ai":false,"enabled":true,"lastRun":"2026-10-29T17:00:00.000Z","lastStatus":"ok","nextRun":"2026-10-30T22:30:00.000Z"}]}'
 ```
 
 ```json
@@ -2519,6 +2528,15 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
         "group": "Home server",
         "schedule": "Daily 22:30",
         "cron": "30 22 * * *",
+        "timezone": "America/Phoenix",
+        "triggers": [
+          {
+            "kind": "calendar",
+            "expr": "*-*-* 22:30:00",
+            "text": "Daily 22:30"
+          }
+        ],
+        "origin": "machine",
         "command": "restic backup /srv",
         "ai": false,
         "enabled": true,
