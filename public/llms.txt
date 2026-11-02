@@ -2,7 +2,7 @@
 
 > Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
-Version 0.10.38 (2026-10-29). Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /api/v1/openapi.json.
+Version 0.11.18 (2026-11-02). Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /api/v1/openapi.json.
 
 ## Concepts
 

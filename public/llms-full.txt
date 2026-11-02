@@ -2,7 +2,7 @@
 
 > Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
-Version 0.10.38 (2026-10-29)
+Version 0.11.18 (2026-11-02)
 
 # Concepts
 
@@ -3200,13 +3200,13 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 
 # Recent releases
 
-- 0.10.38 (2026-10-29): DevLog: 0.10.30-0.10.35 and three production deployments
-- 0.10.37 (2026-10-29): Docs live at /docs, /llms.txt and /skill.md, generated from the registry; CI
-- 0.10.36 (2026-10-29): Integrate docs: self-updating docs, llms.txt, agent skill, demo seed and open-source prep
-- 0.10.35 (2026-10-29): Public API v1, API keys and MCP mounted: Settings › API keys, /api/v1, /mcp
-- 0.10.34 (2026-10-29): Integrate mcp: MCP server (remote + stdio) and the flow CLI
-- 0.10.33 (2026-10-29): Integrate keys: hashed per-environment API keys, Settings tab and routes
-- 0.10.32 (2026-10-29): Integrate api: operation registry, REST API v1 and OpenAPI
-- 0.10.31 (2026-10-29): Sharing: hand-picked cards from the CLI (repeat --node); clearer labels
-- 0.10.30 (2026-10-29): DevLog: 0.10.27-0.10.29 (invite emails, sharing)
-- 0.10.29 (2026-10-29): Sharing end to end: share a person, card, project, label or environment
+- 0.11.18 (2026-11-02): Update CI to actions/checkout v7 and actions/setup-node v7
+- 0.11.17 (2026-11-01): Show each scheduled job's full schedule rules and where they come from
+- 0.11.16 (2026-11-01): Raise the runner model cap and list included models first
+- 0.11.15 (2026-11-01): Report remote machines' scheduled jobs from the AgentFlow runner over SSH
+- 0.11.14 (2026-11-01): Keep runner reports on whole-workspace saves; fix the runner's error parsing
+- 0.11.13 (2026-11-01): Document runner job discovery and note scheduled jobs and split view
+- 0.11.12 (2026-11-01): Report this machine's scheduled jobs from the AgentFlow runner
+- 0.11.11 (2026-11-01): Show runners' scheduled jobs in AgentFlow and promote them into the org
+- 0.11.10 (2026-11-01): Add split view: two tabs side by side with a draggable divider
+- 0.11.9 (2026-11-01): Fix clipped AgentFlow avatar badge and show the account photo on name-matched people

@@ -132,7 +132,7 @@ Hosted sign-in currently requires a native app registration provisioned by a One
 `node verify.mjs` tests all of this against a loopback mock of OneProfileID with synthetic users; it never contacts the real service or database.
 
 ## Versions and DevLog
-Public release tags use [Semantic Versioning](https://semver.org/) (`vMAJOR.MINOR.PATCH`) and user-facing notes in [CHANGELOG.md](CHANGELOG.md). The source CLI currently runs from a clone with `node tools/flow.mjs`; the npm package is private and has not been published. See [Release process](docs/releases.md).
+Public release tags use the commit's Bradshaw Versioning number (`vYEAR.MONTH.UPDATE`, see below) and user-facing notes in [CHANGELOG.md](CHANGELOG.md). The source CLI currently runs from a clone with `node tools/flow.mjs`; the npm package is private and has not been published. See [Release process](docs/releases.md).
 
 Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) (draft 1.0): every commit that reaches `main` gets the next `YEAR.MONTH.UPDATE`, with a zero-based project year (year = calendar year − 2026), calendar months, and the America/Phoenix timezone. The public source history starts at the clean baseline recorded in `public/devlog.json`; earlier releases are historical metadata.
 

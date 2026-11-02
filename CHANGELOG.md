@@ -4,6 +4,11 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+## 0.11.19 — 2026-11-02
+
+First public release.
+
+
 - Initial public release of Flow's chart, timeline, and DevOps workspace.
 - Account-free local mode and optional hosted OneProfileID sign-in with private workspaces and invites.
 - README screenshots and short walkthroughs for timeline and DevOps views.

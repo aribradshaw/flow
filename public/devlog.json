@@ -25,6 +25,699 @@
   },
   "releases": [
     {
+      "version": "0.11.18",
+      "date": "2026-11-02",
+      "title": "Update CI to actions/checkout v7 and actions/setup-node v7",
+      "notes": [
+        "Update CI to actions/checkout v7 and actions/setup-node v7."
+      ],
+      "summary": "Update CI to actions/checkout v7 and actions/setup-node v7.",
+      "sourceSubject": "Update CI to actions/checkout v7 and actions/setup-node v7",
+      "commit": "c711942b11230e00575ba07b9ec78124139009b1",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 71,
+      "admittedAt": "2026-11-02T16:46:13-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.17",
+      "date": "2026-11-01",
+      "title": "Show each scheduled job's full schedule rules and where they come from",
+      "notes": [
+        "Show each scheduled job's full schedule rules and where they come from."
+      ],
+      "summary": "Show each scheduled job's full schedule rules and where they come from.",
+      "sourceSubject": "Show each scheduled job's full schedule rules and where they come from",
+      "commit": "ab07f868af7de3799972e2c1d18ea84cec46a5a7",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 70,
+      "admittedAt": "2026-11-01T19:05:32-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.16",
+      "date": "2026-11-01",
+      "title": "Raise the runner model cap and list included models first",
+      "notes": [
+        "Raise the runner model cap and list included models first."
+      ],
+      "summary": "Raise the runner model cap and list included models first.",
+      "sourceSubject": "Raise the runner model cap and list included models first",
+      "commit": "76474d4d4c1a390041b79364a281c945f78a6f6d",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 69,
+      "admittedAt": "2026-11-01T18:22:36-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.15",
+      "date": "2026-11-01",
+      "title": "Report remote machines' scheduled jobs from the AgentFlow runner over SSH",
+      "notes": [
+        "Report remote machines' scheduled jobs from the AgentFlow runner over SSH."
+      ],
+      "summary": "Report remote machines' scheduled jobs from the AgentFlow runner over SSH.",
+      "sourceSubject": "Report remote machines' scheduled jobs from the AgentFlow runner over SSH",
+      "commit": "714633ed8741390f9e28a56832bbaf6524820015",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 68,
+      "admittedAt": "2026-11-01T18:18:06-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.14",
+      "date": "2026-11-01",
+      "title": "Keep runner reports on whole-workspace saves; fix the runner's error parsing",
+      "notes": [
+        "Keep runner reports on whole-workspace saves; fix the runner's error parsing."
+      ],
+      "summary": "Keep runner reports on whole-workspace saves; fix the runner's error parsing.",
+      "sourceSubject": "Keep runner reports on whole-workspace saves; fix the runner's error parsing",
+      "commit": "1969b4b10138ddb3bd0dd397554acc740d163294",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 67,
+      "admittedAt": "2026-11-01T17:21:09-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.13",
+      "date": "2026-11-01",
+      "title": "Document runner job discovery and note scheduled jobs and split view",
+      "notes": [
+        "Document runner job discovery and note scheduled jobs and split view."
+      ],
+      "summary": "Document runner job discovery and note scheduled jobs and split view.",
+      "sourceSubject": "Document runner job discovery and note scheduled jobs and split view",
+      "commit": "09d4c619c7036290ae7ce19ea898708dc99bf21d",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 66,
+      "admittedAt": "2026-11-01T17:04:00-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.12",
+      "date": "2026-11-01",
+      "title": "Report this machine's scheduled jobs from the AgentFlow runner",
+      "notes": [
+        "Report this machine's scheduled jobs from the AgentFlow runner."
+      ],
+      "summary": "Report this machine's scheduled jobs from the AgentFlow runner.",
+      "sourceSubject": "Report this machine's scheduled jobs from the AgentFlow runner",
+      "commit": "f640dcd41a5b6970429406ba39360f0b4681612a",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 65,
+      "admittedAt": "2026-11-01T17:04:00-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.11",
+      "date": "2026-11-01",
+      "title": "Show runners' scheduled jobs in AgentFlow and promote them into the org",
+      "notes": [
+        "Show runners' scheduled jobs in AgentFlow and promote them into the org."
+      ],
+      "summary": "Show runners' scheduled jobs in AgentFlow and promote them into the org.",
+      "sourceSubject": "Show runners' scheduled jobs in AgentFlow and promote them into the org",
+      "commit": "f9584aa8cbfaeeaa01fadc980269f8f43a9e4a7e",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 64,
+      "admittedAt": "2026-11-01T17:04:00-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.10",
+      "date": "2026-11-01",
+      "title": "Add split view: two tabs side by side with a draggable divider",
+      "notes": [
+        "Add split view: two tabs side by side with a draggable divider."
+      ],
+      "summary": "Add split view: two tabs side by side with a draggable divider.",
+      "sourceSubject": "Add split view: two tabs side by side with a draggable divider",
+      "commit": "8e375d270a6f1f86172d63c25193e7daa3c587c0",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 63,
+      "admittedAt": "2026-11-01T16:24:11-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.9",
+      "date": "2026-11-01",
+      "title": "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people",
+      "notes": [
+        "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people."
+      ],
+      "summary": "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people.",
+      "sourceSubject": "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people",
+      "commit": "4a884a2065d738f763c2338c1d7534efd419b5bd",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 62,
+      "admittedAt": "2026-11-01T15:38:14-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.8",
+      "date": "2026-11-01",
+      "title": "Show model maker icons on AgentFlow cards",
+      "notes": [
+        "Show model maker icons on AgentFlow cards."
+      ],
+      "summary": "Show model maker icons on AgentFlow cards.",
+      "sourceSubject": "Show model maker icons on AgentFlow cards",
+      "commit": "a5f6cc8528c0c45faca9a8a29764ae660755a324",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 61,
+      "admittedAt": "2026-11-01T15:20:08-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.7",
+      "date": "2026-11-01",
+      "title": "Wire person photos into AgentFlow and document the redesign",
+      "notes": [
+        "Wire person photos into AgentFlow and document the redesign."
+      ],
+      "summary": "Wire person photos into AgentFlow and document the redesign.",
+      "sourceSubject": "Wire person photos into AgentFlow and document the redesign",
+      "commit": "186e82719ff264b89c1b64c4c6a41c21866ca542",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 60,
+      "admittedAt": "2026-11-01T15:06:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.6",
+      "date": "2026-11-01",
+      "title": "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker",
+      "notes": [
+        "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker."
+      ],
+      "summary": "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker.",
+      "sourceSubject": "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker",
+      "commit": "12794de7da847571caa264156e48cc12fd0c1cd1",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 59,
+      "admittedAt": "2026-11-01T15:06:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.5",
+      "date": "2026-11-01",
+      "title": "Redesign AgentFlow org cards and consolidate reporting lines",
+      "notes": [
+        "Redesign AgentFlow org cards and consolidate reporting lines."
+      ],
+      "summary": "Redesign AgentFlow org cards and consolidate reporting lines.",
+      "sourceSubject": "Redesign AgentFlow org cards and consolidate reporting lines",
+      "commit": "ee51288df6a8a21e7186c26e88f6d6145e07d070",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 58,
+      "admittedAt": "2026-11-01T15:06:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.4",
+      "date": "2026-11-01",
+      "title": "Show person photos wherever a person appears",
+      "notes": [
+        "Show person photos wherever a person appears."
+      ],
+      "summary": "Show person photos wherever a person appears.",
+      "sourceSubject": "Show person photos wherever a person appears",
+      "commit": "d76baf611df56e6009e857808cc9038e57c097b8",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 57,
+      "admittedAt": "2026-11-01T15:06:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.3",
+      "date": "2026-11-01",
+      "title": "Give AgentFlow agents ordered models with fallbacks and an auto pool",
+      "notes": [
+        "Give AgentFlow agents ordered models with fallbacks and an auto pool."
+      ],
+      "summary": "Give AgentFlow agents ordered models with fallbacks and an auto pool.",
+      "sourceSubject": "Give AgentFlow agents ordered models with fallbacks and an auto pool",
+      "commit": "30947f87b01c464732ecb69f19627b620e96181a",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 56,
+      "admittedAt": "2026-11-01T15:06:15-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.2",
+      "date": "2026-11-01",
+      "title": "Add a Live switch to AgentFlow agents and a runner registry",
+      "notes": [
+        "Add a Live switch to AgentFlow agents and a runner registry."
+      ],
+      "summary": "Add a Live switch to AgentFlow agents and a runner registry.",
+      "sourceSubject": "Add a Live switch to AgentFlow agents and a runner registry",
+      "commit": "3801523e63a96a8b968ed2e902ec3fc0d8127b10",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 55,
+      "admittedAt": "2026-11-01T14:36:05-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.1",
+      "date": "2026-11-01",
+      "title": "Stack larger AgentFlow teams in compact columns so reporting lines never cross",
+      "notes": [
+        "Stack larger AgentFlow teams in compact columns so reporting lines never cross."
+      ],
+      "summary": "Stack larger AgentFlow teams in compact columns so reporting lines never cross.",
+      "sourceSubject": "Stack larger AgentFlow teams in compact columns so reporting lines never cross",
+      "commit": "be4b38fcbb3fff68fc3c18b8a50142df2b86930c",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 54,
+      "admittedAt": "2026-11-01T13:57:19-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.53",
+      "date": "2026-10-31",
+      "title": "Document right-click menus; drop the empty icon column in text-only menus",
+      "notes": [
+        "Document right-click menus; drop the empty icon column in text-only menus."
+      ],
+      "summary": "Document right-click menus; drop the empty icon column in text-only menus.",
+      "sourceSubject": "Document right-click menus; drop the empty icon column in text-only menus",
+      "commit": "e730716951f4e328f6ddcfc251c3b550d3bf0ca0",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 53,
+      "admittedAt": "2026-10-31T16:24:30-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.52",
+      "date": "2026-10-31",
+      "title": "Add right-click menus to AgentFlow",
+      "notes": [
+        "Add right-click menus to AgentFlow."
+      ],
+      "summary": "Add right-click menus to AgentFlow.",
+      "sourceSubject": "Add right-click menus to AgentFlow",
+      "commit": "365dce95a469d78fab5ab5a8ac430f1d8605b619",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 52,
+      "admittedAt": "2026-10-31T16:24:30-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.51",
+      "date": "2026-10-31",
+      "title": "Add right-click menus to the MindMap canvas",
+      "notes": [
+        "Add right-click menus to the MindMap canvas."
+      ],
+      "summary": "Add right-click menus to the MindMap canvas.",
+      "sourceSubject": "Add right-click menus to the MindMap canvas",
+      "commit": "baf4f8f0415cbc7124213daf86951294d7e624e1",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 51,
+      "admittedAt": "2026-10-31T16:24:30-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.50",
+      "date": "2026-10-31",
+      "title": "Send and read query arrays the same way everywhere",
+      "notes": [
+        "Send and read query arrays the same way everywhere."
+      ],
+      "summary": "Send and read query arrays the same way everywhere.",
+      "sourceSubject": "Send and read query arrays the same way everywhere",
+      "commit": "6ef423083e570653f0228d61cd5c8874912c0a24",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 50,
+      "admittedAt": "2026-10-31T16:08:02-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.49",
+      "date": "2026-10-31",
+      "title": "Add a shared right-click menu component",
+      "notes": [
+        "Add a shared right-click menu component."
+      ],
+      "summary": "Add a shared right-click menu component.",
+      "sourceSubject": "Add a shared right-click menu component",
+      "commit": "8cc63cd62a40f500394d9e053241e1b551939c66",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 49,
+      "admittedAt": "2026-10-31T16:03:33-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.48",
+      "date": "2026-10-31",
+      "title": "Delegate DevOps cards to agents and give runners a work queue",
+      "notes": [
+        "Delegate DevOps cards to agents and give runners a work queue."
+      ],
+      "summary": "Delegate DevOps cards to agents and give runners a work queue.",
+      "sourceSubject": "Delegate DevOps cards to agents and give runners a work queue",
+      "commit": "85cbe3f37f0357d2c020254c06e6f57e7b888e84",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 48,
+      "admittedAt": "2026-10-31T16:02:20-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.47",
+      "date": "2026-10-31",
+      "title": "Make AgentFlow's org a canvas and rename Chart to MindMap",
+      "notes": [
+        "Make AgentFlow's org a canvas and rename Chart to MindMap."
+      ],
+      "summary": "Make AgentFlow's org a canvas and rename Chart to MindMap.",
+      "sourceSubject": "Make AgentFlow's org a canvas and rename Chart to MindMap",
+      "commit": "2a4bdacf66fcf33f27580b8c57624d564c59c0e6",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 47,
+      "admittedAt": "2026-10-31T15:47:59-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.46",
+      "date": "2026-10-31",
+      "title": "Merge pull request #3 from aribradshaw/agentflow",
+      "notes": [
+        "Add AgentFlow: an org chart of agents and workflows."
+      ],
+      "summary": "Add AgentFlow: an org chart of agents and workflows.",
+      "sourceSubject": "Merge pull request #3 from aribradshaw/agentflow",
+      "commit": "d842df18531c9d88a656e800481c4b7f1a2065c6",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 46,
+      "admittedAt": "2026-10-31T15:20:39-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.45",
+      "date": "2026-10-31",
+      "title": "Clarify Flow hosting and public release setup",
+      "notes": [
+        "Clarify Flow hosting and public release setup."
+      ],
+      "summary": "Clarify Flow hosting and public release setup.",
+      "sourceSubject": "Clarify Flow hosting and public release setup",
+      "commit": "d134d9740791ce769907ad477df416d5bdff9121",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 45,
+      "admittedAt": "2026-10-31T13:48:52-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.44",
+      "date": "2026-10-31",
+      "title": "Preserve board data shape and stabilize browser checks",
+      "notes": [
+        "Preserve board data shape and stabilize browser checks."
+      ],
+      "summary": "Preserve board data shape and stabilize browser checks.",
+      "sourceSubject": "Preserve board data shape and stabilize browser checks",
+      "commit": "a4ea8f4a56d03cbfc00822c70e1dc8a220a35c07",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 44,
+      "admittedAt": "2026-10-31T13:43:08-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.43",
+      "date": "2026-10-31",
+      "title": "Show Timeline and DevOps in README media",
+      "notes": [
+        "Show Timeline and DevOps in README media."
+      ],
+      "summary": "Show Timeline and DevOps in README media.",
+      "sourceSubject": "Show Timeline and DevOps in README media",
+      "commit": "965d42c2922c6b0d02455645186f3e4dff2d5393",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 43,
+      "admittedAt": "2026-10-31T13:22:08-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.42",
+      "date": "2026-10-31",
+      "title": "Add configurable Flow workflows and self-hosting setup",
+      "notes": [
+        "Add configurable Flow workflows and self-hosting setup."
+      ],
+      "summary": "Add configurable Flow workflows and self-hosting setup.",
+      "sourceSubject": "Add configurable Flow workflows and self-hosting setup",
+      "commit": "6484ae341987543ca725aa365e14b25c882c64ae",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 42,
+      "admittedAt": "2026-10-31T13:00:14-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.41",
+      "date": "2026-10-31",
+      "title": "Remove legacy naming note and private project references",
+      "notes": [
+        "Remove legacy naming note and private project references."
+      ],
+      "summary": "Remove legacy naming note and private project references.",
+      "sourceSubject": "Remove legacy naming note and private project references",
+      "commit": "5a7aff83f68b62e1929209e6cf07a0e06b6d5ceb",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 41,
+      "admittedAt": "2026-10-31T12:43:35-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.40",
+      "date": "2026-10-31",
+      "title": "Document canonical Flow repository for contributors and agents",
+      "notes": [
+        "Document canonical Flow repository for contributors and agents."
+      ],
+      "summary": "Document canonical Flow repository for contributors and agents.",
+      "sourceSubject": "Document canonical Flow repository for contributors and agents",
+      "commit": "055ecec8b437118af943eeb1f1c2b52749d11768",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 40,
+      "admittedAt": "2026-10-31T12:43:35-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.10.39",
+      "date": "2026-10-31",
+      "title": "Initial public Flow source",
+      "notes": [
+        "Initial public Flow source."
+      ],
+      "summary": "Initial public Flow source.",
+      "sourceSubject": "Initial public Flow source",
+      "commit": "a86aaa85e9685c9bcd6bf4e965085b5ba5c2d069",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 39,
+      "admittedAt": "2026-10-31T12:43:35-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
       "version": "0.10.38",
       "date": "2026-10-29",
       "title": "DevLog: 0.10.30-0.10.35 and three production deployments",
@@ -90,13 +783,13 @@
     {
       "version": "0.10.35",
       "date": "2026-10-29",
-      "title": "Public API v1, API keys and MCP mounted: Settings \u203a API keys, /api/v1, /mcp",
+      "title": "Public API v1, API keys and MCP mounted: Settings › API keys, /api/v1, /mcp",
       "notes": [
-        "Settings \u203a API keys: create, copy once, list and revoke keys.",
+        "Settings › API keys: create, copy once, list and revoke keys.",
         "Public API at /api/v1 and MCP at /mcp, limited to each key's environment and scopes."
       ],
-      "summary": "Settings \u203a API keys: create, copy once, list and revoke keys.",
-      "sourceSubject": "Public API v1, API keys and MCP mounted: Settings \u203a API keys, /api/v1, /mcp",
+      "summary": "Settings › API keys: create, copy once, list and revoke keys.",
+      "sourceSubject": "Public API v1, API keys and MCP mounted: Settings › API keys, /api/v1, /mcp",
       "commit": "f7032c281f0404f0ad984afaac8346fbcbeb4330",
       "author": {
         "name": "Flow Contributors",
@@ -264,10 +957,10 @@
       "date": "2026-10-29",
       "title": "Invite emails through Resend; owner-token environments list/archive",
       "notes": [
-        "Invite emails through Resend (branded, rate-limited); Settings \u203a Resend and env.mjs invite --resend.",
+        "Invite emails through Resend (branded, rate-limited); Settings › Resend and env.mjs invite --resend.",
         "Owner CLI: env.mjs environments | archive."
       ],
-      "summary": "Invite emails through Resend (branded, rate-limited); Settings \u203a Resend and env.mjs invite --resend.",
+      "summary": "Invite emails through Resend (branded, rate-limited); Settings › Resend and env.mjs invite --resend.",
       "sourceSubject": "Invite emails through Resend; owner-token environments list/archive",
       "commit": "9d10ad800992fcf3a98aa278c495090321d1222c",
       "author": {
