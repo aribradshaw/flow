@@ -181,6 +181,8 @@ flow runners report --input '{"runner":"Home server","models":[],"jobs":[{"id":"
 
 In the app, **Scheduled** in the org chart's toolbar opens a tray on the left of the canvas. It lists every runner's jobs by runner and group, each with its source icon, name, schedule and a dot for the last run (green OK, red failed, grey unknown). Hover the dot for the last and next run. A group with more than eight jobs starts collapsed to a chip such as "59 jobs" that opens it. Search filters the tray too. Whether the tray is open, and which groups you opened or closed, is remembered on this device.
 
+The reference runner (`tools/agent-runner.mjs`) reports the jobs it finds with every `report` and `tick`: systemd user and system timers (stock distribution timers such as apt-daily, fstrim and logrotate are skipped), the user's crontab, T3 scheduled tasks (read only from T3's database; needs Node 22.5+ for `node:sqlite`), and cron configs in your repos: `vercel.json` crons, `cronSchedule` in `railway.json`/`railway.toml`, and `on.schedule` in GitHub Actions workflows. Repos default to your T3 projects' folders. Commands are summarised on one line with anything that looks like a secret hidden. Run `node tools/agent-runner.mjs jobs` (or `jobs --json`) to see the list without contacting Flow, and tune it with `"jobs"` in `runner.json`: `sources`, `repos`, `exclude`, `include` (keeps a job even when `skipDistro` or `exclude` would drop it) and `skipDistro`; `"jobs": false` stops reporting jobs and leaves the stored list as it is.
+
 #### Promoting a job
 
 To put a job in the org, do one of these:
