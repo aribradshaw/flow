@@ -1714,7 +1714,7 @@ List AgentFlow agents
 
 `GET /api/v1/envs/{env}/agents` · scope `read` · MCP tool `agents_list`
 
-Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order. Filters: status, kind, live (true: the agents a runner should work), project (id or name) and q (name, role, purpose, inputs, outputs, tools).
+Agents in the AgentFlow org chart (AI agents, humans, teams and automations), in saved order. Filters: status, kind, live (true: the agents a runner should work), project (id or name) and q (name, role, purpose, inputs, outputs, tools).
 
 **Input**
 
@@ -1722,7 +1722,7 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | --- | --- | --- | --- |
 | `env` | string | yes | Environment id (see envs.list). |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
-| `kind` | enum |  | One of `agent`, `human`, `team`. |
+| `kind` | enum |  | One of `agent`, `human`, `team`, `automation`. |
 | `live` | boolean |  |  |
 | `project` | string |  | Project id or name. |
 | `q` | string |  |  |
@@ -1736,7 +1736,7 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items` | object[] | yes |  |
 | `items[].id` | string | yes |  |
 | `items[].name` | string | yes |  |
-| `items[].kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `items[].kind` | enum | yes | One of `agent`, `human`, `team`, `automation`. |
 | `items[].title` | string |  |  |
 | `items[].status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
 | `items[].live` | boolean | yes |  |
@@ -1748,6 +1748,8 @@ Agents in the AgentFlow org chart (AI agents, humans and teams), in saved order.
 | `items[].models` | string[] | yes |  |
 | `items[].model` | string | yes |  |
 | `items[].auto` | boolean | yes |  |
+| `items[].schedule` | string |  | When it runs: plain text or cron; "" for none. |
+| `items[].job` | object |  |  |
 | `items[].inputs` | string[] | yes |  |
 | `items[].outputs` | string[] | yes |  |
 | `items[].tools` | string[] | yes |  |
@@ -1786,6 +1788,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents?status=active" \
       "models": [],
       "model": "",
       "auto": false,
+      "schedule": "Weekdays 09:00",
       "inputs": [
         "A card that needs research"
       ],
@@ -1836,7 +1839,7 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent` | object | yes |  |
 | `agent.id` | string | yes |  |
 | `agent.name` | string | yes |  |
-| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`, `automation`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
 | `agent.live` | boolean | yes |  |
@@ -1848,6 +1851,8 @@ One agent by id or name, with `brief`: Markdown for whatever runs the agent (pur
 | `agent.models` | string[] | yes |  |
 | `agent.model` | string | yes |  |
 | `agent.auto` | boolean | yes |  |
+| `agent.schedule` | string |  | When it runs: plain text or cron; "" for none. |
+| `agent.job` | object |  |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -1885,6 +1890,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "models": [],
     "model": "",
     "auto": false,
+    "schedule": "Weekdays 09:00",
     "inputs": [
       "A card that needs research"
     ],
@@ -1936,7 +1942,7 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `agent` | object | yes |  |
 | `agent.id` | string | yes |  |
 | `agent.name` | string | yes |  |
-| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`, `automation`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
 | `agent.live` | boolean | yes |  |
@@ -1948,6 +1954,8 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `agent.models` | string[] | yes |  |
 | `agent.model` | string | yes |  |
 | `agent.auto` | boolean | yes |  |
+| `agent.schedule` | string |  | When it runs: plain text or cron; "" for none. |
+| `agent.job` | object |  |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -2004,6 +2012,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
     "models": [],
     "model": "",
     "auto": false,
+    "schedule": "Weekdays 09:00",
     "inputs": [
       "A card that needs research"
     ],
@@ -2080,7 +2089,7 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | --- | --- | --- | --- |
 | `env` | string | yes | Environment id (see envs.list). |
 | `name` | string | yes |  |
-| `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
+| `kind` | enum |  | agent (AI agent), human, team, or automation (a scripted job without AI that runs on its own schedule outside Flow: no models, never live). One of `agent`, `human`, `team`, `automation`. |
 | `title` | string |  | Role, e.g. Research. |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
 | `live` | boolean |  | The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue. |
@@ -2092,6 +2101,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
 | `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
 | `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
+| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (the runner starts it then); "" for none. |
+| `job` | union |  | The runner job it was promoted from: {runner, id} (see runners.report jobs); null or "" for none. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2109,7 +2120,7 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent` | object | yes |  |
 | `agent.id` | string | yes |  |
 | `agent.name` | string | yes |  |
-| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`, `automation`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
 | `agent.live` | boolean | yes |  |
@@ -2121,6 +2132,8 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `agent.models` | string[] | yes |  |
 | `agent.model` | string | yes |  |
 | `agent.auto` | boolean | yes |  |
+| `agent.schedule` | string |  | When it runs: plain text or cron; "" for none. |
+| `agent.job` | object |  |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -2159,6 +2172,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/agents" \
     "models": [],
     "model": "",
     "auto": false,
+    "schedule": "Weekdays 09:00",
     "inputs": [
       "A card that needs research"
     ],
@@ -2198,7 +2212,7 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `env` | string | yes | Environment id (see envs.list). |
 | `agent` | string | yes | Agent id or name. |
 | `name` | string |  |  |
-| `kind` | enum |  | agent (AI agent), human or team. One of `agent`, `human`, `team`. |
+| `kind` | enum |  | agent (AI agent), human, team, or automation (a scripted job without AI that runs on its own schedule outside Flow: no models, never live). One of `agent`, `human`, `team`, `automation`. |
 | `title` | string |  | Role, e.g. Research. |
 | `status` | enum |  | One of `draft`, `active`, `paused`, `retired`. |
 | `live` | boolean |  | The switch runners obey: false (the default) and runners leave the agent alone; true and the runner named in runtime works its queue. |
@@ -2210,6 +2224,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
 | `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
 | `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
+| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (the runner starts it then); "" for none. |
+| `job` | union |  | The runner job it was promoted from: {runner, id} (see runners.report jobs); null or "" for none. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
 | `tools` | string[] |  | What it may use. |
@@ -2227,7 +2243,7 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent` | object | yes |  |
 | `agent.id` | string | yes |  |
 | `agent.name` | string | yes |  |
-| `agent.kind` | enum | yes | One of `agent`, `human`, `team`. |
+| `agent.kind` | enum | yes | One of `agent`, `human`, `team`, `automation`. |
 | `agent.title` | string |  |  |
 | `agent.status` | enum | yes | One of `draft`, `active`, `paused`, `retired`. |
 | `agent.live` | boolean | yes |  |
@@ -2239,6 +2255,8 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `agent.models` | string[] | yes |  |
 | `agent.model` | string | yes |  |
 | `agent.auto` | boolean | yes |  |
+| `agent.schedule` | string |  | When it runs: plain text or cron; "" for none. |
+| `agent.job` | object |  |  |
 | `agent.inputs` | string[] | yes |  |
 | `agent.outputs` | string[] | yes |  |
 | `agent.tools` | string[] | yes |  |
@@ -2277,6 +2295,7 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher" \
     "models": [],
     "model": "",
     "auto": false,
+    "schedule": "Weekdays 09:00",
     "inputs": [
       "A card that needs research"
     ],
@@ -2360,7 +2379,9 @@ Machines or services that run agents, with the models each one offers, as they l
 | `items` | object[] | yes |  |
 | `items[].name` | string | yes |  |
 | `items[].models` | object[] | yes |  |
+| `items[].jobs` | object[] |  |  |
 | `items[].reported` | string | yes |  |
+| `items[].jobsReported` | string |  |  |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -2384,6 +2405,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/runners" \
           "billing": "included"
         }
       ],
+      "jobs": [],
       "reported": "2026-10-29T17:00:00.000Z"
     }
   ],
@@ -2398,7 +2420,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run. The model list replaces the old one; nothing is saved when it has not changed, so a runner may report on every pass. Agents name the runner in runtime and pick model ids. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners and 500 models each.
+A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one, and so does jobs when sent (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 500 models and 500 jobs each.
 
 **Input**
 
@@ -2411,6 +2433,19 @@ A runner says what it can run. The model list replaces the old one; nothing is s
 | `models[].label` | string |  |  |
 | `models[].provider` | string |  | Display group, e.g. Claude or OpenCode. |
 | `models[].billing` | enum |  | included (a subscription or free) or metered (paid per use). One of `included`, `metered`. |
+| `jobs` | object[] |  | Scheduled jobs on this runner (replaces the stored list; leave out to keep it, [] to clear). |
+| `jobs[].id` | string | yes | Stable per runner, e.g. systemd:backup.timer or vercel:my-app:/api/cron/sync. |
+| `jobs[].name` | string |  | Defaults to the id. |
+| `jobs[].source` | string |  | Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, github or other (any text; defaults to other). |
+| `jobs[].group` | string |  | Display group, e.g. "Home server" or "Vercel · my-app". |
+| `jobs[].schedule` | string |  | When, in words, e.g. "Daily 22:30" or "Every 5 min". |
+| `jobs[].cron` | string |  | The cron expression, when there is one. |
+| `jobs[].command` | string |  | A short summary of what it runs. |
+| `jobs[].ai` | boolean |  | It starts an AI agent (promoted as an AI agent rather than an automation). |
+| `jobs[].enabled` | boolean |  |  |
+| `jobs[].lastRun` | string |  | ISO time of the last run. |
+| `jobs[].lastStatus` | enum |  | One of `ok`, `failed`, `running`, `unknown`. |
+| `jobs[].nextRun` | string |  | ISO time of the next run. |
 
 **Output**
 
@@ -2420,7 +2455,9 @@ A runner says what it can run. The model list replaces the old one; nothing is s
 | `runner` | object | yes |  |
 | `runner.name` | string | yes |  |
 | `runner.models` | object[] | yes |  |
+| `runner.jobs` | object[] |  |  |
 | `runner.reported` | string | yes |  |
+| `runner.jobsReported` | string |  |  |
 | `changed` | boolean | yes |  |
 
 **Example: Home server**
@@ -2445,7 +2482,53 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server"
         "billing": "included"
       }
     ],
+    "jobs": [],
     "reported": "2026-10-29T17:00:00.000Z"
+  },
+  "changed": true
+}
+```
+
+**Example: With scheduled jobs**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/runners/Home%20server" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"models":[{"id":"claudeAgent:claude-sonnet-5-5","label":"Claude · Sonnet 5.5"}],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","ai":false,"enabled":true,"lastRun":"2026-10-29T17:00:00.000Z","lastStatus":"ok","nextRun":"2026-10-30T22:30:00.000Z"}]}'
+```
+
+```json
+{
+  "rev": 60,
+  "runner": {
+    "name": "Home server",
+    "models": [
+      {
+        "id": "claudeAgent:claude-sonnet-5-5",
+        "label": "Claude · Sonnet 5.5",
+        "provider": "Claude",
+        "billing": "included"
+      }
+    ],
+    "jobs": [
+      {
+        "id": "systemd:backup.timer",
+        "name": "Nightly backup",
+        "source": "systemd",
+        "group": "Home server",
+        "schedule": "Daily 22:30",
+        "cron": "30 22 * * *",
+        "command": "restic backup /srv",
+        "ai": false,
+        "enabled": true,
+        "lastRun": "2026-10-29T17:00:00.000Z",
+        "lastStatus": "ok",
+        "nextRun": "2026-10-30T22:30:00.000Z"
+      }
+    ],
+    "reported": "2026-10-29T17:00:00.000Z",
+    "jobsReported": "2026-10-29T17:00:00.000Z"
   },
   "changed": true
 }

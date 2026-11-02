@@ -2,7 +2,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
-  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName} from '../public/agentflow-core.js';
+  workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName,
+  cleanJobs,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -373,4 +374,106 @@ test('matching the signed-in user to a person card: email first, then a unique n
   assert.ok(!isSessionPerson(ari,[ari,{id:'m',name:'Me',email:'ari@example.com'}],me),'a card with their email is them, not the namesake');
   assert.ok(!isSessionPerson(ari,[ari],null),'no session');
   assert.ok(!isSessionPerson(ari,[ari],{email:'ari@example.com',name:''}),'session without a name');
+});
+
+// ---------- scheduled jobs and automations ----------
+const job=(id,o={})=>({id,name:id,source:'systemd',schedule:'Daily',...o});
+test('runner jobs are cleaned: unique ids, trimmed text within limits, defaults, and up to 500',()=>{
+  const js=cleanJobs([job(' a '),job('a',{name:'dup'}),{id:''},{name:'no id'},null,
+    {id:'b',name:'  B  ',source:'s'.repeat(50),group:' ',schedule:'x'.repeat(300),cron:' 0 2 * * * ',command:'c'.repeat(400),ai:'yes',enabled:false,lastRun:'nope',lastStatus:'exploded',nextRun:'2026-11-02T00:00:00Z'},
+    {id:'c'}]);
+  assert.deepEqual(js.map(j=>j.id),['a','b','c'],'the first of an id wins; jobs need an id');
+  const [a,b,c]=js;
+  assert.deepEqual(a,{id:'a',name:'a',source:'systemd',schedule:'Daily',ai:false,enabled:true,lastStatus:'unknown'});
+  assert.deepEqual([b.name,b.source.length,'group' in b,b.schedule.length,b.cron,b.command.length,b.ai,b.enabled,'lastRun' in b,b.lastStatus,b.nextRun],
+    ['B',40,false,200,'0 2 * * *',300,false,false,false,'unknown','2026-11-02T00:00:00Z']);
+  assert.deepEqual([c.name,c.source,c.schedule],['c','other',''],'name defaults to the id, source to other');
+  assert.equal(cleanJobs(Array.from({length:600},(_,i)=>job('j'+i))).length,LIMITS.jobs);
+  assert.equal(cleanJobs([job('x'.repeat(250))])[0].id.length,200);
+  const af=cleanAgentflow({runners:[{name:'Home',jobs:[job('a'),job('a')],jobsReported:'bad'},{name:'Old'}]},{});
+  assert.deepEqual([af.runners[0].jobs.length,'jobsReported' in af.runners[0],af.runners[1].jobs],[1,false,[]],'older runners get an empty job list');
+});
+
+test('reporting jobs: only real changes are saved; lastRun and nextRun alone wait six hours',()=>{
+  const T0='2026-11-01T10:00:00.000Z',later=h=>new Date(Date.parse(T0)+h*3600e3).toISOString();
+  const models=[{id:'x:m',label:'M'}],j=(o={})=>job('backup',{lastStatus:'ok',lastRun:T0,nextRun:later(24),...o});
+  let r=reportRunner(null,'Home',{models,jobs:[j()]},T0);
+  assert.ok(r.changed);assert.deepEqual([r.runner.jobsReported,r.runner.reported,r.runner.jobs.length],[T0,T0,1]);
+  const had=r.runner;
+  r=reportRunner(had,'home',{models,jobs:[j()]},later(1));
+  assert.deepEqual([r.changed,r.runner],[false,had],'the same report saves nothing');
+  r=reportRunner(had,'Home',{models,jobs:[j({lastRun:later(1),nextRun:later(25)})]},later(1));
+  assert.equal(r.changed,false,'a moved lastRun / nextRun alone is not saved');
+  r=reportRunner(had,'Home',{models,jobs:[j({lastRun:later(1),lastStatus:'failed'})]},later(1));
+  assert.ok(r.changed,'a status flip is saved');assert.equal(r.runner.jobs[0].lastRun,later(1),'with the new times');
+  r=reportRunner(had,'Home',{models,jobs:[j({schedule:'Hourly'})]},later(1));assert.ok(r.changed,'another field changed');
+  r=reportRunner(had,'Home',{models,jobs:[j(),job('new')]},later(1));assert.ok(r.changed,'a new job');
+  r=reportRunner(had,'Home',{models,jobs:[j({lastRun:later(7)})]},later(7));
+  assert.deepEqual([r.changed,r.runner.jobsReported,r.runner.jobs[0].lastRun],[true,later(7),later(7)],'after six hours the times are refreshed');
+  assert.equal(JOBS_STALE,6*3600e3);
+  r=reportRunner(had,'Home',{models,jobs:[j()]},later(7));assert.equal(r.changed,false,'nothing to refresh: still nothing saved');
+  r=reportRunner(had,'Home',{models},later(1));assert.equal(r.changed,false,'jobs left out: unchanged models save nothing');
+  r=reportRunner(had,'Home',{models:[]},later(1));
+  assert.deepEqual([r.changed,r.runner.jobs,r.runner.jobsReported],[true,had.jobs,T0],'jobs left out are kept, with their jobsReported');
+  r=reportRunner(had,'Home',{models,jobs:[]},later(1));
+  assert.deepEqual([r.changed,r.runner.jobs,r.runner.jobsReported],[true,[],later(1)],'[] clears them');
+  r=reportRunner({...had,jobsReported:undefined},'Home',{models,jobs:[j({nextRun:later(30)})]},later(1));assert.ok(r.changed,'never saved before: saved');
+  assert.equal(reportRunner(null,'X',{models}).runner.jobsReported,undefined,'no jobs, no jobsReported');
+});
+
+test('automations: never live, no model needed, their schedule on the card, shorter cards',()=>{
+  const db=base();
+  db.agentflow=cleanAgentflow({agents:[{id:'a',name:'Backup',kind:'automation',live:true,schedule:' Daily 22:30 ',models:['x:m'],job:{runner:' Home ',id:'systemd:backup.timer'}},
+    {id:'b',name:'B',schedule:'s'.repeat(300),job:{runner:'',id:'x'}},{id:'c',name:'C',job:'nope'}]},db);
+  const [a,b,c]=db.agentflow.agents;
+  assert.equal(AGENT_KINDS.automation,'Automation');
+  assert.deepEqual([a.kind,a.live,a.schedule,a.job],['automation',false,' Daily 22:30 ',{runner:'Home',id:'systemd:backup.timer'}],'automations are never live');
+  assert.deepEqual([b.schedule.length,'job' in b,'job' in c,c.schedule],[200,false,false,''],'a job link needs a runner and an id');
+  assert.equal(liveProblem(db.agentflow,a),'','automations need no runner or model');
+  assert.equal(runLine(db.agentflow,a),'Daily 22:30','the card shows the schedule, not runner or model');
+  assert.deepEqual([cardH(a),cardH(c)],[CARD.auto,CARD.h]);
+  assert.ok(CARD.auto<CARD.h);
+  const brief=agentBrief(db,'a');
+  assert.match(brief,/^# Backup\n\nAutomation · Draft\n/,'no live state in the brief');
+  assert.match(brief,/- Schedule: Daily 22:30\n- Promoted from: Home · systemd:backup\.timer \(no longer reported\)/);
+  assert.doesNotMatch(brief,/Model/,'automations list no models');
+  assert.deepEqual(filterAgents(db.agentflow,{q:'22:30'}).map(x=>x.id),['a'],'search matches the schedule');
+  assert.deepEqual(filterAgents(db.agentflow,{kind:'automation'}).map(x=>x.id),['a']);
+});
+
+test('jobs across runners, grouped for display, and promoted into the org once',()=>{
+  const db=base();
+  db.agentflow=cleanAgentflow({agents:[{id:'lead',name:'Lead'}],runners:[
+    {name:'Zeta',jobs:[job('z1',{name:'Zed'})]},
+    {name:'Home',models:[{id:'x:m',label:'M'}],jobs:[job('t2',{name:'beta',group:'Timers'}),job('t1',{name:'Alpha',group:'Timers'}),job('loose',{name:'Loose'}),
+      job('vercel:app:/api/cron/sync',{name:'Sync',source:'vercel',group:'Vercel · app',cron:'*/5 * * * *',schedule:'',command:'GET /api/cron/sync',enabled:false}),
+      job('ai',{name:'Digest',source:'claude',ai:true,schedule:'Weekdays 08:00',command:'Write the digest'}),job('odd',{source:'Nomad'})]}]},db);
+  const af=db.agentflow;
+  assert.deepEqual(jobsOf(af).map(j=>`${j.runner}/${j.id}`),['Zeta/z1','Home/t2','Home/t1','Home/loose','Home/vercel:app:/api/cron/sync','Home/ai','Home/odd']);
+  const gs=jobGroups(af);
+  assert.deepEqual(gs.map(g=>[g.label,g.runner,g.jobs.length]),[['Home','Home',3],['Timers','Home',2],['Vercel · app','Home',1],['Zeta','Zeta',1]],'runner, then its ungrouped jobs, then groups by name');
+  assert.deepEqual(gs[1].jobs.map(j=>j.name),['Alpha','beta'],'jobs by name');
+  assert.equal(new Set(gs.map(g=>g.key)).size,gs.length,'keys are unique');
+  assert.equal(jobOf(af,'home','t1').name,'Alpha');assert.equal(jobOf(af,'Home','nope'),null);assert.equal(jobOf(af,'Nobody','t1'),null);
+
+  const n0=af.agents.length,auto=promoteJob(af,'home','vercel:app:/api/cron/sync',{reportsTo:'lead'});
+  assert.deepEqual([auto.kind,auto.name,auto.title,auto.schedule,auto.runtime,auto.purpose,auto.status,auto.live,auto.reportsTo,auto.job,auto.models],
+    ['automation','Sync','Vercel cron','*/5 * * * *','','GET /api/cron/sync','paused',false,'lead',{runner:'Home',id:'vercel:app:/api/cron/sync'},[]],
+    'a job without AI becomes an automation: the cron line when it has no schedule text, paused when disabled');
+  const ai=promoteJob(af,'Home','ai');
+  assert.deepEqual([ai.kind,ai.title,ai.schedule,ai.runtime,ai.status,ai.live,ai.reportsTo],['agent','Claude schedule','Weekdays 08:00','Home','active',false,''],'an AI job becomes an AI agent on its runner, top level');
+  assert.equal(promoteJob(af,'Home','odd',{reportsTo:'ghost'}).title,'Nomad job','unknown sources read as "<source> job"; unknown managers mean top level');
+  assert.equal(promoteJob(af,'Home','odd').reportsTo,'');
+  assert.equal(af.agents.length,n0+3);
+  assert.equal(promoteJob(af,'HOME','ai'),ai,'a job is promoted once: again returns the agent it became');
+  assert.equal(af.agents.length,n0+3,'and adds nothing');
+  assert.equal(promotedAgent(af,'home','ai'),ai);assert.equal(promotedAgent(af,'Home','t1'),null);
+  assert.equal(promoteJob(af,'Home','missing'),null,'unknown jobs are refused');
+  const placedOne=promoteJob(af,'Home','t1',{x:999.6,y:-40});
+  assert.deepEqual([placedOne.x,placedOne.y],[1000,-40]);assert.ok(af.agents.every(placed),'a drop position pins the rest where they were drawn');
+  assert.match(agentBrief(db,ai.id),/- Runs on: Home\n- Schedule: Weekdays 08:00\n- Promoted from: Home · Digest \(Write the digest\)/);
+  const cleaned=cleanAgentflow(structuredClone(af),db);
+  assert.deepEqual(cleaned.agents.find(x=>x.id===auto.id).job,auto.job,'the link survives cleaning');
+  while(af.agents.length<LIMITS.agents)newAgent(af);
+  assert.equal(promoteJob(af,'Home','t2'),null,'refused at the agent limit');
 });

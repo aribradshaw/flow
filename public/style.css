@@ -767,6 +767,90 @@ body[data-tab=agentflow] #inspector{width:320px}
 .af-step-b .ib[disabled]{opacity:.3;pointer-events:none}
 .af-addstep{display:inline-flex;align-items:center;gap:4px;margin-top:6px}
 @media (prefers-reduced-motion:reduce){.af-node,.af-port{transition:none}}
+/* Automations: a shorter, greyer card with a gear; the schedule on the run line. */
+.af-node.k-automation{height:var(--af-ha,76px);padding-top:8px;background:#f8f9f8;border-color:#d6dcd9;box-shadow:none}
+.af-node.k-automation .af-av.k{border-radius:7px;background:#e9edeb;color:#56625e}
+.af-node.k-automation .nm{font-weight:600;color:#3a4542}
+.af-node.k-automation .af-n-run{margin-top:6px}
+.af-node.k-automation .af-n-run>.i{flex:none;color:var(--faint)}
+.af-clk{display:flex;flex:none;margin-left:auto;color:var(--faint)}
+/* A job's last status: ok green, failed red, running blue, unknown grey. */
+.af-jdot{flex:none;width:7px;height:7px;border-radius:50%;background:#c4cbc8}
+.af-jdot.s-ok{background:#2f8a4f}.af-jdot.s-failed{background:var(--danger)}.af-jdot.s-running{background:#3d7bd0}
+.af-n-run .af-jdot{margin-left:auto}
+/* The Scheduled tray: runner jobs to promote, docked left on the org canvas. */
+.af-tray-b{position:relative}
+.af-tray-b.on{border-color:var(--accent-line);background:var(--flygon-tint);color:var(--accent)}
+.af-tray-b em{margin-left:2px;padding:0 5px;border-radius:8px;background:var(--bg);color:var(--muted);font-size:10.5px;font-style:normal;font-weight:600;line-height:15px;font-variant-numeric:tabular-nums}
+.af-tray-b.on em{background:#fff}
+.af-tray{position:absolute;left:10px;top:50px;bottom:10px;z-index:6;display:flex;flex-direction:column;width:288px;max-width:calc(100% - 20px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 18px #141e1c1a;overflow:hidden}
+.af-tray[hidden]{display:none}
+.af-tray-h{display:flex;flex:none;align-items:center;gap:6px;height:36px;padding:0 4px 0 12px;border-bottom:1px solid var(--line)}
+.af-tray-h>.i{color:var(--accent)}
+.af-tray-h strong{font-size:12.5px}
+.af-tray-h em{font-size:11px;font-style:normal;color:var(--faint);font-variant-numeric:tabular-nums}
+.af-tray-l{flex:1;min-height:0;overflow:auto;padding:4px 0 8px}
+.af-tray-f{flex:none;padding:7px 12px;border-top:1px solid var(--line);background:var(--bg);font-size:11px;color:var(--faint)}
+.af-tray-e{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px 20px;text-align:center;color:var(--muted)}
+.af-tray-e>.i{color:var(--accent)}
+.af-tray-e strong{font-size:13px;color:var(--ink)}
+.af-tray-e p{margin:0;font-size:12px;line-height:1.5}
+.af-tray-e code,.af-jobinfo code{padding:0 3px;border-radius:3px;background:var(--bg);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
+.af-jg+.af-jg{border-top:1px solid var(--line)}
+.af-jg-h{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 10px 0 8px;border:0;background:none;color:var(--ink);font-size:11.5px;font-weight:650;text-align:left}
+.af-jg-h:hover{background:var(--bg)}
+.af-jg-h>.i{flex:none;color:var(--muted)}
+.af-jg-h .af-jg-c{display:flex;flex:none;color:var(--faint);transition:transform .12s}
+.af-jg-h[aria-expanded=false] .af-jg-c{transform:rotate(-90deg)}
+.af-jg-l{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.af-jg-h small{flex:1;min-width:0;overflow:hidden;font-size:10.5px;font-weight:400;color:var(--faint);white-space:nowrap;text-overflow:ellipsis}
+.af-jg-h .af-jg-l+.af-jg-f,.af-jg-h .af-jg-l+.af-jg-n{margin-left:auto}
+.af-jg-n{flex:none;min-width:18px;padding:0 5px;border-radius:8px;background:var(--bg);color:var(--muted);font-size:10.5px;font-weight:600;line-height:16px;text-align:center;font-variant-numeric:tabular-nums}
+.af-jg-f{flex:none;min-width:16px;padding:0 4px;border-radius:8px;background:#f8e9e7;color:var(--danger);font-size:10.5px;font-weight:700;line-height:16px;text-align:center}
+.af-jg-chip{display:inline-flex;align-items:center;gap:5px;height:24px;margin:0 10px 8px 30px;padding:0 10px;border:1px dashed var(--line2);border-radius:12px;background:#fff;color:var(--muted);font-size:11.5px;font-weight:600}
+.af-jg-chip:hover{border-style:solid;background:var(--bg);color:var(--ink)}
+.af-jg-chip b{color:var(--danger)}
+.af-jobs{margin:0 0 6px;padding:0;list-style:none}
+.af-job{position:relative;display:flex;align-items:center;gap:8px;min-height:36px;padding:3px 10px 3px 12px;cursor:grab;user-select:none;touch-action:none}
+.af-job:hover{background:var(--bg)}
+.af-job.off .af-job-m{opacity:.55}
+.af-job-ic{display:flex;flex:none;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--accent-2);color:var(--accent)}
+.af-job.off .af-job-ic{background:var(--bg);color:var(--faint)}
+.af-job-m{display:flex;flex:1;flex-wrap:wrap;align-items:center;column-gap:4px;min-width:0;line-height:1.25}
+.af-job-m b{max-width:calc(100% - 16px);overflow:hidden;font-size:12px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
+.af-job-m small{flex-basis:100%;overflow:hidden;font-size:11px;color:var(--muted);white-space:nowrap;text-overflow:ellipsis}
+.af-job-ai{display:flex;flex:none;color:#7a5bd0}
+.af-job-go{position:absolute;right:8px;top:50%;display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 8px;transform:translateY(-50%);opacity:0;border:1px solid var(--line2);border-radius:11px;background:#fff;font-size:11px;font-weight:600}
+.af-job-done{display:inline-flex;flex:none;align-items:center;gap:2px;height:16px;padding:0 6px 0 4px;border:1px solid;border-radius:8px;font-size:10px;font-weight:650;line-height:1}
+.af-job-done:hover{border-color:#2f8a4f;background:#e1f0e6}
+.af-job-go{color:var(--accent)}
+.af-job-go:hover{border-color:var(--accent-line);background:var(--flygon-tint)}
+.af-job:hover .af-job-go,.af-job-go:focus-visible{opacity:1}
+.af-job:not(.done):hover .af-jdot,.af-job:not(.done):focus-within .af-jdot{visibility:hidden}
+.af-job-done{border-color:#2f8a4f40;background:#eef6f0;color:#2f6b45}
+.af-job-done .i{color:#2f8a4f}
+body.af-jdrag,body.af-jdrag *{cursor:grabbing!important}
+.af-jghost{position:fixed;left:0;top:0;z-index:60;display:flex;align-items:center;gap:6px;max-width:300px;padding:5px 10px;border:1px solid var(--accent-line);border-radius:6px;background:#fff;box-shadow:0 6px 18px #141e1c26;font-size:12px;font-weight:600;pointer-events:none;white-space:nowrap}
+.af-jghost .i{flex:none;color:var(--accent)}
+.af-jghost span{overflow:hidden;text-overflow:ellipsis}
+.af-jghost em{font-size:11px;font-style:normal;font-weight:400;color:var(--muted)}
+.af-jghost em:empty{display:none}
+.af-jghost.off{border-color:var(--line2);opacity:.7}
+/* The linked job in the side panel (read-only). */
+.af-jobinfo{border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:11.5px}
+.af-jobinfo-h{display:flex;align-items:center;gap:6px;padding:7px 9px;border-bottom:1px solid var(--line)}
+.af-jobinfo-h .i{flex:none;color:var(--accent)}
+.af-jobinfo-h b{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.af-off{margin-left:auto;padding:0 5px;border-radius:3px;background:#e6ebe9;color:var(--muted);font-size:10px;font-weight:700;line-height:15px}
+.af-jobinfo dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:0;padding:7px 9px}
+.af-jobinfo dt{color:var(--faint)}
+.af-jobinfo dd{min-width:0;margin:0;overflow-wrap:anywhere;color:var(--ink)}
+.af-sec-b>.dc-hint .i{vertical-align:-1px;margin-right:4px}
+/* Four kinds: two by two, so every label fits the panel. */
+.seg.af-kinds{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+.seg.af-kinds button{white-space:nowrap}
+.af-job-s{display:flex;flex-basis:100%;align-items:center;gap:6px;min-width:0}
+.af-job-s small{flex:0 1 auto;flex-basis:auto}
 
 /* ---------- AgentFlow side panel: header, sections, pills, chips, runner and models ---------- */
 .ibody.af-panel{padding:0 0 16px}

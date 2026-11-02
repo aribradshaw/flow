@@ -554,6 +554,30 @@ try{
     await at(lead.id);await menuPick('Open work queue');await sleep(200);
     assert(await js('location.hash')==='#devops'&&await js(`JSON.parse(localStorage.getItem('flygon-flow-devops-ui')).agents.join()`)===lead.id&&/Agents · 1/.test(await js(`document.querySelector('[data-picker=dv-agents]')?.textContent||''`)),'Open work queue shows the DevOps board filtered to that agent');
     await js(`document.querySelector('[data-dv=clear]').click()`);await sleep(100);await js(`document.querySelector('[data-tab=agentflow]').click()`);await sleep(150);}
+  // Scheduled jobs: a runner reports jobs; the tray lists them by group, and a job is promoted into the org.
+  {await js(`(async()=>{const s=await import('/store.js'),c=await import('/agentflow-core.js');s.change(()=>{s.store.db.agentflow.runners=[c.reportRunner(null,'Home server',{models:[],jobs:[
+      {id:'systemd:backup.timer',name:'Nightly backup',source:'systemd',group:'Home server',schedule:'Daily 22:30',command:'restic backup',lastStatus:'ok'},
+      {id:'claude:triage',name:'Morning triage',source:'claude',group:'Agents',schedule:'Weekdays 08:00',ai:true},
+      ...Array.from({length:12},(_,i)=>({id:'vercel:app:'+i,name:'Cron '+(i+1),source:'vercel',group:'Vercel · app',schedule:'Hourly',lastStatus:i===3?'failed':'ok'}))]}).runner]});return 1})()`);await sleep(150);
+    const n0=(await saved()).agentflow.agents.length;
+    await js(`document.activeElement?.blur();document.querySelector('[data-af=tray]').click()`);await sleep(150);
+    assert(await js(`!document.querySelector('.af-tray').hidden&&document.querySelectorAll('.af-tray .af-jg').length===3&&document.querySelectorAll('.af-tray [data-jid]').length===2&&!!document.querySelector('.af-tray .af-jg-chip')`),'the Scheduled tray lists job groups, a big group collapsed to a chip');
+    assert(await js(`JSON.parse(localStorage.getItem('flygon-flow-agentflow-ui')).tray`)===true,'the tray being open is remembered');
+    await js(`document.querySelector('.af-tray .af-jg-chip').click()`);await sleep(100);
+    assert(await js(`document.querySelectorAll('.af-tray [data-jid]').length`)===14&&await js(`!!document.querySelector('.af-tray .af-jdot.s-failed')`),'a big group expands; a failed job shows a red dot');
+    await js(`document.querySelector('[data-jid="systemd:backup.timer"] [data-af=promote]').click()`);await sleep(150);
+    db=await saved();const auto=db.agentflow.agents.at(-1);
+    assert(db.agentflow.agents.length===n0+1&&auto.kind==='automation'&&auto.job?.id==='systemd:backup.timer'&&auto.schedule==='Daily 22:30'&&auto.live===false,'Promote adds the job to the org as an automation');
+    assert(await js(`!!document.querySelector('#afCanvas .af-node.k-automation.sel')&&document.querySelector('#af-name')?.value==='Nightly backup'&&!document.querySelector('#af-live')&&!!document.querySelector('#af-schedule')&&!!document.querySelector('#inspector .af-jobinfo')`),'the new automation is selected: a short card, and a side panel with its schedule and job, without Live');
+    assert(await js(`!!document.querySelector('[data-jid="systemd:backup.timer"] [data-af=goAgent]')`),'the tray marks the job promoted');
+    await js(`document.querySelector('[data-afz=fit]').click()`);await sleep(100);
+    const [jx,jy]=await center('[data-jid="claude:triage"] .af-job-m'),[lx,ly]=await center(`[data-agent="${lead.id}"] .nm`);await drag(jx,jy,lx,ly);await sleep(150);
+    db=await saved();const ai=db.agentflow.agents.at(-1);
+    assert(db.agentflow.agents.length===n0+2&&ai.kind==='agent'&&ai.reportsTo===lead.id&&ai.runtime==='Home server'&&ai.job?.id==='claude:triage'&&!await js(`!!document.querySelector('.af-jghost')`),'dragging a job onto an agent promotes it as that agent\'s report (an AI agent for an AI job)');
+    await js(`document.activeElement?.blur()`);await key('z',90,2);await key('z',90,2);await sleep(100);
+    assert((await saved()).agentflow.agents.length===n0&&await js(`document.querySelectorAll('#afCanvas .k-automation').length`)===0&&!await js(`!!document.querySelector('.af-tray [data-af=goAgent]')`),'promoting undoes one step at a time');
+    await key('z',90,2);await js(`document.querySelector('[data-af=tray]').click()`);await sleep(100);
+    assert(!(await saved()).agentflow.runners.length&&await js(`document.querySelector('.af-tray').hidden`),'(seeded report undone, tray closed)');}
   // Link a card from the agent, then follow the link back from the card.
   await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);
   await js(`document.querySelector('#inspector [data-picker=af-cards]').click()`);await sleep(100);

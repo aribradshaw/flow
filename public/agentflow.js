@@ -8,7 +8,8 @@ import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
-  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker} from './agentflow-core.js';
+  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,
+  jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,cardH} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
@@ -16,7 +17,7 @@ import {colorOf,initials,memberColor} from './devops-core.js';
 // this module draws the org as a pan-and-zoom canvas (like the MindMap) and the workflow list,
 // and edits the selection in the shared #inspector side panel.
 const UIKEY='flygon-flow-agentflow-ui';
-const KIND_ICON={agent:'bot',human:'user',team:'users'},TRIGGER_ICON={manual:'play',schedule:'clock',event:'zap'};
+const KIND_ICON={agent:'bot',human:'user',team:'users',automation:'gear'},TRIGGER_ICON={manual:'play',schedule:'clock',event:'zap'};
 const STATUS_TONE={draft:'slate',active:'green',paused:'amber',retired:'black'};
 let ui={view:'org',q:''};
 try{Object.assign(ui,JSON.parse(localStorage.getItem(UIKEY))||{})}catch{}
@@ -58,7 +59,7 @@ export function mount(opts){
   el.addEventListener('pointerover',e=>{const id=!drag&&e.target.closest?.('#afCanvas [data-agent]')?.dataset.agent||null;if(id!==hoverId){hoverId=id;paintChain()}});
   el.addEventListener('pointerleave',()=>{if(hoverId){hoverId=null;paintChain()}});
   // A cancelled gesture (touch interrupted, capture lost) changes nothing.
-  el.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.pid)return;drag=null;$('#afCanvas')?.classList.remove('panning');paint()});
+  el.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.pid)return;if(drag.mode==='job'){drag.moved=false;jobUp(e,drag)}drag=null;$('#afCanvas')?.classList.remove('panning');paint()});
   el.addEventListener('wheel',e=>{const cv=e.target.closest('#afCanvas');if(!cv)return;e.preventDefault();const r=cv.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
   el.addEventListener('dblclick',e=>{
     const cv=e.target.closest('#afCanvas');if(!cv||e.target.closest('[data-agent],button'))return;
@@ -96,6 +97,7 @@ function toolbar(){
   const view=(v,ic,label,sc)=>`<button type="button" class="${ui.view===v?'on':''}" data-af="view" data-v="${v}" data-tip="${label}" data-key="${esc(keyLabel(sc))}" aria-pressed="${ui.view===v}">${icon(ic,14)}${label}</button>`;
   return `<div class="tl-bar af-bar">
     <div class="seg txt" role="group" aria-label="View">${view('org','network','Org chart','agentflow.view1')}${view('workflows','flow','Workflows','agentflow.view2')}</div>
+    ${ui.view==='org'?trayButton():''}
     <input id="af-q" type="search" placeholder="Search agents and workflows" value="${esc(ui.q)}" aria-label="Search agents and workflows">
     ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}<span class="sp"></span>
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
@@ -129,6 +131,7 @@ function modelMarks(a){
 // Live badge), then counts and its models. The left stripe is the status. Every text row is one
 // line, cut with an ellipsis; the tooltip has it all.
 function nodeHtml(a,p,hits){
+  if(a.kind==='automation')return autoNodeHtml(a,p,hits);
   const flows=workflowsFor(af(),a.id).length,open=openWork(db(),a),sup=person(a.supervisor);
   const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id;
   const run=runLine(af(),a),live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),kind=AGENT_KINDS[a.kind],status=AGENT_STATUS[a.status];
@@ -136,16 +139,29 @@ function nodeHtml(a,p,hits){
   // anyone else shows its kind.
   const hf=humanFace(a),me=hf&&(hf.id===sup?.id||hf.src)?hf:null,rt=a.runtime.trim(),glyph=(rt||a.model.trim()).charAt(0).toUpperCase(),[gb,gf]=glyph?memberColor(rt.toLowerCase()||a.model):[];
   const avatar=me?faceHtml(me,'af-av',`${kind}: ${me.name}`):`<span class="af-av k" data-tip="${kind}">${icon(KIND_ICON[a.kind],15)}</span>`;
-  const runTip=`${run||'No runner or model yet'}\n${live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone'}`;
+  const sched=a.schedule?.trim(),runTip=`${run||'No runner or model yet'}${sched?`\nSchedule: ${sched}`:''}\n${live?(why?`Live, but its runner will skip it: ${why}`:'Live: its runner works its queue'):'Not live: runners leave it alone'}`;
   return `<div class="af-node k-${a.kind} st-${a.status}${live?' live':''}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`${kind}: ${a.name}${a.title?`, ${a.title}`:''}. ${status}${live?', live':''}`)}" style="left:${p.x}px;top:${p.y}px">
     <i class="af-st" data-tip="Status: ${status}"></i>
     <div class="af-n-head"><span class="af-avw">${avatar}${sup&&!me?faceHtml(faceOf(sup),'af-sup',`Supervised by ${sup.name}`):''}</span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
       <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||kind)}</span></div></div>
-    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span></div>`:''}
+    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span>${sched?`<i class="af-clk">${icon('clock',11)}</i>`:''}</div>`:''}
     <div class="af-n-foot"><span class="af-n-stats"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
       </span>${modelMarks(a)}</div>
+    <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
+}
+// An automation: a shorter, greyer card with a gear, its schedule on the run line and the status of
+// the job it was promoted from. No models, no Live badge (it runs on its own schedule, outside Flow).
+function autoNodeHtml(a,p,hits){
+  const isSel=selected?.type==='agent'&&selected.id===a.id,dim=hits&&!hits.has(a.id),drop=drag?.mode==='link'&&drag.over===a.id,status=AGENT_STATUS[a.status];
+  const sched=a.schedule.trim(),j=a.job&&jobOf(af(),a.job.runner,a.job.id),st=j?.lastStatus||'';
+  const tip=`${sched?`Schedule: ${sched}`:'No schedule yet'}${a.job?`\n${j?`${a.job.runner} · ${j.name}${j.lastRun?`\nLast run ${rel(j.lastRun)}: ${JOB_STATUS[st]}`:''}${j.nextRun?`\nNext run ${rel(j.nextRun)}`:''}`:`${a.job.runner} no longer reports this job`}`:''}\nRuns on its own schedule, outside Flow`;
+  return `<div class="af-node k-automation st-${a.status}${isSel?' sel':''}${dim?' dim':''}${drop?' drop':''}" data-agent="${esc(a.id)}" tabindex="0" role="button" aria-label="${esc(`Automation: ${a.name}${a.title?`, ${a.title}`:''}. ${status}${sched?`. ${sched}`:''}`)}" style="left:${p.x}px;top:${p.y}px">
+    <i class="af-st" data-tip="Status: ${status}"></i>
+    <div class="af-n-head"><span class="af-avw"><span class="af-av k" data-tip="Automation">${icon('gear',15)}</span></span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
+      <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||'Automation')}</span></div></div>
+    <div class="af-n-run${sched?'':' none'}" data-tip="${esc(tip)}">${icon('clock',11)}<span>${esc(sched||'No schedule yet')}</span>${st?`<i class="af-jdot s-${st}"></i>`:''}</div>
     <span class="af-port" data-port data-tip="Drag onto an agent to make it report here, or onto empty space for a new report" data-tip-delay="600"></span></div>`;
 }
 // The reporting chain above an agent, highlighted while it is hovered or selected: its own line and
@@ -160,14 +176,109 @@ function paintChain(){
   const el=$('#afCanvas .af-chain');if(!el)return;
   const id=hoverId||(selected?.type==='agent'?selected.id:null);el.setAttribute('d',id?chainD(id):'');
 }
-const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world" style="--af-w:${CARD.w}px;--af-h:${CARD.h}px"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
-  <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div>`;
+const canvasHtml=()=>`<div id="afCanvas" class="af-canvas" aria-label="AgentFlow org canvas"><div class="af-world" style="--af-w:${CARD.w}px;--af-h:${CARD.h}px;--af-ha:${CARD.auto}px"><svg class="af-edges" aria-hidden="true"></svg><div class="af-nodes"></div></div></div>
+  <div class="float af-zoom" role="toolbar" aria-label="Zoom"></div><div class="af-empty-wrap" hidden></div><aside class="af-tray" aria-label="Scheduled jobs" hidden></aside>`;
 function paintZoom(){
   const z=$('#agentflowView .af-zoom');if(!z)return;
   z.innerHTML=ib('minus','Zoom out',{key:keyLabel('agentflow.zoomOut'),attrs:'data-afz="out" data-tip-pos="top"'})+`<button type="button" class="af-scale" data-afz="reset" data-tip="Reset to 100%" data-tip-pos="top">${Math.round(view.z*100)}%</button>`
     +ib('plus','Zoom in',{key:keyLabel('agentflow.zoomIn'),attrs:'data-afz="in" data-tip-pos="top"'})+ib('fit','Fit the org',{key:keyLabel('agentflow.fit'),attrs:'data-afz="fit" data-tip-pos="top"'})
     +'<i class="sep"></i>'+ib('network','Tidy up\nArrange as a tree again',{attrs:'data-afz="tidy" data-tip-pos="top"'})
     +ib('info','Drag a card to move it (Shift: with its reports, Alt: off the grid)\nDrag the dot under a card onto another agent to make that agent report to it,\nor onto empty space to add a new report\nDouble-click empty space to add an agent\nArrow keys nudge the selected agent',{label:'How the canvas works',attrs:'data-tip-pos="top"'});
+}
+// ---------- the Scheduled tray: jobs runners reported, to promote into the org ----------
+// Docked on the left of the canvas. Drawn by render() only while open (never per canvas frame), and
+// its HTML is only replaced when it changed (t.drawn: the HTML it holds), so hover and scroll
+// survive unrelated redraws.
+// ui.tray: open or not; ui.jobGroups: {groupKey: open} for the groups someone opened or closed.
+const BIG_GROUP=8;
+const JOB_ICON={systemd:'timer',cron:'cron',vercel:'cloud',railway:'cloud',t3:'bot',claude:'sparkle',github:'branch',windows:'laptop',aside:'clock',other:'clock'};
+const jobIcon=j=>JOB_ICON[String(j.source||'').toLowerCase()]||'clock';
+const sourceName=j=>JOB_SOURCES[String(j.source||'').toLowerCase()]||j.source||'Scheduled job';
+// A time relative to now: "3 h ago", "in 20 min".
+function rel(iso){
+  const t=Date.parse(iso);if(!Number.isFinite(t))return '';
+  const s=(t-Date.now())/1000,a=Math.abs(s),v=a<90?'':a<5400?`${Math.round(a/60)} min`:a<129600?`${Math.round(a/3600)} h`:`${Math.round(a/86400)} days`;
+  return !v?(s<0?'just now':'in a moment'):s<0?`${v} ago`:`in ${v}`;
+}
+const jobTip=j=>[j.lastRun?`Last run ${rel(j.lastRun)}: ${JOB_STATUS[j.lastStatus]}`:`Last run: ${j.lastStatus==='unknown'?'not reported':JOB_STATUS[j.lastStatus]}`,j.nextRun?`Next run ${rel(j.nextRun)}`:'',j.enabled?'':'Disabled on the runner'].filter(Boolean).join('\n');
+const jobCount=()=>(af().runners||[]).reduce((n,r)=>n+(r.jobs?.length||0),0);
+function trayButton(){
+  const n=jobCount();
+  return `<button type="button" class="txt af-tray-b${ui.tray?' on':''}" data-af="tray" aria-pressed="${!!ui.tray}" data-tip="${ui.tray?'Hide':'Show'} the jobs your runners reported">${icon('clock',13)}Scheduled${n?`<em>${n}</em>`:''}</button>`;
+}
+const groupOpen=g=>typeof ui.jobGroups?.[g.key]==='boolean'?ui.jobGroups[g.key]:g.jobs.length<=BIG_GROUP;
+const jobKey=(runner,id)=>`${runner.toLowerCase()}\u0001${id}`;
+function jobRow(j,promoted){
+  const by=promoted.get(jobKey(j.runner,j.id));
+  return `<li class="af-job${j.enabled?'':' off'}${by?' done':''}" data-jr="${esc(j.runner)}" data-jid="${esc(j.id)}">
+    <span class="af-job-ic" data-tip="${esc(sourceName(j))}">${icon(jobIcon(j),13)}</span>
+    <span class="af-job-m"><b data-tip="${esc(`${j.name}${j.command?`\n${j.command}`:''}`)}">${esc(j.name)}</b>${j.ai?`<i class="af-job-ai" data-tip="Starts an AI agent">${icon('sparkle',10)}</i>`:''}<span class="af-job-s"><small>${esc(j.schedule||j.cron||'No schedule reported')}</small>${by?`<button type="button" class="af-job-done" data-af="goAgent" data-id="${esc(by.id)}" data-tip="${esc(`In the org as ${by.name}`)}">${icon('check',10)}Promoted</button>`:''}</span></span>
+    <i class="af-jdot s-${j.lastStatus}" data-tip="${esc(jobTip(j))}" aria-label="${esc(JOB_STATUS[j.lastStatus])}"></i>
+    ${by?'':`<button type="button" class="af-job-go" data-af="promote" data-tip="Add to the org (top level).\nOr drag it onto an agent to report there">Promote</button>`}</li>`;
+}
+function trayHtml(){
+  const all=jobGroups(af()),total=all.reduce((n,g)=>n+g.jobs.length,0);
+  const q=ui.q.trim().toLowerCase(),hit=j=>[j.name,j.schedule,j.command||'',j.group||'',j.source,j.cron||''].some(x=>x.toLowerCase().includes(q));
+  const groups=q?all.map(g=>({...g,jobs:g.jobs.filter(hit)})).filter(g=>g.jobs.length):all;
+  const promoted=new Map(af().agents.filter(a=>a.job).map(a=>[jobKey(a.job.runner,a.job.id),a]));
+  const head=`<div class="af-tray-h">${icon('clock',13)}<strong>Scheduled</strong><em>${total?plural(total,'job'):''}</em><span class="sp"></span>${ib('x','Hide scheduled jobs',{attrs:'data-af="tray"'})}</div>`;
+  if(!total)return head+`<div class="af-tray-e">${icon('timer',22)}<strong>No scheduled jobs yet</strong><p>Runners report the timers, cron jobs and scheduled functions they find (runners.report with <code>jobs</code>). They show up here, and you can promote any of them into the org.</p></div>`;
+  const body=groups.map(g=>{
+    const open=q||groupOpen(g),failed=g.jobs.filter(j=>j.lastStatus==='failed').length,done=g.jobs.filter(j=>promoted.has(jobKey(j.runner,j.id))).length;
+    const srcs=new Set(g.jobs.map(jobIcon)),ic=srcs.size===1?[...srcs][0]:'server';
+    return `<section class="af-jg${open?' open':''}"><button type="button" class="af-jg-h" data-af="jgroup" data-k="${esc(g.key)}" aria-expanded="${!!open}"><i class="af-jg-c">${icon('chevD',11)}</i>${icon(ic,12)}<span class="af-jg-l">${esc(g.label)}</span>${g.label!==g.runner?`<small>${esc(g.runner)}</small>`:''}
+      ${failed?`<span class="af-jg-f" data-tip="${plural(failed,'job')} failed on the last run">${failed}</span>`:''}<span class="af-jg-n">${g.jobs.length}</span></button>
+      ${open?`<ul class="af-jobs">${g.jobs.map(j=>jobRow(j,promoted)).join('')}</ul>`
+        :`<button type="button" class="af-jg-chip" data-af="jgroup" data-k="${esc(g.key)}">${icon('list',11)}${plural(g.jobs.length,'job')}${failed?` · <b>${failed} failed</b>`:''}${done?` · ${done} promoted`:''}</button>`}</section>`;
+  }).join('');
+  return head+`<div class="af-tray-l">${body||'<p class="af-none">No jobs match.</p>'}</div><div class="af-tray-f">Drag a job onto an agent to report there, or onto the canvas</div>`;
+}
+function paintTray(){
+  const t=$('#agentflowView .af-tray');if(!t)return;
+  t.hidden=!ui.tray;
+  const cv=$('#afCanvas');if(ui.tray&&cv)t.style.top=cv.offsetTop+10+'px';
+  if(!ui.tray){if(t.drawn){t.innerHTML='';t.drawn=''}return}
+  const html=trayHtml();if(html===t.drawn)return;
+  const top=t.querySelector('.af-tray-l')?.scrollTop||0;
+  t.innerHTML=html;t.drawn=html;const l=t.querySelector('.af-tray-l');if(l)l.scrollTop=top;
+}
+// Promote a job (promoteJob): select the new agent and open its side panel. One undo step. A job
+// already in the org selects the agent it became instead.
+function promote(runner,jobId,opts={}){
+  const had=promotedAgent(af(),runner,jobId);
+  if(had){toast(`Already in the org as ${had.name}`);centerOn=had.id;select('agent',had.id);return}
+  if(!jobOf(af(),runner,jobId))return;
+  const no=full(af(),'agents');if(no){toast(no,true);return}
+  // Placed automatically (no drop point): bring it into view.
+  change(()=>{const a=promoteJob(af(),runner,jobId,opts);if(a){selected={type:'agent',id:a.id};if(opts.x===undefined)centerOn=a.id}});
+}
+const jobAt=el=>{const r=el?.closest('[data-jid]');return r?{runner:r.dataset.jr,id:r.dataset.jid}:null};
+// A job dragged out of the tray: a ghost follows the pointer and the agent card under it lights up
+// (classes set directly, no canvas repaint).
+function jobMove(e){
+  const d=drag;
+  if(!d.moved){if(Math.abs(e.clientX-d.sx)+Math.abs(e.clientY-d.sy)<=4)return;d.moved=true;
+    const g=document.createElement('div');g.className='af-jghost';g.innerHTML=`${icon(d.icon,13)}<span>${esc(d.name)}</span><em></em>`;document.body.append(g);d.ghost=g;document.body.classList.add('af-jdrag')}
+  d.ghost.style.transform=`translate(${e.clientX+12}px,${e.clientY+10}px)`;
+  const hit=document.elementFromPoint(e.clientX,e.clientY),card=hit?.closest('#afCanvas [data-agent]'),over=card?.dataset.agent||null;
+  if(over!==d.over){d.card?.classList.remove('drop');d.over=over;d.card=card;card?.classList.add('drop')}
+  d.canvas=!!hit?.closest('#afCanvas')&&!over;
+  d.ghost.classList.toggle('off',!over&&!d.canvas);
+  d.ghost.querySelector('em').textContent=over?`reports to ${agent(over)?.name||''}`:d.canvas?'top level, here':'';
+}
+function jobUp(e,d){
+  d.ghost?.remove();d.card?.classList.remove('drop');document.body.classList.remove('af-jdrag');
+  if(!d.moved)return;
+  if(d.over){promote(d.runner,d.id,{reportsTo:d.over});return}
+  if(d.canvas){const p=toWorld(e);promote(d.runner,d.id,{x:snap(p.x-CARD.w/2),y:snap(p.y-CARD.h/2)})}
+}
+function jobMenu(e,runner,jobId){
+  const j=jobOf(af(),runner,jobId);if(!j)return;
+  const by=promotedAgent(af(),runner,jobId),s=selected?.type==='agent'?agent(selected.id):null;
+  openMenu(e,by?[{label:`Show ${by.name} in the org`,icon:KIND_ICON[by.kind],run:()=>{centerOn=by.id;select('agent',by.id)}}]:[
+    {label:'Promote to org',icon:'plus',run:()=>promote(runner,jobId)},
+    ...(s?[{label:`Promote under ${s.name}`,icon:KIND_ICON[s.kind],run:()=>promote(runner,jobId,{reportsTo:s.id})}]:[]),
+  ],{label:`Job: ${j.name}`});
 }
 // Draw the agents and their reporting lines (also on every frame of a drag).
 function paint(){
@@ -197,11 +308,13 @@ function fit(){
   const cv=$('#afCanvas');if(!cv?.clientWidth)return;fitted=true;
   const ps=[...positions(af()).values()];
   if(!ps.length){view={x:60,y:60,z:1};paint();return}
-  const x0=Math.min(...ps.map(p=>p.x)),y0=Math.min(...ps.map(p=>p.y)),w=Math.max(...ps.map(p=>p.x))+CARD.w-x0,h=Math.max(...ps.map(p=>p.y))+CARD.h-y0,pad=56;
-  view.z=Math.max(.2,Math.min(1,(cv.clientWidth-pad*2)/w,(cv.clientHeight-pad*2)/h));
-  view.x=(cv.clientWidth-w*view.z)/2-x0*view.z;view.y=(cv.clientHeight-h*view.z)/2-y0*view.z;
+  const x0=Math.min(...ps.map(p=>p.x)),y0=Math.min(...ps.map(p=>p.y)),w=Math.max(...ps.map(p=>p.x))+CARD.w-x0,h=Math.max(...ps.map(p=>p.y))+CARD.h-y0,pad=56,l=trayInset(),W=cv.clientWidth-l;
+  view.z=Math.max(.2,Math.min(1,(W-pad*2)/w,(cv.clientHeight-pad*2)/h));
+  view.x=l+(W-w*view.z)/2-x0*view.z;view.y=(cv.clientHeight-h*view.z)/2-y0*view.z;
   paint();
 }
+// The canvas width the open Scheduled tray covers (fit and centring leave it clear).
+const trayInset=()=>{const t=ui.tray&&$('#agentflowView .af-tray');return t&&!t.hidden&&t.offsetWidth?t.offsetLeft+t.offsetWidth:0};
 function zoom(f,x,y){
   const cv=$('#afCanvas');if(!cv)return;x??=cv.clientWidth/2;y??=cv.clientHeight/2;
   const z=Math.max(.2,Math.min(2.5,view.z*f));
@@ -211,7 +324,7 @@ function zoom(f,x,y){
 function tidy(){if(af().agents.some(placed))change(()=>unpin(af()));requestAnimationFrame(fit)}
 function center(id){
   const cv=$('#afCanvas'),p=positions(af()).get(id);if(!cv?.clientWidth||!p)return;
-  view.x=cv.clientWidth/2-(p.x+CARD.w/2)*view.z;view.y=cv.clientHeight/2-(p.y+CARD.h/2)*view.z;paint();
+  const l=trayInset();view.x=l+(cv.clientWidth-l)/2-(p.x+CARD.w/2)*view.z;view.y=cv.clientHeight/2-(p.y+CARD.h/2)*view.z;paint();
 }
 const toWorld=e=>{const r=$('#afCanvas').getBoundingClientRect();return {x:(e.clientX-r.left-view.x)/view.z,y:(e.clientY-r.top-view.y)/view.z}};
 
@@ -219,6 +332,10 @@ const toWorld=e=>{const r=$('#afCanvas').getBoundingClientRect();return {x:(e.cl
 // Card: move (Shift carries its reports along). Dot under a card: link to a new manager's report.
 // Empty space: pan. Every finished change is one undo step.
 function canvasDown(e){
+  // A job row in the Scheduled tray: drag it onto an agent or the canvas to promote it.
+  const row=e.button===0&&!e.target.closest('button')&&e.target.closest('.af-tray [data-jid]');
+  if(row){const j=jobAt(row),job=jobOf(af(),j.runner,j.id);if(!job)return;
+    drag={mode:'job',...j,name:job.name,icon:jobIcon(job),sx:e.clientX,sy:e.clientY,pid:e.pointerId};e.currentTarget.setPointerCapture(e.pointerId);return}
   const cv=e.target.closest('#afCanvas');if(!cv||(e.button!==0&&e.button!==1)||e.target.closest('button,input,a'))return;
   // Ctrl+click on a Mac is a right-click: leave it to the context menu.
   if(e.button===0&&e.ctrlKey&&/Mac/.test(navigator.platform))return;
@@ -239,6 +356,7 @@ function canvasDown(e){
 }
 function canvasMove(e){
   if(!drag||e.pointerId!==drag.pid)return;
+  if(drag.mode==='job'){jobMove(e);return}
   const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
   if(drag.mode==='pan'){view.x=drag.x+dx;view.y=drag.y+dy}
   else if(drag.mode==='move'){
@@ -254,6 +372,7 @@ function canvasMove(e){
 function canvasUp(e){
   if(!drag||e.pointerId!==drag.pid)return;
   const d=drag;drag=null;$('#afCanvas')?.classList.remove('panning');
+  if(d.mode==='job'){jobUp(e,d);return}
   if(d.mode==='move'&&d.moved){
     const before=clone(store.db);pin(af());
     for(const [id,p] of d.live){const a=agent(id);if(a){a.x=p.x;a.y=p.y;touch(a)}}
@@ -301,7 +420,7 @@ export function render(){
     // Keep the canvas element between renders, so a gesture or the zoom is never interrupted.
     if(!el.querySelector('#afCanvas'))el.innerHTML=toolbar()+canvasHtml();
     else el.querySelector('.af-bar').outerHTML=toolbar();
-    paintZoom();paint();
+    paintZoom();paint();paintTray();
     if(!fitted)requestAnimationFrame(()=>{if(!fitted)fit()});
     if(centerOn){const id=centerOn;centerOn=null;requestAnimationFrame(()=>center(id))}
     return;
@@ -314,6 +433,10 @@ function action(name,b){
   ({
     view(){ui.view=b.dataset.v;keepUi();if(selected&&(selected.type==='agent')!==(ui.view==='org'))selected=null;rerender()},
     clear(){ui.q='';keepUi();render()},
+    tray(){ui.tray=!ui.tray;keepUi();render()},
+    jgroup(){const g=jobGroups(af()).find(x=>x.key===b.dataset.k);if(!g)return;ui.jobGroups={...ui.jobGroups,[g.key]:!groupOpen(g)};keepUi();paintTray()},
+    promote(){const j=jobAt(b);if(j)promote(j.runner,j.id)},
+    goAgent(){const id=b.dataset.id;if(agent(id)){centerOn=id;select('agent',id)}},
     addAgent:()=>addAgent(),
     addWorkflow:()=>addWorkflow(),
     starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
@@ -356,6 +479,8 @@ async function copyBrief(){
 // first, so the menu acts on what the side panel shows. Every change is one undo step.
 const MENU_CAP=15,byName=(x,y)=>x.name.localeCompare(y.name);
 function contextMenu(e){
+  const jr=e.target.closest('.af-tray [data-jid]');
+  if(jr){e.preventDefault();if(!drag){const j=jobAt(jr);jobMenu(e,j.runner,j.id)}return}
   const cv=e.target.closest('#afCanvas'),w=e.target.closest('[data-flow]');
   if(!cv&&!w)return; // the toolbar and search field keep the browser's own menu
   e.preventDefault();
@@ -373,7 +498,7 @@ function contextMenu(e){
 function setOn(get,k,v){
   const x=get();if(!x||x[k]===v)return;
   if(k==='reportsTo'&&!canReportTo(af(),x.id,v))return;
-  change(()=>{x[k]=v;touch(x)});
+  change(()=>{x[k]=v;if(k==='kind'&&v==='automation')x.live=false;touch(x)});
 }
 function addStepFor(wid,aid){
   const w=flow(wid);if(!w)return;const no=full(af(),'steps',w);if(no){toast(no,true);return}
@@ -442,7 +567,7 @@ function flowMenu(at,id){
 // ---------- side panel (shared #inspector) ----------
 // The selection's header (avatar, name, status, Live), then collapsible sections. Which sections
 // are open is remembered in ui.sec (localStorage); favourite models in ui.fav.
-const SEC_OPEN={identity:true,run:true,work:true,instr:false,links:false,team:true,setup:true,steps:true};
+const SEC_OPEN={identity:true,run:true,sched:true,work:true,instr:false,links:false,team:true,setup:true,steps:true};
 const secOpen=k=>typeof ui.sec?.[k]==='boolean'?ui.sec[k]:SEC_OPEN[k]??true;
 function sec(k,ic,title,body,meta=''){
   const open=secOpen(k);
@@ -489,7 +614,7 @@ const managersFor=a=>af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).
 function agentHtml(a){
   const ppl=peopleOf(db()),reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id),chain=chainOf(af(),a.id),mgr=agent(a.reportsTo),sup=person(a.supervisor);
   const live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),ms=modelsOf(a);
-  const identity=`<label>Kind</label><div class="seg wide">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" id="af-kind-${k}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
+  const identity=`<label>Kind</label><div class="seg wide af-kinds">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" id="af-kind-${k}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
     <label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}">
     <label>Status</label>${statusPills(a.status,AGENT_STATUS)}
     <label for="af-reports">Reports to</label>${selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',mgr&&agentAv(mgr)?bub(faceNode(humanFace(mgr)),'mini'):`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr})}
@@ -506,16 +631,35 @@ function agentHtml(a){
     ${ib('trash','Delete agent',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
     <form id="afedit" class="ibody af-panel" autocomplete="off">
     <div class="af-hero">${avatarHtml(a)}<div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(a.name)}" aria-label="Name">
-      <div class="af-hero-s">${statusPill(a.status,AGENT_STATUS)}<span>${esc([a.title,a.kind==='agent'&&ms.length?modelLabel(af(),{...a,model:ms[0]}):''].filter(Boolean).join(' · ')||AGENT_KINDS[a.kind])}</span></div></div>
+      <div class="af-hero-s">${statusPill(a.status,AGENT_STATUS)}<span>${esc([a.title,a.kind==='agent'&&ms.length?modelLabel(af(),{...a,model:ms[0]}):'',a.kind==='automation'?a.schedule.trim():''].filter(Boolean).join(' · ')||AGENT_KINDS[a.kind])}</span></div></div>
       ${a.kind==='agent'?liveHtml(a,why):''}</div>
     ${why?`<div class="af-warn" role="status">${icon('alert',12)}<span>Its runner will skip it: ${esc(why)}</span></div>`:''}
     ${sec('identity','idCard','Identity',identity)}
     ${a.kind==='agent'?sec('run','server','Runs on',runtimeHtml(a),runMeta):''}
+    ${a.kind==='automation'?sec('sched','clock','Schedule',scheduleHtml(a),esc(a.schedule.trim()||'not set')):''}
     ${sec('work','target','Work',work,`${a.inputs.length} in · ${a.outputs.length} out`)}
     ${sec('instr','book','Instructions',`<textarea id="af-instr" rows="8" maxlength="20000" aria-label="Instructions" placeholder="System prompt or runbook">${esc(a.instructions)}</textarea>`,instrMeta)}
     ${sec('links','link','Links',linksHtml(a),linkMeta)}
     ${team?sec('team','network','Team',team,[reps.length&&plural(reps.length,'report'),flows.length&&plural(flows.length,'workflow')].filter(Boolean).join(' · ')):''}
     </form>`;
+}
+// When it runs, and the runner job it was promoted from (read-only: the runner reports it).
+const scheduleInput=(a,ph)=>`<label for="af-schedule">Schedule <em>plain text or cron</em></label><input id="af-schedule" maxlength="200" placeholder="${esc(ph)}" value="${esc(a.schedule)}">`;
+function scheduleHtml(a){
+  return scheduleInput(a,'e.g. Daily 22:30 or 30 22 * * *')+jobHtml(a)
+    +`<div class="dc-hint">${icon('info',11)}Automations run on their own schedule, outside Flow: no runner works them and they have no models.</div>`;
+}
+function jobHtml(a){
+  if(!a.job)return '';
+  const j=jobOf(af(),a.job.runner,a.job.id);
+  if(!j)return `<label>Promoted from</label><div class="dc-hint">${esc(a.job.runner)} no longer reports this job (${esc(a.job.id)}).</div>`;
+  const row=(k,v)=>v?`<dt>${k}</dt><dd>${v}</dd>`:'';
+  const [bg,fg]=colorOf({ok:'green',failed:'red',running:'blue'}[j.lastStatus]||'slate');
+  return `<label>Promoted from</label><div class="af-jobinfo"><div class="af-jobinfo-h">${icon(jobIcon(j),13)}<b>${esc(j.name)}</b>${j.enabled?'':'<span class="af-off">Off</span>'}</div><dl>
+    ${row('Source',esc(`${sourceName(j)} · ${a.job.runner}${j.group&&j.group!==a.job.runner?` · ${j.group}`:''}`))}${row('Schedule',esc(j.schedule))}${row('Cron',j.cron?`<code>${esc(j.cron)}</code>`:'')}
+    ${row('Runs',j.command?`<code>${esc(j.command)}</code>`:'')}
+    ${row('Last run',`<span class="pill" style="background:${bg};color:${fg}">${esc(JOB_STATUS[j.lastStatus])}</span>${j.lastRun?` <span data-tip="${esc(j.lastRun)}">${esc(rel(j.lastRun))}</span>`:''}`)}
+    ${row('Next run',j.nextRun?`<span data-tip="${esc(j.nextRun)}">${esc(rel(j.nextRun))}</span>`:'')}</dl></div>`;
 }
 // The switch a runner obeys. It stays off until someone turns it on, whatever the status says.
 function liveHtml(a,why){
@@ -552,7 +696,8 @@ function runtimeHtml(a){
     <label for="af-model-add">Models <em>${a.auto===true?'the runner picks per card':'primary, then fallbacks'}</em></label>
     ${rows?`<ol class="af-models">${rows}</ol>`:''}
     <button type="button" class="pk-btn af-madd" id="af-model-add" data-af-models aria-haspopup="listbox" aria-expanded="${!!mp}"${ms.length>=MAX_MODELS?' disabled':''}>${icon('plus',12)}<span class="pk-t">${ms.length?'Add a fallback':'Choose a model'}</span><small>${pool.size?`${pool.size} available`:'type any id'}</small></button>
-    <label class="af-tog${a.auto===true?' on':''}"><input type="checkbox" id="af-auto" role="switch"${a.auto===true?' checked':''}><span class="af-sw" aria-hidden="true"></span><span>${icon('sparkle',12)}Auto <em>let the runner pick from these per card</em></span></label>`;
+    <label class="af-tog${a.auto===true?' on':''}"><input type="checkbox" id="af-auto" role="switch"${a.auto===true?' checked':''}><span class="af-sw" aria-hidden="true"></span><span>${icon('sparkle',12)}Auto <em>let the runner pick from these per card</em></span></label>
+    ${scheduleInput(a,'e.g. Weekdays 09:00 — the runner starts it then')}${jobHtml(a)}`;
 }
 // The model picker: searchable, grouped by provider, favourites first, and it stays open while you
 // add (Enter or click), so a primary and its fallbacks are picked in one go. Rows are capped so a
@@ -692,7 +837,8 @@ export function inspectorClick(e){
     const j=b.dataset.afMup?i-1:i+1;if(j<0||j>=ms.length)return;[ms[i],ms[j]]=[ms[j],ms[i]];setModels(x,ms);
     requestAnimationFrame(()=>($(`#af-${b.dataset.afMup?'mup':'mdn'}-${j}:not([disabled])`)||$(`#af-mdel-${j}`))?.focus());return;
   }
-  if(b.dataset.afKind){if(x.kind!==b.dataset.afKind)change(()=>{x.kind=b.dataset.afKind;touch(x)});return}
+  // Automations are never live (they run on their own schedule, outside Flow).
+  if(b.dataset.afKind){const k=b.dataset.afKind;if(x.kind!==k)change(()=>{x.kind=k;if(k==='automation')x.live=false;touch(x)});return}
   if(b.dataset.afStatus){if(x.status!==b.dataset.afStatus)change(()=>{x.status=b.dataset.afStatus;touch(x)});return}
   if(b.dataset.afTrigger){if(x.trigger!==b.dataset.afTrigger)change(()=>{x.trigger=b.dataset.afTrigger;touch(x)});return}
   if(b.dataset.afAdd){addTo(b.dataset.afAdd);return}
@@ -713,7 +859,7 @@ export function inspectorClick(e){
   })[b.dataset.afi]?.();
 }
 // Text fields autosave as you type: one undo step per open form.
-const TEXT={'af-name':'name','af-title':'title','af-purpose':'purpose','af-runtime':'runtime','af-instr':'instructions','af-desc':'description','af-sched':'schedule'};
+const TEXT={'af-name':'name','af-title':'title','af-schedule':'schedule','af-purpose':'purpose','af-runtime':'runtime','af-instr':'instructions','af-desc':'description','af-sched':'schedule'};
 export function inspectorInput(e){
   const t=e.target,x=sel(),form=$('#afedit');if(!x||!form)return;
   const key=TEXT[t.id],sa=t.dataset.stepAction,so=t.dataset.stepOutput;

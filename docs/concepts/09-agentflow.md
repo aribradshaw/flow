@@ -6,9 +6,11 @@ Flow stores the design. It does not run agents itself. A runner of your choice (
 
 ## Agents
 
-An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, instructions, runtime, models[], model, auto, inputs[], outputs[], tools[]` and links `projects[], cards[], items[]`.
+An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, instructions, runtime, models[], model, auto, schedule, inputs[], outputs[], tools[]`, an optional `job`, and links `projects[], cards[], items[]`.
 
-- `kind`: `agent` (an AI agent), `human` or `team` (a group heading in the org).
+- `kind`: `agent` (an AI agent), `human`, `team` (a group heading in the org) or `automation` (a scripted job without AI, such as a backup timer, that runs on its own schedule outside Flow; see [Automations](#automations)).
+- `schedule` says when it runs, in plain words or cron, such as "Weekdays 09:00" or `30 22 * * *` (`""` for none). For an AI agent, its runner starts it then.
+- `job` is `{runner, id}`: the runner job it was promoted from (see [Scheduled jobs](#scheduled-jobs)). It is absent when there is none; send `null` or `""` to `agents.update` to clear it.
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.
 - `supervisor` is a person card on one of your mind maps: the human accountable for the agent. A `human` agent shows a person's photo: its supervisor's, else that of the only person card with the agent's name, else your account photo when the agent has your account name and no person card does.
@@ -28,6 +30,49 @@ flow runners report --input '{"runner":"Home server","models":[{"id":"claudeAgen
 ```
 
 `tools/agent-runner.mjs` is a reference runner for [T3 Code](https://t3.codes): it reports the providers and models signed in on its machine, and for each live agent whose `runtime` is its name, starts a T3 thread on the agent's model for the top card in its queue, then moves the card to UAT when the thread finishes. If a model will not start, or its thread fails or hits a limit, it starts the card again on the next model and keeps every attempt; when all have failed it leaves the card and logs it. For an `auto` agent it prefers `included` models over `metered` ones, keeping the pool's order, and can ask a small "router" model to choose among the included ones from the card and the agent's purpose. It marks Claude, Codex, Cursor, Grok and Antigravity models `included`, OpenCode's own free models (`opencode/…`) `included` and other OpenCode models `metered`, and its settings can override that. It starts in dry-run mode, so it only prints what it would do until you turn that off. See the comment at the top of the file for its settings.
+
+## Scheduled jobs
+
+A runner can also tell Flow which scheduled jobs it found: systemd timers, crontab lines, scheduled T3 or Claude tasks, Vercel or Railway crons, GitHub Actions schedules, Windows scheduled tasks. It sends them as `jobs` in the same `runners.report` call, up to 500 per runner:
+
+| Field | |
+|---|---|
+| `id` | Required, up to 200 characters, stable per runner, e.g. `systemd:backup.timer` or `vercel:my-app:/api/cron/sync`. |
+| `name` | Up to 120 characters (defaults to the id). |
+| `source` | Where it is scheduled, up to 40 characters: `systemd`, `cron`, `t3`, `vercel`, `railway`, `aside`, `windows`, `claude`, `github` or `other` (the default). Other text is kept as it is. |
+| `group` | A display group, up to 120 characters, e.g. "Home server" or "Vercel · my-app". |
+| `schedule` | When, in words, up to 200 characters: "Daily 22:30", "Every 5 min". |
+| `cron` | The cron expression, when there is one (up to 120). |
+| `command` | A short summary of what it runs (up to 300). |
+| `ai` | `true` when the job starts an AI agent. |
+| `enabled` | `false` when it is switched off on the runner (default `true`). |
+| `lastRun`, `nextRun` | ISO times. |
+| `lastStatus` | `ok`, `failed`, `running` or `unknown` (the default). |
+
+`jobs` replaces the stored list. Leave it out to keep the stored jobs, or send `[]` to clear them. To keep writes down, a report is not saved when the only changes are `lastRun` and `nextRun`, unless the jobs were last saved six hours ago or more. A changed `lastStatus`, a job added or removed, or any other field always saves. The runner's `jobsReported` is when its jobs were last saved, and the response's `changed` says whether this report was.
+
+```sh
+flow runners report --input '{"runner":"Home server","models":[],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","lastStatus":"ok","lastRun":"2026-11-01T22:30:00Z","nextRun":"2026-11-02T22:30:00Z"}]}'
+```
+
+In the app, **Scheduled** in the org chart's toolbar opens a tray on the left of the canvas. It lists every runner's jobs by runner and group, each with its source icon, name, schedule and a dot for the last run (green OK, red failed, grey unknown). Hover the dot for the last and next run. A group with more than eight jobs starts collapsed to a chip such as "59 jobs" that opens it. Search filters the tray too. Whether the tray is open, and which groups you opened or closed, is remembered on this device.
+
+### Promoting a job
+
+To put a job in the org, do one of these:
+
+- Drag the job onto an agent's card. It becomes that agent's report.
+- Drag it onto empty canvas to place it at the top level, right there.
+- Click **Promote** on the row (top level).
+- Right-click it and choose **Promote to org**, or **Promote under** the selected agent.
+
+The new agent is selected and its side panel opens. Undo removes it again. A job without AI becomes an **automation**, and an `ai` job becomes an AI agent whose `runtime` is the runner (pick its models, then switch it to Live). Either way the agent is named after the job, its role comes from the source (such as "Vercel cron" or "systemd timer"), its `schedule` is the job's (or its cron line), its purpose is the command, and its status is Active, or Paused when the job is disabled. It is never live, and `job` links it back. A job is promoted once: its row then shows **Promoted** (click it to select the agent), and promoting it again selects the agent it already became.
+
+## Automations
+
+An automation (`kind: "automation"`) is a scripted job in the org with no AI in it. It runs on its own schedule, outside Flow, so it has no runner, no models and no Live switch: `live` is always false, and a runner never works it. Its card is shorter and grey, with a gear, and shows its schedule (and its job's last status) where an AI agent's card shows its runner and model. Its side panel has a **Schedule** section with the schedule, and, when it came from a runner job, that job's source, schedule, cron line, command and last and next run (read-only, as the runner reports them). An AI agent's `schedule` is under **Runs on**, and its card shows a small clock when it has one.
+
+The brief lists `Schedule: …` and `Promoted from: <runner> · <job name>` under Runtime.
 
 ## Workflows
 
@@ -59,4 +104,4 @@ The runner only calls out to Flow and never needs to be reachable itself, so it 
 
 ## In the app
 
-The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). The org chart is a canvas like the MindMap: drag empty space to pan, scroll to zoom, drag a card to move it (Shift: with its reports), and drag the dot under a card onto another agent to make that agent report to it, or onto empty space to add a new report. Each AI agent's card shows small icons for the makers of its models in the bottom-right corner (the primary first, then up to two fallbacks and "+N"), or one auto symbol with a count when it is on Auto, and its supervisor's face sits on the corner of its avatar. Double-click empty space to add an agent. **Tidy up** returns to the automatic tree. In the tree, a manager's reports that have no reports of their own are stacked in indented columns (up to six per column) once there are three or more, so a large team stays compact and no reporting lines cross. Positions are saved as the agent's optional `x` and `y`. An agent without them, such as one added through the API, is placed under its manager, below the last of its teammates. `N` adds an agent under the selected one, `W` adds a workflow, `/` searches, `F` fits the org, arrow keys nudge the selected agent. Right-click (or the menu key) opens a menu on an agent, a reporting line, a workflow card or empty canvas: change kind, status or manager, add the agent to a workflow, open its work queue on the DevOps board, duplicate a workflow, and so on. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.
+The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). **Scheduled** opens the tray of runner jobs (see [Scheduled jobs](#scheduled-jobs)). The org chart is a canvas like the MindMap: drag empty space to pan, scroll to zoom, drag a card to move it (Shift: with its reports), and drag the dot under a card onto another agent to make that agent report to it, or onto empty space to add a new report. Each AI agent's card shows small icons for the makers of its models in the bottom-right corner (the primary first, then up to two fallbacks and "+N"), or one auto symbol with a count when it is on Auto, and its supervisor's face sits on the corner of its avatar. Double-click empty space to add an agent. **Tidy up** returns to the automatic tree. In the tree, a manager's reports that have no reports of their own are stacked in indented columns (up to six per column) once there are three or more, so a large team stays compact and no reporting lines cross. Positions are saved as the agent's optional `x` and `y`. An agent without them, such as one added through the API, is placed under its manager, below the last of its teammates. `N` adds an agent under the selected one, `W` adds a workflow, `/` searches, `F` fits the org, arrow keys nudge the selected agent. Right-click (or the menu key) opens a menu on an agent, a reporting line, a workflow card or empty canvas: change kind, status or manager, add the agent to a workflow, open its work queue on the DevOps board, duplicate a workflow, and so on. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.

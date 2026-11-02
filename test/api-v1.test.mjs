@@ -358,6 +358,50 @@ test('AgentFlow: agents and workflows, with briefs for runners',async()=>{
   assert.equal((await op('agents.get',{env:ENV,agent:'Chief of staff'})).body.code,'unknown_agent');
 });
 
+test('AgentFlow: runners report scheduled jobs; agents carry a schedule and the job they came from',async()=>{
+  const at=h=>new Date(Date.now()+h*3600e3).toISOString(),models=[{id:'claudeAgent:claude-sonnet-5-5',label:'Claude · Sonnet 5.5'}];
+  const backup=(o={})=>({id:'systemd:backup.timer',name:'Nightly backup',source:'systemd',group:'Jobs box',schedule:'Daily 22:30',cron:'30 22 * * *',command:'restic backup /srv',lastRun:at(-1),lastStatus:'ok',nextRun:at(20),...o});
+  let r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[backup(),{id:'vercel:app:/api/cron/sync',name:'Sync',source:'vercel',schedule:'Every 5 min',ai:false},{id:'claude:triage',name:'Triage',source:'claude',schedule:'Weekdays 08:00',ai:true}]});
+  assert.deepEqual([r.status,r.body.changed,r.body.runner.jobs.length],[200,true,3]);
+  assert.ok(r.body.runner.jobsReported,'jobsReported is set when jobs are saved');
+  assert.deepEqual(r.body.runner.jobs[1],{id:'vercel:app:/api/cron/sync',name:'Sync',source:'vercel',schedule:'Every 5 min',ai:false,enabled:true,lastStatus:'unknown'});
+  const rev=r.body.rev,jobs=r.body.runner.jobs;
+  r=await op('runners.report',{env:ENV,runner:'jobs box',models,jobs:[backup({lastRun:at(-.5),nextRun:at(21)}),jobs[1],jobs[2]]});
+  assert.deepEqual([r.body.changed,r.body.rev],[false,rev],'only lastRun and nextRun moved: nothing saved');
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models});
+  assert.deepEqual([r.body.changed,r.body.runner.jobs.length],[false,3],'leaving jobs out keeps them');
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[backup({lastStatus:'failed'}),jobs[1],jobs[2]]});
+  assert.deepEqual([r.body.changed,r.body.runner.jobs[0].lastStatus],[true,'failed'],'a status flip is saved');
+  // Six hours on, the volatile times are refreshed too.
+  {const w=await store.get(ENV);w.data.agentflow.runners.find(x=>x.name==='Jobs box').jobsReported=at(-7);
+    assert.ok((await store.put(ENV,{baseRev:w.rev,data:w.data,by:OWNER.email,owner:OWNER.email,name:w.name})).ok);}
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[backup({lastStatus:'failed',lastRun:at(-.2)}),jobs[1],jobs[2]]});
+  assert.equal(r.body.changed,true,'jobs last saved over six hours ago: the new times are saved');
+  assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:Array.from({length:501},(_,i)=>({id:'j'+i}))})).status,400,'up to 500 jobs');
+  assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{id:'x',lastStatus:'exploded'}]})).status,400,'lastStatus is ok, failed, running or unknown');
+  assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{id:'x',source:'s'.repeat(41)}]})).status,400,'source is up to 40 characters');
+  assert.equal((await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[{name:'no id'}]})).status,400,'jobs need an id');
+
+  // Agents: schedule, the job link, and automations.
+  r=await op('agents.create',{env:ENV,name:'Nightly backup',kind:'automation',live:true,schedule:'Daily 22:30',job:{runner:'Jobs box',id:'systemd:backup.timer'}});
+  assert.equal(r.status,201);const auto=r.body.agent;
+  assert.deepEqual([auto.kind,auto.live,auto.schedule,auto.job],['automation',false,'Daily 22:30',{runner:'Jobs box',id:'systemd:backup.timer'}],'automations are never live');
+  r=await op('agents.get',{env:ENV,agent:auto.id});
+  assert.match(r.body.brief,/^# Nightly backup\n\nAutomation · Draft\n/);
+  assert.match(r.body.brief,/- Schedule: Daily 22:30\n- Promoted from: Jobs box · Nightly backup \(restic backup \/srv\)/);
+  r=await op('agents.update',{env:ENV,agent:auto.id,job:null,schedule:''});
+  assert.deepEqual(['job' in r.body.agent,r.body.agent.schedule],[false,''],'null clears the link');
+  r=await op('agents.update',{env:ENV,agent:auto.id,job:{runner:'Jobs box',id:'claude:triage'},kind:'agent',schedule:'Weekdays 08:00'});
+  assert.deepEqual([r.body.agent.kind,r.body.agent.job.id,r.body.agent.schedule],['agent','claude:triage','Weekdays 08:00']);
+  r=await op('agents.update',{env:ENV,agent:auto.id,job:''});assert.equal('job' in r.body.agent,false,'"" clears it too');
+  assert.equal((await op('agents.update',{env:ENV,agent:auto.id,job:{runner:'Jobs box'}})).status,400,'a link needs a runner and an id');
+  assert.equal((await op('agents.update',{env:ENV,agent:auto.id,schedule:'x'.repeat(201)})).status,400,'schedule is up to 200 characters');
+  assert.deepEqual((await op('agents.list',{env:ENV,kind:'automation'})).body.items.map(a=>a.name),[]);
+  await op('agents.delete',{env:ENV,agent:auto.id});
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[]});
+  assert.deepEqual([r.body.changed,r.body.runner.jobs],[true,[]],'[] clears the jobs');
+});
+
 test('AgentFlow: delegating cards to agents and the work queue a runner reads',async()=>{
   const bot=(await op('agents.create',{env:ENV,name:'Runner bot'})).body.agent;
   let r=await op('cards.create',{env:ENV,title:'Queue me',column:'requests',due:'2026-11-20',agents:['Runner bot']});

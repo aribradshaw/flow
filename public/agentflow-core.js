@@ -3,8 +3,12 @@
 // use them in Node, as with devops-core.js.
 //
 // db.agentflow = {agents:[agent], workflows:[workflow], runners:[runner]}
-// agent    = {id,name,kind,title,status,live,reportsTo,supervisor,purpose,instructions,runtime,models[],model,auto,
-//             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated, x?,y?}
+// agent    = {id,name,kind,title,status,live,reportsTo,supervisor,purpose,instructions,runtime,models[],model,auto,schedule,
+//             inputs[],outputs[],tools[],projects[],cards[],items[],created,updated, job?,x?,y?}
+//   kind: agent (AI), human, team, or automation: a scripted job with no AI that runs on its own
+//   schedule outside Flow (a systemd timer, a cron job). Automations have no models and are never live.
+//   schedule: when it runs, plain text or cron ('' for none). job: {runner,id}, the runner job it was
+//   promoted from (promoteJob); absent when none.
 //   live: the switch a runner obeys. Off (the default), runners leave the agent alone whatever its
 //   status; on, a runner whose name matches `runtime` works its queue on `models`.
 //   models: model ids in order, the primary first and then fallbacks the runner tries when one fails
@@ -14,21 +18,29 @@
 //   reportsTo: another agent (the AgentFlow org chart); supervisor: a person card on a Flow chart.
 // workflow = {id,name,description,status,trigger,schedule,steps:[{id,agent,action,output}],
 //             projects[],cards[],items[],created,updated}
-// runner   = {name,models:[{id,label,provider?,billing?}],reported}: a machine or service that runs
+// runner   = {name,models:[{id,label,provider?,billing?}],jobs:[job],reported,jobsReported?}: a machine or service that runs
 //   agents, as it reported itself (runners.report). Its name is what agents put in `runtime`, and its
 //   models are the choices for `models`. provider groups models for display (e.g. "Claude"); billing is
 //   'included' (a subscription or free) or 'metered' (paid per use). Flow never contacts a runner;
 //   the runner calls Flow.
+// job      = {id,name,source,group?,schedule,cron?,command?,ai,enabled,lastRun?,lastStatus,nextRun?}: a scheduled
+//   job the runner found (a systemd timer, a crontab line, a Vercel cron...). id is stable per runner;
+//   group is a display group ("Vercel · my-app"); ai: it starts an AI agent. jobsReported: when the
+//   jobs were last saved (see reportRunner for when a report is saved).
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
 
-export const AGENT_KINDS={agent:'AI agent',human:'Human',team:'Team'};
+export const AGENT_KINDS={agent:'AI agent',human:'Human',team:'Team',automation:'Automation'};
 export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired:'Retired'};
 export const WORKFLOW_STATUS={draft:'Draft',active:'Active',paused:'Paused'};
 export const TRIGGERS={manual:'Manual',schedule:'Schedule',event:'Event'};
 export const TRIGGER_HINT={manual:'Someone starts it',schedule:'e.g. Weekdays at 09:00',event:'e.g. A card enters UAT'};
-export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500,agentModels:10};
+export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners:20,models:500,agentModels:10,jobs:500};
+export const JOB_STATUS={ok:'OK',failed:'Failed',running:'Running',unknown:'Unknown'};
+// How a job's source reads as an agent's role when it is promoted (unknown sources: "<source> job").
+export const JOB_SOURCES={systemd:'systemd timer',cron:'Cron job',t3:'T3 schedule',vercel:'Vercel cron',railway:'Railway cron',aside:'Aside schedule',
+  windows:'Windows scheduled task',claude:'Claude schedule',github:'GitHub Actions schedule',other:'Scheduled job'};
 export const BILLING={included:'Included',metered:'Metered'};
 // Ids of records shared in from another workspace. They are projected in on read and are not in
 // stored data, so links to them are kept even when the record is not present (e.g. on the server).
@@ -82,12 +94,14 @@ export function cleanAgentflow(d,db={}){
   const people=new Set(peopleOf(db).map(n=>n.id));
   const links=x=>({projects:refs(x.projects,projects),cards:refs(x.cards,cards),items:refs(x.items,items)});
   const seen=new Set();
-  const agents=(Array.isArray(d.agents)?d.agents:[]).filter(a=>a&&typeof a.id==='string'&&a.id&&typeof a.name==='string'&&!seen.has(a.id)&&seen.add(a.id)).slice(0,LIMITS.agents).map(a=>({
-    id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind:pick(a.kind,AGENT_KINDS,'agent'),title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),live:a.live===true,
+  const agents=(Array.isArray(d.agents)?d.agents:[]).filter(a=>a&&typeof a.id==='string'&&a.id&&typeof a.name==='string'&&!seen.has(a.id)&&seen.add(a.id)).slice(0,LIMITS.agents).map(a=>{
+    const kind=pick(a.kind,AGENT_KINDS,'agent'),job=cleanJobLink(a.job);
+    return {id:a.id.slice(0,80),name:a.name.trim().slice(0,120)||'Untitled agent',kind,title:str(a.title,120),status:pick(a.status,AGENT_STATUS,'draft'),live:a.live===true&&kind!=='automation',
     reportsTo:typeof a.reportsTo==='string'?a.reportsTo:'',supervisor:typeof a.supervisor==='string'&&(people.has(a.supervisor)||shared(a.supervisor))?a.supervisor:'',
-    purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),...cleanModels(a),
+    purpose:str(a.purpose,2000),instructions:str(a.instructions,20000),runtime:str(a.runtime,200),...cleanModels(a),schedule:str(a.schedule,200),
     inputs:strs(a.inputs),outputs:strs(a.outputs),tools:strs(a.tools),...links(a),created:iso(a.created,now),updated:iso(a.updated,now),
-    ...(placed(a)?{x:clampXY(a.x),y:clampXY(a.y)}:{})}));
+    ...(job?{job}:{}),...(placed(a)?{x:clampXY(a.x),y:clampXY(a.y)}:{})};
+  });
   const byId=new Map(agents.map(a=>[a.id,a]));
   for(const a of agents){
     if(!byId.has(a.reportsTo)||a.reportsTo===a.id){a.reportsTo='';continue}
@@ -112,7 +126,26 @@ function cleanModels(a){
   const models=strs(Array.isArray(a.models)&&a.models.length?a.models:typeof a.model==='string'?[a.model]:[],LIMITS.agentModels,120);
   return {models,model:models[0]||'',auto:a.auto===true};
 }
-// Runners as they reported themselves: unique names, each with unique model ids.
+// The runner job an agent was promoted from: {runner,id} (both non-empty, up to 200 characters), or null.
+export function cleanJobLink(j){
+  if(!j||typeof j!=='object'||typeof j.runner!=='string'||typeof j.id!=='string')return null;
+  const runner=j.runner.trim().slice(0,200),id=j.id.slice(0,200);
+  return runner&&id.trim()?{runner,id}:null;
+}
+// Scheduled jobs as a runner reported them: unique ids (the first wins), up to LIMITS.jobs. Text is
+// trimmed and cut to its limit; group, cron, command, lastRun and nextRun are left out when empty
+// (or, for the times, not a date). enabled is true unless false; lastStatus is unknown unless known.
+const isoOr=v=>typeof v==='string'&&v.trim()&&!Number.isNaN(Date.parse(v))?v.trim().slice(0,40):'';
+export function cleanJobs(v){
+  const seen=new Set();
+  return (Array.isArray(v)?v:[]).filter(j=>j&&typeof j.id==='string'&&j.id.trim()).map(j=>({...j,id:j.id.trim().slice(0,200)}))
+    .filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,LIMITS.jobs).map(j=>{
+      const t=(k,n)=>str(j[k],n).trim(),group=t('group',120),cron=t('cron',120),command=t('command',300),lastRun=isoOr(j.lastRun),nextRun=isoOr(j.nextRun);
+      return {id:j.id,name:t('name',120)||j.id.slice(0,120),source:t('source',40)||'other',...(group?{group}:{}),schedule:t('schedule',200),...(cron?{cron}:{}),
+        ...(command?{command}:{}),ai:j.ai===true,enabled:j.enabled!==false,...(lastRun?{lastRun}:{}),lastStatus:pick(j.lastStatus,JOB_STATUS,'unknown'),...(nextRun?{nextRun}:{})};
+    });
+}
+// Runners as they reported themselves: unique names, each with unique model ids and job ids.
 export function cleanRunners(v){
   const seen=new Set();
   return (Array.isArray(v)?v:[]).filter(r=>r&&typeof r.name==='string'&&r.name.trim()).map(r=>({...r,name:r.name.trim().slice(0,200)}))
@@ -122,8 +155,28 @@ export function cleanRunners(v){
         const provider=str(m.provider,80).trim();
         return {id:m.id.trim().slice(0,120),label:str(m.label,160).trim(),...(provider?{provider}:{}),...(Object.hasOwn(BILLING,m.billing)?{billing:m.billing}:{})};
       })
-        .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),reported:iso(r.reported,new Date().toISOString())};
+        .filter(m=>!ms.has(m.id)&&ms.add(m.id)).slice(0,LIMITS.models),jobs:cleanJobs(r.jobs),reported:iso(r.reported,new Date().toISOString()),
+        ...(isoOr(r.jobsReported)?{jobsReported:isoOr(r.jobsReported)}:{})};
     });
+}
+// A runner's report (runners.report) against what is stored (had, or null): {runner, changed}.
+// models replace the old list. jobs replace the old list too; left out (undefined), the stored jobs
+// stay. Not every report is saved: changed is false, and had comes back as it is, when nothing
+// changed but lastRun and nextRun, unless the jobs were last saved JOBS_STALE ago or more (then those
+// are refreshed). A changed lastStatus, job set or any other field always saves. jobsReported is set
+// whenever jobs are saved.
+export const JOBS_STALE=6*3600e3;
+const steady=js=>JSON.stringify(js.map(({lastRun,nextRun,...j})=>j));
+export function reportRunner(had,name,{models,jobs}={},now=new Date().toISOString()){
+  const want=cleanRunners([{name,models,jobs:jobs||[]}])[0],keep=jobs===undefined;
+  let changed=!had||JSON.stringify(had.models)!==JSON.stringify(want.models);
+  if(had&&!keep&&!changed){
+    const old=had.jobs||[],stale=!had.jobsReported||Date.parse(now)-Date.parse(had.jobsReported)>=JOBS_STALE;
+    changed=steady(old)!==steady(want.jobs)||(stale&&JSON.stringify(old)!==JSON.stringify(want.jobs));
+  }
+  if(!changed)return {runner:had,changed:false};
+  const at=keep?had?.jobsReported:now;
+  return {runner:{name:had?.name||want.name,models:want.models,jobs:keep?had?.jobs||[]:want.jobs,reported:now,...(at?{jobsReported:at}:{})},changed:true};
 }
 export const runnerOf=(af,name)=>{const n=String(name??'').trim().toLowerCase();return n?(af?.runners||[]).find(r=>r.name.toLowerCase()===n)||null:null};
 // An agent's model ids in order. Agents not yet cleaned may only have model.
@@ -167,12 +220,16 @@ export function modelMaker(id,label=''){
 // label when its runner reported one, "+N" for fallbacks, or "Auto (N models)"). Empty for neither.
 export const modelLabel=(af,a)=>modelChoices(af,a)[0]?.label||'';
 export function runLine(af,a){
+  if(a.kind==='automation')return String(a.schedule||'').trim();
   const n=idsOf(a).length;
   const model=!n?'':a.auto?`Auto (${n} model${n===1?'':'s'})`:`${modelLabel(af,a).trim()}${n>1?` +${n-1}`:''}`;
   return [a.runtime.trim(),model].filter(Boolean).join(' · ');
 }
 // Why a live agent would be skipped by its runner, or '' when it is ready.
 export function liveProblem(af,a){
+  // Automations need no runner or model: they run on their own schedule, outside Flow, and are
+  // never live, so nothing is missing.
+  if(a.kind==='automation')return '';
   if(a.kind!=='agent')return 'Only AI agents run';
   if(!a.runtime.trim())return 'Pick where it runs';
   if(!idsOf(a).length)return 'Pick a model';
@@ -183,7 +240,7 @@ export function liveProblem(af,a){
 
 export function newAgent(af,over={}){
   const now=new Date().toISOString();
-  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',models:[],model:'',auto:false,
+  const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',models:[],model:'',auto:false,schedule:'',
     inputs:[],outputs:[],tools:[],projects:[],cards:[],items:[],created:now,updated:now,...over};
   af.agents.push(a);return a;
 }
@@ -245,9 +302,51 @@ export function workQueue(db,agentId){
   return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done').sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
 }
 
+// ---------- scheduled jobs ----------
+// Every job every runner reported, each with its runner's name: {...job, runner}.
+export const jobsOf=af=>(af?.runners||[]).flatMap(r=>(r.jobs||[]).map(j=>({...j,runner:r.name})));
+export const jobOf=(af,runner,jobId)=>{const r=runnerOf(af,runner);return r&&(r.jobs||[]).find(j=>j.id===jobId)||null};
+// Jobs for display, grouped by runner and then by the job's group: [{key, label, runner, jobs[]}],
+// sorted by runner name, then group (a runner's ungrouped jobs first, labelled with the runner),
+// and jobs by name.
+const byText=(x,y)=>x.localeCompare(y,undefined,{sensitivity:'base',numeric:true});
+export function jobGroups(af){
+  const m=new Map();
+  for(const r of af?.runners||[])for(const j of r.jobs||[]){
+    const g=j.group||'',key=JSON.stringify([r.name,g]);
+    if(!m.has(key))m.set(key,{key,label:g||r.name,runner:r.name,group:g,jobs:[]});
+    m.get(key).jobs.push({...j,runner:r.name});
+  }
+  const out=[...m.values()].sort((x,y)=>byText(x.runner,y.runner)||(!y.group)-(!x.group)||byText(x.group,y.group));
+  for(const g of out){g.jobs.sort((x,y)=>byText(x.name,y.name)||byText(x.id,y.id));delete g.group}
+  return out;
+}
+const sameJob=(l,runner,jobId)=>!!l&&l.id===jobId&&l.runner.toLowerCase()===String(runner??'').trim().toLowerCase();
+// The agent promoted from a runner's job, or null.
+export const promotedAgent=(af,runner,jobId)=>(af?.agents||[]).find(a=>sameJob(a.job,runner,jobId))||null;
+// Promote a runner's job into the org: a new agent linked to it (job: {runner, id}). An AI job becomes
+// an AI agent (runtime: the runner, no models yet: pick them), any other an automation. Named after the
+// job, its role from the source ("Vercel cron"), its schedule the job's (or its cron line), its purpose
+// the job's command; active when the job is enabled, else paused; never live. opts: reportsTo (an
+// agent id, else top level) and x, y (a canvas position; the rest are pinned first).
+// A job is promoted once: promoting it again returns the agent it already became and changes nothing.
+// Returns null when the job is unknown or the workspace is at LIMITS.agents.
+export function promoteJob(af,runner,jobId,{reportsTo='',x,y}={}){
+  const had=promotedAgent(af,runner,jobId);if(had)return had;
+  const r=runnerOf(af,runner),j=r&&(r.jobs||[]).find(q=>q.id===jobId);
+  if(!j||af.agents.length>=LIMITS.agents)return null;
+  const at=Number.isFinite(x)&&Number.isFinite(y);if(at)pin(af);
+  const src=String(j.source||'other').toLowerCase();
+  return newAgent(af,{name:j.name.slice(0,120)||'Untitled job',kind:j.ai?'agent':'automation',title:(JOB_SOURCES[src]||`${j.source} job`).slice(0,120),
+    status:j.enabled===false?'paused':'active',schedule:(j.schedule||j.cron||'').slice(0,200),runtime:j.ai?r.name:'',purpose:(j.command||'').slice(0,2000),
+    job:{runner:r.name,id:j.id},reportsTo:agentOf(af,reportsTo)?reportsTo:'',...(at?{x:clampXY(x),y:clampXY(y)}:{})});
+}
+
 // ---------- canvas layout ----------
 // Card size on the canvas and the spacing of the automatic tree.
-export const CARD={w:216,h:96},STEP={x:240,y:152};
+export const CARD={w:216,h:96,auto:76},STEP={x:240,y:152};
+// An automation's card is shorter (no models or counts); it keeps the same top edge and slot.
+export const cardH=a=>a?.kind==='automation'?CARD.auto:CARD.h;
 // A manager with STACK.min or more reports that have no reports of their own lists those in
 // columns of up to STACK.rows, indented under it, so a big team doesn't stretch the chart sideways.
 export const STACK={min:3,rows:6,y:CARD.h+20,indent:24};
@@ -341,12 +440,12 @@ function curve(m,r){
   return c(m.x+W/2,m.y+H,r.x+W/2,r.y,false);
 }
 export function reportLines(af,pos,side=stacked(af)){
-  const pieces=[],routes=new Map(),byManager=new Map();
+  const pieces=[],routes=new Map(),byManager=new Map(),byId=new Map(af.agents.map(a=>[a.id,a]));
   for(const a of af.agents)if(a.reportsTo&&a.reportsTo!==a.id&&pos.has(a.reportsTo)&&pos.has(a.id)){
     if(!byManager.has(a.reportsTo))byManager.set(a.reportsTo,[]);byManager.get(a.reportsTo).push(a);
   }
   for(const [mid,reps] of byManager){
-    const m=pos.get(mid),x1=m.x+CARD.w/2,y1=m.y+CARD.h;
+    const m=pos.get(mid),x1=m.x+CARD.w/2,y1=m.y+cardH(byId.get(mid));
     const below=[];
     for(const a of reps){const r=pos.get(a.id);if(r.y-y1>=24)below.push(a);else{const d=curve(m,r);pieces.push({d,owners:[a.id]});routes.set(a.id,d)}}
     if(!below.length)continue;
@@ -423,7 +522,7 @@ export function full(af,kind,x,key){
 export function filterAgents(af,f={}){
   const q=String(f.q||'').trim().toLowerCase();
   return af.agents.filter(a=>(!f.status||a.status===f.status)&&(!f.kind||a.kind===f.kind)&&(f.live===undefined||a.live===f.live)&&(!f.project||a.projects.includes(f.project))
-    &&(!q||[a.name,a.title,a.purpose,...a.inputs,...a.outputs,...a.tools].some(s=>s.toLowerCase().includes(q))));
+    &&(!q||[a.name,a.title,a.purpose,a.schedule||'',...a.inputs,...a.outputs,...a.tools].some(s=>s.toLowerCase().includes(q))));
 }
 export function filterWorkflows(af,f={}){
   const q=String(f.q||'').trim().toLowerCase();
@@ -448,7 +547,9 @@ const runtimeModels=(auto,ms)=>!ms.length?[]:auto?[`- Auto from: ${ms.map(modelT
   :ms.length===1?[`- Model: ${modelText(ms[0])}`]:ms.map((m,i)=>`- Model ${i+1}: ${modelText(m)} (${i?'fallback':'primary'})`);
 export function agentBrief(db,agentId){
   const af=db.agentflow,a=agentOf(af,agentId);if(!a)return '';
-  const ms=modelChoices(af,a);
+  const ms=a.kind==='automation'?[]:modelChoices(af,a),job=a.job&&jobOf(af,a.job.runner,a.job.id);
+  const runtime=[...(a.runtime?[`- Runs on: ${a.runtime}`]:[]),...runtimeModels(a.auto,ms),...(a.schedule?.trim()?[`- Schedule: ${a.schedule.trim()}`]:[]),
+    ...(a.job?[`- Promoted from: ${a.job.runner} · ${job?`${job.name}${job.command?` (${job.command})`:''}`:`${a.job.id} (no longer reported)`}`]:[])];
   const name=x=>x?`${x.name}${x.title?` (${x.title})`:''}`:'';
   const boss=agentOf(af,a.reportsTo),sup=peopleOf(db).find(n=>n.id===a.supervisor);
   const flows=workflowsFor(af,a.id).map(w=>{const steps=w.steps.map((s,i)=>s.agent===a.id?`step ${i+1}: ${s.action||'(no action)'}`:'').filter(Boolean);return `${w.name}: ${steps.join('; ')}`});
@@ -457,7 +558,7 @@ export function agentBrief(db,agentId){
     `## Purpose\n\n${a.purpose.trim()||'Not written yet.'}`,
     `## Reporting\n\n- Reports to: ${name(boss)||'Nobody (top of the org)'}\n- Supervised by: ${sup?.name||'Nobody assigned'}\n- Direct reports: ${reportsOf(af,a.id).map(name).join(', ')||'None'}`,
     `## Inputs\n\n${bullets(a.inputs)}`,`## Outputs\n\n${bullets(a.outputs)}`,`## Tools\n\n${bullets(a.tools)}`,
-    ...(a.runtime||ms.length?[`## Runtime\n\n${[...(a.runtime?[`- Runs on: ${a.runtime}`]:[]),...runtimeModels(a.auto,ms)].join('\n')}`]:[]),
+    ...(runtime.length?[`## Runtime\n\n${runtime.join('\n')}`]:[]),
     `## Workflows\n\n${bullets(flows)}`,
     workSection(db,a),
     ...(a.instructions.trim()?[`## Instructions\n\n${a.instructions.trim()}`]:[]),
