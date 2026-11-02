@@ -191,7 +191,7 @@ function paintZoom(){
 // survive unrelated redraws.
 // ui.tray: open or not; ui.jobGroups: {groupKey: open} for the groups someone opened or closed.
 const BIG_GROUP=8;
-const JOB_ICON={systemd:'timer',cron:'cron',vercel:'cloud',railway:'cloud',t3:'bot',claude:'sparkle',github:'branch',windows:'laptop',aside:'clock',other:'clock'};
+const JOB_ICON={systemd:'timer',cron:'cron',vercel:'cloud',railway:'cloud',t3:'bot',claude:'sparkle',codex:'sparkle',github:'branch',windows:'laptop',aside:'clock',other:'clock'};
 const jobIcon=j=>JOB_ICON[String(j.source||'').toLowerCase()]||'clock';
 const sourceName=j=>JOB_SOURCES[String(j.source||'').toLowerCase()]||j.source||'Scheduled job';
 // A time relative to now: "3 h ago", "in 20 min".

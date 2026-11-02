@@ -1,16 +1,21 @@
 // The reference runner's job discovery: schedule parsers, repo cron configs, filters, and the
-// jobs field on runners.report (with the fallback for servers that do not take it yet).
+// jobs field on runners.report (with the fallback for servers that do not take it yet); and remote
+// (SSH) discovery of a Windows machine: Task Scheduler, Aside, Claude desktop and Codex, with
+// synthetic samples in the shapes the remote scripts send.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {humaniseOnCalendar,humaniseMonotonic,humaniseDuration,humaniseCron,nextCron,parseCron,vercelJobs,railwayJobs,railwayConfig,
   workflowCrons,workflowJobs,crontabJobs,isDistroTimer,filterJobs,matches,redact,aiCommand,commandName,parseShow,parseTimerList,
-  systemdJob,t3Schedule,dayPhrase,jobsTable,discoverJobs} from '../tools/agent-runner.mjs';
+  systemdJob,t3Schedule,dayPhrase,jobsTable,discoverJobs,parseRRule,rruleNext,humaniseRRule,isoDuration,humaniseWinTrigger,humaniseWinTriggers,
+  isVendorTask,winStatus,windowsJobs,asideJobs,claudeTasks,claudeJobs,skillSummary,parseToml,codexJobs,remotePlan,remoteJobs,repoFileJobs,
+  psScript,pyScript,wallOf,wallToMs} from '../tools/agent-runner.mjs';
+import {spawnSync} from 'node:child_process';
 
 const RUNNER=fileURLToPath(new URL('../tools/agent-runner.mjs',import.meta.url));
 const NOW=new Date('2026-11-01T12:00:00Z');
@@ -267,19 +272,20 @@ test('discoverJobs reads repo configs from the configured repos only',async()=>{
 
 // report against a stub Flow server: jobs go in the same POST; a server that rejects the field gets
 // the models alone.
-async function reportAgainst(handler){
-  const bodies=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{bodies.push(JSON.parse(s||'null'));const [code,body]=handler(bodies.length);res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))})});
+async function reportAgainst(handler,extra=()=>({})){
+  const bodies=[],paths=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{bodies.push(JSON.parse(s||'null'));paths.push(req.url);const [code,body]=handler(bodies.length);res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))})});
   await new Promise(r=>srv.listen(0,'127.0.0.1',r));
   const home=mkdtempSync(join(tmpdir(),'runner-report-'));
   try{
     mkdirSync(join(home,'.config','flygon-flow'),{recursive:true});mkdirSync(join(home,'repo'));
     writeFileSync(join(home,'repo','vercel.json'),JSON.stringify({crons:[{path:'/api/x',schedule:'*/5 * * * *'}]}));
     writeFileSync(join(home,'.config','flygon-flow','runner.json'),JSON.stringify({name:'box',env:'default-workspace',url:`http://127.0.0.1:${srv.address().port}`,key:'k',
-      t3Home:join(home,'t3'),opencode:'',grok:'',jobs:{sources:['vercel'],repos:[join(home,'repo')]}}));
+      t3Home:join(home,'t3'),opencode:'',grok:'',jobs:{sources:['vercel'],repos:[join(home,'repo')]},...extra(home)}));
     const env={...process.env,HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.state')};
     for(const k of Object.keys(env))if(k.startsWith('FLOW_'))delete env[k];
-    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,'report'],{env,timeout:20000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
-    return {...out,bodies};
+    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,'report'],{env,timeout:30000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
+    const state=(()=>{try{return JSON.parse(readFileSync(join(home,'.state','flygon-flow','runner-state.json'),'utf8'))}catch{return null}})();
+    return {...out,bodies,paths,state};
   }finally{srv.close();rmSync(home,{recursive:true,force:true})}
 }
 test('report sends jobs with the models',async()=>{
@@ -313,4 +319,223 @@ test('jobs needs no settings or server',async()=>{
     const r=await new Promise(res=>execFile(process.execPath,[RUNNER,'jobs','--json','--config',join(home,'r.json')],{env,timeout:20000},(err,stdout,stderr)=>res({code:err?err.code??1:0,stdout,stderr})));
     assert.equal(r.code,0,r.stderr);assert.deepEqual(JSON.parse(r.stdout),[]);
   }finally{rmSync(home,{recursive:true,force:true})}
+});
+
+// ---------- remote (SSH) discovery ----------
+const PHX='America/Phoenix';
+test('RFC 5545 rules read as text, in the rule\'s zone',()=>{
+  const at=Date.parse('2026-09-12T16:00:00Z'),h=(r,o={})=>humaniseRRule(r,{tz:PHX,anchor:at,...o});
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261101T180000\nRRULE:FREQ=DAILY;COUNT=1'),'Once Nov 1 18:00');
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261027T090000\\nRRULE:FREQ=DAILY;COUNT=7'),'Daily 09:00, 7 times','an escaped \\n works too');
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261013T090000\nRRULE:FREQ=DAILY;UNTIL=20261027T090000'),'Daily 09:00, until Oct 27');
+  assert.equal(h('DTSTART;TZID=America/Chicago:20260819T090000\nRRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0'),'Tue-Fri 09:00 America/Chicago','another zone is named');
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261006T090000\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=9;BYMINUTE=0'),'Daily 09:00');
+  assert.equal(h('FREQ=DAILY;BYHOUR=9,16;BYMINUTE=15'),'Daily 09:15, 16:15');
+  assert.equal(h('RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;BYSECOND=0'),'Daily 09:00');
+  assert.equal(h('FREQ=MINUTELY;INTERVAL=15'),'Every 15 min');
+  assert.equal(h('FREQ=HOURLY;INTERVAL=6'),'Every 6 h');
+  assert.equal(h('FREQ=HOURLY;INTERVAL=1'),'Hourly');
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261016T200000\nRRULE:FREQ=DAILY;BYHOUR=8,21;COUNT=34'),'Daily 08:00, 21:00, 34 times');
+  assert.equal(h('FREQ=WEEKLY;BYDAY=SA;BYHOUR=10;BYMINUTE=30'),'Saturdays 10:30');
+  assert.equal(h('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;BYHOUR=8'),'Every 2 weeks, Mon, Wed 08:00');
+  assert.equal(h('DTSTART:20260930T040000Z\nRRULE:FREQ=DAILY;COUNT=1'),'Once Sep 29 21:00','a UTC start is shown in the machine\'s zone');
+  assert.equal(h('FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=4;BYHOUR=9;BYMINUTE=0;BYSECOND=0;COUNT=1'),'Once Nov 4 09:00','a one-shot without DTSTART counts from the anchor');
+  assert.equal(h('DTSTART;TZID=America/Phoenix:20261024T213000\nRRULE:FREQ=HOURLY;INTERVAL=12;COUNT=2'),'Every 12 h, 2 times');
+  assert.equal(h('FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=6;BYMINUTE=0'),'Monthly on day 1 06:00');
+  assert.equal(h('not a rule'),'not a rule');
+  assert.equal(parseRRule('BYHOUR=9'),null,'no FREQ, no rule');
+  assert.deepEqual(parseRRule('DTSTART;TZID=America/Phoenix:20261101T180000\nRRULE:FREQ=DAILY;COUNT=1;BYDAY=MO,1TU').by.nth,true);
+});
+test('the next occurrence of a rule',()=>{
+  const now=Date.parse('2026-11-02T01:00:00Z');   // Nov 1 18:00 in Phoenix
+  let x=rruleNext('DTSTART;TZID=America/Phoenix:20261027T090000\nRRULE:FREQ=DAILY;COUNT=7',{now});
+  assert.deepEqual(x,{next:'2026-11-02T16:00:00.000Z',first:'2026-10-27T16:00:00.000Z',done:false});
+  x=rruleNext('DTSTART;TZID=America/Phoenix:20261027T090000\nRRULE:FREQ=DAILY;COUNT=7',{now:Date.parse('2026-11-03T00:00:00Z')});
+  assert.equal(x.done,true,'seven runs, all past: done');
+  assert.equal(rruleNext('DTSTART;TZID=America/Phoenix:20261013T090000\nRRULE:FREQ=DAILY;UNTIL=20261027T090000',{now}).done,true,'until has passed');
+  assert.equal(rruleNext('FREQ=DAILY;BYHOUR=9,16;BYMINUTE=15',{tz:PHX,anchor:Date.parse('2026-08-01T00:00:00Z'),now}).next,'2026-11-02T16:15:00.000Z');
+  assert.equal(rruleNext('FREQ=MINUTELY;INTERVAL=15',{tz:PHX,anchor:Date.parse('2026-01-01T00:07:00Z'),now}).next,'2026-11-02T01:07:00.000Z','no COUNT: skips ahead');
+  assert.equal(rruleNext('DTSTART;TZID=America/Chicago:20260819T090000\nRRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0',{now}).next,'2026-11-03T15:00:00.000Z','after the DST change, 09:00 CST');
+  assert.equal(rruleNext('FREQ=DAILY;COUNT=1;BYMONTH=9;BYMONTHDAY=7;BYHOUR=14;BYMINUTE=18',{tz:PHX,anchor:Date.parse('2026-09-07T20:00:00Z'),now}).done,true,'a used-up one-shot');
+  assert.equal(rruleNext('FREQ=MONTHLY;BYDAY=1MO',{now}),null,'BYDAY with a number is not followed');
+});
+test('time zones: wall clock and back, and cron in a zone',()=>{
+  const t=Date.parse('2026-11-01T14:30:00Z');
+  assert.equal(new Date(wallOf(t,PHX)).toISOString(),'2026-11-01T07:30:00.000Z');
+  assert.equal(wallToMs(wallOf(t,PHX),PHX),t);
+  assert.equal(nextCron('30 7 * * *',new Date('2026-11-01T15:00:00Z'),{tz:PHX}),'2026-11-02T14:30:00.000Z');
+  assert.equal(nextCron('0 9,13,17,21 * * *',new Date('2026-11-02T00:10:00Z'),{tz:PHX}),'2026-11-02T04:00:00.000Z');
+  assert.equal(nextCron('0 9 * * 1',new Date('2026-11-01T12:00:00Z'),{tz:'America/Chicago'}),'2026-11-02T15:00:00.000Z');
+});
+test('Windows triggers read as text',()=>{
+  const T=(type,o={})=>humaniseWinTrigger({type:`MSFT_Task${type}Trigger`,...o});
+  assert.equal(T('Daily',{start:'2026-01-01T18:00:00',days:1}),'Daily 18:00');
+  assert.equal(T('Daily',{start:'2026-01-01T18:00:00-07:00',days:2}),'Every 2 days 18:00');
+  assert.equal(T('Daily',{start:'2026-01-01T18:58:38',days:1,interval:'PT1H',duration:'P1D'}),'Hourly');
+  assert.equal(T('Daily',{start:'2026-01-01T11:39:02',days:1,interval:'PT4H',duration:'PT23H'}),'Every 4 h');
+  assert.equal(T('Daily',{start:'2026-01-01T08:00:00',days:1,interval:'PT2H',duration:'PT6H'}),'Daily 08:00, then every 2 h for 6 h');
+  assert.equal(T('Weekly',{start:'2026-01-01T05:11:44',weeks:1,dow:32}),'Fridays 05:11');
+  assert.equal(T('Weekly',{start:'2026-01-01T04:00:00',weeks:2,dow:1}),'Every 2 weeks, Sundays 04:00');
+  assert.equal(T('Weekly',{start:'2026-01-01T09:00:00',weeks:1,dow:62}),'Weekdays 09:00');
+  assert.equal(T('Time',{start:'2026-10-15T08:51:32-07:00',interval:'PT15M'}),'Every 15 min');
+  assert.equal(T('Time',{start:'2026-10-13T19:00:00-07:00',interval:'PT3H'}),'Every 3 h');
+  assert.equal(T('Time',{start:'2026-10-27T13:50:56',interval:'P1D'}),'Daily 13:50');
+  assert.equal(T('Time',{start:`${new Date().getFullYear()}-11-26T14:04:25`}),'Once Nov 26 14:04');
+  assert.equal(T('Time',{start:'2020-03-02T07:00:00'}),'Once Mar 2 2020 07:00');
+  assert.equal(T('Monthly',{start:'2026-01-01T03:00:00',dom:1}),'Monthly on day 1 03:00');
+  assert.equal(T('Monthly',{start:'2026-01-01T03:00:00',dom:1|(1<<14)}),'Monthly on day 1, 15 03:00');
+  assert.equal(T('MonthlyDOW',{start:'2026-01-01T09:00:00',wom:1,dow:2}),'First Monday monthly 09:00');
+  assert.equal(T('MonthlyDOW',{start:'2026-01-01T09:00:00',wom:16,dow:64}),'Last Saturday monthly 09:00');
+  assert.equal(T('Logon'),'At logon');
+  assert.equal(T('Logon',{interval:'PT3H30M'}),'At logon, then every 3 h 30 min');
+  assert.deepEqual([T('Boot'),T('Event'),T('Idle'),T('Registration'),T('SessionStateChange'),humaniseWinTrigger({type:''})],
+    ['At boot','On an event','When idle','When created','On lock or unlock','Custom trigger']);
+  assert.equal(humaniseWinTriggers([]),'On demand');
+  assert.equal(humaniseWinTriggers([{type:'MSFT_TaskEventTrigger'},{type:'MSFT_TaskEventTrigger'},{type:'MSFT_TaskLogonTrigger'}]),'On an event; At logon','repeats once');
+  assert.equal(humaniseWinTriggers([{type:'MSFT_TaskLogonTrigger',enabled:false}]),'On demand (triggers off)');
+  assert.deepEqual(isoDuration('PT3H30M'),{ms:3.5*36e5,text:'3 h 30 min'});
+  assert.equal(isoDuration('P'),null);
+});
+test('Windows tasks to jobs: vendor tasks skipped, status from the last result',()=>{
+  assert.deepEqual([winStatus('Ready',0,'x'),winStatus('Running',0,'x'),winStatus('Ready',267009,'x'),winStatus('Ready',267011,null),winStatus('Ready',1,'x'),winStatus('Ready',2147946720,'x')],
+    ['ok','running','running','unknown','failed','failed']);
+  for(const p of ['\\MicrosoftEdgeUpdateTaskMachineCore{X}','\\McAfee\\wps\\Updater','\\GoogleSystem\\GoogleUpdater\\Task','\\Opera scheduled Autoupdate 1','\\Adobe Acrobat Update Task',
+    '\\OneDrive Reporting Task-S-1-5','\\ZoomUpdateTaskUser-S-1','\\BraveSoftwareUpdateTaskMachineUA{X}','\\Git for Windows Updater','\\AsideSystem\\AsideUpdater\\Task'])assert.ok(isVendorTask(p),p);
+  for(const p of ['\\Nightly backup','\\Operations report','\\Photo sync'])assert.ok(!isVendorTask(p),p);
+  const base={path:'\\',state:'Ready',result:0,last:'2026-11-01T10:00:00.0000000Z',next:'2026-11-02T10:00:00.0000000Z'};
+  const tasks=[
+    {...base,name:'Nightly backup',triggers:[{type:'MSFT_TaskDailyTrigger',start:'2026-01-01T02:00:00',days:1}],actions:[{type:'MSFT_TaskExecAction',exe:'powershell.exe',args:'-File C:\\Users\\Pat\\scripts\\backup.ps1 -Token abc123secret'}]},
+    {...base,name:'Agent nudge',state:'Disabled',triggers:[{type:'MSFT_TaskTimeTrigger',start:'2026-01-01T00:00:00',interval:'PT30M'}],actions:[{exe:'C:\\Tools\\codex.exe',args:'exec "check"'}]},
+    {...base,name:'MicrosoftEdgeUpdateTaskMachineCore',triggers:[],actions:[]},
+    {...base,path:'\\McAfee\\wps\\',name:'McAfee Updater',triggers:[],actions:[{type:'MSFT_TaskComHandlerAction'}]}];
+  const jobs=windowsJobs(tasks,{group:'Laptop',profile:'C:\\Users\\Pat'});
+  assert.deepEqual(jobs.map(j=>j.id),['windows:\\Nightly backup','windows:\\Agent nudge']);
+  assert.deepEqual(jobs[0],{id:'windows:\\Nightly backup',name:'Nightly backup',source:'windows',group:'Laptop',schedule:'Daily 02:00',
+    command:'powershell.exe -File ~\\scripts\\backup.ps1 -Token ***',ai:false,enabled:true,lastRun:'2026-11-01T10:00:00.000Z',lastStatus:'ok',nextRun:'2026-11-02T10:00:00.000Z'});
+  assert.deepEqual([jobs[1].enabled,jobs[1].ai,'nextRun' in jobs[1]],[false,true,false],'disabled: no next run');
+  assert.deepEqual(windowsJobs(tasks,{include:['*McAfee Updater'],exclude:['Nightly*']}).map(j=>j.name),['Agent nudge','McAfee Updater'],'include keeps, exclude drops');
+  assert.equal(windowsJobs(tasks,{skipVendor:false}).length,4);
+  assert.equal(windowsJobs(tasks,{skipVendor:false})[3].command,'COM handler');
+});
+test('Aside routines to jobs',()=>{
+  const now=Date.parse('2026-11-02T01:00:00Z'),rule='DTSTART;TZID=America/Phoenix:20261027T090000\nRRULE:FREQ=DAILY;COUNT=7';
+  const r=(o={})=>({id:'r1',name:'Ad check',prompt:'\nCheck the ads.\nUse api_key=abc123 for it.',rrule:rule,status:'active',next_run_at:'2026-11-02T16:00:00.000Z',created_at:1792000000,
+    model:{provider:'gateway',modelId:'vendor/model-1'},last:{status:'idle',started:1793552408,finished:1793552500,aborted:null},...o});
+  const [a,b,c,d,e]=asideJobs([r(),r({id:'r2',status:'paused',next_run_at:null}),r({id:'r3',next_run_at:'2026-10-24T16:00:00.000Z'}),
+    r({id:'r4',last:{status:'suspended',started:1793552408}}),r({id:'r5',last:{status:'errored',started:1793552408,finished:1793552410,aborted:1793552410}})],{group:'Laptop · Aside',tz:PHX,now});
+  assert.deepEqual(a,{id:'aside:r1',name:'Ad check',source:'aside',group:'Laptop · Aside',schedule:'Daily 09:00, 7 times',command:'gateway/vendor/model-1 · Check the ads.',
+    ai:true,enabled:true,lastRun:'2026-11-01T17:00:08.000Z',lastStatus:'ok',nextRun:'2026-11-02T16:00:00.000Z'});
+  assert.deepEqual([b.enabled,'nextRun' in b],[false,false],'paused');
+  assert.deepEqual([c.schedule,c.lastStatus,'nextRun' in c],['Daily 09:00, 7 times (stale)','unknown',false],'next_run_at in the past: stale');
+  assert.deepEqual([d.lastStatus,d.command.startsWith('Waiting for approval · ')],['running',true],'suspended: waiting for approval');
+  assert.equal(e.lastStatus,'failed');
+  assert.equal(asideJobs([r({last:undefined})],{now})[0].lastStatus,'unknown','never ran');
+  assert.match(asideJobs([r({prompt:'Use token=abc123secret'})],{now})[0].command,/token=\*\*\*/,'secrets hidden');
+});
+test('Claude desktop scheduled tasks to jobs',()=>{
+  const json=JSON.stringify({scheduledTasks:[
+    {id:'morning-digest',displayName:'Morning digest',cronExpression:'30 7 * * *',enabled:true,filePath:'X:\\tasks\\morning-digest\\SKILL.md',createdAt:1790000000000,lastRunAt:'2026-11-01T14:37:55.721Z',lastScheduledFor:'2026-11-01T14:30:00.000Z',approvedPermissions:[{toolName:'Read'}]},
+    {id:'weekly-review',displayName:'Weekly review',cronExpression:'0 9 * * 1',enabled:false},{displayName:'no id'}],
+    recordedSkips:{'morning-digest':[{at:1793000000000,reason:'per_task_limit'}]}});
+  const tasks=claudeTasks(json);
+  assert.deepEqual(tasks.map(t=>t.id),['morning-digest','weekly-review']);
+  assert.deepEqual(claudeTasks('not json'),[]);
+  const skills={'morning-digest':'---\nname: morning-digest\ndescription: "Summarise the inbox and calendar each morning"\n---\n\n# Morning digest\nRead the inbox.'};
+  const [a,b]=claudeJobs(tasks,{group:'Laptop · Claude',tz:PHX,skills,now:new Date('2026-11-01T15:00:00Z')});
+  assert.deepEqual(a,{id:'claude:morning-digest',name:'Morning digest',source:'claude',group:'Laptop · Claude',schedule:'Daily 07:30',cron:'30 7 * * *',
+    command:'Summarise the inbox and calendar each morning',ai:true,enabled:true,lastRun:'2026-11-01T14:37:55.721Z',lastStatus:'unknown',nextRun:'2026-11-02T14:30:00.000Z'});
+  assert.deepEqual([b.enabled,'nextRun' in b,'command' in b,b.schedule],[false,false,false,'Mondays 09:00']);
+  assert.equal(skillSummary('# Check replies\nMore text'),'Check replies');
+  assert.equal(skillSummary('---\nname: x\n---\n\nFirst line here.\n'),'First line here.');
+});
+test('Codex automation.toml and automations to jobs',()=>{
+  const toml=['version = 1','id = "daily-brief"','kind = "cron"','name = "Daily brief"','prompt = "Line one with \\"quotes\\" and caf\\u00e9\\nline two"',
+    'status = "ACTIVE"','rrule = "DTSTART;TZID=America/Phoenix:20260801T090000\\nRRULE:FREQ=DAILY;BYHOUR=9,16;BYMINUTE=15"','model = "gpt-x"','reasoning_effort = "medium"',
+    'target = { type = "project", project_id = "p1" }','cwds = ["C:\\\\work", \'D:\\\\other\']','created_at = 1785000000000','[extra]','name = "ignored"'].join('\n');
+  const a=parseToml(toml);
+  assert.deepEqual([a.version,a.id,a.prompt,a.cwds,a.created_at,a.target,a.name],[1,'daily-brief','Line one with "quotes" and café\nline two',['C:\\work','D:\\\\other'],1785000000000,'{ type = "project", project_id = "p1" }','Daily brief']);
+  assert.equal(parseToml('prompt = "cut short with no clo').prompt,'cut short with no clo','a string cut short');
+  const now=Date.parse('2026-11-02T01:00:00Z'),created=Date.parse('2026-09-01T00:00:00Z');
+  const autos=[{...a,id:'daily-brief'},
+    {id:'nudge',kind:'heartbeat',name:'Nudge',status:'PAUSED',rrule:'FREQ=HOURLY;INTERVAL=6',created_at:created},
+    {id:'once-done',kind:'heartbeat',name:'Once done',status:'ACTIVE',rrule:'RRULE:FREQ=DAILY;BYHOUR=9;BYMINUTE=0;COUNT=1',created_at:created},
+    {id:'once-later',kind:'heartbeat',name:'Once later',status:'ACTIVE',rrule:'FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=4;BYHOUR=9;BYMINUTE=0;COUNT=1',created_at:created}];
+  const jobs=codexJobs(autos,{group:'Laptop · Codex',tz:PHX,runs:{'daily-brief':[3,1793574773]},now});
+  assert.deepEqual(jobs.map(j=>j.id),['codex:daily-brief','codex:nudge','codex:once-later'],'a used-up one-shot is skipped');
+  assert.deepEqual(jobs[0],{id:'codex:daily-brief',name:'Daily brief',source:'codex',group:'Laptop · Codex',schedule:'Daily 09:15, 16:15',
+    command:'codex:gpt-x (medium) · Line one with "quotes" and café',ai:true,enabled:true,lastRun:'2026-11-01T23:12:53.000Z',lastStatus:'unknown',nextRun:'2026-11-02T16:15:00.000Z'});
+  assert.deepEqual([jobs[1].enabled,jobs[1].schedule,'nextRun' in jobs[1]],[false,'Every 6 h',false]);
+  assert.deepEqual([jobs[2].schedule,jobs[2].nextRun],['Once Nov 4 09:00','2026-11-04T16:00:00.000Z']);
+  assert.equal(codexJobs(autos,{tz:PHX,now,keepDone:true}).find(j=>j.id==='codex:once-done').schedule,'Once Sep 1 09:00 (done)','keepDone marks it');
+  assert.equal(codexJobs([{id:'c',cron:'0 8 * * *'}],{tz:PHX,now})[0].nextRun,'2026-11-02T15:00:00.000Z');
+});
+test('remote plans, scripts and raw output to jobs',()=>{
+  let p=remotePlan({name:'L',ssh:['ssh','h'],python:'C:\\py\\python.exe'});
+  assert.deepEqual([p.psSources,p.pySources,p.repos,p.needsPython],[['windows'],['aside','claude-desktop','codex'],[],false]);
+  p=remotePlan({name:'L',ssh:['ssh','h'],repos:['C:\\code\\shop'],sources:['windows','aside','claude-desktop','vercel']});
+  assert.deepEqual([p.psSources,p.pySources,p.repos,p.needsPython],[['windows','claude-desktop'],[],['C:\\code\\shop'],true],'no python: PowerShell reads the Claude files; Aside needs python');
+  const c={sources:['windows'],repos:[],asideStatuses:['active','paused']};
+  for(const s of [psScript(c),pyScript(c)])assert.ok(/^[\x00-\x7f]*$/.test(s),'scripts are ASCII');
+  assert.ok(psScript(c).startsWith("$CFG=@{sources=@(([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('d2luZG93cw=='))));repos=@();asideStatuses=@("),'settings as PowerShell literals');
+  assert.ok(!/ConvertTo-Json|Get-ScheduledTask/.test(psScript(c)),'no slow cmdlets on the main path');
+  const py=spawnSync('python3',['-c','import sys,ast;ast.parse(sys.stdin.read())'],{input:pyScript(c),encoding:'utf8'});
+  if(!py.error)assert.equal(py.status,0,py.stderr);
+  const files=[{dir:'',name:'vercel.json',text:JSON.stringify({crons:[{path:'/api/x',schedule:'0 5 * * *'}]})},{dir:'.github/workflows',name:'w.yml',text:"on:\n  schedule:\n    - cron: '0 6 * * 1'\n"},
+    {dir:'services/api',name:'railway.json',text:JSON.stringify({deploy:{cronSchedule:'*/10 * * * *'}})}];
+  assert.deepEqual(repoFileJobs('shop',files,{now:NOW}).map(j=>j.id),['vercel:shop:/api/x','github:shop:w.yml','railway:shop:services/api/railway.json']);
+  const notes=[],now=Date.parse('2026-11-02T01:00:00Z');
+  const raw={ps:{home:'C:\\Users\\Pat',errors:['claude: nope'],windows:[{path:'\\',name:'Backup',state:'Ready',result:0,triggers:[],actions:[]},{path:'\\',name:'GoogleUpdaterTask',state:'Ready',triggers:[]}],
+    repos:[{repo:'shop',files}]},py:{aside:[{id:'r1',name:'Ads',rrule:'FREQ=DAILY;BYHOUR=9',status:'active',next_run_at:'2026-11-02T16:00:00.000Z'}],
+    claude:{tasks:[{id:'t1',displayName:'T1',cronExpression:'0 9 * * *',enabled:true}],skills:{}},codex:{automations:[{dir:'auto-1',text:'name = "Auto"\nstatus = "ACTIVE"\nrrule = "FREQ=DAILY;BYHOUR=7;BYMINUTE=0"'}],runs:{}}}};
+  const jobs=remoteJobs({name:'Laptop',ssh:['ssh'],python:'py',repos:['C:\\code\\shop'],timezone:PHX,exclude:['github:*']},raw,{now,note:n=>notes.push(n)});
+  assert.deepEqual(jobs.map(j=>[j.id,j.group]),[['windows:\\Backup','Laptop'],['aside:r1','Laptop · Aside'],['claude:t1','Laptop · Claude'],['codex:auto-1','Laptop · Codex'],
+    ['vercel:shop:/api/x','Vercel · shop'],['railway:shop:services/api/railway.json','Railway · api']]);
+  assert.deepEqual(notes,['Laptop: claude: nope']);
+  assert.equal(jobs.find(j=>j.id==='codex:auto-1').nextRun,'2026-11-02T14:00:00.000Z');
+});
+
+// A stand-in for ssh: answers the PowerShell script with Task Scheduler data and the Python one with
+// an Aside routine; with a flag file it fails the first connection (exit 255) to test the retry.
+const FAKE_SSH=`let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+  const fs=require('fs'),flag=process.argv[2];
+  if(flag&&fs.existsSync(flag)){fs.unlinkSync(flag);process.stderr.write('kex_exchange_identification: Connection closed\\n');process.exit(255)}
+  if(s.includes('Schedule.Service'))console.log(JSON.stringify({home:'C:\\\\Users\\\\Pat',errors:[],windows:[{path:'\\\\',name:'Backup',state:'Ready',result:0,last:'2026-11-01T10:00:00Z',triggers:[{type:'MSFT_TaskDailyTrigger',start:'2026-01-01T02:00:00',days:1}],actions:[]}]}));
+  else if(s.includes('import json'))console.log('banner\\n'+JSON.stringify({home:'C:\\\\Users\\\\Pat',errors:[],aside:[{id:'r1',name:'Ads',rrule:'FREQ=DAILY;BYHOUR=9',status:'active'}],claude:{tasks:[],skills:{}},codex:{automations:[],runs:{}}}));
+  else process.exit(3);
+});`;
+const fakeRemote=(home,o={})=>{writeFileSync(join(home,'fake-ssh.cjs'),FAKE_SSH);return {name:'Laptop',ssh:[process.execPath,join(home,'fake-ssh.cjs'),...(o.flag?[o.flag]:[])],python:'C:\\py\\python.exe',timezone:PHX,...o.extra}};
+test('jobs --remote prints a remote machine\'s jobs over ssh, with one retry on a failed connection',async()=>{
+  const home=mkdtempSync(join(tmpdir(),'runner-remote-'));
+  try{
+    const flag=join(home,'fail-once');writeFileSync(flag,'');
+    writeFileSync(join(home,'r.json'),JSON.stringify({jobs:{sources:[]},remotes:[fakeRemote(home,{flag})]}));
+    const run=a=>new Promise(res=>execFile(process.execPath,[RUNNER,'jobs',...a,'--config',join(home,'r.json')],{env:{...process.env,HOME:home},timeout:30000},(err,stdout,stderr)=>res({code:err?err.code??1:0,stdout,stderr})));
+    let r=await run(['--remote','laptop','--json']);
+    assert.equal(r.code,0,r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).map(j=>j.id).sort(),['aside:r1','windows:\\Backup']);
+    r=await run(['--all']);
+    assert.equal(r.code,0,r.stderr);assert.match(r.stdout,/== Laptop \(America\/Phoenix\)/);assert.match(r.stdout,/Backup\s+Daily 02:00/);
+    r=await run(['--remote','Desk']);
+    assert.equal(r.code,1);assert.match(r.stderr,/No remote "Desk" in "remotes" \(Laptop\)/);
+  }finally{rmSync(home,{recursive:true,force:true})}
+});
+test('report sends each remote as its own runner, jobs only, and notes when it ran',async()=>{
+  const r=await reportAgainst(()=>[200,{changed:true}],home=>({remotes:[fakeRemote(home),{name:'box',ssh:['ssh']},{name:'Off',enabled:false,ssh:['ssh']}]}));
+  assert.equal(r.code,0,r.stderr);
+  assert.deepEqual(r.paths,['/api/v1/envs/default-workspace/runners/box','/api/v1/envs/default-workspace/runners/Laptop']);
+  assert.ok(Array.isArray(r.bodies[0].models));
+  assert.deepEqual(Object.keys(r.bodies[1]),['jobs'],'no models: the server keeps what it has');
+  assert.deepEqual(r.bodies[1].jobs.map(j=>j.id).sort(),['aside:r1','windows:\\Backup']);
+  assert.match(r.stdout,/remote "box" has this runner's name; skipped/);
+  assert.match(r.stdout,/reported 2 jobs as "Laptop"/);
+  assert.equal(r.state.remotes.Laptop.jobs,2);assert.ok(Date.parse(r.state.remotes.Laptop.at));
+});
+test('a remote that cannot be reached is logged and skipped',async()=>{
+  const r=await reportAgainst(()=>[200,{changed:true}],()=>({remotes:[{name:'Gone',ssh:[process.execPath,'-e','process.exit(255)'],timeout:3}]}));
+  assert.equal(r.code,0,r.stderr);assert.equal(r.bodies.length,1,'only the local report');
+  assert.match(r.stdout,/remote "Gone": ssh exit 255/);assert.match(r.state.remotes.Gone.error,/ssh exit 255/);
+});
+test('an older server that needs models: the remote is skipped with a note',async()=>{
+  const r=await reportAgainst(n=>n===1?[200,{changed:true}]:[400,{error:'input.models: is required',code:'invalid_input'}],home=>({remotes:[fakeRemote(home)]}));
+  assert.equal(r.code,0,r.stderr);assert.match(r.stdout,/this Flow server needs models in runners\.report; update Flow/);
 });

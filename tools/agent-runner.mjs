@@ -7,6 +7,8 @@
 //   node tools/agent-runner.mjs retry 12 forget card #12, so the next tick starts it again
 //   node tools/agent-runner.mjs jobs     print the scheduled jobs this machine would report (--json for
 //                                        JSON); contacts no Flow server and needs no settings
+//   node tools/agent-runner.mjs jobs --remote Laptop   the same for a remote machine (over SSH);
+//                                        --all for this machine and every remote
 //
 // One pass per call: run `tick` from a timer (cron, a systemd timer) every few minutes.
 // For each AgentFlow agent with `live` on whose `runtime` is this runner's name, it takes the first
@@ -50,6 +52,17 @@
 //              "include": ["logrotate"],         kept even when skipDistro or exclude would drop them
 //              "skipDistro": true}               skip stock distribution timers (apt-daily, fstrim, …)
 //                                                "jobs": false reports no jobs (stored ones stay as they are)
+//     "remotes": [{"name": "Laptop",             other machines, each reported as its own runner (jobs only)
+//                  "ssh": ["ssh", "-i", "~/.ssh/key", "-o", "BatchMode=yes", "me@laptop"],   the ssh command
+//                  "python": "C:\\Python\\python.exe",   optional: Python on it (for Aside and Codex runs)
+//                  "timezone": "America/Phoenix",    its time zone (default: this machine's)
+//                  "sources": ["windows", "aside", "claude-desktop", "codex", "vercel", "railway", "github"],
+//                  "repos": ["C:\\code\\shop"],      repos on it to read cron configs from (default: none)
+//                  "exclude": [], "include": [],     as in "jobs"; include also keeps a vendor task
+//                  "skipVendor": true,               skip vendor updater tasks (Adobe, Edge, Google, …)
+//                  "keepDone": false,                also report finished Aside routines and Codex one-shots
+//                  "timeout": 40,                    seconds for the whole remote
+//                  "enabled": true}]
 //   }
 // Model ids are "<T3 provider instance>:<model>", e.g. "claudeAgent:claude-sonnet-5-5" or
 // "opencode:anthropic/claude-sonnet-5-5". The runner reports the current models from T3's model
@@ -73,11 +86,33 @@
 // cursor-agent, agy, t3 thread, this runner). Commands are one line, with ~ for home and anything
 // that looks like a key, token or password replaced by ***. A server from before jobs answers 400:
 // the runner then reports the models alone and logs "server does not accept jobs yet".
-// State (threads it started): $XDG_STATE_HOME/flygon-flow/runner-state.json.
+// Remote machines ("remotes"). After its own pass, `tick` reads each remote over SSH, at most every
+// 15 minutes (the last time is kept in the state file; `report` reads them every time), and reports
+// it as a runner named after the remote, with `jobs` and no `models` (so Flow keeps what it has).
+// The remote is a Windows machine; its login shell may be cmd.exe. The runner sends a PowerShell
+// script (powershell -EncodedCommand reads it from stdin) and, when "python" is set, a Python one,
+// both embedded below, both read only. A remote that cannot be reached within "timeout" (one retry
+// on a failed connection) is logged and skipped; it never holds up this machine's pass.
+//   windows         Task Scheduler, outside \Microsoft\: triggers as text (Daily 18:00, Every 15 min,
+//                   At logon, On demand), last and next run, status from the last result (0 ok,
+//                   running, else failed), off when disabled. Vendor updater tasks are skipped.
+//   aside           Aside routines from %USERPROFILE%\.aside\u\<n>\state.db (copied with its WAL to a
+//                   temp folder, read, removed; needs "python"): active and paused ones, the schedule
+//                   from the RRULE, the model and prompt, the last run from the routine's newest
+//                   session (suspended: running and "Waiting for approval"; errored: failed). One
+//                   whose next run has passed is "(stale)".
+//   claude-desktop  Claude desktop scheduled tasks (scheduled-tasks.json under %LOCALAPPDATA%\
+//                   Claude-Data), cron in the remote's time, with what each does from its SKILL.md.
+//   codex           Codex automations (%USERPROFILE%\.codex\automations\*\automation.toml): RRULE or
+//                   cron, ACTIVE or PAUSED, the model; a used-up one-shot is skipped. The last run of
+//                   a cron automation comes from Codex's state database (with "python").
+//   vercel, railway, github   cron configs in "repos" on the remote, read as for local repos.
+// Jobs are grouped as "<remote>", "<remote> · Aside", "<remote> · Claude", "<remote> · Codex".
+// State (threads it started, when remotes last ran): $XDG_STATE_HOME/flygon-flow/runner-state.json.
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync,readdirSync,statSync,realpathSync} from 'node:fs';
 import {join,dirname,basename,relative} from 'node:path';
 import {homedir,hostname} from 'node:os';
-import {spawnSync} from 'node:child_process';
+import {spawnSync,spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
@@ -292,8 +327,9 @@ export function humaniseCron(expr,{utc=false}={}){
 }
 // The next time a cron expression fires after `from`, as an ISO string (null if never within 4 years).
 // Day of month and day of week both set means either matches, as in cron.
-export function nextCron(expr,from=new Date(),{utc=false}={}){
+export function nextCron(expr,from=new Date(),{utc=false,tz=''}={}){
   const p=parseCron(expr);if(!p)return null;
+  if(tz&&!utc)return nextCronIn(p,from,tz);
   const get=d=>utc?[d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCDay(),d.getUTCHours(),d.getUTCMinutes()]:[d.getFullYear(),d.getMonth(),d.getDate(),d.getDay(),d.getHours(),d.getMinutes()];
   let t=new Date(Math.floor(from.getTime()/60000)*60000+60000);
   const end=from.getTime()+4*366*864e5;
@@ -304,6 +340,38 @@ export function nextCron(expr,from=new Date(),{utc=false}={}){
     if(!p.hour.has(hh)){t=new Date(t.getTime()+(60-mm)*60000);continue}
     if(!p.min.has(mm)){t=new Date(t.getTime()+60000);continue}
     return t.toISOString();
+  }
+  return null;
+}
+// Wall-clock time in a time zone ('' is this machine's, 'UTC' is UTC), as a "wall" number: the
+// milliseconds Date.UTC gives for that wall-clock reading. A remote machine's cron lines and
+// schedules are in its own zone (its "timezone" setting).
+const W=(y,mo,d,h=0,mi=0,s=0)=>Date.UTC(y,mo-1,d,h,mi,s);
+const wf=w=>{const d=new Date(w);return {y:d.getUTCFullYear(),mo:d.getUTCMonth()+1,d:d.getUTCDate(),h:d.getUTCHours(),mi:d.getUTCMinutes(),s:d.getUTCSeconds(),wd:d.getUTCDay()}};
+const fmts=new Map();
+export function validTz(tz){if(!tz||tz==='UTC')return true;try{new Intl.DateTimeFormat('en-US',{timeZone:tz});return true}catch{return false}}
+export function wallOf(ms,tz=''){
+  if(tz==='UTC')return Math.floor(ms/1000)*1000;
+  let f=fmts.get(tz);
+  if(!f)fmts.set(tz,f=new Intl.DateTimeFormat('en-US',{...(tz?{timeZone:tz}:{}),hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'}));
+  const p={};for(const x of f.formatToParts(new Date(ms)))p[x.type]=x.value;
+  return W(+p.year,+p.month,+p.day,+p.hour%24,+p.minute,+p.second);
+}
+// The instant (ms) a wall-clock reading in tz stands for (around a DST change, the nearest one).
+export function wallToMs(w,tz=''){if(tz==='UTC')return w;let g=w-(wallOf(w,tz)-w);g=w-(wallOf(g,tz)-g);return g}
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const dateIn=(ms,tz)=>{const f=wf(wallOf(ms,tz));return `${MON[f.mo-1]} ${f.d} ${hm(f.h,f.mi)}`};
+function nextCronIn(p,from,tz){
+  let w=Math.floor(wallOf(from.getTime(),tz)/60000)*60000+60000;
+  const end=w+4*366*864e5;
+  while(w<end){
+    const f=wf(w),day=p.domStar&&p.dowStar?true:p.domStar?p.dow.has(f.wd):p.dowStar?p.dom.has(f.d):p.dom.has(f.d)||p.dow.has(f.wd);
+    if(!p.mon.has(f.mo)||!day){w=W(f.y,f.mo,f.d+1);continue}
+    if(!p.hour.has(f.h)){w=W(f.y,f.mo,f.d,f.h+1);continue}
+    if(!p.min.has(f.mi)){w+=60000;continue}
+    const t=wallToMs(w,tz);
+    if(t>from.getTime())return new Date(t).toISOString();
+    w+=60000;
   }
   return null;
 }
@@ -337,8 +405,9 @@ export function redact(s){
     .replace(/(\b[\w]*(?:key|token|secret|password|passwd|pwd|auth)[\w]*\s*[=:]\s*)(?!\*\*\*|bearer\s)\S+/gi,'$1***')
     .replace(/\b(sk|pk|rk|flow|ghp|gho|ghs|github_pat|xox[abpr]|glpat)[-_][A-Za-z0-9_-]{8,}/g,'***');
 }
-// Does a command start an AI CLI? A simple heuristic: one of the CLIs as a program name.
-const AI_CLI=/(?:^|[\s/;&|'"(])(?:claude|codex|opencode|grok|cursor-agent|agy|gemini|aider)(?=$|[\s;&|'")])|(?:^|[\s/])t3\s+thread\b|agent-runner\.mjs/i;
+// Does a command start an AI CLI? A simple heuristic: one of the CLIs as a program name (on Windows
+// too: C:\Tools\codex.exe).
+const AI_CLI=/(?:^|[\s/\\;&|'"(])(?:claude|codex|opencode|grok|cursor-agent|agy|gemini|aider)(?:\.(?:exe|cmd|bat|ps1))?(?=$|[\s;&|'")])|(?:^|[\s/\\])t3(?:\.exe)?\s+thread\b|agent-runner\.mjs/i;
 export const aiCommand=s=>AI_CLI.test(String(s||''));
 const shortHome=s=>home&&home!=='/'?String(s).split(home+'/').join('~/'):String(s);
 const tidy=s=>clip(redact(shortHome(s)),300);
@@ -512,6 +581,22 @@ function systemdJobs(scope,group,note){
   const S=show('Id,ExecStart,Result,ActiveState,ExecMainStatus,Description',[...new Set(timers.map(t=>t.service))]);
   return timers.map(t=>systemdJob(t,T.get(t.unit),S.get(t.service),{scope,group}));
 }
+// The cron configs of one repo, from its files: [{dir, name, text}], dir '' for the root, e.g.
+// 'services/api', or '.github/workflows'. Used for local repos and for repos on a remote machine.
+export function repoFileJobs(repo,files,{sources=new Set(['vercel','railway','github']),now=new Date()}={}){
+  const out=[];
+  for(const {dir='',name,text} of files){
+    if(dir==='.github/workflows'){if(sources.has('github')&&/\.ya?ml$/.test(name))out.push(...workflowJobs(text,{repo,file:name,now}));continue}
+    if(sources.has('vercel')&&name==='vercel.json')out.push(...vercelJobs(text,{repo:dir?`${repo}/${dir}`:repo,now}));
+    if(sources.has('railway')&&/^railway(\.[\w.-]+)?\.(json|toml)$/.test(name)){
+      // railway.<name>.json is a config for another service: "<repo> (<name>)".
+      const extra=name.replace(/\.(json|toml)$/,'').replace(/^railway\.?/,''),base=dir?basename(dir):repo;
+      out.push(...railwayJobs(text,{repo,service:extra?`${base} (${extra})`:base,file:dir?`${dir}/${name}`:name,toml:name.endsWith('.toml'),now}));
+    }
+  }
+  return out;
+}
+const REPO_FILE=/^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml))$/;
 function repoJobs(roots,sources,note,now){
   const out=[],ls=d=>{try{return readdirSync(d)}catch{return []}},isDir=p=>{try{return statSync(p).isDirectory()}catch{return false}};
   const seen=new Set();
@@ -520,21 +605,11 @@ function repoJobs(roots,sources,note,now){
     if(seen.has(root)||!isDir(root))continue;seen.add(root);
     const repo=basename(root);
     try{
-      const dirs=[root,...['services','apps'].flatMap(s=>ls(join(root,s)).map(x=>join(root,s,x)).filter(isDir))];
-      for(const dir of dirs){
-        const rel=relative(root,dir),files=ls(dir);
-        if(sources.has('vercel')&&files.includes('vercel.json'))out.push(...vercelJobs(readFileSync(join(dir,'vercel.json'),'utf8'),{repo:rel?`${repo}/${rel}`:repo,now}));
-        if(sources.has('railway'))for(const f of files.filter(f=>/^railway(\.[\w.-]+)?\.(json|toml)$/.test(f))){
-          // railway.<name>.json is a config for another service: "<repo> (<name>)".
-          const extra=f.replace(/\.(json|toml)$/,'').replace(/^railway\.?/,''),base=rel?basename(dir):repo;
-          const service=extra?`${base} (${extra})`:base;
-          out.push(...railwayJobs(readFileSync(join(dir,f),'utf8'),{repo,service,file:rel?`${rel}/${f}`:f,toml:f.endsWith('.toml'),now}));
-        }
-      }
-      if(sources.has('github')){
-        const wf=join(root,'.github','workflows');
-        for(const f of ls(wf).filter(f=>/\.ya?ml$/.test(f)))out.push(...workflowJobs(readFileSync(join(wf,f),'utf8'),{repo,file:f,now}));
-      }
+      const dirs=[root,...['services','apps'].flatMap(s=>ls(join(root,s)).map(x=>join(root,s,x)).filter(isDir))],files=[];
+      for(const dir of dirs)for(const f of ls(dir).filter(f=>REPO_FILE.test(f)))files.push({dir:relative(root,dir),name:f,text:readFileSync(join(dir,f),'utf8')});
+      const wf=join(root,'.github','workflows');
+      for(const f of ls(wf).filter(f=>/\.ya?ml$/.test(f)))files.push({dir:'.github/workflows',name:f,text:readFileSync(join(wf,f),'utf8')});
+      out.push(...repoFileJobs(repo,files,{sources,now}));
     }catch(e){note(`${repo}: ${e.message}`)}
   }
   return out;
@@ -568,15 +643,555 @@ export async function discoverJobs(c={},{note=()=>{}}={}){
     .filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,500).map(({distro,...j})=>j);
 }
 // The `jobs` table: one line a job, grouped.
-const when=iso=>{if(!iso)return '';const d=new Date(iso);return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${hm(d.getHours(),d.getMinutes())}`};
-export function jobsTable(jobs){
+// Times are shown in tz (a remote's "timezone"), else in this machine's.
+const when=(iso,tz='')=>{if(!iso)return '';const d=wf(wallOf(Date.parse(iso),tz));return `${d.y}-${pad2(d.mo)}-${pad2(d.d)} ${hm(d.h,d.mi)}`};
+export function jobsTable(jobs,{tz=''}={}){
   if(!jobs.length)return 'No scheduled jobs found.';
   const rows=[...jobs].sort((a,b)=>(a.group||'').localeCompare(b.group||'')||a.name.localeCompare(b.name))
-    .map(j=>[j.group||'',j.source,j.name,j.schedule,j.enabled===false?'off':'on',j.ai?'ai':'',when(j.lastRun),j.lastStatus||'',when(j.nextRun)]);
+    .map(j=>[j.group||'',j.source,j.name,j.schedule,j.enabled===false?'off':'on',j.ai?'ai':'',when(j.lastRun,tz),j.lastStatus||'',when(j.nextRun,tz)]);
   const head=['GROUP','SOURCE','NAME','SCHEDULE','ON','AI','LAST RUN','STATUS','NEXT RUN'],cap=[30,8,44,34,3,2,16,7,16];
   const cut=(s,n)=>s.length>n?s.slice(0,n-1)+'~':s;
   const w=head.map((h,i)=>Math.min(cap[i],Math.max(h.length,...rows.map(r=>r[i].length))));
   return [head,...rows].map(r=>r.map((x,i)=>cut(x,w[i]).padEnd(w[i])).join('  ').trimEnd()).join('\n');
+}
+
+// ---------- scheduled jobs on a remote machine (SSH) ----------
+// A remote's raw data comes back from small scripts run over SSH (below); turning it into jobs is
+// pure and exported for the tests, like the local parsers above.
+
+// RFC 5545 recurrence rules as Aside and Codex write them: an optional DTSTART line (TZID=…, or
+// UTC with Z, or floating) and an RRULE line (or the bare rule). null when there is no FREQ.
+const DAY2={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6};
+const stamp=v=>{const m=/^(\d{4})(\d\d)(\d\d)(?:T(\d\d)(\d\d)(\d\d)?(Z)?)?$/i.exec(v);return m?{w:W(+m[1],+m[2],+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0)),utc:!!m[7]}:null};
+export function parseRRule(text){
+  const r={freq:'',interval:1,by:{}};
+  for(const raw of String(text??'').replace(/\\n/g,'\n').split(/[\r\n]+/)){
+    const line=raw.trim();let m;
+    if(!line)continue;
+    if((m=/^DTSTART(?:;TZID=([^:;]+))?:(\S+)$/i.exec(line))){const s=stamp(m[2]);if(s){r.start=s.w;r.tz=s.utc?'UTC':m[1]||''}continue}
+    const body=line.replace(/^RRULE:/i,'');
+    if(!/^[A-Z]+=/i.test(body))continue;
+    for(const part of body.split(';')){
+      const [k='',v='']=part.split('='),K=k.toUpperCase(),list=v.split(',');
+      if(K==='FREQ')r.freq=v.toUpperCase();
+      else if(K==='INTERVAL')r.interval=Math.max(1,parseInt(v)||1);
+      else if(K==='COUNT')r.count=parseInt(v)||undefined;
+      else if(K==='UNTIL'){const s=stamp(v);if(s)r.until=s}
+      else if(K==='BYDAY'){r.by.day=list.map(x=>DAY2[x.slice(-2).toUpperCase()]).filter(x=>x!==undefined);if(list.some(x=>/^[+-]?\d/.test(x)))r.by.nth=true}
+      else if(/^BY(HOUR|MINUTE|SECOND|MONTH|MONTHDAY)$/.test(K))r.by[K.slice(2).toLowerCase()]=list.map(Number).filter(Number.isFinite);
+    }
+  }
+  return /^(MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)$/.test(r.freq)?r:null;
+}
+// The next occurrence of a rule after `now` (ms): {next: ISO or null, first: ISO of the first
+// occurrence or null, done: no occurrence after now}. Times are worked out in the rule's zone (its
+// DTSTART TZID), else in tz. A rule without DTSTART starts at `anchor` (ms). null when the rule
+// uses what this does not follow (BYDAY with a number, like 1MO).
+export function rruleNext(r,{tz='',anchor=Date.now(),now=Date.now()}={}){
+  if(typeof r==='string')r=parseRRule(r);
+  if(!r||r.by.nth)return null;
+  const z=r.tz||tz;if(!validTz(z))return null;
+  const S=r.start??Math.floor(wallOf(anchor,z)/60000)*60000,s=wf(S),by=r.by,iv=r.interval||1;
+  if((r.freq==='MONTHLY'||r.freq==='YEARLY')&&by.day)return null;
+  const until=r.until?(r.until.utc?r.until.w:wallToMs(r.until.w,z)):Infinity;
+  const hours=by.hour||[s.h],mins=by.minute||[s.mi],sec=(by.second||[s.s])[0]||0;
+  const ok=w=>{const f=wf(w);return (!by.month||by.month.includes(f.mo))&&(!by.monthday||by.monthday.includes(f.d))&&(!by.day||by.day.includes(f.wd))&&(!by.hour||by.hour.includes(f.h))&&(!by.minute||by.minute.includes(f.mi))};
+  const times=day=>hours.flatMap(h=>mins.map(m=>day+h*36e5+m*6e4+sec*1e3));
+  const midnight=w=>w-(((w%864e5)+864e5)%864e5);
+  const inMonth=(y,mo,d)=>{const w=W(y,mo,d);return wf(w).mo===((mo-1)%12+12)%12+1?[w]:[]};
+  const period=p=>{
+    switch(r.freq){
+      case 'MINUTELY':return [S+p*iv*6e4];
+      case 'HOURLY':{const f=wf(S+p*iv*36e5),b=W(f.y,f.mo,f.d,f.h);return mins.map(m=>b+m*6e4+sec*1e3)}
+      case 'DAILY':return times(midnight(S)+p*iv*864e5);
+      case 'WEEKLY':{const mon=midnight(S)-((s.wd+6)%7)*864e5+p*iv*7*864e5;return (by.day||[s.wd]).flatMap(d=>times(mon+((d+6)%7)*864e5))}
+      case 'MONTHLY':{const t=s.mo-1+p*iv,y=s.y+Math.floor(t/12),mo=t%12+1;return (by.monthday||[s.d]).flatMap(d=>inMonth(y,mo,d)).flatMap(times)}
+      default:{const y=s.y+p*iv;return (by.month||[s.mo]).flatMap(mo=>(by.monthday||[s.d]).flatMap(d=>inMonth(y,mo,d))).flatMap(times)}
+    }
+  };
+  // Without COUNT the occurrences before now need no counting: start a little before now.
+  const len={MINUTELY:6e4,HOURLY:36e5,DAILY:864e5,WEEKLY:7*864e5}[r.freq]*iv;
+  let p=!r.count&&len&&Number.isFinite(now)?Math.max(0,Math.floor((wallOf(now,z)-S)/len)-2):0,n=0,first=null;
+  const stop=(Number.isFinite(now)?wallOf(now,z):S)+5*366*864e5;
+  for(let i=0;i<100000;i++,p++){
+    const c=period(p).sort((a,b)=>a-b);
+    if(c.length&&c[0]>stop)break;
+    for(const w of c){
+      if(w<S||!ok(w))continue;
+      const t=wallToMs(w,z);
+      if(t>until)return {next:null,first,done:true};
+      n++;first??=new Date(t).toISOString();
+      if(t>now)return {next:new Date(t).toISOString(),first,done:false};
+      if(r.count&&n>=r.count)return {next:null,first,done:true};
+    }
+  }
+  return {next:null,first,done:true};
+}
+// A rule as text: "Daily 09:00", "Tue-Fri 09:00", "Every 15 min", "Once Nov 1 18:00", with
+// ", 7 times" or ", until Oct 27" when it ends. Times are in the rule's zone; a zone other than
+// tz (the machine's) is named after the time. A UTC start without BYHOUR is shown in tz.
+export function humaniseRRule(text,{tz='',anchor=Date.now()}={}){
+  let r=typeof text==='string'?parseRRule(text):text;
+  if(!r)return clip(text,200)||'Unknown';
+  if(r.tz==='UTC'&&tz&&tz!=='UTC'&&r.start!==undefined&&!r.by.hour&&validTz(tz))r={...r,start:wallOf(r.start,tz),tz};
+  const z=r.tz||tz,zone=r.tz&&r.tz!==tz?` ${r.tz}`:'';
+  const s=r.start!==undefined?wf(r.start):null,by=r.by,iv=r.interval||1;
+  if(r.count===1){const x=rruleNext(r,{tz,anchor,now:-Infinity});return x?.first?`Once ${dateIn(Date.parse(x.first),z)}${zone}`:'Once'}
+  const H=by.hour||(s?[s.h]:null),M=by.minute||(s?[s.mi]:H?[0]:null);
+  const t=H&&M?timesOf([...H].sort((a,b)=>a-b),[...M].sort((a,b)=>a-b)):null;
+  const at=t?` ${t}`:H&&M?` (${H.length*M.length} times a day)`:'';
+  const wd=s?s.wd:null;
+  let base;
+  switch(r.freq){
+    case 'MINUTELY':base=iv===1?'Every minute':`Every ${iv} min`;break;
+    case 'HOURLY':base=iv===1?(M?.length===1&&M[0]?`Hourly at :${pad2(M[0])}`:'Hourly'):`Every ${iv} h`;break;
+    case 'DAILY':base=by.day?`${dayPhrase(by.day)}${at}`:iv===1?`Daily${at}`:`Every ${iv} days${at}`;break;
+    case 'WEEKLY':{const d=by.day||(wd!==null?[wd]:null);base=`${iv>1?`Every ${iv} weeks, `:''}${d?dayPhrase(d):'Weekly'}${at}`;break}
+    case 'MONTHLY':{const d=by.monthday||(s?[s.d]:null);base=`${iv>1?`Every ${iv} months`:'Monthly'}${d?` on day ${d.join(', ')}`:''}${at}`;break}
+    default:{const mo=(by.month||(s?[s.mo]:[]))[0],d=(by.monthday||(s?[s.d]:[]))[0];base=`Yearly${mo&&d?` on ${MON[mo-1]} ${d}`:''}${at}`}
+  }
+  const end=r.count>1?`, ${r.count} times`:r.until?`, until ${(f=>`${MON[f.mo-1]} ${f.d}`)(wf(r.until.utc&&validTz(z)?wallOf(r.until.w,z):r.until.w))}`:'';
+  return clip(base+zone+end,200);
+}
+
+// Windows Task Scheduler. A trigger as the PowerShell script sends it: {type (the CIM class, e.g.
+// MSFT_TaskDailyTrigger), start (StartBoundary, local time), enabled, days (DaysInterval), weeks
+// (WeeksInterval), dow (DaysOfWeek: Sunday 1, Monday 2, … Saturday 64), dom (DaysOfMonth: day 1
+// is bit 0), wom (WeeksOfMonth: first 1 … fourth 8, last 16), interval and duration (Repetition,
+// ISO 8601 durations such as PT15M)}.
+export function isoDuration(s){
+  const m=/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(s??''));
+  if(!m||!m.slice(1).some(Boolean))return null;
+  const [d,h,mi,se]=m.slice(1).map(x=>+x||0);
+  return {ms:((d*24+h)*60+mi)*6e4+se*1e3,text:[d&&`${d} day${d>1?'s':''}`,h&&`${h} h`,mi&&`${mi} min`,se&&`${se} s`].filter(Boolean).join(' ')};
+}
+const everyDur=d=>({'1 day':'Every day','1 h':'Hourly','1 min':'Every minute'}[d.text]||`Every ${d.text}`);
+export function humaniseWinTrigger(t={}){
+  const type=String(t.type||'').replace(/^MSFT_Task/,'').replace(/Trigger$/,''),start=String(t.start||'');
+  const tm=/T(\d\d):(\d\d)/.exec(start),time=tm?`${tm[1]}:${tm[2]}`:'',at=time?` ${time}`:'';
+  const rep=isoDuration(t.interval),dur=isoDuration(t.duration),allDay=!dur||dur.ms>=23*36e5;
+  const days=[0,1,2,3,4,5,6].filter(i=>(+t.dow||0)&(1<<i));
+  switch(type){
+    case 'Daily':{
+      if(rep&&allDay)return everyDur(rep);
+      const base=+t.days>1?`Every ${+t.days} days${at}`:`Daily${at}`;
+      return rep?`${base}, then every ${rep.text} for ${dur.text}`:base;
+    }
+    case 'Weekly':{
+      const base=`${+t.weeks>1?`Every ${+t.weeks} weeks, `:''}${days.length?dayPhrase(days):'Weekly'}${at}`;
+      return rep?`${base}, then every ${rep.text}${allDay?'':` for ${dur.text}`}`:base;
+    }
+    case 'Time':{
+      if(rep)return rep.ms===864e5&&time?`Daily ${time}`:everyDur(rep);
+      const d=/^(\d{4})-(\d\d)-(\d\d)/.exec(start);
+      return d?`Once ${MON[+d[2]-1]} ${+d[3]}${+d[1]!==new Date().getFullYear()?` ${d[1]}`:''}${at}`:'Once';
+    }
+    case 'Monthly':{
+      const dom=[...Array(32).keys()].filter(i=>(+t.dom||0)&(2**i)).map(i=>i+1),last=(+t.dom||0)&(2**31)?['the last day']:[];
+      return `Monthly${dom.length||last.length?` on day ${[...dom.filter(d=>d<32),...last].join(', ')}`:''}${at}`;
+    }
+    case 'MonthlyDOW':{
+      const w=['First','Second','Third','Fourth','Last'].filter((_,i)=>(+t.wom||0)&(1<<i));
+      return days.length===1&&w.length===1?`${w[0]} ${DAYS_LONG[days[0]]} monthly${at}`:`Monthly${w.length?` (${w.join(', ').toLowerCase()} week)`:''}${days.length?` on ${dayPhrase(days)}`:''}${at}`;
+    }
+    case 'Logon':return rep?`At logon, then every ${rep.text}`:'At logon';
+    case 'Boot':return rep?`At boot, then every ${rep.text}`:'At boot';
+    case 'Event':return 'On an event';
+    case 'Idle':return 'When idle';
+    case 'Registration':return 'When created';
+    case 'SessionStateChange':return 'On lock or unlock';
+    default:return 'Custom trigger';
+  }
+}
+export function humaniseWinTriggers(list){
+  const on=(Array.isArray(list)?list:[list]).filter(Boolean);
+  if(!on.length)return 'On demand';
+  const live=on.filter(t=>t.enabled!==false);
+  if(!live.length)return 'On demand (triggers off)';
+  return clip([...new Set(live.map(humaniseWinTrigger))].join('; '),200);
+}
+// Vendor tasks (updaters, telemetry, OEM helpers), skipped unless "include" names them. Globs on
+// "\Folder\TaskName", ignoring case. "include" and "exclude" are tried on that and on the name.
+export const VENDOR_TASKS=['*\\Adobe*','*Adobe *','*Brave*Update*','*MicrosoftEdgeUpdate*','\\Google*','*GoogleUpdate*','*Zoom*Update*',
+  '*McAfee*','\\HP\\*','\\Hewlett-Packard\\*','*HPOneAgent*','\\Omen*','*SystemOptimizer*','*OneDrive *','*BlueStacks*',
+  '*Git for Windows Updater*','*Quick Share*','*AsideUpdater*','*Dropbox*','*Opera*Autoupdate*','*Opera scheduled*','\\Mozilla\\*','*Firefox*',
+  '*NVIDIA*','\\SoftLanding\\*','\\CreateExplorerShellUnelevatedTask','*EqualizerAPO*','*CCXProcess*','\\Intel\\*','\\Lenovo\\*',
+  '\\Dell\\*','\\ASUS\\*','*npcapwatchdog*','*CCleaner*','*Avast*','*AVG*','*Norton*'];
+export const isVendorTask=(path,list=VENDOR_TASKS)=>list.some(p=>matches(p,path));
+// LastTaskResult (COM gives it signed): 0 is success; 0x41301 is running; the other SCHED_S_* codes mean it has not run
+// (ready, disabled, never run, no more runs, not scheduled); anything else is a failure.
+const WIN_IDLE=new Set([267008,267010,267011,267012,267013]);
+export function winStatus(state,result,last){
+  if(String(state)==='Running'||+result===267009)return 'running';
+  if(!last||result==null||WIN_IDLE.has(+result))return 'unknown';
+  return +result===0?'ok':'failed';
+}
+// Windows paths under the user's profile as ~, and secrets hidden, as tidy does for local commands.
+const winTidy=(s,profile)=>{let x=String(s??'');if(profile)x=x.replace(new RegExp(profile.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),'~');return clip(redact(x),300)};
+export function windowsJobs(tasks,{group='',profile='',include=[],exclude=[],skipVendor=true}={}){
+  return (Array.isArray(tasks)?tasks:[]).filter(t=>t?.name).flatMap(t=>{
+    const path=`${t.path||'\\'}${t.name}`,hit=list=>list.some(x=>matches(x,path)||matches(x,t.name));
+    if(!hit(include)&&((skipVendor&&isVendorTask(path))||hit(exclude)))return [];
+    const command=winTidy((Array.isArray(t.actions)?t.actions:[t.actions]).filter(Boolean).map(a=>/ComHandler/.test(a.type||'')?'COM handler':[a.exe,a.args].filter(Boolean).join(' ')).filter(Boolean).join(' && '),profile);
+    const lastRun=anyTime(t.last),nextRun=anyTime(t.next);
+    return [{id:clip(`windows:${path}`,200),name:clip(t.name,120),source:'windows',group:clip(group,120),schedule:humaniseWinTriggers(t.triggers),
+      ...(command?{command}:{}),ai:aiCommand(command),enabled:String(t.state)!=='Disabled',...(lastRun?{lastRun}:{}),
+      lastStatus:winStatus(t.state,t.result,lastRun),...(nextRun&&String(t.state)!=='Disabled'?{nextRun}:{})}];
+  });
+}
+
+// Aside routines, as the Python script reads them from each state.db: the routines row (prompt cut
+// short, the model from session_config) and `last`, the newest session of the routine with its
+// newest turn ({status, started, finished, aborted}, unix seconds; an idle session is done, a
+// suspended one waits for approval). A routine whose next_run_at has
+// passed is stale (Aside is not running, or it missed it): its status is unknown.
+const unix=v=>v==null||v===''?undefined:anyTime(+v>1e12?+v:+v*1000);
+const STALE_GRACE=15*60e3;
+export function asideJobs(routines,{group='',tz='',now=Date.now()}={}){
+  return (Array.isArray(routines)?routines:[]).filter(r=>r?.id).map(r=>{
+    const next=anyTime(r.next_run_at),stale=r.status==='active'&&next&&Date.parse(next)<now-STALE_GRACE,l=r.last||{};
+    const waiting=l.status==='suspended',lastRun=unix(l.started);
+    const lastStatus=stale||!r.last?'unknown':waiting?'running':l.status==='errored'||l.aborted||/^(aborted|interrupted)$/.test(l.status||'')?'failed'
+      :l.status==='idle'||l.finished?'ok':l.started?'running':'unknown';
+    const model=[r.model?.provider,r.model?.modelId].filter(Boolean).join('/');
+    const prompt=clip(String(r.prompt||'').split('\n').find(x=>x.trim())||'',200);
+    return {id:clip(`aside:${r.id}`,200),name:clip(r.name||prompt||r.id,120),source:'aside',group:clip(group,120),
+      schedule:clip(humaniseRRule(r.rrule,{tz,anchor:unix(r.created_at)?Date.parse(unix(r.created_at)):now})+(stale?' (stale)':''),200),
+      command:clip(redact([waiting&&'Waiting for approval',model,prompt].filter(Boolean).join(' · ')),300),ai:true,enabled:r.status==='active',
+      ...(lastRun?{lastRun}:{}),lastStatus,...(next&&!stale&&r.status==='active'?{nextRun:next}:{})};
+  });
+}
+
+// Claude desktop scheduled tasks: scheduled-tasks.json {scheduledTasks: [{id, displayName,
+// cronExpression (local time), enabled, lastRunAt, …}]}, and each task's SKILL.md for what it does.
+export function claudeTasks(text){
+  let d;try{d=typeof text==='string'?JSON.parse(text):text}catch{return []}
+  return (Array.isArray(d?.scheduledTasks)?d.scheduledTasks:[]).filter(t=>t&&typeof t.id==='string'&&t.id);
+}
+// What a SKILL.md says it does: the front matter's description, else the first heading or line.
+export function skillSummary(md){
+  const text=String(md??'').replace(/^\uFEFF/,''),fm=/^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  const desc=fm&&/^description:\s*(.+)$/m.exec(fm[1])?.[1].trim().replace(/^(["'])(.*)\1$/,'$2');
+  if(desc)return clip(desc,300);
+  const line=(fm?text.slice(fm[0].length):text).split('\n').map(l=>l.trim()).find(Boolean)||'';
+  return clip(line.replace(/^#+\s*/,''),300);
+}
+export function claudeJobs(tasks,{group='',tz='',skills={},now=new Date()}={}){
+  return (Array.isArray(tasks)?tasks:[]).filter(t=>t?.id).map(t=>{
+    const expr=clip(t.cronExpression,120),enabled=t.enabled!==false,lastRun=anyTime(t.lastRunAt),next=enabled&&expr?nextCron(expr,now,{tz}):null;
+    const what=skills[t.id]!==undefined?skillSummary(skills[t.id]):'';
+    return {id:clip(`claude:${t.id}`,200),name:clip(t.displayName||t.id,120),source:'claude',group:clip(group,120),
+      schedule:expr?humaniseCron(expr):'On demand',...(expr?{cron:expr}:{}),...(what?{command:clip(redact(what),300)}:{}),ai:true,enabled,
+      ...(lastRun?{lastRun}:{}),lastStatus:'unknown',...(next?{nextRun:next}:{})};
+  });
+}
+
+// Codex automations: automation.toml, read as simple "key = value" lines (strings, numbers,
+// booleans, string arrays; inline tables are kept as text). A string cut short has no closing quote.
+export function parseToml(text){
+  const out={};
+  for(const line of String(text??'').split('\n')){
+    if(/^\s*\[/.test(line))break;
+    const m=/^\s*([A-Za-z_][\w-]*)\s*=\s*(.*)$/.exec(line);if(!m)continue;
+    out[m[1]]=tomlValue(m[2].trim());
+  }
+  return out;
+}
+function tomlValue(v){
+  if(v[0]==='"'){
+    let s='',i=1;
+    for(;i<v.length&&v[i]!=='"';i++){
+      if(v[i]!=='\\'){s+=v[i];continue}
+      const c=v[++i];
+      if(c==='u'||c==='U'){const n=c==='u'?4:8;s+=String.fromCodePoint(parseInt(v.slice(i+1,i+1+n),16)||0xfffd);i+=n}
+      else s+={n:'\n',t:'\t',r:'\r','"':'"','\\':'\\',b:'\b',f:'\f'}[c]??c??'';
+    }
+    return s;
+  }
+  if(v[0]==="'"){const e=v.indexOf("'",1);return e<0?v.slice(1):v.slice(1,e)}
+  if(v[0]==='['&&v.endsWith(']')){const items=[...v.slice(1,-1).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map(x=>x[2]??tomlValue(`"${x[1]}"`));return items}
+  if(/^(true|false)$/.test(v))return v==='true';
+  const c=v.replace(/\s+#.*$/,'');
+  if(/^[+-]?\d[\d_]*(\.\d+)?$/.test(c))return Number(c.replace(/_/g,''));
+  return c;
+}
+// One job per automation. kind "cron" starts a new thread each run (runs: {id: [count, newest
+// created_at in unix seconds]} from Codex's state database); "heartbeat" wakes an existing thread,
+// so its last run is not known. Its schedule is an RRULE (no DTSTART: it counts from when the
+// automation was created), a cron line, or times. A one-shot whose runs are used up is skipped, or with keepDone
+// marked "(done)".
+export function codexJobs(automations,{group='',tz='',runs={},now=Date.now(),keepDone=false}={}){
+  const out=[];
+  for(const a of Array.isArray(automations)?automations:[]){
+    const id=String(a?.id||'').trim();if(!id)continue;
+    const anchor=+a.created_at||+a.updated_at||now,anchorMs=anchor>1e12?anchor:anchor*1000;
+    let schedule='',next=null,done=false;
+    if(a.rrule){const x=rruleNext(a.rrule,{tz,anchor:anchorMs,now});schedule=humaniseRRule(a.rrule,{tz,anchor:anchorMs});next=x?.next||null;done=!!x?.done}
+    else if(a.cron){schedule=humaniseCron(a.cron);next=nextCron(a.cron,new Date(now),{tz})}
+    else if(Array.isArray(a.times)&&a.times.length){
+      const ts=a.times.map(anyTime).filter(Boolean).sort();next=ts.find(t=>Date.parse(t)>now)||null;done=!next;
+      schedule=ts.length===1?`Once ${dateIn(Date.parse(ts[0]),tz)}`:`${ts.length} set times`;
+    }else schedule=a.kind==='heartbeat'?'Heartbeat':'Unknown';
+    if(done&&!keepDone)continue;
+    const enabled=String(a.status||'ACTIVE').toUpperCase()==='ACTIVE',r=runs[id],lastRun=Array.isArray(r)&&r[1]?unix(r[1]):undefined;
+    const model=a.model?`codex:${a.model}${a.reasoning_effort?` (${a.reasoning_effort})`:''}`:'';
+    const prompt=clip(String(a.prompt||'').split('\n').find(x=>x.trim())||'',200);
+    out.push({id:clip(`codex:${id}`,200),name:clip(a.name||a.title||id,120),source:'codex',group:clip(group,120),schedule:clip(schedule+(done?' (done)':''),200),
+      ...(a.cron?{cron:clip(a.cron,120)}:{}),command:clip(redact([model,prompt].filter(Boolean).join(' · ')),300),ai:true,enabled,
+      ...(lastRun?{lastRun}:{}),lastStatus:'unknown',...(next&&enabled?{nextRun:next}:{})});
+  }
+  return out;
+}
+
+// The scripts. PowerShell (always there on Windows) reads Task Scheduler and files; Python, when
+// "python" is set, reads the SQLite databases (Aside, Codex), and then also the Claude and Codex
+// files. Both only read; Aside's database is copied (with its WAL) to a temp folder that is removed
+// after. Each prints one JSON object, ASCII only. CFG is prepended: {sources, repos, asideStatuses}.
+// The PowerShell one uses the Task Scheduler COM API and writes its JSON itself: the ScheduledTasks
+// and JSON cmdlets of Windows PowerShell 5.1 made a run take 5 to over 60 seconds.
+const PS_SCRIPT=String.raw`
+$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+$want=@($CFG.sources)
+$out=@{home=$env:USERPROFILE;errors=@()}
+function Iso($d){ if($d -and $d.Year -gt 2000){ $d.ToUniversalTime().ToString('o') } else { $null } }
+function Head($p,$n){ $t=[IO.File]::ReadAllText($p); if($t.Length -gt $n){ $t.Substring(0,$n) } else { $t } }
+if($want -contains 'windows'){ try {
+  # The Task Scheduler COM API: much faster than the ScheduledTasks cmdlets (CIM), and it knows
+  # monthly triggers. Folders are walked with a queue, \Microsoft left out.
+  $TT=@{0='Event';1='Time';2='Daily';3='Weekly';4='Monthly';5='MonthlyDOW';6='Idle';7='Registration';8='Boot';9='Logon';11='SessionStateChange'}
+  $ST=@{0='Unknown';1='Disabled';2='Queued';3='Ready';4='Running'}
+  $svc=New-Object -ComObject Schedule.Service; $svc.Connect()
+  $q=New-Object System.Collections.Queue; $q.Enqueue($svc.GetFolder('\'))
+  $list=New-Object System.Collections.ArrayList
+  while($q.Count -gt 0){ $f=$q.Dequeue()
+    if($f.Path -eq '\Microsoft'){ continue }
+    try { foreach($s in @($f.GetFolders(0))){ [void]$q.Enqueue($s) } } catch { $out.errors+=('windows '+$f.Path+': '+$_.Exception.Message) }
+    $tasks=@(); try { $tasks=@($f.GetTasks(1)) } catch { $out.errors+=('windows '+$f.Path+': '+$_.Exception.Message) }
+    foreach($t in $tasks){ try { $d=$t.Definition
+      [void]$list.Add([ordered]@{ path=($f.Path.TrimEnd('\')+'\'); name=$t.Name; state=$ST[[int]$t.State]
+        triggers=@(foreach($g in @($d.Triggers)){ [ordered]@{ type=('MSFT_Task'+$TT[[int]$g.Type]+'Trigger'); start=$g.StartBoundary; enabled=$g.Enabled
+          days=$g.DaysInterval; weeks=$g.WeeksInterval; dow=$g.DaysOfWeek; dom=$g.DaysOfMonth; wom=$g.WeeksOfMonth; interval=$g.Repetition.Interval; duration=$g.Repetition.Duration } })
+        actions=@(foreach($a in @($d.Actions)){ [ordered]@{ type=$(if($a.Type -eq 5){'MSFT_TaskComHandlerAction'}elseif($a.Type -eq 0){'MSFT_TaskExecAction'}else{'other'}); exe=$a.Path; args=$a.Arguments } })
+        last=(Iso $t.LastRunTime); next=(Iso $t.NextRunTime); result=$t.LastTaskResult })
+    } catch { $out.errors+=('windows '+$t.Name+': '+$_.Exception.Message) } }
+  }
+  $out.windows=@($list)
+} catch { $out.errors+=('windows: '+$_.Exception.Message) } }
+if($CFG.repos){ $out.repos=@(foreach($r in @($CFG.repos)){ try {
+  $root=(Resolve-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($r))).ProviderPath
+  $dirs=@($root)+@(foreach($s in 'services','apps'){ $p=Join-Path $root $s; if(Test-Path -LiteralPath $p -PathType Container){ Get-ChildItem -LiteralPath $p -Directory | ForEach-Object { $_.FullName } } })
+  $files=@()
+  foreach($d in $dirs){ $rel=$d.Substring($root.Length).TrimStart('\').Replace('\','/')
+    foreach($f in @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(vercel\.json|railway(\.[\w.-]+)?\.(json|toml))$' })){ $files+=[ordered]@{ dir=$rel; name=$f.Name; text=(Head $f.FullName 200000) } } }
+  $wf=Join-Path $root '.github\workflows'
+  if(Test-Path -LiteralPath $wf){ foreach($f in @(Get-ChildItem -LiteralPath $wf -File | Where-Object { $_.Name -match '\.ya?ml$' })){ $files+=[ordered]@{ dir='.github/workflows'; name=$f.Name; text=(Head $f.FullName 200000) } } }
+  [ordered]@{ repo=(Split-Path $root -Leaf); files=$files }
+} catch { $out.errors+=('repo '+$r+': '+$_.Exception.Message) } }) }
+if($want -contains 'claude-desktop'){ try {
+  $tasks=@{}
+  $base=Join-Path $env:LOCALAPPDATA 'Claude-Data'
+  foreach($f in @(Get-ChildItem -Path (Join-Path $base 'claude_*\claude-code-sessions') -Recurse -Filter 'scheduled-tasks.json' -File -ErrorAction SilentlyContinue)){
+    try { $d=[IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json
+      foreach($t in @($d.scheduledTasks)){ if($t.id){ $o=$tasks[$t.id]; if(-not $o -or [string]$t.lastRunAt -gt [string]$o.lastRunAt){
+        $tasks[$t.id]=[ordered]@{ id=$t.id; displayName=$t.displayName; cronExpression=$t.cronExpression; enabled=$t.enabled; lastRunAt=[string]$t.lastRunAt } } } }
+    } catch { $out.errors+=('claude: '+$_.Exception.Message) } }
+  $skills=@{}
+  foreach($f in @(Get-ChildItem -Path (Join-Path $env:USERPROFILE '.claude\scheduled-tasks\*\SKILL.md') -File -ErrorAction SilentlyContinue)){ $skills[$f.Directory.Name]=(Head $f.FullName 2000) }
+  $out.claude=@{ tasks=@($tasks.Values); skills=$skills }
+} catch { $out.errors+=('claude: '+$_.Exception.Message) } }
+if($want -contains 'codex'){ try {
+  $out.codex=@{ automations=@(foreach($f in @(Get-ChildItem -Path (Join-Path $env:USERPROFILE '.codex\automations\*\automation.toml') -File -ErrorAction SilentlyContinue)){
+    [ordered]@{ dir=$f.Directory.Name; text=((Get-Content -LiteralPath $f.FullName -Encoding UTF8 | ForEach-Object { if($_.Length -gt 800){ $_.Substring(0,800) } else { $_ } }) -join [char]10) } }); runs=@{} }
+} catch { $out.errors+=('codex: '+$_.Exception.Message) } }
+# JSON by hand: the JSON cmdlet is slow on Windows PowerShell 5.1, and this keeps the output ASCII.
+function E($s){ [regex]::Replace($s,'[\\"\x00-\x1f\x7f-\uffff]',{ param($m) $c=[int][char]$m.Value; if($c -eq 92){ '\\' } elseif($c -eq 34){ '\"' } else { '\u{0:x4}' -f $c } }) }
+function J($v){
+  if($null -eq $v){ return 'null' }
+  if($v -is [string] -or $v -is [char]){ return '"'+(E ([string]$v))+'"' }
+  if($v -is [bool]){ if($v){ return 'true' } else { return 'false' } }
+  if($v -is [datetime]){ return '"'+(Iso $v)+'"' }
+  if($v -is [ValueType]){ return [Convert]::ToString($v,[Globalization.CultureInfo]::InvariantCulture) }
+  if($v -is [Collections.IDictionary]){ $p=foreach($k in @($v.Keys)){ '"'+(E ([string]$k))+'":'+(J $v[$k]) }; return '{'+(@($p) -join ',')+'}' }
+  if($v -is [Collections.IEnumerable]){ $p=foreach($x in $v){ J $x }; return '['+(@($p) -join ',')+']' }
+  return '"'+(E ([string]$v))+'"'
+}
+[Console]::Out.Write((J $out))
+`;
+const PY_SCRIPT=String.raw`
+import os,sys,json,glob,re,sqlite3,shutil,tempfile
+H=os.environ.get('USERPROFILE') or os.path.expanduser('~')
+L=os.environ.get('LOCALAPPDATA') or os.path.join(H,'AppData','Local')
+want=set(CFG.get('sources') or [])
+out={'home':H,'errors':[]}
+def err(s,e): out['errors'].append('%s: %s'%(s,str(e)[:200]))
+def snapshot(p):
+  d=tempfile.mkdtemp(prefix='flow-jobs-')
+  for s in ('','-wal'):
+    if os.path.exists(p+s): shutil.copyfile(p+s,os.path.join(d,'db'+s))
+  return d,sqlite3.connect(os.path.join(d,'db'))
+def head(p,n):
+  with open(p,encoding='utf-8',errors='replace') as f: return f.read(n)
+if 'aside' in want:
+  out['aside']=[]
+  keep=set(CFG.get('asideStatuses') or ['active','paused'])
+  for u in sorted(glob.glob(os.path.join(H,'.aside','u','*'))):
+    n=os.path.basename(u); p=os.path.join(u,'state.db')
+    if not n.isdigit() or not os.path.isfile(p): continue
+    d=None; c=None
+    try:
+      d,c=snapshot(p); c.row_factory=sqlite3.Row
+      for r in c.execute('SELECT id,name,prompt,rrule,status,next_run_at,paused_at,created_at,session_config FROM routines'):
+        if r['status'] not in keep: continue
+        x={k:r[k] for k in ('id','name','rrule','status','next_run_at','paused_at','created_at')}
+        x['prompt']=(r['prompt'] or '')[:600]
+        try:
+          m=(json.loads(r['session_config'] or '{}').get('model') or {}); x['model']={'provider':m.get('provider'),'modelId':m.get('modelId')}
+        except Exception: x['model']={}
+        s=c.execute('SELECT id,status FROM sessions WHERE routine_id=? ORDER BY created_at DESC LIMIT 1',(r['id'],)).fetchone()
+        if s:
+          t=c.execute('SELECT started_at,finished_at,aborted_at FROM session_turns WHERE session_id=? ORDER BY started_at DESC LIMIT 1',(s['id'],)).fetchone()
+          x['last']={'status':s['status'],'started':t['started_at'] if t else None,'finished':t['finished_at'] if t else None,'aborted':t['aborted_at'] if t else None}
+        out['aside'].append(x)
+    except Exception as e: err('aside '+n,e)
+    finally:
+      if c: c.close()
+      if d: shutil.rmtree(d,ignore_errors=True)
+if 'claude-desktop' in want:
+  tasks={}; skills={}
+  for f in glob.glob(os.path.join(L,'Claude-Data','claude_*','claude-code-sessions','**','scheduled-tasks.json'),recursive=True):
+    try:
+      with open(f,encoding='utf-8') as fh: data=json.load(fh)
+      for t in data.get('scheduledTasks') or []:
+        if not isinstance(t,dict) or not t.get('id'): continue
+        t={k:t.get(k) for k in ('id','displayName','cronExpression','enabled','lastRunAt')}
+        o=tasks.get(t['id'])
+        if not o or str(t.get('lastRunAt') or '')>str(o.get('lastRunAt') or ''): tasks[t['id']]=t
+    except Exception as e: err('claude',e)
+  for f in glob.glob(os.path.join(H,'.claude','scheduled-tasks','*','SKILL.md')):
+    try: skills[os.path.basename(os.path.dirname(f))]=head(f,2000)
+    except Exception as e: err('claude skill',e)
+  out['claude']={'tasks':list(tasks.values()),'skills':skills}
+if 'codex' in want:
+  autos=[]; runs={}
+  for f in glob.glob(os.path.join(H,'.codex','automations','*','automation.toml')):
+    try: autos.append({'dir':os.path.basename(os.path.dirname(f)),'text':'\n'.join(l[:800] for l in head(f,400000).split('\n'))})
+    except Exception as e: err('codex',e)
+  dbs=sorted(glob.glob(os.path.join(H,'.codex','state_*.sqlite')),key=lambda p:int(re.sub(r'\D','',os.path.basename(p)) or 0))
+  if dbs:
+    d=None; c=None
+    try:
+      d,c=snapshot(dbs[-1])
+      for t,f,at in c.execute("SELECT substr(title,1,400),substr(first_user_message,1,400),created_at FROM threads WHERE thread_source='automation'"):
+        m=re.search(r'Automation ID: (\S+)',(t or '')+'\n'+(f or ''))
+        if m:
+          k=m.group(1); n,last=runs.get(k,[0,0]); runs[k]=[n+1,max(last,at or 0)]
+    except Exception as e: err('codex runs',e)
+    finally:
+      if c: c.close()
+      if d: shutil.rmtree(d,ignore_errors=True)
+  out['codex']={'automations':autos,'runs':runs}
+sys.stdout.write(json.dumps(out))
+`;
+export const REMOTE_SOURCES=['windows','aside','claude-desktop','codex','vercel','railway','github'];
+const PS_BOOT=Buffer.from('$s=[Console]::In.ReadToEnd();iex $s','utf16le').toString('base64');
+const b64=v=>Buffer.from(JSON.stringify(v)).toString('base64');
+// The settings as PowerShell literals (strings in base64, so the script stays ASCII).
+const psLit=v=>Array.isArray(v)?`@(${v.map(psLit).join(',')})`:v&&typeof v==='object'?`@{${Object.entries(v).map(([k,x])=>`${k}=${psLit(x)}`).join(';')}}`
+  :typeof v==='boolean'?(v?'$true':'$false'):typeof v==='number'?String(v):`([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(String(v??'')).toString('base64')}')))`;
+export const psScript=c=>`$CFG=${psLit(c)}\n${PS_SCRIPT}`;
+export const pyScript=c=>`import json,base64\nCFG=json.loads(base64.b64decode('${b64(c)}').decode('utf-8'))\n${PY_SCRIPT}`;
+// What each script does for a remote: Python takes Aside, Claude and Codex when it is there.
+export function remotePlan(remote={}){
+  const sources=new Set(Array.isArray(remote.sources)?remote.sources:REMOTE_SOURCES),py=!!remote.python;
+  const repos=['vercel','railway','github'].some(s=>sources.has(s))&&Array.isArray(remote.repos)?remote.repos:[];
+  const pySources=py?['aside','claude-desktop','codex'].filter(s=>sources.has(s)):[];
+  const psSources=['windows',...(py?[]:['claude-desktop','codex'])].filter(s=>sources.has(s));
+  return {sources,repos,pySources,psSources,needsPython:!py&&sources.has('aside')};
+}
+// Raw script output to jobs, filtered ("include", "exclude", "skipVendor") and capped like local ones.
+export function remoteJobs(remote,raw,{now=Date.now(),note=()=>{}}={}){
+  const name=clip(remote.name,100),tz=remote.timezone||'',plan=remotePlan(remote),jobs=[];
+  const ps=raw.ps||{},py=raw.py||{},profile=ps.home||py.home||'';
+  for(const e of [...(ps.errors||[]),...(py.errors||[])])note(`${name}: ${e}`);
+  const step=(label,fn)=>{try{jobs.push(...fn())}catch(e){note(`${name} ${label}: ${e.message}`)}};
+  const o={include:remote.include||[],exclude:remote.exclude||[]};
+  if(plan.sources.has('windows')&&ps.windows)step('windows',()=>windowsJobs(ps.windows,{group:name,profile,skipVendor:remote.skipVendor!==false,...o}));
+  if(plan.sources.has('aside')&&py.aside)step('aside',()=>asideJobs(py.aside,{group:`${name} · Aside`,tz,now}));
+  const claude=py.claude||ps.claude,codex=py.codex||ps.codex;
+  if(plan.sources.has('claude-desktop')&&claude)step('claude',()=>claudeJobs(claudeTasks({scheduledTasks:claude.tasks}),{group:`${name} · Claude`,tz,skills:claude.skills||{},now:new Date(now)}));
+  if(plan.sources.has('codex')&&codex)step('codex',()=>codexJobs((codex.automations||[]).map(a=>({id:a.dir,...parseToml(a.text)})),
+    {group:`${name} · Codex`,tz,runs:codex.runs||{},now,keepDone:!!remote.keepDone}));
+  for(const r of Array.isArray(ps.repos)?ps.repos:[])step(`repo ${r.repo}`,()=>repoFileJobs(r.repo,r.files||[],{sources:plan.sources,now:new Date(now)}));
+  const seen=new Set();
+  return filterJobs(jobs,{...o,skipDistro:false}).filter(j=>!seen.has(j.id)&&seen.add(j.id)).slice(0,500);
+}
+// spawn with a time limit (spawnSync would hold up the pass); {status, stdout, stderr, timedOut}.
+function runAsync(bin,argv,{input='',timeout=40000}={}){
+  return new Promise(res=>{
+    let p;try{p=spawn(bin,argv,{stdio:['pipe','pipe','pipe']})}catch(error){res({status:null,error,stdout:'',stderr:''});return}
+    let stdout='',stderr='',timedOut=false;
+    const t=setTimeout(()=>{timedOut=true;p.kill('SIGKILL')},timeout);
+    p.stdout.setEncoding('utf8').on('data',d=>{stdout+=d});p.stderr.setEncoding('utf8').on('data',d=>{stderr+=d});
+    p.on('error',error=>{clearTimeout(t);res({status:null,error,stdout,stderr,timedOut})});
+    p.on('close',status=>{clearTimeout(t);res({status,stdout,stderr,timedOut})});
+    p.stdin.on('error',()=>{});p.stdin.end(input);
+  });
+}
+const jsonOut=s=>{const a=s.indexOf('{'),b=s.lastIndexOf('}');if(a<0||b<a)throw new Error('no JSON in the output');return JSON.parse(s.slice(a,b+1))};
+const sshErr=r=>clip(String(r.stderr||r.error?.message||'').split('\n').filter(l=>l.trim()&&!/^\*\*|post-quantum|store now|upgraded/i.test(l)).join(' ')||`exit ${r.status}`,200);
+// One script over SSH; a connection failure (ssh exits 255) is tried once more while time is left.
+async function overSsh(remote,command,script,deadline){
+  const argv=remote.ssh.map(a=>tilde(String(a)));
+  for(let attempt=1;;attempt++){
+    const left=deadline-Date.now();if(left<2000)throw new Error('out of time');
+    const r=await runAsync(argv[0],[...argv.slice(1),command],{input:script,timeout:left});
+    if(r.timedOut)throw new Error(`timed out after ${Math.round((remote.timeout||40))} s`);
+    if(r.status===0)return jsonOut(r.stdout);
+    if(r.status===255&&attempt<2&&deadline-Date.now()>10000)continue;
+    throw new Error(`ssh exit ${r.status}: ${sshErr(r)}`);
+  }
+}
+// Every job a remote machine has, or throws (nothing reachable). Parts that fail are noted.
+export async function discoverRemote(remote,{note=()=>{},now=Date.now()}={}){
+  if(!remote?.name||!Array.isArray(remote.ssh)||!remote.ssh.length)throw new Error('a remote needs "name" and "ssh" (the ssh command as a list)');
+  if(remote.timezone&&!validTz(remote.timezone))note(`${remote.name}: unknown timezone "${remote.timezone}"; using this machine's`);
+  const r={...remote,timezone:validTz(remote.timezone)?remote.timezone:''},plan=remotePlan(r),deadline=Date.now()+(+r.timeout||40)*1000;
+  if(plan.needsPython)note(`${r.name}: set "python" (python.exe on it) to read Aside routines and Codex runs`);
+  const cfgFor=sources=>({sources,repos:plan.repos,asideStatuses:r.keepDone?['active','paused','completed']:['active','paused']});
+  const quote=s=>/[\s"]/.test(s)?`"${s.replace(/"/g,'')}"`:s;
+  const [ps,py]=await Promise.allSettled([
+    plan.psSources.length||plan.repos.length?overSsh(r,`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${PS_BOOT}`,psScript(cfgFor(plan.psSources)),deadline):null,
+    plan.pySources.length?overSsh(r,`${quote(r.python)} -`,pyScript(cfgFor(plan.pySources)),deadline):null]);
+  if(ps.status==='rejected')note(`${r.name} PowerShell: ${ps.reason.message}`);
+  if(py.status==='rejected')note(`${r.name} Python: ${py.reason.message}`);
+  if(ps.status==='rejected'&&(py.status==='rejected'||!plan.pySources.length))throw new Error(ps.reason.message);
+  if(py.status==='rejected'&&!plan.psSources.length&&!plan.repos.length)throw new Error(py.reason.message);
+  return remoteJobs(r,{ps:ps.value||{},py:py.value||{}},{now,note});
+}
+const REMOTE_EVERY=15*60e3;
+const remotesOf=c=>(Array.isArray(c?.remotes)?c.remotes:[]).filter(x=>x&&x.enabled!==false);
+// Report each remote as its own runner (jobs only), at most every 15 minutes unless forced. A
+// remote that cannot be reached is logged and tried again next time; the local pass never waits on it.
+async function reportRemotes({force=false}={}){
+  if(!jobsOn(cfg))return;
+  for(const rm of remotesOf(cfg)){
+    const name=String(rm.name||'').trim();
+    if(!name){log('remote without a name; skipped');continue}
+    if(same(name,cfg.name)){log(`remote "${name}" has this runner's name; skipped (it would replace this machine's jobs)`);continue}
+    const st=readJson(stateFile)||{runs:{}},last=Date.parse(st.remotes?.[name]?.at||'');
+    if(!force&&Date.now()-last<REMOTE_EVERY)continue;
+    const mark=(o)=>{const s=readJson(stateFile)||{runs:{}};(s.remotes||={})[name]={at:new Date().toISOString(),...o};writeJson(stateFile,s)};
+    let jobs;
+    try{jobs=await discoverRemote(rm,{note:m=>log('jobs:',m)})}
+    catch(e){log(`remote "${name}": ${e.message}`);mark({error:clip(e.message,200)});continue}
+    try{
+      const r=await flow('POST',`/runners/${encodeURIComponent(name)}`,{jobs});
+      log(`reported ${jobs.length} jobs as "${name}"${r.changed?'':' (unchanged)'}`);mark({jobs:jobs.length});
+    }catch(e){
+      log(e.status===400&&/models/i.test(e.message)?`remote "${name}": this Flow server needs models in runners.report; update Flow to report remotes (${clip(e.message,120)})`:`remote "${name}": ${e.message}`);
+      mark({error:clip(e.message,200)});
+    }
+  }
 }
 
 // ---------- T3 ----------
@@ -658,7 +1273,12 @@ const titleOf=(a,card)=>`[Flow] ${a.name}: #${card.number} ${card.title}`.slice(
 const startArgv=(title,project)=>(provider,model)=>['thread','start','--provider',provider,'--model',model,'--title',title,...(cfg.worktree?['--worktree',cfg.worktree]:[]),project,'-'];
 
 // ---------- one pass ----------
+// The local pass, then any remotes that are due (they never hold up the local pass).
 async function tick(){
+  try{await tickLocal()}
+  finally{await reportRemotes().catch(e=>log('remotes:',e.message))}
+}
+async function tickLocal(){
   const state=readJson(stateFile)||{runs:{}};const save=()=>DRY||writeJson(stateFile,state);
   const catalogue=await report().catch(e=>{log('report failed:',e.message);return catalog()});
   // Threads started earlier: done ones send their card to UAT, failed ones go on to the next model.
@@ -732,22 +1352,33 @@ async function retry(){
   delete state.runs[hit[0]];writeJson(stateFile,state);log(`#${n} forgotten; the next tick may start it again`);
 }
 
+// `jobs` prints this machine's jobs; `jobs --remote <name>` a remote's; `jobs --all` both.
 async function jobsCmd(){
-  const t0=Date.now(),notes=[];
+  const t0=Date.now(),notes=[],note=m=>notes.push(m),json=args.includes('--json');
   if(!jobsOn(cfg))notes.push('jobs are off in the runner settings ("jobs": false); this is what would be found');
-  const jobs=await discoverJobs(cfg,{note:m=>notes.push(m)});
+  const want=args.includes('--remote')?args[args.indexOf('--remote')+1]||'':null,all=args.includes('--all'),remotes=remotesOf(cfg);
+  const parts=[];
+  if(want===null)parts.push({name:cfg.name||hostname(),tz:'',jobs:await discoverJobs(cfg,{note})});
+  const pick=want!==null?remotes.filter(r=>same(r.name,want)):all?remotes:[];
+  if(want!==null&&!pick.length){console.error(`No remote "${want}" in "remotes" (${remotes.map(r=>r.name).join(', ')||'none set'})`);process.exit(1)}
+  for(const r of pick){
+    try{parts.push({name:r.name,tz:validTz(r.timezone)?r.timezone||'':'',jobs:await discoverRemote(r,{note})})}
+    catch(e){notes.push(`${r.name}: ${e.message}`);parts.push({name:r.name,tz:'',jobs:[],failed:true})}
+  }
   for(const n of notes)console.error('note: '+n);
-  if(args.includes('--json'))console.log(JSON.stringify(jobs,null,2));
-  else console.log(jobsTable(jobs));
-  console.error(`${jobs.length} jobs in ${Date.now()-t0} ms`);
+  if(json)console.log(JSON.stringify(parts.length===1?parts[0].jobs:Object.fromEntries(parts.map(p=>[p.name,p.jobs])),null,2));
+  else console.log(parts.map(p=>(parts.length>1?`== ${p.name}${p.tz?` (${p.tz})`:''}\n`:'')+(p.failed?'Not reachable.':jobsTable(p.jobs,{tz:p.tz}))).join('\n\n'));
+  console.error(`${parts.reduce((n,p)=>n+p.jobs.length,0)} jobs in ${Date.now()-t0} ms`);
+  if(parts.some(p=>p.failed)&&parts.length===1)process.exitCode=1;
 }
+async function reportCmd(){await report();await reportRemotes({force:true})}
 
 async function main(argv){
   args=argv;cmd=args.find(a=>!a.startsWith('-'))||'tick';
   cfgPath=args.includes('--config')?args[args.indexOf('--config')+1]:join(cfgDir,'runner.json');
   cfg=readJson(cfgPath)||{};
-  const cmds={report,tick,status,retry,jobs:jobsCmd};
-  if(!cmds[cmd]){console.error('Use: report | tick | status | retry <card number> | jobs [--json]');process.exit(2)}
+  const cmds={report:reportCmd,tick,status,retry,jobs:jobsCmd};
+  if(!cmds[cmd]){console.error('Use: report | tick | status | retry <card number> | jobs [--json] [--remote <name> | --all]');process.exit(2)}
   // `jobs` only looks at this machine, so it needs no Flow server (and no settings file).
   if(cmd!=='jobs'){
     if(!cfg?.name||!cfg?.env){console.error(`Set "name" and "env" in ${cfgPath} (see the top of this file).`);process.exit(1)}

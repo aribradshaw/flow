@@ -417,6 +417,11 @@ test('reporting jobs: only real changes are saved; lastRun and nextRun alone wai
   assert.deepEqual([r.changed,r.runner.jobs,r.runner.jobsReported],[true,had.jobs,T0],'jobs left out are kept, with their jobsReported');
   r=reportRunner(had,'Home',{models,jobs:[]},later(1));
   assert.deepEqual([r.changed,r.runner.jobs,r.runner.jobsReported],[true,[],later(1)],'[] clears them');
+  r=reportRunner(had,'Home',{jobs:[j({lastStatus:'failed'})]},later(1));
+  assert.deepEqual([r.changed,r.runner.models,r.runner.jobs[0].lastStatus],[true,had.models,'failed'],'models left out are kept');
+  r=reportRunner(had,'Home',{jobs:[j()]},later(1));assert.equal(r.changed,false,'models left out, same jobs: nothing saved');
+  r=reportRunner(null,'Laptop',{jobs:[j()]},T0);
+  assert.deepEqual([r.changed,r.runner.name,r.runner.models,r.runner.jobs.length],[true,'Laptop',[],1],'a new runner with jobs only');
   r=reportRunner({...had,jobsReported:undefined},'Home',{models,jobs:[j({nextRun:later(30)})]},later(1));assert.ok(r.changed,'never saved before: saved');
   assert.equal(reportRunner(null,'X',{models}).runner.jobsReported,undefined,'no jobs, no jobsReported');
 });

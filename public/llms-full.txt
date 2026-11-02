@@ -158,13 +158,13 @@ flow runners report --input '{"runner":"Home server","models":[{"id":"claudeAgen
 
 ### Scheduled jobs
 
-A runner can also tell Flow which scheduled jobs it found: systemd timers, crontab lines, scheduled T3 or Claude tasks, Vercel or Railway crons, GitHub Actions schedules, Windows scheduled tasks. It sends them as `jobs` in the same `runners.report` call, up to 500 per runner:
+A runner can also tell Flow which scheduled jobs it found: systemd timers, crontab lines, scheduled T3, Claude or Aside tasks, Codex automations, Vercel or Railway crons, GitHub Actions schedules, Windows scheduled tasks. It sends them as `jobs` in the same `runners.report` call, up to 500 per runner:
 
 | Field | |
 |---|---|
 | `id` | Required, up to 200 characters, stable per runner, e.g. `systemd:backup.timer` or `vercel:my-app:/api/cron/sync`. |
 | `name` | Up to 120 characters (defaults to the id). |
-| `source` | Where it is scheduled, up to 40 characters: `systemd`, `cron`, `t3`, `vercel`, `railway`, `aside`, `windows`, `claude`, `github` or `other` (the default). Other text is kept as it is. |
+| `source` | Where it is scheduled, up to 40 characters: `systemd`, `cron`, `t3`, `vercel`, `railway`, `aside`, `windows`, `claude`, `codex`, `github` or `other` (the default). Other text is kept as it is. |
 | `group` | A display group, up to 120 characters, e.g. "Home server" or "Vercel · my-app". |
 | `schedule` | When, in words, up to 200 characters: "Daily 22:30", "Every 5 min". |
 | `cron` | The cron expression, when there is one (up to 120). |
@@ -174,7 +174,7 @@ A runner can also tell Flow which scheduled jobs it found: systemd timers, cront
 | `lastRun`, `nextRun` | ISO times. |
 | `lastStatus` | `ok`, `failed`, `running` or `unknown` (the default). |
 
-`jobs` replaces the stored list. Leave it out to keep the stored jobs, or send `[]` to clear them. To keep writes down, a report is not saved when the only changes are `lastRun` and `nextRun`, unless the jobs were last saved six hours ago or more. A changed `lastStatus`, a job added or removed, or any other field always saves. The runner's `jobsReported` is when its jobs were last saved, and the response's `changed` says whether this report was.
+`jobs` replaces the stored list. Leave it out to keep the stored jobs, or send `[]` to clear them. `models` is optional too: leave it out to keep the stored models, as a runner does when it reports the jobs of another machine it reaches over SSH. To keep writes down, a report is not saved when the only changes are `lastRun` and `nextRun`, unless the jobs were last saved six hours ago or more. A changed `lastStatus`, a job added or removed, or any other field always saves. The runner's `jobsReported` is when its jobs were last saved, and the response's `changed` says whether this report was.
 
 ```sh
 flow runners report --input '{"runner":"Home server","models":[],"jobs":[{"id":"systemd:backup.timer","name":"Nightly backup","source":"systemd","group":"Home server","schedule":"Daily 22:30","cron":"30 22 * * *","command":"restic backup /srv","lastStatus":"ok","lastRun":"2026-11-01T22:30:00Z","nextRun":"2026-11-02T22:30:00Z"}]}'
@@ -183,6 +183,27 @@ flow runners report --input '{"runner":"Home server","models":[],"jobs":[{"id":"
 In the app, **Scheduled** in the org chart's toolbar opens a tray on the left of the canvas. It lists every runner's jobs by runner and group, each with its source icon, name, schedule and a dot for the last run (green OK, red failed, grey unknown). Hover the dot for the last and next run. A group with more than eight jobs starts collapsed to a chip such as "59 jobs" that opens it. Search filters the tray too. Whether the tray is open, and which groups you opened or closed, is remembered on this device.
 
 The reference runner (`tools/agent-runner.mjs`) reports the jobs it finds with every `report` and `tick`: systemd user and system timers (stock distribution timers such as apt-daily, fstrim and logrotate are skipped), the user's crontab, T3 scheduled tasks (read only from T3's database; needs Node 22.5+ for `node:sqlite`), and cron configs in your repos: `vercel.json` crons, `cronSchedule` in `railway.json`/`railway.toml`, and `on.schedule` in GitHub Actions workflows. Repos default to your T3 projects' folders. Commands are summarised on one line with anything that looks like a secret hidden. Run `node tools/agent-runner.mjs jobs` (or `jobs --json`) to see the list without contacting Flow, and tune it with `"jobs"` in `runner.json`: `sources`, `repos`, `exclude`, `include` (keeps a job even when `skipDistro` or `exclude` would drop it) and `skipDistro`; `"jobs": false` stops reporting jobs and leaves the stored list as it is.
+
+#### Remote machines
+
+The reference runner can also read the scheduled jobs of other machines over SSH, such as a Windows laptop, and report each one as a runner of its own, named after it. It sends that runner's `jobs` only, so the remote shows in the Scheduled tray (and its jobs can be promoted) without any models. List them as `"remotes"` in `runner.json`:
+
+```json
+"remotes": [{"name": "Laptop", "ssh": ["ssh", "-i", "~/.ssh/laptop_key", "-o", "BatchMode=yes", "me@laptop"],
+             "python": "C:\\Python\\python.exe", "timezone": "America/Phoenix"}]
+```
+
+- `ssh` is the ssh command as a list, ending with the host. Use a key and `BatchMode=yes` so it never asks for a password. The remote's login shell may be `cmd.exe`: the runner sends its scripts on stdin, PowerShell through `powershell -EncodedCommand`, and Python when `python` (the path to `python.exe` on the remote) is set. Both scripts only read.
+- `timezone` is the remote's time zone (an IANA name). Its cron lines and schedules are read in that zone. It defaults to the runner's own.
+- `sources` picks what to read (all by default):
+  - `windows`: Task Scheduler tasks outside `\Microsoft\`, with their triggers in words ("Daily 18:00", "Every 15 min", "At logon", "On demand"), last and next run, and status from the last result. Vendor updater tasks (Adobe, Edge, Google, Zoom, McAfee, HP, OneDrive and so on) are skipped unless `skipVendor` is `false` or `include` names them.
+  - `aside`: Aside routines, active and paused (`keepDone` adds completed ones). Each shows its schedule from its RRULE (one-shots as "Once Nov 1 18:00"), its model and prompt, and its last run. A routine waiting for approval shows as running, with "Waiting for approval". One whose next run has already passed is marked "(stale)". Needs `python`: Aside's database is copied to a temporary folder, read and removed.
+  - `claude-desktop`: Claude desktop scheduled tasks, with what each one does taken from its `SKILL.md`.
+  - `codex`: Codex automations, from their RRULE or cron line and status. One-shots whose runs are used up are skipped (`keepDone` keeps them, marked "(done)"). With `python`, the last run of each cron automation comes from Codex's database.
+  - `vercel`, `railway`, `github`: cron configs in the repos listed in `repos` (paths on the remote).
+- `include`, `exclude` work as in `"jobs"`. `timeout` is in seconds for the whole remote (40 by default), and `enabled: false` turns a remote off.
+
+`tick` reads the remotes after its own pass, at most every 15 minutes, and keeps the time in its state file. `report` reads them every time. A remote that cannot be reached is logged and tried again next time, after one retry if the connection fails, and it never holds up the local pass. Run `node tools/agent-runner.mjs jobs --remote Laptop` to see a remote's jobs without contacting Flow, or `jobs --all` for this machine and every remote.
 
 #### Promoting a job
 
@@ -2652,7 +2673,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one, and so does jobs when sent (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 500 models and 500 jobs each.
+A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 500 models and 500 jobs each.
 
 **Input**
 
@@ -2660,7 +2681,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | --- | --- | --- | --- |
 | `env` | string | yes | Environment id (see envs.list). |
 | `runner` | string | yes | Runner name, e.g. Home server. |
-| `models` | object[] | yes |  |
+| `models` | object[] |  | The models this runner can run (replaces the stored list; leave out to keep it). |
 | `models[].id` | string | yes |  |
 | `models[].label` | string |  |  |
 | `models[].provider` | string |  | Display group, e.g. Claude or OpenCode. |
@@ -2668,7 +2689,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `jobs` | object[] |  | Scheduled jobs on this runner (replaces the stored list; leave out to keep it, [] to clear). |
 | `jobs[].id` | string | yes | Stable per runner, e.g. systemd:backup.timer or vercel:my-app:/api/cron/sync. |
 | `jobs[].name` | string |  | Defaults to the id. |
-| `jobs[].source` | string |  | Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, github or other (any text; defaults to other). |
+| `jobs[].source` | string |  | Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, codex, github or other (any text; defaults to other). |
 | `jobs[].group` | string |  | Display group, e.g. "Home server" or "Vercel · my-app". |
 | `jobs[].schedule` | string |  | When, in words, e.g. "Daily 22:30" or "Every 5 min". |
 | `jobs[].cron` | string |  | The cron expression, when there is one. |

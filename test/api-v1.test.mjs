@@ -400,6 +400,14 @@ test('AgentFlow: runners report scheduled jobs; agents carry a schedule and the 
   await op('agents.delete',{env:ENV,agent:auto.id});
   r=await op('runners.report',{env:ENV,runner:'Jobs box',models,jobs:[]});
   assert.deepEqual([r.body.changed,r.body.runner.jobs],[true,[]],'[] clears the jobs');
+
+  // A runner reporting another machine (over SSH) sends jobs alone: models are kept.
+  r=await op('runners.report',{env:ENV,runner:'Jobs box',jobs:[backup()]});
+  assert.deepEqual([r.status,r.body.changed,r.body.runner.models.map(m=>m.id),r.body.runner.jobs.length],[200,true,[models[0].id],1],'models left out are kept');
+  r=await op('runners.report',{env:ENV,runner:'Laptop',jobs:[{id:'windows:\\Backup',source:'windows'},{id:'codex:brief',source:'codex',ai:true}]});
+  assert.deepEqual([r.status,r.body.runner.name,r.body.runner.models,r.body.runner.jobs.map(j=>j.source)],[200,'Laptop',[],['windows','codex']],'a new runner with jobs only');
+  r=await op('runners.report',{env:ENV,runner:'Laptop'});
+  assert.deepEqual([r.status,r.body.changed,r.body.runner.jobs.length],[200,false,2],'neither: nothing changes');
 });
 
 test('AgentFlow: delegating cards to agents and the work queue a runner reads',async()=>{

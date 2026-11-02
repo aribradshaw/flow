@@ -40,7 +40,7 @@ export const LIMITS={agents:500,workflows:500,steps:100,list:50,refs:100,runners
 export const JOB_STATUS={ok:'OK',failed:'Failed',running:'Running',unknown:'Unknown'};
 // How a job's source reads as an agent's role when it is promoted (unknown sources: "<source> job").
 export const JOB_SOURCES={systemd:'systemd timer',cron:'Cron job',t3:'T3 schedule',vercel:'Vercel cron',railway:'Railway cron',aside:'Aside schedule',
-  windows:'Windows scheduled task',claude:'Claude schedule',github:'GitHub Actions schedule',other:'Scheduled job'};
+  windows:'Windows scheduled task',claude:'Claude schedule',codex:'Codex automation',github:'GitHub Actions schedule',other:'Scheduled job'};
 export const BILLING={included:'Included',metered:'Metered'};
 // Ids of records shared in from another workspace. They are projected in on read and are not in
 // stored data, so links to them are kept even when the record is not present (e.g. on the server).
@@ -160,15 +160,16 @@ export function cleanRunners(v){
     });
 }
 // A runner's report (runners.report) against what is stored (had, or null): {runner, changed}.
-// models replace the old list. jobs replace the old list too; left out (undefined), the stored jobs
-// stay. Not every report is saved: changed is false, and had comes back as it is, when nothing
+// models replace the old list; left out (undefined), the stored models stay (a runner reporting
+// another machine's jobs knows no models for it). jobs replace the old list too; left out, the
+// stored jobs stay. Not every report is saved: changed is false, and had comes back as it is, when nothing
 // changed but lastRun and nextRun, unless the jobs were last saved JOBS_STALE ago or more (then those
 // are refreshed). A changed lastStatus, job set or any other field always saves. jobsReported is set
 // whenever jobs are saved.
 export const JOBS_STALE=6*3600e3;
 const steady=js=>JSON.stringify(js.map(({lastRun,nextRun,...j})=>j));
 export function reportRunner(had,name,{models,jobs}={},now=new Date().toISOString()){
-  const want=cleanRunners([{name,models,jobs:jobs||[]}])[0],keep=jobs===undefined;
+  const want=cleanRunners([{name,models:models===undefined?had?.models:models,jobs:jobs||[]}])[0],keep=jobs===undefined;
   let changed=!had||JSON.stringify(had.models)!==JSON.stringify(want.models);
   if(had&&!keep&&!changed){
     const old=had.jobs||[],stale=!had.jobsReported||Date.parse(now)-Date.parse(had.jobsReported)>=JOBS_STALE;

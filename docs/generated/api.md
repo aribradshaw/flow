@@ -2420,7 +2420,7 @@ Report a runner and its models
 
 `POST /api/v1/envs/{env}/runners/{runner}` · scope `write` · MCP tool `runners_report`
 
-A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one, and so does jobs when sent (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 500 models and 500 jobs each.
+A runner says what it can run, and optionally which scheduled jobs it found (systemd timers, cron, hosted crons...). The model list replaces the old one when sent (leave models out to keep the stored ones, e.g. when a runner reports the jobs of another machine it reaches over SSH), and so does jobs (leave it out to keep the stored jobs; [] clears them). Nothing is saved when nothing changed, so a runner may report on every pass: a report that only moves lastRun or nextRun is not saved either, unless the jobs were last saved 6 hours ago or more (jobsReported); a changed lastStatus, job or field always is. Agents name the runner in runtime and pick model ids; jobs show in the AgentFlow Scheduled tray, where they can be promoted into the org. Give each model a provider to group it by, and billing: included (a subscription or free) or metered (paid per use), which runners prefer included models by when picking automatically. Up to 20 runners, 500 models and 500 jobs each.
 
 **Input**
 
@@ -2428,7 +2428,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | --- | --- | --- | --- |
 | `env` | string | yes | Environment id (see envs.list). |
 | `runner` | string | yes | Runner name, e.g. Home server. |
-| `models` | object[] | yes |  |
+| `models` | object[] |  | The models this runner can run (replaces the stored list; leave out to keep it). |
 | `models[].id` | string | yes |  |
 | `models[].label` | string |  |  |
 | `models[].provider` | string |  | Display group, e.g. Claude or OpenCode. |
@@ -2436,7 +2436,7 @@ A runner says what it can run, and optionally which scheduled jobs it found (sys
 | `jobs` | object[] |  | Scheduled jobs on this runner (replaces the stored list; leave out to keep it, [] to clear). |
 | `jobs[].id` | string | yes | Stable per runner, e.g. systemd:backup.timer or vercel:my-app:/api/cron/sync. |
 | `jobs[].name` | string |  | Defaults to the id. |
-| `jobs[].source` | string |  | Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, github or other (any text; defaults to other). |
+| `jobs[].source` | string |  | Where it is scheduled: systemd, cron, t3, vercel, railway, aside, windows, claude, codex, github or other (any text; defaults to other). |
 | `jobs[].group` | string |  | Display group, e.g. "Home server" or "Vercel · my-app". |
 | `jobs[].schedule` | string |  | When, in words, e.g. "Daily 22:30" or "Every 5 min". |
 | `jobs[].cron` | string |  | The cron expression, when there is one. |
