@@ -25,6 +25,69 @@
   },
   "releases": [
     {
+      "version": "0.11.21",
+      "date": "2026-11-02",
+      "title": "Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field",
+      "notes": [
+        "AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons with their names on hover, and the search field fills the rest of the bar."
+      ],
+      "summary": "AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons with their names on hover, and the search field fills the rest of the bar.",
+      "sourceSubject": "Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field",
+      "commit": "f8b4f34f60b57e47bc28eef8268561c266a90543",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 74,
+      "admittedAt": "2026-11-02T17:12:28-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.20",
+      "date": "2026-11-02",
+      "title": "Stretch the account menu's OneProfileID badge to the menu's full width",
+      "notes": [
+        "The Backed by OneProfileID badge in the account menu spans the menu's full width."
+      ],
+      "summary": "The Backed by OneProfileID badge in the account menu spans the menu's full width.",
+      "sourceSubject": "Stretch the account menu's OneProfileID badge to the menu's full width",
+      "commit": "eab63e6b7fe76505f1ad534433b6d79178d13658",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 73,
+      "admittedAt": "2026-11-02T17:03:52-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.19",
+      "date": "2026-11-02",
+      "title": "Record public commits in the DevLog and tag releases with Bradshaw Versioning",
+      "notes": [
+        "DevLog: versions 0.10.39 to 0.11.18 recorded; public releases are tagged with their Bradshaw version, starting with v0.11.19."
+      ],
+      "summary": "DevLog: versions 0.10.39 to 0.11.18 recorded; public releases are tagged with their Bradshaw version, starting with v0.11.19.",
+      "sourceSubject": "Record public commits in the DevLog and tag releases with Bradshaw Versioning",
+      "commit": "6e875559d55fe64e6dd6e11d22a044d9c8d1c0b9",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 72,
+      "admittedAt": "2026-11-02T16:57:13-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
       "version": "0.11.18",
       "date": "2026-11-02",
       "title": "Update CI to actions/checkout v7 and actions/setup-node v7",

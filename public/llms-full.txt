@@ -2,7 +2,7 @@
 
 > Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
-Version 0.11.18 (2026-11-02)
+Version 0.11.21 (2026-11-02)
 
 # Concepts
 
@@ -3200,6 +3200,9 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 
 # Recent releases
 
+- 0.11.21 (2026-11-02): Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field
+- 0.11.20 (2026-11-02): Stretch the account menu's OneProfileID badge to the menu's full width
+- 0.11.19 (2026-11-02): Record public commits in the DevLog and tag releases with Bradshaw Versioning
 - 0.11.18 (2026-11-02): Update CI to actions/checkout v7 and actions/setup-node v7
 - 0.11.17 (2026-11-01): Show each scheduled job's full schedule rules and where they come from
 - 0.11.16 (2026-11-01): Raise the runner model cap and list included models first
@@ -3207,6 +3210,3 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 - 0.11.14 (2026-11-01): Keep runner reports on whole-workspace saves; fix the runner's error parsing
 - 0.11.13 (2026-11-01): Document runner job discovery and note scheduled jobs and split view
 - 0.11.12 (2026-11-01): Report this machine's scheduled jobs from the AgentFlow runner
-- 0.11.11 (2026-11-01): Show runners' scheduled jobs in AgentFlow and promote them into the org
-- 0.11.10 (2026-11-01): Add split view: two tabs side by side with a draggable divider
-- 0.11.9 (2026-11-01): Fix clipped AgentFlow avatar badge and show the account photo on name-matched people
