@@ -36,7 +36,7 @@ node verify.mjs               # end-to-end in headless Edge/Chrome on its own po
 The docs in `public/docs/`, `public/llms*.txt`, `skills/flygon-flow/SKILL.md` and `docs/generated/` are **generated**. Edit their sources instead:
 - the operation registry (`lib/registry.mjs`): summaries, descriptions, schemas, examples
 - `docs/concepts/*.md`: hand-written concepts
-- `public/devlog.json`: releases, maintained with `tools/devlog.mjs`
+- `public/devlog.json`: releases, recorded automatically after each push to `main` by the DevLog workflow (`tools/devlog-auto.mjs`); pull before you push, and do not edit it by hand
 
 Then run `node tools/docs.mjs` and commit the result.
 

@@ -1,0 +1,45 @@
+# Bradshaw Versioning: every commit that reaches main is recorded in public/devlog.json automatically.
+# Pushes made with GITHUB_TOKEN start no new workflow runs, so the registry commit does not loop;
+# the next push's run records it (the scheme numbers registry commits too).
+name: DevLog
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: devlog
+  cancel-in-progress: false
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Record new commits and push the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSHED_AT: ${{ github.event.repository.pushed_at }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            out=$(node tools/devlog-auto.mjs)
+            if [ -z "$out" ]; then echo "Every commit on main is recorded."; exit 0; fi
+            echo "$out"
+            node tools/docs.mjs
+            first=$(echo "$out" | head -1 | awk '{print $NF}'); last=$(echo "$out" | tail -1 | awk '{print $NF}')
+            git add public/devlog.json docs public skills
+            git commit -q -m "DevLog: $first$([ "$first" != "$last" ] && echo "-$last")"
+            if git push -q origin HEAD:main; then exit 0; fi
+            echo "main moved during recording; retrying ($attempt)"
+            sleep $((attempt * 3))
+          done
+          exit 1
