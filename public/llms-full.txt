@@ -2,7 +2,7 @@
 
 > Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
-Version 0.11.23 (2026-11-02)
+Version 0.11.25 (2026-11-02)
 
 # Concepts
 
@@ -3200,6 +3200,8 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 
 # Recent releases
 
+- 0.11.25 (2026-11-02): Author DevLog registry commits as the owner so Railway deploys them
+- 0.11.24 (2026-11-02): DevLog: 0.11.22-0.11.23
 - 0.11.23 (2026-11-02): Record every push to main in the DevLog automatically
 - 0.11.22 (2026-11-02): DevLog: 0.11.19-0.11.21
 - 0.11.21 (2026-11-02): Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field
@@ -3208,5 +3210,3 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 - 0.11.18 (2026-11-02): Update CI to actions/checkout v7 and actions/setup-node v7
 - 0.11.17 (2026-11-01): Show each scheduled job's full schedule rules and where they come from
 - 0.11.16 (2026-11-01): Raise the runner model cap and list included models first
-- 0.11.15 (2026-11-01): Report remote machines' scheduled jobs from the AgentFlow runner over SSH
-- 0.11.14 (2026-11-01): Keep runner reports on whole-workspace saves; fix the runner's error parsing
