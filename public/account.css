@@ -37,7 +37,8 @@
 .acct-item:hover .i,.acct-item:focus-visible .i{color:var(--flygon-dark)}
 .acct-item.danger:hover,.acct-item.danger:focus-visible{background:#f8e9e7;color:var(--danger)}
 .acct-item.danger:hover .i,.acct-item.danger:focus-visible .i{color:var(--danger)}
-.acct-foot{display:flex;justify-content:center;padding:8px 4px 4px;margin-top:4px;border-top:1px solid var(--line)}
+.acct-foot{padding:6px 0 0;margin-top:4px;border-top:1px solid var(--line)}
+.acct-foot opid-badge{display:block;width:100%}
 
 /* settings dialog */
 .acct-dlg{width:min(440px,calc(100vw - 32px));padding:0;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);box-shadow:0 24px 60px #141e1c40}

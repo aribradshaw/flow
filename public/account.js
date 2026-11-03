@@ -37,6 +37,18 @@ const I={
 };
 const svg=(n,s=16)=>`<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 
+// The badge draws its box in an open shadow root with no ::part, so outside CSS cannot widen it.
+// An adopted sheet survives the component re-rendering its shadow content.
+let fullSheet=null;
+function fullWidthBadge(el){
+  if(!el||typeof CSSStyleSheet!=='function')return;
+  customElements.whenDefined('opid-badge').then(()=>{
+    const root=el.shadowRoot;if(!root)return;
+    if(!fullSheet){fullSheet=new CSSStyleSheet();fullSheet.replaceSync('.badge{display:flex;justify-content:center;width:100%;box-sizing:border-box}')}
+    if(!root.adoptedStyleSheets.includes(fullSheet))root.adoptedStyleSheets=[...root.adoptedStyleSheets,fullSheet];
+  }).catch(()=>{});
+}
+
 let session={mode:'local',user:null},ready=false,menu=null,signingIn=false;
 
 if(!document.querySelector('link[data-account]')){
@@ -123,7 +135,7 @@ function openMenu(){
     ${opid()&&u?`<button type="button" role="menuitem" class="acct-item danger" data-acct="logout">${svg('logout')}Log out</button>`:''}
     ${opid()?'<div class="acct-foot"><opid-badge mode="light" kind="backed"></opid-badge></div>':''}`;
   document.body.append(menu);
-  placeMenu();refreshButton();popIn(menu);fillMenuEnvs();
+  placeMenu();refreshButton();popIn(menu);fillMenuEnvs();fullWidthBadge(menu.querySelector('.acct-foot opid-badge'));
   menu.querySelector('[role=menuitem]')?.focus();
 }
 function placeMenu(){

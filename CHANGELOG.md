@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- The Backed by OneProfileID badge in the account menu spans the menu's full width.
+
 ## 0.11.19 — 2026-11-02
 
 First public release.
