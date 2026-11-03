@@ -15,7 +15,7 @@ pre code{background:none;padding:0;color:inherit}
 pre.out{background:#fff;color:var(--ink);border:1px solid var(--line)}
 .top{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;height:48px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line)}
 .brand{font-weight:700;text-decoration:none;color:var(--ink)}.brand span{color:var(--accent-line)}
-.ver{font-size:12px;color:var(--muted)}.sp{flex:1}
+.sp{flex:1}
 #q{width:min(320px,40vw);height:30px;padding:0 10px;border:1px solid var(--line2,#ccd4d1);border-radius:var(--r);font:inherit}
 .txt{padding:4px 9px;border:1px solid var(--line2,#ccd4d1);border-radius:var(--r);font-size:12px;font-weight:600;text-decoration:none;color:var(--ink);background:#fff}
 .wrap{display:flex;max-width:1180px;margin:0 auto}

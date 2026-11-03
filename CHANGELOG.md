@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- The DevLog now records one release per production deploy, listing the commits it includes, instead of committing a registry file back to the repository.
+
 - AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons, with their names on hover, and the search field fills the rest of the bar.
 
 - The Backed by OneProfileID badge in the account menu spans the menu's full width.

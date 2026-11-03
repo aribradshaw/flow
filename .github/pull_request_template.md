@@ -6,7 +6,7 @@
 
 - [ ] `npm run check`
 - [ ] `npm test`
-- [ ] `node tools/docs.mjs --check` (run `node tools/docs.mjs` if you changed the registry, `docs/concepts/` or `public/devlog.json`)
+- [ ] `node tools/docs.mjs --check` (run `node tools/docs.mjs` if you changed the registry or `docs/concepts/`)
 - [ ] `node verify.mjs` for UI or server changes (headless Edge/Chrome; it never touches real data)
 
 ## Data and compatibility

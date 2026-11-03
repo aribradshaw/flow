@@ -9,7 +9,7 @@
 //     whole input; <command> --help lists its flags.
 //   flow refresh                                refetch the OpenAPI document (cached for an hour)
 //   flow mcp                                    a local stdio MCP server that proxies to the REST API
-//   flow inbox|devlog|workspace …              tools/inbox.mjs, tools/devlog.mjs, tools/env.mjs
+//   flow inbox|workspace …                     tools/inbox.mjs, tools/env.mjs
 // Config: $XDG_CONFIG_HOME/flygon-flow/config.json (default ~/.config), written 0600; FLOW_URL,
 // FLOW_API_KEY and FLOW_ENV override it. The key is never printed.
 import {readFileSync,writeFileSync,mkdirSync,renameSync,chmodSync,realpathSync} from 'node:fs';
@@ -23,7 +23,7 @@ import {createMcp,defaultResources} from '../lib/mcp.mjs';
 
 const dir=join(process.env.XDG_CONFIG_HOME||join(homedir(),'.config'),'flygon-flow'),CONFIG=join(dir,'config.json'),CACHE=join(dir,'openapi-cache.json');
 const TTL=Number(process.env.FLOW_SPEC_TTL||3600)*1000,ENV_ID=/^[A-Za-z0-9-]{1,64}$/;
-const WRAPPED={inbox:'inbox.mjs',devlog:'devlog.mjs',workspace:'env.mjs'};
+const WRAPPED={inbox:'inbox.mjs',workspace:'env.mjs'};
 const fail=(m,code=1)=>{console.error(m);process.exit(code)};
 const readJson=f=>{try{return JSON.parse(readFileSync(f,'utf8'))}catch{return null}};
 const writePrivate=(f,v)=>{mkdirSync(dir,{recursive:true,mode:0o700});writeFileSync(f+'.tmp',JSON.stringify(v,null,2),{mode:0o600});chmodSync(f+'.tmp',0o600);renameSync(f+'.tmp',f)};
@@ -174,7 +174,7 @@ async function main(argv){
   if(cmd==='mcp')return mcp();
   const cfg=config();
   if(cmd==='refresh'){const ops=operationsFrom(await spec(cfg,{refresh:true}));console.log(`${ops.length} commands from ${cfg.url}`);return}
-  const usage=`Usage: flow <command> …\n  flow login --url <server> --key <key>   flow env use <id>   flow refresh   flow mcp\n  flow inbox …   flow devlog …   flow workspace …`;
+  const usage=`Usage: flow <command> …\n  flow login --url <server> --key <key>   flow env use <id>   flow refresh   flow mcp\n  flow inbox …   flow workspace …`;
   if(!cmd||cmd==='help'||cmd==='--help'||cmd==='-h'){
     console.log(usage);
     if(cfg.url)try{console.log('\n'+groupHelp(operationsFrom(await spec(cfg))))}catch(e){console.log(`\n(${e.message})`)}

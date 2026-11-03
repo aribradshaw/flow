@@ -2,7 +2,7 @@
 
 > Flygon Flow keeps a MindMap (people, entities and ideas; called charts in the API), a product timeline, a DevOps board and AgentFlow (agents and workflows) in one workspace per environment. People use the web app. Agents use the same operations through the REST API, the MCP server or the CLI, authenticated with a personal API key (`flow_…`).
 
-Version 0.11.25 (2026-11-02)
+Releases: `GET /api/devlog` on your Flow server (one per production deploy), also in the app under Settings › DevLog.
 
 # Concepts
 
@@ -115,13 +115,14 @@ The owner can also invite people to the app itself (Settings › Account › *In
 
 ## Versioning
 
-Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md). Every commit that reaches `main` gets the next `YEAR.MONTH.UPDATE`:
+Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers. Every production deploy gets the next `YEAR.MONTH.UPDATE`:
 
 - The year is zero-based from 2026, so October 2026 is `0.10.x` and January 2027 is `1.1.x`. Months are calendar months, in the America/Phoenix timezone.
-- The registry is `public/devlog.json`. Each release records its version, commit, admission time and `compatibility` (`compatible`, `action-required` or `breaking`, with the required `action`), plus any verified deployments.
-- A version identifies source code only. It says nothing about whether that code is deployed.
+- One release per deploy. A release lists every commit the deploy brought, plus `compatibility` (`compatible`, `action-required` or `breaking`, with the required `action`).
+- The server records the release when the deploy starts. Nothing is committed back to the repository.
+- `public/devlog.json` is the frozen history from before deploy releases (up to `0.11.25`).
 
-These docs are generated from the same registry, so the version in the header is the newest recorded release.
+The app's Settings › DevLog and `GET /api/devlog` list every release, newest first.
 
 ## AgentFlow
 
@@ -3197,16 +3198,3 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 }
 ```
 
-
-# Recent releases
-
-- 0.11.25 (2026-11-02): Author DevLog registry commits as the owner so Railway deploys them
-- 0.11.24 (2026-11-02): DevLog: 0.11.22-0.11.23
-- 0.11.23 (2026-11-02): Record every push to main in the DevLog automatically
-- 0.11.22 (2026-11-02): DevLog: 0.11.19-0.11.21
-- 0.11.21 (2026-11-02): Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field
-- 0.11.20 (2026-11-02): Stretch the account menu's OneProfileID badge to the menu's full width
-- 0.11.19 (2026-11-02): Record public commits in the DevLog and tag releases with Bradshaw Versioning
-- 0.11.18 (2026-11-02): Update CI to actions/checkout v7 and actions/setup-node v7
-- 0.11.17 (2026-11-01): Show each scheduled job's full schedule rules and where they come from
-- 0.11.16 (2026-11-01): Raise the runner model cap and list included models first

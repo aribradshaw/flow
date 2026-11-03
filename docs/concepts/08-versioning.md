@@ -1,9 +1,10 @@
 # Versioning
 
-Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md). Every commit that reaches `main` gets the next `YEAR.MONTH.UPDATE`:
+Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers. Every production deploy gets the next `YEAR.MONTH.UPDATE`:
 
 - The year is zero-based from 2026, so October 2026 is `0.10.x` and January 2027 is `1.1.x`. Months are calendar months, in the America/Phoenix timezone.
-- The registry is `public/devlog.json`. Each release records its version, commit, admission time and `compatibility` (`compatible`, `action-required` or `breaking`, with the required `action`), plus any verified deployments.
-- A version identifies source code only. It says nothing about whether that code is deployed.
+- One release per deploy. A release lists every commit the deploy brought, plus `compatibility` (`compatible`, `action-required` or `breaking`, with the required `action`).
+- The server records the release when the deploy starts. Nothing is committed back to the repository.
+- `public/devlog.json` is the frozen history from before deploy releases (up to `0.11.25`).
 
-These docs are generated from the same registry, so the version in the header is the newest recorded release.
+The app's Settings › DevLog and `GET /api/devlog` list every release, newest first.

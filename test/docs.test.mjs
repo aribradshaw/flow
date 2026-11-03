@@ -11,10 +11,10 @@ import {build,sources,stale,write,mcpName,markdown,restCall} from '../tools/docs
 
 const repo=fileURLToPath(new URL('..',import.meta.url)),tool=join(repo,'tools/docs.mjs'),fixture=join(repo,'test/fixtures/docs-registry.mjs');
 const {operations}=await import('./fixtures/docs-registry.mjs');
-// A throwaway tree with the real sources (devlog, concepts, tokens) and no registry of its own.
+// A throwaway tree with the real sources (concepts, tokens) and no registry of its own.
 function tree(){
   const d=mkdtempSync(join(tmpdir(),'flow-docs-'));
-  mkdirSync(join(d,'public'));cpSync(join(repo,'public/devlog.json'),join(d,'public/devlog.json'));cpSync(join(repo,'public/style.css'),join(d,'public/style.css'));
+  mkdirSync(join(d,'public'));cpSync(join(repo,'public/style.css'),join(d,'public/style.css'));
   cpSync(join(repo,'docs/concepts'),join(d,'docs/concepts'),{recursive:true});
   return d;
 }
@@ -34,11 +34,14 @@ test('every operation appears in every output',async()=>{
   assert.ok(files['public/docs/devops.html'].includes('cards.move'));
 });
 
-test('concepts and the devlog version reach the outputs',async()=>{
+test('concepts reach the outputs, and no release version is embedded',async()=>{
   const src=await sources(repo,fixture),files=build(src);
   assert.ok(src.concepts.length>=8);
   for(const c of src.concepts){assert.ok(files['public/docs/index.html'].includes(`id="${c.slug}"`));assert.ok(files['public/llms.txt'].includes(c.title));assert.ok(files['public/llms-full.txt'].includes(c.title))}
-  assert.ok(files['public/llms.txt'].includes(`Version ${src.releases[0].version}`));
+  // Versions come from production deploys, so the docs point to /api/devlog instead of a number that goes stale.
+  const newest=JSON.parse(readFileSync(join(repo,'public/devlog.json'),'utf8')).releases[0].version;
+  for(const [f,body] of Object.entries(files)){assert.ok(!body.includes(`Version ${newest}`),f);assert.ok(!/Version \d+\.\d+\.\d+/.test(body),f)}
+  for(const f of ['public/llms.txt','public/llms-full.txt','docs/generated/api.md','public/docs/index.html'])assert.ok(files[f].includes('/api/devlog'),f);
   assert.match(files['skills/flygon-flow/SKILL.md'],/^---\nname: flygon-flow\ndescription: .+\n---\n/);
   assert.match(files['public/docs/docs.css'],/--flygon-green:#7cb980/);
 });

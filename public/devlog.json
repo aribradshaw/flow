@@ -2,6 +2,7 @@
   "scheme": {
     "name": "Bradshaw Versioning",
     "specification": "1.0 draft (October 12, 2026)",
+    "status": "Frozen history. This file is no longer updated. After 0.11.25 each production deploy records one release in Postgres (flygon_flow_devlog_releases, @aribradshaw/devlog deploy-time releases), listing every commit that deploy brought; the newest entry here (0.11.25) is the baseline that numbering continues from. Nothing is committed back to Git.",
     "yearMode": "zero-based",
     "originYear": 2026,
     "timeZone": "America/Phoenix",
@@ -13,7 +14,7 @@
     "admission": "Admission time is when a push first brought the commit to origin/main. Commits in one push are numbered parent before child.",
     "registryCommits": "Every commit on main gets a number, including commits that only update this registry. A registry update cannot know its own commit SHA, so it is recorded by the next update; until then the newest commit on main is assigned but not yet listed.",
     "deployment": "Versions identify source commits only. Deployment records in this public registry begin with public source.",
-    "conformance": "Single-writer registry kept in Git by the release coordinator (not an atomic service); admission times come from the coordinator's push log.",
+    "conformance": "Until it was frozen: single-writer registry kept in Git by the release coordinator (not an atomic service); admission times come from the coordinator's push log. After it: one release per production deploy, recorded atomically in Postgres at server start.",
     "revisions": [
       {
         "at": "2026-10-29T16:15:00-07:00",

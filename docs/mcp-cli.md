@@ -125,9 +125,9 @@ flow refresh                       # refetch the API description
   The OpenAPI cache sits beside it (`openapi-cache.json`, refreshed after an hour (`FLOW_SPEC_TTL`
   seconds), or by `flow refresh`). When the server can't be reached, the cached copy is used. The key
   is never printed. `flow logout` removes it.
-- **Existing tools**: `flow inbox …` runs `tools/inbox.mjs`, `flow devlog …` runs `tools/devlog.mjs`, and
-  `flow workspace …` runs `tools/env.mjs`, with the arguments passed through unchanged. Built-in
-  commands (`login`, `logout`, `env`, `refresh`, `mcp`, `help`, `inbox`, `devlog`, `workspace`) take
+- **Existing tools**: `flow inbox …` runs `tools/inbox.mjs` and `flow workspace …` runs `tools/env.mjs`,
+  with the arguments passed through unchanged. Built-in
+  commands (`login`, `logout`, `env`, `refresh`, `mcp`, `help`, `inbox`, `workspace`) take
   precedence over generated ones.
 - `flow mcp` is a stdio MCP server (newline-delimited JSON-RPC on stdin/stdout, logs on stderr). It
   offers the same tools, built from the cached OpenAPI document, and forwards each call to REST. With a

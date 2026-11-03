@@ -630,20 +630,34 @@ async function mcpRoute(req,res){
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 
-// ---------- DevLog: one page of the release registry at a time (GET /api/devlog?page=N&q=text) ----------
-const DEVLOG_PAGE=10;
-function devlogPage(req,res){
+// ---------- DevLog: GET /api/devlog?page=N&q=text, one page (10) of releases ----------
+// Releases recorded per production deploy (Postgres, lib/devlog-releases.mjs) come first, then the
+// frozen history in public/devlog.json. Page origin only (trusted), no sign-in: DevLog is public product information.
+const devlogMod=await import('./lib/devlog-releases.mjs');
+const devlogHistory=()=>devlogMod.readHistory(join(root,'devlog.json'));
+// Deploy releases change only when a deploy starts, so a minute of caching is plenty.
+let devlogCache={at:0,list:[]};
+async function deployedReleases(){
+  if(Date.now()-devlogCache.at<60000)return devlogCache.list;
+  let list=[];
+  try{const db=await cloud();if(db)list=await (await devlogMod.releaseStore((q,p)=>db.query(q,p))).list({limit:1000})}catch{}
+  devlogCache={at:Date.now(),list};return list;
+}
+async function devlogPage(req,res){
   const u=new URL(req.url,'http://x');if(u.pathname!=='/api/devlog')return false;
   if(!trusted(req)||req.method!=='GET'){res.writeHead(403);res.end();return true}
-  let reg;try{reg=JSON.parse(readFileSync(join(root,'devlog.json'),'utf8'))}catch{json(res,500,{error:'DevLog unavailable'});return true}
-  const q=String(u.searchParams.get('q')||'').trim().toLowerCase().slice(0,100),all=reg.releases||[];
-  // Every word must appear in the version, title, notes or commit (like DevLog's filterDevLogEntries).
-  const hits=q?all.filter(e=>{const hay=[e.version,e.title,e.summary,...(e.notes||[]),e.commit].join(' ').toLowerCase();return q.split(/\s+/).every(w=>hay.includes(w))}):all;
-  const pages=Math.max(1,Math.ceil(hits.length/DEVLOG_PAGE)),page=Math.min(pages,Math.max(1,parseInt(u.searchParams.get('page'))||1));
-  json(res,200,{current:all[0]?.version||'',latest:all[0]?{version:all[0].version,date:all[0].date,title:all[0].title}:null,total:hits.length,page,pages,
-    repository:reg.scheme?.repository||'',scheme:{name:reg.scheme?.name,yearMode:reg.scheme?.yearMode,timeZone:reg.scheme?.timeZone},
-    entries:hits.slice((page-1)*DEVLOG_PAGE,page*DEVLOG_PAGE).map(e=>({version:e.version,date:e.date,title:e.title,notes:e.notes,commit:e.commit,compatibility:e.compatibility,action:e.action}))});
+  json(res,200,devlogMod.devlogResponse({deployed:await deployedReleases(),history:devlogHistory(),page:u.searchParams.get('page'),q:u.searchParams.get('q')}));
   return true;
+}
+// Records this production deploy's release in the background once the server listens. Never
+// blocks or stops startup; one log line either way.
+async function recordDevlog(){
+  try{
+    const ctx=await devlogMod.deployToRecord(process.env);if(!ctx)return;
+    const db=await cloud();if(!db)return;
+    const result=await devlogMod.recordRelease({store:await devlogMod.releaseStore((q,p)=>db.query(q,p)),ctx,history:devlogHistory()});
+    devlogCache.at=0;console.log(devlogMod.describeResult(result));
+  }catch(e){console.error(`DevLog: release recording failed: ${cloudError(e)}`)}
 }
 
 // ---------- user preferences (shortcuts, Settings tab, ...): GET/PUT /api/prefs, own prefs only ----------
@@ -694,7 +708,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
@@ -710,5 +724,6 @@ const host=process.env.HOST||(auth.mode==='opid'?'0.0.0.0':'127.0.0.1');
 if(auth.mode==='local'&&!LOOPBACK.includes(host)){console.error(`Refusing to listen on ${host} in local single-user mode. Set OPID_BASE_URL, OPID_APP_ID, OPID_APP_SECRET and OPID_APP_ORIGIN to serve it publicly with sign-in.`);process.exit(1)}
 let port=Number(process.env.PORT||4317);
 server.on('error',e=>{if(e.code==='EADDRINUSE'&&!process.env.PORT){port++;server.listen(port,host);}else{console.error(e);process.exit(1);}});
+server.once('listening',()=>{setImmediate(()=>recordDevlog().catch(()=>{}))});
 server.on('listening',()=>{const url=auth.mode==='opid'&&!LOOPBACK.includes(host)?`${auth.appOrigin} (listening on ${host}:${server.address().port})`:`http://${host==='::1'?'[::1]':host}:${server.address().port}`;if(!VERIFY&&auth.mode==='local')writeFileSync(new URL('./running.json',import.meta.url),JSON.stringify({url,pid:process.pid}));console.log(`Flygon Flow: ${url} (${auth.mode==='opid'?'OneProfileID sign-in':'local single-user mode'}${auth.mode==='local'&&SYNC_URL&&SYNC_TOKEN?`, syncing with ${SYNC_HOST}`:''})`);});
 server.listen(port,host);

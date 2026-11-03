@@ -36,9 +36,12 @@ node verify.mjs               # end-to-end in headless Edge/Chrome on its own po
 The docs in `public/docs/`, `public/llms*.txt`, `skills/flygon-flow/SKILL.md` and `docs/generated/` are **generated**. Edit their sources instead:
 - the operation registry (`lib/registry.mjs`): summaries, descriptions, schemas, examples
 - `docs/concepts/*.md`: hand-written concepts
-- `public/devlog.json`: releases, recorded automatically after each push to `main` by the DevLog workflow (`tools/devlog-auto.mjs`); pull before you push, and do not edit it by hand
 
 Then run `node tools/docs.mjs` and commit the result.
+
+## Versions
+
+Do not edit `public/devlog.json`: it is frozen history. Each production deploy records its own DevLog release in Postgres at server start, listing the commits it brought, and nothing is committed back. To shape a release note, add `DevLog-Note:`, `DevLog-Compat:` or `DevLog-Action:` trailers to your commit.
 
 ## Data and privacy
 
