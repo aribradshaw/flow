@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons, with their names on hover, and the search field fills the rest of the bar.
+
 - The Backed by OneProfileID badge in the account menu spans the menu's full width.
 
 ## 0.11.19 — 2026-11-02

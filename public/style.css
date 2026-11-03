@@ -634,7 +634,8 @@ dialog.share-modal{width:min(560px,92vw);max-height:88vh}
 body[data-tab=agentflow] #inspector{width:320px}
 .af-bar{gap:6px}
 .af-bar .seg.txt button .i{flex:none}
-#af-q{width:220px;height:28px;font-size:12px}
+#af-q{flex:1;min-width:120px;width:auto;height:28px;font-size:12px}
+.af-bar .seg.txt button{padding:0 7px}
 .txt.primary-txt{display:inline-flex;align-items:center;gap:4px;border-color:var(--primary);background:var(--primary);color:#fff}
 .txt.primary-txt:hover{background:var(--primary-hover)}
 .af-bar>.txt{display:inline-flex;align-items:center;gap:4px;height:28px}
@@ -1069,7 +1070,7 @@ body.split-drag .pane{pointer-events:none}
 @container pane (max-width:620px){#inspector{position:absolute;top:0;right:0;bottom:0;z-index:10;box-shadow:-4px 0 16px #141e1c1a}}
 /* Toolbars and rows in a half-width pane: the same trims as a narrow window. */
 @container pane (max-width:820px){
-  .dv-bar select{max-width:110px}#dv-q{width:110px}.dv-count{display:none}#af-q{width:150px}
+  .dv-bar select{max-width:110px}#dv-q{width:110px}.dv-count{display:none}
   .af-bar{flex-wrap:wrap;height:auto;min-height:40px;padding-top:5px;padding-bottom:5px;row-gap:5px}
   .lr{grid-template-columns:96px 16px minmax(100px,1fr) 16px}.lr .tags,.lr .o{display:none}
 }

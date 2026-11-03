@@ -96,12 +96,12 @@ export function headerHtml(){
   return `<span class="meta" data-tip="${plural(a,'agent')} · ${plural(w,'workflow')}">${a} · ${w}</span>`;
 }
 function toolbar(){
-  const view=(v,ic,label,sc)=>`<button type="button" class="${ui.view===v?'on':''}" data-af="view" data-v="${v}" data-tip="${label}" data-key="${esc(keyLabel(sc))}" aria-pressed="${ui.view===v}">${icon(ic,14)}${label}</button>`;
+  const view=(v,ic,label,sc)=>`<button type="button" class="${ui.view===v?'on':''}" data-af="view" data-v="${v}" data-tip="${label}" data-key="${esc(keyLabel(sc))}" aria-label="${label}" aria-pressed="${ui.view===v}">${icon(ic,14)}</button>`;
   return `<div class="tl-bar af-bar">
     <div class="seg txt" role="group" aria-label="View">${view('org','network','Org chart','agentflow.view1')}${view('workflows','flow','Workflows','agentflow.view2')}</div>
     ${ui.view==='org'?trayButton():''}
     <input id="af-q" type="search" placeholder="Search agents and workflows" value="${esc(ui.q)}" aria-label="Search agents and workflows">
-    ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}<span class="sp"></span>
+    ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
@@ -227,7 +227,7 @@ const jobTip=j=>[j.lastRun?`Last run ${rel(j.lastRun)}: ${JOB_STATUS[j.lastStatu
 const jobCount=()=>(af().runners||[]).reduce((n,r)=>n+(r.jobs?.length||0),0);
 function trayButton(){
   const n=jobCount();
-  return `<button type="button" class="txt af-tray-b${ui.tray?' on':''}" data-af="tray" aria-pressed="${!!ui.tray}" data-tip="${ui.tray?'Hide':'Show'} the jobs your runners reported">${icon('clock',13)}Scheduled${n?`<em>${n}</em>`:''}</button>`;
+  return `<button type="button" class="txt af-tray-b${ui.tray?' on':''}" data-af="tray" aria-pressed="${!!ui.tray}" data-tip="${ui.tray?'Hide':'Show'} scheduled jobs" aria-label="Scheduled jobs${n?`: ${n}`:''}">${icon('clock',13)}${n?`<em>${n}</em>`:''}</button>`;
 }
 const groupOpen=g=>typeof ui.jobGroups?.[g.key]==='boolean'?ui.jobGroups[g.key]:g.jobs.length<=BIG_GROUP;
 const jobKey=(runner,id)=>`${runner.toLowerCase()}\u0001${id}`;
