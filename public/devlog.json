@@ -25,6 +25,48 @@
   },
   "releases": [
     {
+      "version": "0.11.23",
+      "date": "2026-11-02",
+      "title": "Record every push to main in the DevLog automatically",
+      "notes": [
+        "Record every push to main in the DevLog automatically."
+      ],
+      "summary": "Record every push to main in the DevLog automatically.",
+      "sourceSubject": "Record every push to main in the DevLog automatically",
+      "commit": "be75567f0f367ca6b624bf0a184e646b90def9fc",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 76,
+      "admittedAt": "2026-11-02T17:17:53-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
+      "version": "0.11.22",
+      "date": "2026-11-02",
+      "title": "DevLog: 0.11.19-0.11.21",
+      "notes": [
+        "DevLog: 0.11.19-0.11.21."
+      ],
+      "summary": "DevLog: 0.11.19-0.11.21.",
+      "sourceSubject": "DevLog: 0.11.19-0.11.21",
+      "commit": "bfa731eb49fce3c018c3db1f3deeacab017ca927",
+      "author": {
+        "name": "Flow Contributors",
+        "githubLogin": null,
+        "avatarUrl": null,
+        "profileUrl": null
+      },
+      "sequence": 75,
+      "admittedAt": "2026-11-02T17:15:16-07:00",
+      "compatibility": "compatible",
+      "deployments": []
+    },
+    {
       "version": "0.11.21",
       "date": "2026-11-02",
       "title": "Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field",
