@@ -27,8 +27,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUSHED_AT: ${{ github.event.repository.pushed_at }}
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Authored as the repository owner: Railway holds deploys of commits by non-members for approval.
+          git config user.name 'Ari Bradshaw'
+          git config user.email '46178296+aribradshaw@users.noreply.github.com'
+          export GIT_COMMITTER_NAME='github-actions[bot]' GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
           for attempt in 1 2 3 4 5; do
             git fetch -q origin main && git reset -q --hard origin/main
             out=$(node tools/devlog-auto.mjs)
