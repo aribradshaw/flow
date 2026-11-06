@@ -87,3 +87,16 @@ test('PUT /api/workspace: an old client\'s save keeps the stored jobs, and says 
   r=await call('PUT',`/api/workspace?env=${env}`,{baseRev:2,data:got.data});
   assert.equal(r.status,200);assert.equal(r.data.runnersKept,undefined);
 });
+
+test('PUT /api/workspace: a save cannot lower the next card number, and tells the browser to read it back',async()=>{
+  const env='counter-save',ws=n=>({active:'c',charts:[{id:'c',name:'C',nodes:[{id:'n',name:'N',type:'entity',x:0,y:0}],edges:[]}],projects:[],timeline:[],
+    devops:{cards:[],nextNumber:n},environment:{id:env,name:'Counter',visibility:'private',members:[]}});
+  let r=await call('PUT',`/api/workspace?env=${env}`,{baseRev:0,data:ws(50)});
+  assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.countersKept,undefined);
+  r=await call('PUT',`/api/workspace?env=${env}`,{baseRev:1,data:ws(2)});
+  assert.equal(r.status,200);assert.equal(r.data.countersKept,true);
+  const got=(await call('GET',`/api/workspace?env=${env}`)).data;
+  assert.equal(got.data.devops.nextNumber,50);
+  r=await call('PUT',`/api/workspace?env=${env}`,{baseRev:got.rev,data:got.data});
+  assert.equal(r.status,200);assert.equal(r.data.countersKept,undefined,'a save that keeps the number is not flagged');
+});

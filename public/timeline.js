@@ -1,6 +1,6 @@
 import {icon} from './icons.js';
 import {$,esc,ib,uid,clone,download,pickerButton,openPicker,prop,hint} from './ui.js';
-import {store,change,checkpoint,commit,save,PALETTE} from './store.js';
+import {store,change,checkpoint,commit,snapshot,save,PALETTE} from './store.js';
 import {cardsForItem,isOpen} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
@@ -84,7 +84,7 @@ export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openC
     if(e.button!==0||e.target.closest('button'))return;
     const it=e.target.closest('[data-item]'),i=it&&item(it.dataset.item);if(!i)return;
     if(ui.view==='list'){select(i.id);return}
-    drag={id:i.id,end:!!e.target.closest('[data-end]'),sx:e.clientX,sy:e.clientY,s0:i.start,e0:i.end,before:clone(db()),moved:false};
+    drag={id:i.id,end:!!e.target.closest('[data-end]'),sx:e.clientX,sy:e.clientY,s0:i.start,e0:i.end,before:snapshot(),moved:false};
     el.setPointerCapture(e.pointerId);
   });
   // Calendar drops on a day, the Board drops on a status column.

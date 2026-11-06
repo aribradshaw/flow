@@ -4,6 +4,10 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- Undo and redo no longer erase cards or edits that arrived from the server, an agent or another device since your edit, and undo no longer carries over when you switch environments.
+
+- Card numbers are never reused, and many API or MCP writes at once now queue instead of failing with a conflict.
+
 - The DevLog now records one release per production deploy, listing the commits it includes, instead of committing a registry file back to the repository.
 
 - AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons, with their names on hover, and the search field fills the rest of the bar.

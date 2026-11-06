@@ -3,6 +3,7 @@ import {cleanDevops} from './devops-core.js';
 import {starterChart} from './demo-seed.js';
 import {cleanWorkflow} from './workflow.js';
 import {cleanAgentflow} from './agentflow-core.js';
+import {rebaseSnapshots} from './sync-core.js';
 // Persistence, validation and whole-database undo. Charts keep the original v1 schema;
 // projects, timeline, devops and agentflow are additive fields, so older saves load unchanged.
 // The app is now "Flygon Flow", but the storage key keeps its original name on purpose:
@@ -107,8 +108,15 @@ function saveLocal(){
 window.addEventListener('pagehide',()=>{if(backupPending)fetch('/api/backups/'+backupId,{method:'PUT',headers:{'Content-Type':'application/json'},body:backupPending,keepalive:true}).catch(()=>{})});
 
 export function checkpoint(){store.undo.push(clone(store.db));if(store.undo.length>100)store.undo.shift();store.redo=[]}
+// A snapshot held across a drag. If the server's copy arrives before the drag ends the snapshot is out
+// of date and would erase what arrived, so commit() skips that undo step (the drag itself still saves).
+let adoptions=0;const held=new WeakMap();
+export function snapshot(){const s=clone(store.db);held.set(s,adoptions);return s}
 // Record a snapshot taken before a drag, once the drag has actually changed something.
-export function commit(before){store.undo.push(before);if(store.undo.length>100)store.undo.shift();store.redo=[];save()}
+export function commit(before){
+  if(!held.has(before)||held.get(before)===adoptions){store.undo.push(before);if(store.undo.length>100)store.undo.shift()}
+  store.redo=[];save();
+}
 export const validDb=d=>Array.isArray(d?.charts)&&d.charts.length>0&&d.charts.every(validChart);
 // Swap in a whole saved workspace; undoable like any other change.
 export function replaceDb(d){
@@ -118,10 +126,27 @@ export function replaceDb(d){
 export function change(fn){checkpoint();fn();save();store.onChange()}
 // Adopt a modified copy of the database (agent inbox) as one undoable, validated step.
 // Take the server's (or a merged) copy: no undo step and no upload of it again.
-export function adoptRemote(d){d=clone(d);if(!d.charts.some(c=>c.id===d.active))d.active=d.charts[0].id;store.db=normalize(d);store.fresh=false;saveLocal();store.onChange()}
+// Undo and redo keep what arrived (they only take back this browser's own edits); a different
+// environment starts them over, so undo can never write one environment into another.
+export function adoptRemote(d){
+  d=clone(d);if(!d.charts.some(c=>c.id===d.active))d.active=d.charts[0].id;
+  const before=store.db;store.db=normalize(d);adoptions++;
+  if(before?.environment?.id!==store.db.environment?.id){store.undo=[];store.redo=[]}
+  else if(before&&(store.undo.length||store.redo.length)){
+    const after=clone(store.db);
+    store.undo=rebaseSnapshots(store.undo,before,after);store.redo=rebaseSnapshots(store.redo,before,after);
+  }
+  store.fresh=false;saveLocal();store.onChange();
+}
 export function applyDb(next){checkpoint();store.db=normalize(next);save();store.onChange()}
 export function step(dir){
   const [from,to]=dir<0?[store.undo,store.redo]:[store.redo,store.undo];
   if(!from.length)return;
-  to.push(clone(store.db));store.db=from.pop();save();store.onChange();
+  const next=store.db.devops?.nextNumber;
+  to.push(clone(store.db));store.db=clone(from.pop());
+  // The chart it had open may have been deleted elsewhere since.
+  if(!store.db.charts.some(c=>c.id===store.db.active))store.db.active=store.db.charts[0].id;
+  // A number already handed out stays used, even if the card that took it is undone away.
+  if(store.db.devops&&Number.isInteger(next))store.db.devops.nextNumber=Math.max(next,store.db.devops.nextNumber||1);
+  save();store.onChange();
 }

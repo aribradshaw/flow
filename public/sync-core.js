@@ -52,6 +52,17 @@ function mergeById(b,l,r){
   });
   return out;
 }
+// Undo snapshots are whole workspaces, so a change from the server must be carried into each of them
+// or undo would erase it. Replays before -> after onto every snapshot with the same merge rules; when
+// both changed a field, what arrived wins, so undo never brings back a value someone has since replaced.
+// Results may share objects with after and with each other: treat them as read-only (clone on use).
+export const rebaseSnapshots=(snapshots,before,after)=>same(before,after)?snapshots:snapshots.map(s=>merge3(before,after,s));
+// Card numbers only grow: returns incoming with the next number raised to stored's if it was lower.
+export function keepCounters(stored,incoming){
+  const have=stored?.devops?.nextNumber,got=incoming?.devops?.nextNumber;
+  if(!Number.isInteger(have)||!incoming?.devops||(Number.isInteger(got)&&got>=have))return incoming;
+  return {...incoming,devops:{...incoming.devops,nextNumber:have}};
+}
 // How much a workspace holds (cards, connections, projects, items, DevOps cards, AgentFlow agents and workflows).
 export function size(d){
   if(!d)return 0;

@@ -19,7 +19,8 @@ async function loadStore(){
     .replace("from './devops-core.js'",`from ${JSON.stringify(new URL('devops-core.js',pub).href)}`)
     .replace("from './demo-seed.js'",`from ${JSON.stringify(new URL('demo-seed.js',pub).href)}`)
     .replace("from './workflow.js'",`from ${JSON.stringify(new URL('workflow.js',pub).href)}`)
-    .replace("from './agentflow-core.js'",`from ${JSON.stringify(new URL('agentflow-core.js',pub).href)}`);
+    .replace("from './agentflow-core.js'",`from ${JSON.stringify(new URL('agentflow-core.js',pub).href)}`)
+    .replace("from './sync-core.js'",`from ${JSON.stringify(new URL('sync-core.js',pub).href)}`);
   writeFileSync(join(dir,'store.mjs'),src);
   try{return await import(pathToFileURL(join(dir,'store.mjs')).href)}finally{rmSync(dir,{recursive:true,force:true})}
 }

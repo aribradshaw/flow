@@ -536,6 +536,23 @@ test('writes are revision-checked: a concurrent save is merged, not overwritten'
   assert.equal((await store.get('bob-public')).visibility,'public');assert.equal((await store.get('bob-public')).name,w.name);
 });
 
+test('20 parallel creates and a concurrent edit all persist, each with its own number',async()=>{
+  const first=await op('cards.create',{env:ENV,title:'Edited meanwhile'});assert.equal(first.status,201);
+  // The file store answers at once; a pause makes these reads overlap the way Postgres reads do.
+  const get=store.get.bind(store);store.get=async id=>{const w=await get(id);await new Promise(r=>setTimeout(r,2));return w};
+  try{
+  const creates=Array.from({length:20},(_,i)=>op('cards.create',{env:ENV,title:`Parallel ${i}`}));
+  const edit=op('cards.update',{env:ENV,card:first.body.card.number,description:'Kept'});
+  const out=await Promise.all(creates);
+  assert.equal((await edit).status,200);
+  assert.deepEqual(out.map(r=>r.status),Array(20).fill(201));
+  const cards=(await store.get(ENV)).data.devops.cards;
+  for(const r of out)assert.ok(cards.some(c=>c.id===r.body.card.id),`${r.body.card.title} is saved`);
+  assert.equal(cards.find(c=>c.id===first.body.card.id).description,'Kept');
+  assert.equal(new Set(out.map(r=>r.body.card.number)).size,20,'no number is handed out twice');
+  }finally{store.get=get}
+});
+
 test('invoke() works without HTTP (MCP / CLI path)',async()=>{
   const ctx={user:OWNER,store,envCheck:envCheckFor(store)};
   const r=await invoke('cards.get',{env:ENV,card:1},ctx);assert.equal(r.card.number,1);

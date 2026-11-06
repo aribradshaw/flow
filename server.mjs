@@ -35,7 +35,7 @@ const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
 auth.useSessionStore(sessionStore({db:()=>cloud(),max:auth.SESSION_MAX}));
-const {shrinks,size}=await import('./public/sync-core.js');
+const {shrinks,size,keepCounters}=await import('./public/sync-core.js');
 const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
 const appHost=auth.appOrigin?new URL(auth.appOrigin).host:'';
@@ -367,14 +367,16 @@ async function workspace(req,res){
         // Runners are the server's (only runners.report changes them): a save never drops or rolls back
         // what a runner reported, e.g. a tab running older code that saves runners without their jobs.
         const kept=carryRunners(w?.data,incoming);
-        const data={...kept.data,environment:{...(kept.data.environment||{}),id:envId,ownerEmail:owner}};
+        // Card numbers only grow. A browser that sent a lower one reads the workspace back (below).
+        const counted=keepCounters(w?.data,kept.data);
+        const data={...counted,environment:{...(kept.data.environment||{}),id:envId,ownerEmail:owner}};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80)});
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
         // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
         if(!user.token)await applyRecipientSave(envId,user,body.data).catch(e=>console.error('share write-back failed',e?.message));
         const v=user.token?{shared:''}:await withShares(envId,user,data);
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{})});
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;

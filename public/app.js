@@ -1,6 +1,6 @@
 import {icon} from './icons.js';
 import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice} from './ui.js';
-import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
+import {store,chart,change,checkpoint,commit,snapshot,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
 import * as af from './agentflow.js';
@@ -426,12 +426,12 @@ canvas.onpointerdown=e=>{
   if(el&&e.button===0){
     const id=el.dataset.node,n=node(id);
     if(connecting){if(!source){source=id;renderCanvas()}else if(source!==id)connectTo(source,id);return}
-    if(e.target.closest('[data-grip]')){const [w,h]=size(n);drag={mode:'resize',id,...start,w,h,before:clone(store.db)}}
+    if(e.target.closest('[data-grip]')){const [w,h]=size(n);drag={mode:'resize',id,...start,w,h,before:snapshot()}}
     else if(e.target.closest('[data-port]')){drag={mode:'link',id,...start}}
     else{
       // An area carries along every card that sits fully inside it.
       const r=rect(n),inside=n.type==='area'?chart().nodes.filter(m=>m.id!==id&&(q=>q.x>=r.x&&q.y>=r.y&&q.x+q.w<=r.x+r.w&&q.y+q.h<=r.y+r.h)(rect(m))).map(m=>({id:m.id,x:m.x,y:m.y})):[];
-      drag={mode:'move',id,...start,x:n.x,y:n.y,inside,before:clone(store.db)};
+      drag={mode:'move',id,...start,x:n.x,y:n.y,inside,before:snapshot()};
     }
     if(selected!==id){selected=id;renderCanvas();renderInspector()}
   }else if(edgeEl&&e.button===0){selected=edgeEl.dataset.edge;render();return}
