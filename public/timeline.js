@@ -407,7 +407,7 @@ function itemHtml(i){
   const releases=db().timeline.filter(r=>r.kind==='release'&&r.id!==i.id).sort((a,b)=>(b.projects.some(p=>i.projects.includes(p))-a.projects.some(p=>i.projects.includes(p)))||(a.start||'9999').localeCompare(b.start||'9999'));
   const inRelease=i.kind==='release'?db().timeline.filter(x=>x.release===i.id):[],linked=cardsForItem(db(),i.id);
   return `<div class="ihead cd-h"><span class="k" style="color:${color(i)}">${icon(k.icon)}</span><strong>${k.label}</strong><span class="sp"></span>
-    ${ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})}${ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
+    ${ib('check',i.status==='done'?`Reopen (now ${statusInfo('done').label})`:`Mark ${statusInfo('done').label}`,{key:keyLabel('timeline.complete'),cls:i.status==='done'?'on':'',attrs:'data-ti="complete"'})}${ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})}${ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
     <form id="tedit" class="ti-body ti-form" autocomplete="off">
     <div class="ibody ti-top"><label for="ti-title">Title</label><input id="ti-title" class="cd-title" maxlength="200" required value="${esc(i.title)}">
       <div class="ti-sets">${setField('kind','Type',Object.entries(KINDS),i.kind)}${setField('status','Status',statusEntries(),i.status)}${setField('priority','Priority',Object.entries(PRIORITY).map(([v,x])=>[v,{...x,word:x.label.split(' ')[0]}]),i.priority)}</div></div>
@@ -453,7 +453,7 @@ export function inspectorClick(e){
     ask(`Delete project "${p.name}"?
 It will be removed from ${n} item${n===1?'':'s'}. You can undo this.`,{ok:'Delete',danger:true}).then(ok=>{if(ok)drop()});return;
   }
-  ({dup:()=>duplicate(selected),delete:()=>remove(selected),close:()=>select(null),
+  ({complete:()=>toggleDone(selected),dup:()=>duplicate(selected),delete:()=>remove(selected),close:()=>select(null),
     padd(){const v=$('#pnew').value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}})[b.dataset.ti]?.();
 }
 // Fields autosave as you type, one undo step per open form.
@@ -488,10 +488,13 @@ export function inspectorKey(e){
   if(e.target.id==='ti-proj'){e.preventDefault();addTag(e.target)}
   if(e.target.id==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
 }
+// Mark done, or reopen a done item as planned.
+const toggleDone=id=>{const i=item(id);if(i)change(()=>i.status=i.status==='done'?'planned':'done')};
 export function key(e){
   if(e.key==='Escape'){selected=null;rerender();return}
   if(matches(e,'timeline.delete')&&item(selected)){e.preventDefault();remove(selected);return}
   if(matches(e,'timeline.duplicate')&&item(selected)){e.preventDefault();duplicate(selected);return}
+  if(matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return}
   if(matches(e,'timeline.add')){e.preventDefault();add()}
   else if(matches(e,'timeline.today'))goToday();
   else{const v=[1,2,3,4].find(n=>matches(e,'timeline.view'+n));if(v){ui.view=VIEWS[v-1];jump=true;keepUi();renderView()}}

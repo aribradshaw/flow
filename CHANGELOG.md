@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- Timeline items can be marked done with one click in their panel, or D. Done and cancelled items now grey out and fade in every view, so finished work no longer looks active.
+
 - Undo and redo no longer erase cards or edits that arrived from the server, an agent or another device since your edit, and undo no longer carries over when you switch environments.
 
 - Card numbers are never reused, and many API or MCP writes at once now queue instead of failing with a conflict.

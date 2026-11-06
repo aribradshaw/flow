@@ -73,7 +73,7 @@ The free-form canvas of cards and connections (the API calls each mind map a *ch
 - Projects are coloured tags managed from the tag icon. MindMap entity and area names are offered as suggestions.
 - Views (1 · 2 · 3): **Timeline** (Gantt always spanning at least ~15 months ahead, rows grouped by project, type or status; week / month / quarter zoom), **Calendar** (month grid), **List** (by month, overdue in red).
 - Drag items to reschedule; drag a bar's right end to change its length. Double-click a row or calendar day to add an item there. N adds, T jumps to today.
-- Filter by project and hide done items from the toolbar. Export .ics (respects filters) for Google/Outlook/Apple Calendar.
+- Mark an item done with the check button in its panel, or D when it's selected. Done and cancelled items turn grey and fade in every view. Filter by project and hide done items from the toolbar. Export .ics (respects filters) for Google/Outlook/Apple Calendar.
 - **Product management.** Projects can sit under a mind map entity or area (Projects panel › "Under …", or the folder+ button in the MindMap strip). Features are an item type with priority (high / medium / low) and a target release; a release lists the items targeting it and how many are done. Items may be left without a date: they are backlog and appear only on the Board and List.
 - **Board** (4): a kanban with one column per status; drag cards between columns to change status, + on a column (or double-click it) to add a feature there. Cards sort by priority, then date.
 - Selecting an entity on the MindMap shows every project under it in the strip: project chips (open that project), next-up item, backlog count (opens the Board), new project, add item, Board and Timeline shortcuts.
