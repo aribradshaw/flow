@@ -259,7 +259,20 @@ try{
   await key('d',68,0,'d');await sleep(200);db=await saved();
   assert(db.timeline.find(i=>i.id===f.id).status==='planned','D in a text field just types');
   await js(`document.activeElement.blur()`);
+  await key('Escape',27);await sleep(250);
+  // An item whose linked cards are all done suggests closing it, and never closes itself.
+  await js(`(async()=>{const s=await import('/store.js'),c=await import('/devops-core.js');s.change(()=>{c.newCard(s.store.db.devops,{title:'QA ready card',item:'${f.id}',column:'done'})})})()`);await sleep(200);
+  db=await saved();
+  assert(db.timeline.find(i=>i.id===f.id).status==='planned','finishing an item\'s cards does not close it on its own');
+  [x,y]=await center(`.card[data-item="${f.id}"]`);await mouse('mousePressed',x,y);await mouse('mouseReleased',x,y);await sleep(250);
+  assert(await js(`document.querySelector('.ti-ready')?.textContent.includes('only card')`),'an open item with all its cards done asks whether it is complete');
+  await js(`document.querySelector('.ti-ready [data-ti=complete]').click()`);await sleep(150);
+  db=await saved();
+  assert(db.timeline.find(i=>i.id===f.id).status==='done'&&await js(`!document.querySelector('.ti-ready')`),'the prompt marks it done and goes away');
+  await js(`document.querySelector('[data-ti=complete]').click()`);await sleep(150);
+  assert(await js(`!!document.querySelector('.ti-ready')`),'reopening brings the prompt back');
   await key('Escape',27);await sleep(200);
+  await js(`(async()=>{const s=await import('/store.js');s.change(()=>{const d=s.store.db.devops;d.cards=d.cards.filter(c=>c.title!=='QA ready card')})})()`);await sleep(200);
   [x,y]=await center(`.card[data-item="${f.id}"]`);const [ax,ay]=await center('[data-col=active] .col-b');await drag(x,y,ax,ay);
   await js(`document.querySelector('.card[data-item="${moved.id}"]')?.click()`);
   [x,y]=await center(`.card[data-item="${moved.id}"]`);await mouse('mousePressed',x,y);await mouse('mouseReleased',x,y);

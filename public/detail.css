@@ -55,6 +55,8 @@ dialog.card-modal,dialog.item-modal{overflow:hidden}
 .ti-body.ti-form{display:flex;flex-direction:column;padding:0}
 .ti-form>.cd-grid{flex:none;overflow:visible;border-top:1px solid var(--line)}
 .ti-top{flex:none;padding:0 20px 10px}
+.ti-ready{flex:none;display:flex;align-items:center;gap:8px;margin:10px 20px 2px;padding:7px 8px 7px 10px;border:1px solid var(--accent-line);border-radius:6px;background:var(--accent-2);font-size:13px}
+.ti-ready span{flex:1;min-width:0}
 .ti-top>label{margin-top:8px}
 .ti-sets{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:2px}
 .ti-set{min-width:0}

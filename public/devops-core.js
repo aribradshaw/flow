@@ -125,6 +125,13 @@ export function dueTone(card,today){
   return (Date.parse(card.due)-Date.parse(today))/864e5<=2?'soon':'';
 }
 export const cardsForItem=(db,itemId)=>db.devops.cards.filter(c=>c.item===itemId);
+// A timeline item still open whose linked cards are all done. Flow only suggests closing it: an item can
+// involve more than its cards. Returns how many cards it has, 0 when it is not ready.
+export function readyToClose(db,item){
+  if(item.status==='done'||item.status==='cancelled')return 0;
+  const cards=cardsForItem(db,item.id);
+  return cards.length&&!cards.some(isOpen)?cards.length:0;
+}
 export const openCardsFor=(db,{person,entity}={})=>filterCards(db,{assignee:person,entity,hideDone:true});
 export const initials=name=>String(name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0].toUpperCase()).join('')||'?';
 const KEYS=Object.keys(COLORS);

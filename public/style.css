@@ -233,7 +233,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 :is(.ti,.chip,.lr,.card):is(.s-done,.s-cancelled):hover{opacity:1;filter:none}
 .ti.s-cancelled .nm{text-decoration:line-through}
 .ti.late:not(.s-active) .nm,.ti.late.out .nm{color:var(--danger)}
-.smark{display:inline-flex}.smark.risk{color:var(--warn)}.smark.blocked{color:var(--danger)}.smark.done{color:#3f7a44}
+.smark{display:inline-flex}.smark.risk{color:var(--warn)}.smark.blocked{color:var(--danger)}.smark.done{color:#3f7a44}.smark.ready{color:#fff;background:#3f7a44;border-radius:50%;padding:1px}
 .ti.bar.s-active .smark{color:#fff}
 
 .cal{display:flex;flex-direction:column;min-height:100%}

@@ -1,7 +1,7 @@
 import {icon} from './icons.js';
 import {$,esc,ib,uid,clone,download,pickerButton,openPicker,prop,hint} from './ui.js';
 import {store,change,checkpoint,commit,snapshot,save,PALETTE} from './store.js';
-import {cardsForItem,isOpen} from './devops-core.js';
+import {cardsForItem,isOpen,readyToClose} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
 import {panel} from './motion.js';
@@ -58,9 +58,10 @@ const releaseOf=i=>i.kind!=='release'&&i.release?item(i.release):null;
 function itemTip(i){
   const names=i.projects.map(p=>project(p)?.name).filter(Boolean),days=dated(i)?span(i)[1]-span(i)[0]+1:0,rel=releaseOf(i);
   return [i.title,`${KINDS[i.kind].label} · ${dateLabel(i)}${days>1?` · ${days} days`:''}`,statusInfo(i.status).label+(late(i)?' · overdue':'')+(i.priority?` · ${PRIORITY[i.priority].label}`:''),
-    rel&&`Target: ${rel.title}${dated(rel)?` (${fmt(rel.start)})`:''}`,names.join(', '),i.owner&&`Owner: ${i.owner}`].filter(Boolean).join('\n');
+    i.kind!=='card'&&readyToClose(db(),i)&&'All its cards are done: ready to mark complete',rel&&`Target: ${rel.title}${dated(rel)?` (${fmt(rel.start)})`:''}`,names.join(', '),i.owner&&`Owner: ${i.owner}`].filter(Boolean).join('\n');
 }
-const statusMark=i=>['risk','blocked','done'].includes(i.status)?`<span class="smark ${i.status}">${icon(STATUS[i.status].icon,11)}</span>`:'';
+const statusMark=i=>['risk','blocked','done'].includes(i.status)?`<span class="smark ${i.status}">${icon(STATUS[i.status].icon,11)}</span>`
+  :i.kind!=='card'&&readyToClose(db(),i)?`<span class="smark ready">${icon('check',11)}</span>`:'';
 // Chart cards that can own projects: entities and areas, across every chart.
 const cards=()=>{const seen=new Map();for(const c of db().charts)for(const n of c.nodes)if((n.type==='entity'||n.type==='area')&&!seen.has(n.id))seen.set(n.id,n);return [...seen.values()]};
 const cardName=id=>cards().find(n=>n.id===id)?.name||'';
@@ -409,6 +410,7 @@ function itemHtml(i){
   return `<div class="ihead cd-h"><span class="k" style="color:${color(i)}">${icon(k.icon)}</span><strong>${k.label}</strong><span class="sp"></span>
     ${ib('check',i.status==='done'?`Reopen (now ${statusInfo('done').label})`:`Mark ${statusInfo('done').label}`,{key:keyLabel('timeline.complete'),cls:i.status==='done'?'on':'',attrs:'data-ti="complete"'})}${ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})}${ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
     <form id="tedit" class="ti-body ti-form" autocomplete="off">
+    ${readyToClose(db(),i)?`<div class="ti-ready" role="status">${icon('check',14)}<span>${linked.length===1?'Its only card is':`All ${linked.length} of its cards are`} done. Is this complete?</span><button type="button" class="txt" data-ti="complete">Mark ${esc(statusInfo('done').label)}</button></div>`:''}
     <div class="ibody ti-top"><label for="ti-title">Title</label><input id="ti-title" class="cd-title" maxlength="200" required value="${esc(i.title)}">
       <div class="ti-sets">${setField('kind','Type',Object.entries(KINDS),i.kind)}${setField('status','Status',statusEntries(),i.status)}${setField('priority','Priority',Object.entries(PRIORITY).map(([v,x])=>[v,{...x,word:x.label.split(' ')[0]}]),i.priority)}</div></div>
     <div class="cd-grid"><div class="cd-main ibody">
