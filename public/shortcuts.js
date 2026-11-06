@@ -26,7 +26,7 @@ export const SHORTCUTS=[
   {id:'timeline.view2',scope:'timeline',keys:['2'],desc:'Calendar view'},
   {id:'timeline.view3',scope:'timeline',keys:['3'],desc:'List view'},
   {id:'timeline.view4',scope:'timeline',keys:['4'],desc:'Board view'},
-  {id:'timeline.complete',scope:'timeline',keys:['D'],desc:'Mark the selected item done, or reopen it'},
+  {id:'timeline.complete',scope:'timeline',keys:['D'],desc:'Mark the open item done, or reopen it'},
   {id:'timeline.duplicate',scope:'timeline',keys:['Mod+D'],desc:'Duplicate the selected item'},
   {id:'timeline.delete',scope:'timeline',keys:['Delete','Backspace'],desc:'Delete the selected item'},
   {id:'devops.add',scope:'devops',keys:['N'],desc:'New card in Requests / Sprinted'},

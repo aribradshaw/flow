@@ -251,6 +251,14 @@ try{
   await js(`document.querySelector('[data-ti=complete]').click()`);await sleep(150);
   db=await saved();
   assert(db.timeline.find(i=>i.id===f.id).status==='planned','the same button reopens it');
+  await key('d',68,0,'d');await sleep(200);db=await saved();
+  assert(db.timeline.find(i=>i.id===f.id).status==='done','D marks the open item done');
+  await key('d',68,0,'d');await sleep(200);db=await saved();
+  assert(db.timeline.find(i=>i.id===f.id).status==='planned','D reopens it');
+  await js(`document.querySelector('#ti-title').focus()`);
+  await key('d',68,0,'d');await sleep(200);db=await saved();
+  assert(db.timeline.find(i=>i.id===f.id).status==='planned','D in a text field just types');
+  await js(`document.activeElement.blur()`);
   await key('Escape',27);await sleep(200);
   [x,y]=await center(`.card[data-item="${f.id}"]`);const [ax,ay]=await center('[data-col=active] .col-b');await drag(x,y,ax,ay);
   await js(`document.querySelector('.card[data-item="${moved.id}"]')?.click()`);

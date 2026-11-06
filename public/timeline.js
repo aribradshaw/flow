@@ -484,6 +484,8 @@ export function inspectorChange(e){
   if(t.dataset.punder){const p=project(t.dataset.punder);if(p)change(()=>p.entity=t.value)}
 }
 export function inspectorKey(e){
+  // The item panel keeps its keys to itself, so its shortcut is handled here. Letters still type in its fields.
+  if(!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return}
   if(e.key!=='Enter')return;
   if(e.target.id==='ti-proj'){e.preventDefault();addTag(e.target)}
   if(e.target.id==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
@@ -494,7 +496,7 @@ export function key(e){
   if(e.key==='Escape'){selected=null;rerender();return}
   if(matches(e,'timeline.delete')&&item(selected)){e.preventDefault();remove(selected);return}
   if(matches(e,'timeline.duplicate')&&item(selected)){e.preventDefault();duplicate(selected);return}
-  if(matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return}
+  if(matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return} // focus left the open panel
   if(matches(e,'timeline.add')){e.preventDefault();add()}
   else if(matches(e,'timeline.today'))goToday();
   else{const v=[1,2,3,4].find(n=>matches(e,'timeline.view'+n));if(v){ui.view=VIEWS[v-1];jump=true;keepUi();renderView()}}
