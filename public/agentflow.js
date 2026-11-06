@@ -1,14 +1,14 @@
 import {icon,makerIcon} from './icons.js';
-import {$,esc,ib,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed} from './ui.js';
+import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed} from './ui.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {ask} from './modal.js';
+import {ask,detailModal} from './modal.js';
 import {openMenu,menuOpen} from './menu.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {clone} from './ui.js';
-import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,descendants,chainOf,
+import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,rootsOf,setupSteps,JOBS_STALE,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
-  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,
+  canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem,modelChoices,modelMaker,
   jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,JOB_ORIGINS,JOB_TRIGGERS,cardH} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
 
@@ -93,7 +93,7 @@ export function focus({agentId,workflowId}={}){
 // ---------- header, toolbar and views ----------
 export function headerHtml(){
   const a=af().agents.length,w=af().workflows.length;
-  return `<span class="meta" data-tip="${plural(a,'agent')} · ${plural(w,'workflow')}">${a} · ${w}</span>`;
+  return `<span class="meta">${plural(a,'agent')} · ${plural(w,'workflow')}</span>`;
 }
 function toolbar(){
   const view=(v,ic,label,sc)=>`<button type="button" class="${ui.view===v?'on':''}" data-af="view" data-v="${v}" data-tip="${label}" data-key="${esc(keyLabel(sc))}" aria-label="${label}" aria-pressed="${ui.view===v}">${icon(ic,14)}</button>`;
@@ -146,7 +146,7 @@ function nodeHtml(a,p,hits){
     <i class="af-st" data-tip="Status: ${status}"></i>
     <div class="af-n-head"><span class="af-avw">${avatar}${sup&&!me?faceHtml(faceOf(sup),'af-sup',`Supervised by ${sup.name}`):''}</span><div class="af-n-id"><span class="nm" data-tip="${esc(a.name)}">${esc(a.name)}</span>
       <span class="af-n-role${a.title?'':' none'}"${a.title?` data-tip="${esc(a.title)}"`:''}>${esc(a.title||kind)}</span></div></div>
-    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${esc(glyph)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span>${sched?`<i class="af-clk">${icon('clock',11)}</i>`:''}</div>`:''}
+    ${a.kind==='agent'?`<div class="af-n-run${run?'':' none'}${why?' warn':''}" data-tip="${esc(runTip)}">${live?`<b>Live</b>`:''}${glyph?`<i class="af-g" style="background:${gb};color:${gf}">${icon(rt?'server':'cpu',10)}</i>`:''}<span>${esc(run||'No runner or model yet')}</span>${sched?`<i class="af-clk">${icon('clock',11)}</i>`:''}</div>`:''}
     <div class="af-n-foot"><span class="af-n-stats"><span data-tip="${plural(a.inputs.length,'input')} → ${plural(a.outputs.length,'output')}">${icon('arrowR',11)}${a.inputs.length}/${a.outputs.length}</span>
       ${flows?`<span data-tip="In ${plural(flows,'workflow')}">${icon('flow',11)}${flows}</span>`:''}
       ${open?`<span data-tip="${plural(open,'open card')}">${icon('branch',11)}${open}</span>`:''}
@@ -615,7 +615,7 @@ function agentMenu(at,id){
     {label:'Status',icon:'dot',items:Object.entries(AGENT_STATUS).map(([k,n])=>({label:n,checked:a.status===k,run:()=>setOn(get,'status',k)}))},
     {label:'Reports to',icon:'network',items:[{label:'Nobody (top level)',checked:!a.reportsTo,run:()=>setOn(get,'reportsTo','')},
       ...shown.map(x=>({label:x.name,icon:KIND_ICON[x.kind],checked:x.id===a.reportsTo,run:()=>setOn(get,'reportsTo',x.id)})),
-      ...(ok.length>shown.length?['-',{label:'More in the side panel…',run(){ui.sec={...ui.sec,identity:true};keepUi();select('agent',id);requestAnimationFrame(()=>$('#af-reports')?.click())}}]:[])]},
+      ...(ok.length>shown.length?['-',{label:'More in the side panel…',run(){ui.tab='org';keepUi();select('agent',id);requestAnimationFrame(()=>$('#af-reports')?.click())}}]:[])]},
     {label:'Add to workflow',icon:'flow',items:[...flows,...(flows.length?['-']:[]),{label:'New workflow starting here',icon:'plus',run:()=>addWorkflow(id)}]},
     '-',
     {label:q?`Open work queue (${q})`:'Open work queue',icon:'branch',run:()=>openQueue(id)},
@@ -662,9 +662,11 @@ function flowMenu(at,id){
 }
 
 // ---------- side panel (shared #inspector) ----------
-// The selection's header (avatar, name, status, Live), then collapsible sections. Which sections
-// are open is remembered in ui.sec (localStorage); favourite models in ui.fav.
-const SEC_OPEN={identity:true,run:true,sched:true,work:true,instr:false,links:false,team:true,setup:true,steps:true};
+// A sticky block (header, name, role, Live, kind, status, setup, warnings, tab bar), then the tabs of
+// an agent, or a workflow's steps. All tab panels are in the DOM, hidden when inactive, so every field
+// id stays. Remembered in localStorage: the active tab in ui.tab, open sections in ui.sec, favourite
+// models in ui.fav.
+const SEC_OPEN={links:false};
 const secOpen=k=>typeof ui.sec?.[k]==='boolean'?ui.sec[k]:SEC_OPEN[k]??true;
 function sec(k,ic,title,body,meta=''){
   const open=secOpen(k);
@@ -683,16 +685,30 @@ function avatarHtml(a){
 }
 // A picker or button lead for an agent: a human's face photo, else its kind icon.
 const agentAv=x=>{const f=humanFace(x);if(!f?.src)return null;const [bg,fg]=memberColor(f.id);return {text:initials(f.name),bg,fg,img:f.src}};
-// Status as coloured pills (one click each) for agents and workflows.
-const statusPills=(cur,names)=>`<div class="af-pills" role="group" aria-label="Status">${Object.entries(names).map(([k,n])=>{const [bg,fg]=colorOf(STATUS_TONE[k]||'slate');
-  return `<button type="button" class="af-pill${cur===k?' on':''}" id="af-st-${k}" data-af-status="${k}" aria-pressed="${cur===k}" style="--pb:${bg};--pf:${fg}"><i></i>${esc(n)}</button>`}).join('')}</div>`;
+// Status as a one-click choice with a coloured dot, for agents and workflows.
+const statusChoice=(cur,names,tips)=>choice('af-status',Object.entries(names).map(([k,n])=>({value:k,label:n,tip:`${n}: ${tips[k]}`,lead:`<i class="dot" style="--pf:${colorOf(STATUS_TONE[k]||'slate')[1]}"></i>`})),cur,{label:'Status',idp:'af-st'});
 // A single-select picker trigger (ui.js openPicker) that shows the current choice.
 const selBtn=(key,label,text,lead='',{none=false,disabled=false}={})=>`<button type="button" class="pk-btn af-sel${none?' none':''}" id="${key}" data-picker="${key}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}" aria-label="${esc(`${label}: ${text}`)}"${disabled?' disabled':''}>${lead}<span class="pk-t">${esc(text)}</span>${icon('chevD',12)}</button>`;
-// Inputs, outputs and tools: chips with ×, and an inline field that adds on Enter.
-function chips(key,label,ic,hint,values){
-  const one=label.toLowerCase().replace(/s$/,'');
-  return `<div class="af-chips-l"><label for="af-new-${key}">${icon(ic,12)}${label}</label><em>${hint}</em></div>
-    <div class="af-chips">${values.map((v,i)=>`<span class="af-chip"><span>${esc(v)}</span><button type="button" data-af-del="${key}" data-i="${i}" aria-label="${esc(`Remove ${one}: ${v}`)}">${icon('x',10)}</button></span>`).join('')}<input id="af-new-${key}" maxlength="200" placeholder="${values.length?'Add…':`Add ${one}, then Enter`}" aria-label="New ${one}"></div>`;
+// Inputs, outputs and tools: chips with ×, and an inline field that adds on Enter. The full text is
+// in the chip's tip and in its remove button's name.
+const chipHtml=(key,one,v,i)=>`<span class="af-chip" data-tip="${esc(v)}"><span>${esc(v)}</span><button type="button" id="af-del-${key}-${i}" data-af-del="${key}" data-i="${i}" data-tip="${esc(`Remove ${one}: ${v}`)}" aria-label="${esc(`Remove ${one}: ${v}`)}">${icon('x',10)}</button></span>`;
+const newChip=(key,one,placeholder)=>`<input id="af-new-${key}" maxlength="200" placeholder="${placeholder}" aria-label="New ${one}">`;
+// What goes in, the agent, what comes out: two columns of chips joined by CSS connectors.
+function pipelineHtml(a){
+  const they=a.kind==='human'||a.kind==='team';
+  const head=(key,label,ic,tip)=>`<div class="af-ph af-ph-${key}"><label for="af-new-${key}">${icon(ic,12)}${label}</label>${hint(tip,label)}</div>`;
+  // An empty column has just its add field, on the connector.
+  const add=(key,one)=>`<div class="af-padd af-padd-${key}">${newChip(key,one,`Add ${one}`)}</div>`;
+  const list=(key,one,values)=>`<div class="af-plist af-plist-${key}">${values.map((v,i)=>chipHtml(key,one,v,i)).join('')||add(key,one)}</div>`;
+  return `<div class="af-pipe">
+    ${head('inputs','Inputs','inbox',they?'What they take in':'What it takes in')}${head('outputs','Outputs','send',they?'What they produce':'What it produces')}
+    ${list('inputs','input',a.inputs)}<div class="af-pmid" aria-hidden="true"><span>${icon(KIND_ICON[a.kind],13)}</span></div>${list('outputs','output',a.outputs)}
+    ${a.inputs.length?add('inputs','input'):''}${a.outputs.length?add('outputs','output'):''}</div>`;
+}
+function toolsHtml(a){
+  const they=a.kind==='human'||a.kind==='team';
+  return `<div class="af-ph af-ph-tools"><label for="af-new-tools">${icon('wrench',12)}Tools</label>${hint(they?'What they may use':'What it may use','Tools')}</div>
+    <div class="af-chips">${a.tools.map((v,i)=>chipHtml('tools','tool',v,i)).join('')}${newChip('tools','tool',a.tools.length?'Add…':'Add tool, then Enter')}</div>`;
 }
 const projectItems=()=>db().projects.map(p=>({value:p.id,label:p.name,color:p.color}));
 const cardItems=()=>db().devops.cards.map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
@@ -708,50 +724,123 @@ function linksHtml(x){
 }
 // The candidates for Reports to: not itself and not one of its own reports.
 const managersFor=a=>af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).has(x.id)).sort(byName);
+const WORDS={agent:{purpose:'What this agent is responsible for',instr:'System prompt or runbook'},
+  human:{purpose:'What this person is responsible for',instr:'How this person works, or a runbook'},
+  team:{purpose:'What this team is responsible for',instr:'How this team works, or a runbook'},
+  automation:{purpose:'What this automation does',instr:'Runbook: what it runs and what to check'}};
+const KIND_TIP={agent:'AI agent: works cards through a runner',human:'Human: a person in the org',team:'Team: a group with its own reports',automation:'Automation: a scripted job without AI, on its own schedule'};
+const STATUS_TIP={draft:'still being set up',active:'in use',paused:'on hold',retired:'no longer used'};
+const AI_STATUS_TIP={...STATUS_TIP,paused:'on hold. A label only: runners go by Live',retired:'no longer used. A label only: runners go by Live'};
+const FLOW_STATUS_TIP={draft:'still being written',active:'in use',paused:'on hold'};
+const TRIGGER_TIP={manual:'Manual: someone starts it',schedule:'Schedule: at a set time',event:'Event: when something happens'};
+const lineCount=t=>{const s=String(t||'').trim();return s?s.split('\n').length:0};
+// ---------- tabs ----------
+// Humans and teams have no Run tab. The remembered tab wins while the kind has it; with none
+// remembered, an AI agent still being set up opens on Run.
+const tabsFor=a=>a.kind==='human'||a.kind==='team'?['job','org','links']:['job','run','org','links'];
+function activeTab(a){
+  // Settle the default once, so finishing setup mid-edit does not flip the panel to another tab.
+  if(!ui.tab)ui.tab=setupSteps(af(),a).some(s=>!s.done)?'run':'job';
+  return tabsFor(a).includes(ui.tab)?ui.tab:'job';
+}
+// Each tab's word, icon, short badge and full summary (tip and accessible name).
+function tabInfo(a){
+  const reps=reportsOf(af(),a.id).length,flows=workflowsFor(af(),a.id).length,ms=modelsOf(a).length,links=linkCount(a),lines=lineCount(a.instructions),mgr=agent(a.reportsTo);
+  const sch=a.schedule.trim(),auto=a.kind==='automation',job=a.job&&jobOf(af(),a.job.runner,a.job.id);
+  return {
+    job:{word:'Job',ic:'target',badge:a.inputs.length||a.outputs.length?`${a.inputs.length}·${a.outputs.length}`:'',
+      text:`${a.inputs.length} in · ${a.outputs.length} out · ${plural(a.tools.length,'tool')} · ${lines?plural(lines,'line'):'no lines'} of instructions`},
+    run:auto?{word:'Schedule',ic:'clock',badge:job?`<i class="af-jdot s-${esc(job.lastStatus)}"></i>`:'',text:`${sch||'No schedule set'}${a.job?` · job on ${a.job.runner}`:''}`}
+      :{word:'Run',ic:'server',badge:ms?String(ms):'',text:`${a.runtime.trim()||'No runner'} · ${plural(ms,'model')}${sch?` · ${sch}`:''}`},
+    org:{word:'Org',ic:'network',badge:reps+flows?String(reps+flows):'',text:`Reports to ${mgr?mgr.name:'nobody'} · ${plural(reps,'direct report')} · ${plural(flows,'workflow')}`},
+    links:{word:'Links',ic:'link',badge:links?String(links):'',text:`${plural(a.projects.length,'project')} · ${plural(a.cards.length,'card')} · ${plural(a.items.length,'timeline item')}`},
+  };
+}
+function tabBar(a,cur){
+  const info=tabInfo(a);
+  return `<div class="af-tabs" role="tablist" aria-label="Agent details">${tabsFor(a).map(k=>{const t=info[k],on=k===cur;
+    return `<button type="button" role="tab" class="af-tab${on?' on':''}" id="af-tab-${k}" data-af-tab="${k}" aria-selected="${on}" aria-controls="af-pane-${k}" tabindex="${on?0:-1}" aria-label="${esc(`${t.word}: ${t.text}`)}" data-tip="${esc(t.text)}">${icon(t.ic,13)}<span>${t.word}</span>${t.badge?`<small>${t.badge}</small>`:''}</button>`}).join('')}</div>`;
+}
+const tabPane=(k,cur,html)=>`<div class="af-pane af-pane-${k}" role="tabpanel" id="af-pane-${k}" data-af-pane="${k}" aria-labelledby="af-tab-${k}"${k===cur?'':' hidden'}>${html}</div>`;
+// Show a tab without redrawing the panel, so focus and caret stay where they are.
+function showTab(k,{focus=false}={}){
+  const pane=$('#inspector');if(!pane)return;
+  ui.tab=k;keepUi();
+  for(const t of pane.querySelectorAll('[role=tab]')){const on=t.dataset.afTab===k;t.classList.toggle('on',on);t.setAttribute('aria-selected',on);t.tabIndex=on?0:-1;if(on&&focus)t.focus()}
+  for(const p of pane.querySelectorAll('[role=tabpanel]'))p.hidden=p.dataset.afPane!==k;
+  pane.scrollTop=0;
+}
+// ---------- setup strip: what an AI agent still needs, each chip jumping to its field ----------
+const SETUP_GO={runner:['run','#af-runtime','Pick where it runs'],model:['run','#af-model-add','Pick the model it runs on'],
+  cards:['links','#inspector [data-picker=af-cards]','Link a card. Runners work cards linked directly to the agent; cards in a linked project stay out of its queue']};
+function setupHtml(a){
+  const steps=setupSteps(af(),a),done=steps.filter(s=>s.done).length;
+  if(done===steps.length)return '';
+  return `<div class="af-setup"><span class="af-setup-n">Setup ${done}/${steps.length}</span><span class="af-setup-bar" role="progressbar" aria-label="Setup progress" aria-valuemin="0" aria-valuemax="${steps.length}" aria-valuenow="${done}"><i style="width:${Math.round(done/steps.length*100)}%"></i></span>
+    ${steps.filter(s=>!s.done).map(s=>`<button type="button" class="af-setup-c" id="af-setup-${s.key}" data-af-setup="${s.key}" data-tip="${esc(SETUP_GO[s.key][2])}">${esc(s.label)}</button>`).join('')}</div>`;
+}
+function goSetup(key){const [tab,q]=SETUP_GO[key]||[];if(!tab)return;showTab(tab);document.querySelector(q)?.focus()}
+// ---------- the agent panel ----------
+function jobPane(a){
+  const w=WORDS[a.kind]||WORDS.agent,n=lineCount(a.instructions);
+  return `<div class="af-field"><label for="af-purpose">Purpose</label><textarea id="af-purpose" class="af-grow" rows="2" maxlength="2000" placeholder="${esc(w.purpose)}">${esc(a.purpose)}</textarea></div>
+    ${pipelineHtml(a)}${toolsHtml(a)}
+    <div class="af-ph af-ph-instr"><label for="af-instr">${icon('book',12)}Instructions</label><span class="sp"></span><span class="af-count" id="af-instr-n">${n?plural(n,'line'):'Empty'}</span>${ib('fit','Open in a large editor',{cls:'af-instr-open',attrs:'id="af-instr-open" data-afi="instr"'})}</div>
+    <textarea id="af-instr" rows="4" maxlength="20000" placeholder="${esc(w.instr)}">${esc(a.instructions)}</textarea>`;
+}
+function orgChain(a,reps){
+  const up=chainOf(af(),a.id).reverse().map(m=>`<button type="button" class="af-link" id="af-up-${esc(m.id)}" data-agent-go="${esc(m.id)}" data-tip="${esc(m.name)}" aria-label="${esc(`Open ${m.name}`)}">${icon(KIND_ICON[m.kind],11)}<span>${esc(m.name)}</span></button>`);
+  const parts=[...up,`<span class="af-link me" aria-current="true">${icon(KIND_ICON[a.kind],11)}<span>${esc(a.name)}</span></span>`,...(reps.length?[`<span class="af-link n">${plural(reps.length,'report')}</span>`]:[])];
+  return `<div class="af-orgchain" role="group" aria-label="Place in the org">${parts.join(`<i class="af-sepr">${icon('chevR',10)}</i>`)}</div>`;
+}
+function orgPane(a){
+  const ppl=peopleOf(db()),reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id),mgr=agent(a.reportsTo),sup=person(a.supervisor);
+  return `${orgChain(a,reps)}
+    ${prop('Reports to',selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',mgr&&agentAv(mgr)?bub(faceNode(humanFace(mgr)),'mini'):`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr}),{hint:'Another agent. Sets its place in the org chart.'})}
+    ${prop('Supervisor',ppl.length?selBtn('af-sup','Supervisor',sup?sup.name:'None',sup?bub(sup,'mini'):`<span class="pk-ic">${icon('user',13)}</span>`,{none:!sup}):`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`,{hint:'The person accountable, from your MindMap. Their face shows on the card.'})}
+    ${reps.length?`<div class="af-h">Direct reports<em>${reps.length}</em></div><ul class="links">${reps.map(r=>`<li><button type="button" id="af-rep-${esc(r.id)}" data-agent-go="${esc(r.id)}">${icon(KIND_ICON[r.kind],12)}<span>${esc(r.name)}</span><em>${esc(r.title)}</em></button></li>`).join('')}</ul>`:''}
+    ${flows.length?`<div class="af-h">Workflows<em>${flows.length}</em></div><ul class="links">${flows.map(w=>`<li><button type="button" id="af-wf-${esc(w.id)}" data-flow-go="${esc(w.id)}">${icon('flow',12)}<span>${esc(w.name)}</span><em>step ${w.steps.map((s,i)=>s.agent===a.id?i+1:0).filter(Boolean).join(', ')}</em></button></li>`).join('')}</ul>`:''}`;
+}
 function agentHtml(a){
-  const ppl=peopleOf(db()),reps=reportsOf(af(),a.id),flows=workflowsFor(af(),a.id),chain=chainOf(af(),a.id),mgr=agent(a.reportsTo),sup=person(a.supervisor);
-  const live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),ms=modelsOf(a);
-  const identity=`<label>Kind</label><div class="seg wide af-kinds">${Object.entries(AGENT_KINDS).map(([k,n])=>`<button type="button" class="${a.kind===k?'on':''}" id="af-kind-${k}" data-af-kind="${k}" aria-pressed="${a.kind===k}">${icon(KIND_ICON[k],13)}${n}</button>`).join('')}</div>
-    <label for="af-title">Role</label><input id="af-title" maxlength="120" placeholder="e.g. Research" value="${esc(a.title)}">
-    <label>Status</label>${statusPills(a.status,AGENT_STATUS)}
-    <label for="af-reports">Reports to</label>${selBtn('af-reports','Reports to',mgr?mgr.name:'Nobody (top level)',mgr&&agentAv(mgr)?bub(faceNode(humanFace(mgr)),'mini'):`<span class="pk-ic">${icon(mgr?KIND_ICON[mgr.kind]:'network',13)}</span>`,{none:!mgr})}
-    ${chain.length>1?`<div class="dc-hint af-chain">${esc(chain.map(x=>x.name).reverse().join(' › '))} › ${esc(a.name)}</div>`:''}
-    <label for="af-sup">Supervisor <em>a person on your MindMap</em></label>${ppl.length?selBtn('af-sup','Supervisor',sup?sup.name:'None',sup?bub(sup,'mini'):`<span class="pk-ic">${icon('user',13)}</span>`,{none:!sup}):`<div class="dc-hint">Add people to a mind map to pick a supervisor.</div>`}`;
-  const work=`<label for="af-purpose">Purpose</label><textarea id="af-purpose" rows="3" maxlength="2000" placeholder="What this agent is responsible for">${esc(a.purpose)}</textarea>
-    ${chips('inputs','Inputs','inbox','what it takes in',a.inputs)}${chips('outputs','Outputs','send','what it produces',a.outputs)}${chips('tools','Tools','wrench','what it may use',a.tools)}`;
-  const team=(reps.length?`<label>Direct reports</label><ul class="links">${reps.map(r=>`<li><button type="button" data-agent-go="${esc(r.id)}">${icon(KIND_ICON[r.kind],12)}<span>${esc(r.name)}</span><em>${esc(r.title)}</em></button></li>`).join('')}</ul>`:'')
-    +(flows.length?`<label>Workflows</label><ul class="links">${flows.map(w=>`<li><button type="button" data-flow-go="${esc(w.id)}">${icon('flow',12)}<span>${esc(w.name)}</span><em>step ${w.steps.map((s,i)=>s.agent===a.id?i+1:0).filter(Boolean).join(', ')}</em></button></li>`).join('')}</ul>`:'');
-  const instrMeta=a.instructions.trim()?plural(a.instructions.trim().split('\n').length,'line'):'empty';
-  const runMeta=a.runtime.trim()?esc(a.runtime.trim()):'not set',linkMeta=linkCount(a)?String(linkCount(a)):'none';
-  return `<div class="ihead"><span class="k af-k${a.kind==='human'?' human':''}">${icon(KIND_ICON[a.kind])}</span><strong>${AGENT_KINDS[a.kind]}</strong><span class="sp"></span>
+  const live=a.kind==='agent'&&a.live,why=live&&liveProblem(af(),a),cur=activeTab(a);
+  const label=live&&(a.status==='paused'||a.status==='retired')?`Live while ${AGENT_STATUS[a.status]}: runners still pick it up. Status is your label, Live is what runners obey.`:'';
+  const warn=t=>`<div class="af-warn" role="status">${icon('alert',12)}<span>${esc(t)}</span></div>`;
+  const tips=a.kind==='agent'?AI_STATUS_TIP:STATUS_TIP;
+  return `<form id="afedit" class="ibody af-panel" autocomplete="off"><div class="af-top">
+    <div class="ihead"><span class="k af-k${a.kind==='human'?' human':''}">${icon(KIND_ICON[a.kind])}</span><strong>${AGENT_KINDS[a.kind]}</strong><span class="sp"></span>
     ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('plus','Add a direct report',{attrs:'data-afi="addReport"'})}
     ${ib('trash','Delete agent',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
-    <form id="afedit" class="ibody af-panel" autocomplete="off">
     <div class="af-hero">${avatarHtml(a)}<div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(a.name)}" aria-label="Name">
-      <div class="af-hero-s">${statusPill(a.status,AGENT_STATUS)}<span>${esc([a.title,a.kind==='agent'&&ms.length?modelLabel(af(),{...a,model:ms[0]}):'',a.kind==='automation'?a.schedule.trim():''].filter(Boolean).join(' · ')||AGENT_KINDS[a.kind])}</span></div></div>
+      <input id="af-title" class="af-role-in" maxlength="120" placeholder="Add a role" value="${esc(a.title)}" aria-label="Role"></div>
       ${a.kind==='agent'?liveHtml(a,why):''}</div>
-    ${why?`<div class="af-warn" role="status">${icon('alert',12)}<span>Its runner will skip it: ${esc(why)}</span></div>`:''}
-    ${sec('identity','idCard','Identity',identity)}
-    ${a.kind==='agent'?sec('run','server','Runs on',runtimeHtml(a),runMeta):''}
-    ${a.kind==='automation'?sec('sched','clock','Schedule',scheduleHtml(a),esc(a.schedule.trim()||'not set')):''}
-    ${sec('work','target','Work',work,`${a.inputs.length} in · ${a.outputs.length} out`)}
-    ${sec('instr','book','Instructions',`<textarea id="af-instr" rows="8" maxlength="20000" aria-label="Instructions" placeholder="System prompt or runbook">${esc(a.instructions)}</textarea>`,instrMeta)}
-    ${sec('links','link','Links',linksHtml(a),linkMeta)}
-    ${team?sec('team','network','Team',team,[reps.length&&plural(reps.length,'report'),flows.length&&plural(flows.length,'workflow')].filter(Boolean).join(' · ')):''}
+    <div class="af-row">${choice('af-kind',Object.entries(AGENT_KINDS).map(([k,n])=>({value:k,label:n,icon:KIND_ICON[k],tip:KIND_TIP[k]})),a.kind,{label:'Kind',idp:'af-kind'})}${statusChoice(a.status,AGENT_STATUS,tips)}</div>
+    ${a.kind==='agent'?setupHtml(a):''}
+    ${why?warn(`Its runner will skip it: ${why}`):''}${label?warn(label):''}
+    ${tabBar(a,cur)}</div>
+    ${tabPane('job',cur,jobPane(a))}
+    ${a.kind==='agent'?tabPane('run',cur,runtimeHtml(a)):a.kind==='automation'?tabPane('run',cur,scheduleHtml(a)):''}
+    ${tabPane('org',cur,orgPane(a))}
+    ${tabPane('links',cur,linksHtml(a))}
     </form>`;
 }
 // When it runs, and the runner job it was promoted from (read-only: the runner reports it).
-const scheduleInput=(a,ph)=>`<label for="af-schedule">Schedule <em>plain text or cron</em></label><input id="af-schedule" maxlength="200" placeholder="${esc(ph)}" value="${esc(a.schedule)}">`;
+const scheduleInput=(a,ph,tip)=>prop('Schedule',`<input id="af-schedule" maxlength="200" placeholder="${esc(ph)}" value="${esc(a.schedule)}">`,{ic:'clock',for:'af-schedule',hint:tip});
 function scheduleHtml(a){
-  return scheduleInput(a,'e.g. Daily 22:30 or 30 22 * * *')+jobHtml(a)
-    +`<div class="dc-hint">${icon('info',11)}Automations run on their own schedule, outside Flow: no runner works them and they have no models.</div>`;
+  return scheduleInput(a,'e.g. Daily 22:30 or 30 22 * * *','Plain text or cron. Automations run on their own schedule, outside Flow: no runner works them and they have no models.')+jobHtml(a);
 }
+// One status line; Details opens everything the runner reported. Open state lasts while the panel does.
+let jobOpen=false;
 function jobHtml(a){
   if(!a.job)return '';
   const j=jobOf(af(),a.job.runner,a.job.id);
-  if(!j)return `<label>Promoted from</label><div class="dc-hint">${esc(a.job.runner)} no longer reports this job (${esc(a.job.id)}).</div>`;
-  const runner=runnerOf(af(),a.job.runner)?.name||a.job.runner;
-  return `<label>Promoted from</label><div class="af-jobinfo"><div class="af-jobinfo-h">${icon(jobIcon(j),13)}<b>${esc(j.name)}</b>${j.enabled?'':'<span class="af-off">Off</span>'}</div>${jobDetails({...j,runner})}</div>`;
+  if(!j)return `<div class="af-h">${icon('clock',12)}Promoted from</div><div class="dc-hint">${esc(a.job.runner)} no longer reports this job (${esc(a.job.id)}).</div>`;
+  const runner=runnerOf(af(),a.job.runner)?.name||a.job.runner,status=JOB_STATUS[j.lastStatus]||'Unknown';
+  const time=j.nextRun?`next ${rel(j.nextRun)}`:j.lastRun?`last ${rel(j.lastRun)}`:'',line=[time,sourceName(j),runner].filter(Boolean).join(' · ');
+  return `<div class="af-h">${icon(jobIcon(j),12)}<span class="af-h-n">Promoted from ${esc(j.name)}</span></div>
+    <div class="af-jobline"><i class="af-jdot s-${esc(j.lastStatus)}"></i><span class="af-jobline-t"><b>${esc(status)}</b>${line?` · ${esc(line)}`:''}${j.enabled?'':' · <b>Off</b>'}${j.drift?` · <b class="af-jobline-w">Drift</b>`:''}</span>
+      <button type="button" class="af-more" id="af-job-more" data-af-job-more aria-expanded="${jobOpen}" aria-controls="af-job-more-b" aria-label="${esc(`Details: ${status}${line?`, ${line}`:''}`)}">Details<i class="af-chev">${icon('chevD',12)}</i></button></div>
+    <div class="dc-hint af-jobnote">Reported by ${esc(runner)}. Change it there, not here.</div>
+    <div class="af-jobinfo" id="af-job-more-b"${jobOpen?'':' hidden'}><div class="af-jobinfo-h">${icon(jobIcon(j),13)}<b>${esc(j.name)}</b>${j.enabled?'':'<span class="af-off">Off</span>'}</div>${jobDetails({...j,runner})}</div>`;
 }
 // The switch a runner obeys. It stays off until someone turns it on, whatever the status says.
 function liveHtml(a,why){
@@ -765,7 +854,8 @@ const MAX_MODELS=10,MP_CAP=200;
 const modelsOf=a=>Array.isArray(a.models)?a.models:(a.model?[a.model]:[]);
 const providerOf=m=>m.provider||(m.id.includes(':')?m.id.split(':')[0]:'Other');
 const BILLING={included:['Included','green'],metered:['Metered','amber']};
-const billBadge=m=>{const b=BILLING[m?.billing];if(!b)return '';const [bg,fg]=colorOf(b[1]);return `<span class="af-bill" style="background:${bg};color:${fg}">${b[0]}</span>`};
+const BILL_TIP={included:'Covered by your plan',metered:'Costs per use'};
+const billBadge=(m,tip=false)=>{const b=BILLING[m?.billing];if(!b)return '';const [bg,fg]=colorOf(b[1]);return `<span class="af-bill" style="background:${bg};color:${fg}"${tip?` data-tip="${BILL_TIP[m.billing]}"`:''}>${b[0]}</span>`};
 function modelPool(a){
   const r=runnerOf(af(),a.runtime),seen=new Set(),out=[];
   for(const m of r?r.models:(af().runners||[]).flatMap(x=>x.models))if(!seen.has(m.id)){seen.add(m.id);out.push(m)}
@@ -776,20 +866,21 @@ function setModels(a,list){
   change(()=>{a.models=list;a.model=list[0]||'';touch(a)});
 }
 function runtimeHtml(a){
-  const rs=af().runners||[],r=runnerOf(af(),a.runtime),ms=modelsOf(a),pool=new Map(modelPool(a).map(m=>[m.id,m]));
-  const rows=ms.map((id,i)=>{const m=pool.get(id);
-    return `<li class="af-m${i?'':' first'}"><em>${i+1}</em>${makerIcon(modelMaker(id,m?.label),15)}<span class="af-m-l"><b>${esc(m?.label||id)}</b><small>${i?`Fallback ${i+1}`:a.auto===true?'Pool':'Primary'}${m?.label&&m.label!==id?` · ${esc(id)}`:''}${m||!pool.size?'':' · not reported'}</small></span>${billBadge(m)}
-      <span class="af-m-b">${ib('chevU','Move up',{attrs:`id="af-mup-${i}" data-af-mup="${i}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`id="af-mdn-${i}" data-af-mdn="${i}"${i<ms.length-1?'':' disabled'}`})}${ib('x','Remove',{attrs:`id="af-mdel-${i}" data-af-mdel="${i}"`,label:`Remove ${m?.label||id}`})}</span></li>`}).join('');
-  return `<label for="af-runtime">Runner</label>
-    <div class="af-combo"><input id="af-runtime" maxlength="200" placeholder="${rs.length?'Pick or type a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
-      <button type="button" class="af-combo-b" data-picker="af-runner" aria-haspopup="listbox" aria-expanded="${pickerOpen('af-runner')}" aria-label="Reported runners"${rs.length?'':' disabled'} data-tip="${rs.length?`${plural(rs.length,'runner')} reported`:'No runner has reported to this workspace yet'}">${icon('chevD',12)}</button></div>
-    ${r?`<div class="dc-hint af-ok">${icon('check',11)}Reported ${esc(ago(r.reported))} · ${plural(r.models.length,'model')}</div>`
-      :a.runtime.trim()&&rs.length?`<div class="dc-hint">No runner called “${esc(a.runtime.trim())}” has reported to this workspace.</div>`:''}
-    <label for="af-model-add">Models <em>${a.auto===true?'the runner picks per card':'primary, then fallbacks'}</em></label>
+  const rs=af().runners||[],r=runnerOf(af(),a.runtime),ms=modelsOf(a),pool=new Map(modelPool(a).map(m=>[m.id,m])),auto=a.auto===true;
+  const rows=ms.map((id,i)=>{const m=pool.get(id),name=m?.label||id,role=auto?'Pool':i?`Fallback ${i}`:'Primary',missing=!!pool.size&&!m,bill=BILL_TIP[m?.billing];
+    const text=[`${name}${m?.label&&m.label!==id?` (${id})`:''}`,role,bill&&`${BILLING[m.billing][0]}: ${bill}`,missing&&'Not reported by this runner'].filter(Boolean);
+    return `<li class="af-m${i?'':' first'}" data-tip="${esc(text.join('\n'))}"><em>${i+1}</em>${makerIcon(modelMaker(id,m?.label),15)}<span class="af-m-l" id="af-ml-${i}" tabindex="0" role="group" aria-label="${esc(`${i+1}. ${text.join('. ')}`)}"><b>${esc(name)}</b></span>${missing?`<i class="af-m-miss">${icon('alert',12)}</i>`:''}${billBadge(m,true)}
+      <span class="af-m-b">${ib('chevU','Move up',{attrs:`id="af-mup-${i}" data-af-mup="${i}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`id="af-mdn-${i}" data-af-mdn="${i}"${i<ms.length-1?'':' disabled'}`})}${ib('x','Remove',{attrs:`id="af-mdel-${i}" data-af-mdel="${i}"`,label:`Remove ${name}`})}</span></li>`}).join('');
+  const stale=r&&Date.now()-Date.parse(r.reported)>JOBS_STALE;
+  return `${prop('Runner',`<div class="af-combo"><input id="af-runtime" maxlength="200" placeholder="${rs.length?'Pick or type a runner':'e.g. T3, home server'}" value="${esc(a.runtime)}">
+      <button type="button" class="af-combo-b" data-picker="af-runner" aria-haspopup="listbox" aria-expanded="${pickerOpen('af-runner')}" aria-label="Reported runners"${rs.length?'':' disabled'} data-tip="${rs.length?`${plural(rs.length,'runner')} reported`:'No runner has reported to this workspace yet'}">${icon('chevD',12)}</button></div>`,{ic:'server',for:'af-runtime',hint:'The machine that works its cards. Pick one that has reported, or type a name. The line below says when it last reported and how many models it offers.'})}
+    ${r?`<div class="af-runline"><i class="af-rdot${stale?' stale':''}"></i>${esc(ago(r.reported))} · ${plural(r.models.length,'model')}</div>`
+      :a.runtime.trim()&&rs.length?`<div class="af-runline"><i class="af-rdot none"></i>No runner called “${esc(a.runtime.trim())}” has reported to this workspace.</div>`:''}
+    <div class="af-mh"><label for="af-model-add">Models</label>${hint(auto?'A pool: the runner picks one from these per card.':'The first is the primary. The rest are fallbacks, tried in order.','Models')}<span class="sp"></span>
+      <label class="af-tog af-auto${auto?' on':''}" data-tip="Auto: let the runner pick from these per card"><input type="checkbox" id="af-auto" role="switch"${auto?' checked':''}><span class="af-sw" aria-hidden="true"></span><span>${icon('sparkle',12)}Auto</span></label></div>
     ${rows?`<ol class="af-models">${rows}</ol>`:''}
-    <button type="button" class="pk-btn af-madd" id="af-model-add" data-af-models aria-haspopup="listbox" aria-expanded="${!!mp}"${ms.length>=MAX_MODELS?' disabled':''}>${icon('plus',12)}<span class="pk-t">${ms.length?'Add a fallback':'Choose a model'}</span><small>${pool.size?`${pool.size} available`:'type any id'}</small></button>
-    <label class="af-tog${a.auto===true?' on':''}"><input type="checkbox" id="af-auto" role="switch"${a.auto===true?' checked':''}><span class="af-sw" aria-hidden="true"></span><span>${icon('sparkle',12)}Auto <em>let the runner pick from these per card</em></span></label>
-    ${scheduleInput(a,'e.g. Weekdays 09:00 — the runner starts it then')}${jobHtml(a)}`;
+    <button type="button" class="pk-btn af-madd" id="af-model-add" data-af-models aria-haspopup="listbox" aria-expanded="${!!mp}"${ms.length>=MAX_MODELS?' disabled':''}>${icon('plus',12)}<span class="pk-t">${!ms.length?'Choose a model':auto?'Add to the pool':'Add a fallback'}</span><small>${pool.size?`${pool.size} available`:'type any id'}</small></button>
+    ${scheduleInput(a,'e.g. Weekdays 09:00','A note in its brief. Runners do not start it at this time: they work its queue while it is Live.')}${jobHtml(a)}`;
 }
 // The model picker: searchable, grouped by provider, favourites first, and it stays open while you
 // add (Enter or click), so a primary and its fallbacks are picked in one go. Rows are capped so a
@@ -863,39 +954,67 @@ function openModels(btn){
   btn.setAttribute('aria-expanded','true');
   draw();place();popIn(el);input.focus();
 }
+// Steps: a rail of one-line summaries; one opens in place into its editor (openStep). All editors are
+// in the DOM, hidden when collapsed, so their ids stay.
+let openStep=null;
+function stepHtml(w,s,i,agents){
+  const a=s.agent?agent(s.agent):null,open=openStep===s.id,sid=esc(s.id),name=a?a.name:'Unassigned',act=s.action.trim(),out=s.output.trim();
+  const face=a&&agentAv(a)?bub(faceNode(humanFace(a)),'mini'):`<span class="af-sr-ic">${icon(a?KIND_ICON[a.kind]:'user',12)}</span>`;
+  const text=`Step ${i+1}: ${name}. ${act||'No action yet'}${out?`. Output: ${out}`:''}`;
+  return `<li data-step="${sid}"${open?' class="open"':''}><button type="button" class="af-sr" id="af-srow-${sid}" data-step-open="${sid}" aria-expanded="${open}" aria-controls="af-sed-${sid}" aria-label="${esc(text)}" data-tip="${esc(text)}">
+      <em>${i+1}</em>${face}<span class="af-sr-m"><b>${esc(name)}</b><small class="af-sr-a${act?'':' none'}">${esc(act||'No action yet')}</small></span>${out?`<i class="af-sr-o" data-tip="${esc(`Output: ${out}`)}">${icon('send',11)}</i>`:''}<i class="af-chev">${icon('chevD',12)}</i></button>
+    <div class="af-sed" id="af-sed-${sid}"${open?'':' hidden'}>
+      <select id="af-agt-${sid}" data-step-agent="${sid}" aria-label="Step ${i+1} agent">${opt('','Unassigned',s.agent)}${agents.map(x=>opt(x.id,x.name,s.agent)).join('')}</select>
+      <input data-step-action="${sid}" id="af-act-${sid}" maxlength="500" placeholder="What happens" value="${esc(s.action)}" aria-label="Step ${i+1} action">
+      <input data-step-output="${sid}" id="af-out-${sid}" maxlength="300" placeholder="Output (optional)" value="${esc(s.output)}" aria-label="Step ${i+1} output">
+      <div class="af-sed-b">${ib('chevU','Move up',{attrs:`id="af-sup-${sid}" data-step-up="${sid}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`id="af-sdn-${sid}" data-step-down="${sid}"${i<w.steps.length-1?'':' disabled'}`})}<span class="sp"></span>${ib('x','Remove step',{attrs:`id="af-sdel-${sid}" data-step-del="${sid}"`})}</div></div></li>`;
+}
 function workflowHtml(w){
   const agents=[...af().agents].sort(byName);
-  const setup=`<label for="af-desc">Description</label><textarea id="af-desc" rows="3" maxlength="4000" placeholder="What this workflow achieves">${esc(w.description)}</textarea>
-    <label>Trigger</label><div class="seg wide">${Object.entries(TRIGGERS).map(([k,n])=>`<button type="button" class="${w.trigger===k?'on':''}" id="af-trig-${k}" data-af-trigger="${k}" aria-pressed="${w.trigger===k}">${icon(TRIGGER_ICON[k],12)}${n}</button>`).join('')}</div>
-    ${w.trigger==='manual'?'':`<label for="af-sched">${w.trigger==='schedule'?'When':'On'}</label><input id="af-sched" maxlength="200" placeholder="${esc(TRIGGER_HINT[w.trigger])}" value="${esc(w.schedule)}">`}`;
-  const steps=`<ol class="af-step-list">${w.steps.map((s,i)=>`<li data-step="${esc(s.id)}"><em>${i+1}</em><div class="af-step-f">
-      <select data-step-agent="${esc(s.id)}" aria-label="Step ${i+1} agent">${opt('','Unassigned',s.agent)}${agents.map(a=>opt(a.id,a.name,s.agent)).join('')}</select>
-      <input data-step-action="${esc(s.id)}" id="af-act-${esc(s.id)}" maxlength="500" placeholder="What happens" value="${esc(s.action)}" aria-label="Step ${i+1} action">
-      <input data-step-output="${esc(s.id)}" id="af-out-${esc(s.id)}" maxlength="300" placeholder="Output (optional)" value="${esc(s.output)}" aria-label="Step ${i+1} output"></div>
-      <div class="af-step-b">${ib('chevU','Move up',{attrs:`data-step-up="${esc(s.id)}"${i?'':' disabled'}`})}${ib('chevD','Move down',{attrs:`data-step-down="${esc(s.id)}"${i<w.steps.length-1?'':' disabled'}`})}${ib('x','Remove step',{attrs:`data-step-del="${esc(s.id)}"`})}</div></li>`).join('')}</ol>
-    <button type="button" class="txt af-addstep" data-afi="addStep">${icon('plus',13)}Add step</button>`;
-  return `<div class="ihead"><span class="k af-k">${icon('flow')}</span><strong>Workflow</strong><span class="sp"></span>
+  return `<form id="afedit" class="ibody af-panel" autocomplete="off"><div class="af-top">
+    <div class="ihead"><span class="k af-k">${icon('flow')}</span><strong>Workflow</strong><span class="sp"></span>
     ${ib('copy','Copy brief as Markdown\nFor the runner that does the work',{attrs:'data-afi="brief"'})}${ib('trash','Delete workflow',{key:keyLabel('agentflow.delete'),cls:'danger',attrs:'data-afi="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-afi="close"'})}</div>
-    <form id="afedit" class="ibody af-panel" autocomplete="off">
-    <div class="af-hero"><span class="af-av k-flow">${icon('flow',20)}</span><div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(w.name)}" aria-label="Name">
-      <div class="af-hero-s">${icon(TRIGGER_ICON[w.trigger],11)}<span>${esc(TRIGGERS[w.trigger])}${w.schedule&&w.trigger!=='manual'?` · ${esc(w.schedule)}`:''} · ${plural(w.steps.length,'step')}</span></div></div></div>
-    ${statusPills(w.status,WORKFLOW_STATUS)}
-    ${sec('setup','zap','Setup',setup)}
-    ${sec('steps','list','Steps',steps,String(w.steps.length))}
+    <div class="af-hero one"><span class="af-av k-flow">${icon('flow',20)}</span><div class="af-hero-m"><input id="af-name" class="af-name-in" maxlength="120" required value="${esc(w.name)}" aria-label="Name"></div></div>
+    <div class="af-row">${statusChoice(w.status,WORKFLOW_STATUS,FLOW_STATUS_TIP)}${choice('af-trigger',Object.entries(TRIGGERS).map(([k,n])=>({value:k,label:n,icon:TRIGGER_ICON[k],tip:TRIGGER_TIP[k]})),w.trigger,{label:'Trigger',idp:'af-trig'})}</div></div>
+    <div class="af-pane">
+    ${w.trigger==='manual'?'':prop('When',`<input id="af-sched" maxlength="200" placeholder="${esc(TRIGGER_HINT[w.trigger])}" value="${esc(w.schedule)}">`,{ic:TRIGGER_ICON[w.trigger],for:'af-sched'})}
+    <div class="af-field"><label for="af-desc">Description</label><textarea id="af-desc" class="af-grow" rows="2" maxlength="4000" placeholder="What this workflow achieves">${esc(w.description)}</textarea></div>
+    <div class="af-h">${icon('list',12)}Steps<em>${w.steps.length}</em></div>
+    ${w.steps.length?`<ol class="af-rail">${w.steps.map((s,i)=>stepHtml(w,s,i,agents)).join('')}</ol>`:''}
+    <button type="button" class="af-addstep" id="af-addstep" data-afi="addStep"><i>${icon('plus',12)}</i>Add step</button>
+    </div>
     ${sec('links','link','Links',linksHtml(w),linkCount(w)?String(linkCount(w)):'none')}
     </form>`;
 }
+function openInstructions(btn){
+  const id=sel()?.id,a=agent(id);if(!a)return;
+  const m=detailModal({cls:'af-instr-dlg',label:`Instructions for ${a.name}`,from:btn,
+    onClose(){rerender();requestAnimationFrame(()=>$('#af-instr-open')?.focus())},
+    events:{input(e){if(e.target.id==='af-instr-big')setInstructions(agent(id),e.target.value)},click(e){if(e.target.closest('[data-instr-close]'))m.close()}}});
+  m.body.innerHTML=`<div class="af-instr-h">${icon('book',14)}<strong>Instructions</strong><span class="af-count">${esc(a.name)}</span><span class="sp"></span>${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-instr-close'})}</div>
+    <textarea id="af-instr-big" maxlength="20000" aria-label="Instructions" placeholder="${esc((WORDS[a.kind]||WORDS.agent).instr)}"></textarea>`;
+  const t=m.body.querySelector('textarea');t.value=a.instructions;t.focus();t.setSelectionRange(t.value.length,t.value.length);
+}
+// Autosaves like the panel's own fields: same undo step, and the short field and its count follow.
+function setInstructions(a,v){
+  if(!a)return;autosave(a,()=>{a.instructions=v});
+  const t=$('#af-instr');if(t&&t.value!==v)t.value=v;
+  countInstructions(v);
+}
+const countInstructions=v=>{const c=$('#af-instr-n'),n=lineCount(v);if(c)c.textContent=n?plural(n,'line'):'Empty'};
 export function renderInspector(pane){
   const x=sel();
   if(mp&&(!x||x.id!==mp.id))closeModels();
   panel(pane,!!x,{onHidden:()=>{if(!sel())pane.innerHTML=''}});
   if(!x)return;
   // Keep focus and caret when the panel is redrawn after a change.
-  const a=document.activeElement,keep=pane.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null,top=pane.scrollTop;
+  const a=document.activeElement,had=pane.contains(a),keep=had&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null,top=pane.scrollTop;
   pane.innerHTML=selected.type==='agent'?agentHtml(x):workflowHtml(x);
   pane.scrollTop=top;
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
+  // The field is gone or on a tab this kind lacks: stay in the panel, never drop to the page.
+  if(had&&!pane.contains(document.activeElement))(pane.querySelector('[role=tab][aria-selected=true]')||$('#af-name'))?.focus({preventScroll:true});
   if(mp){mp.draw();mp.place()}
 }
 function addTo(key){
@@ -917,6 +1036,10 @@ export function inspectorClick(e){
   const box=e.target.closest('.af-chips');if(box&&e.target===box){box.querySelector('input')?.focus();return}
   const b=e.target.closest('button');if(!b)return;
   const x=sel();if(!x)return;
+  if(b.dataset.afTab){showTab(b.dataset.afTab);return}
+  if(b.dataset.afSetup){goSetup(b.dataset.afSetup);return}
+  if(b.dataset.afJobMore!==undefined){jobOpen=!jobOpen;const box=$('#af-job-more-b');if(box)box.hidden=!jobOpen;b.setAttribute('aria-expanded',jobOpen);return}
+  if(b.dataset.stepOpen){openStep=openStep===b.dataset.stepOpen?null:b.dataset.stepOpen;rerender();return}
   if(b.dataset.afSec){const k=b.dataset.afSec;ui.sec={...ui.sec,[k]:!secOpen(k)};keepUi();rerender();return}
   const pk=PICKERS[b.dataset.picker];
   if(pk){const [k,items,label]=pk;openPicker(b,{items:items(),selected:x[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){if(v.length>LIMITS.refs){toast(`Up to ${LIMITS.refs} linked ${k} each.`,true);rerender();return}change(()=>{x[k]=v;touch(x)})}});return}
@@ -940,27 +1063,41 @@ export function inspectorClick(e){
   if(b.dataset.agentGo){select('agent',b.dataset.agentGo);return}
   if(b.dataset.flowGo){ui.view='workflows';keepUi();select('workflow',b.dataset.flowGo);return}
   const step=id=>x.steps.findIndex(s=>s.id===id);
-  if(b.dataset.stepDel){change(()=>{x.steps.splice(step(b.dataset.stepDel),1);touch(x)});return}
+  if(b.dataset.stepDel){
+    const i=step(b.dataset.stepDel);if(i<0)return;
+    change(()=>{x.steps.splice(i,1);touch(x)});
+    const next=x.steps[Math.min(i,x.steps.length-1)];
+    requestAnimationFrame(()=>(next&&document.getElementById('af-srow-'+next.id)||$('#af-addstep'))?.focus());return;
+  }
   if(b.dataset.stepUp||b.dataset.stepDown){
     const id=b.dataset.stepUp||b.dataset.stepDown,i=step(id),j=b.dataset.stepUp?i-1:i+1;if(i<0||j<0||j>=x.steps.length)return;
     change(()=>{[x.steps[i],x.steps[j]]=[x.steps[j],x.steps[i]];touch(x)});
-    requestAnimationFrame(()=>document.querySelector(`#inspector [data-step-${j<i?'up':'down'}="${CSS.escape(id)}"]:not([disabled])`)?.focus());return;
+    // At the top or bottom its own arrow is disabled: fall back to the other one, or to Remove.
+    const q=`#inspector [data-step-%="${CSS.escape(id)}"]`,dir=j<i?'up':'down',other=j<i?'down':'up';
+    requestAnimationFrame(()=>(document.querySelector(q.replace('%',dir)+':not([disabled])')||document.querySelector(q.replace('%',other)+':not([disabled])')||document.querySelector(q.replace('%','del')))?.focus());return;
   }
-  ({close:()=>select(null),delete:removeSelected,brief:copyBrief,addReport:()=>addAgent(x.id),
-    addStep(){const no=full(af(),'steps',x);if(no){toast(no,true);return}const s=newStep();change(()=>{x.steps.push(s);touch(x)});requestAnimationFrame(()=>document.getElementById('af-act-'+s.id)?.focus())},
+  ({close:()=>select(null),delete:removeSelected,brief:copyBrief,addReport:()=>addAgent(x.id),instr:()=>openInstructions(b),
+    addStep(){const no=full(af(),'steps',x);if(no){toast(no,true);return}const s=newStep();openStep=s.id;change(()=>{x.steps.push(s);touch(x)});requestAnimationFrame(()=>document.getElementById('af-act-'+s.id)?.focus())},
   })[b.dataset.afi]?.();
 }
 // Text fields autosave as you type: one undo step per open form.
 const TEXT={'af-name':'name','af-title':'title','af-schedule':'schedule','af-purpose':'purpose','af-runtime':'runtime','af-instr':'instructions','af-desc':'description','af-sched':'schedule'};
+function autosave(x,apply){
+  const form=$('#afedit');if(form&&!edited.has(form)){checkpoint();edited.add(form)}
+  apply();touch(x);save();render();
+}
 export function inspectorInput(e){
   const t=e.target,x=sel(),form=$('#afedit');if(!x||!form)return;
   const key=TEXT[t.id],sa=t.dataset.stepAction,so=t.dataset.stepOutput;
   if(!key&&!sa&&!so)return;
   if(key==='name'&&!t.value.trim())return;
-  if(!edited.has(form)){checkpoint();edited.add(form)}
-  if(key)x[key]=key==='name'?t.value.trim():t.value;
-  else{const s=x.steps.find(y=>y.id===(sa||so));if(s)s[sa?'action':'output']=t.value}
-  touch(x);save();render();
+  autosave(x,()=>{
+    if(key)x[key]=key==='name'?t.value.trim():t.value;
+    else{const s=x.steps.find(y=>y.id===(sa||so));if(s)s[sa?'action':'output']=t.value}
+  });
+  if(key==='instructions')countInstructions(t.value);
+  // The open step's summary line follows its action as you type.
+  if(sa){const l=document.querySelector(`#af-srow-${CSS.escape(sa)} .af-sr-a`),v=t.value.trim();if(l){l.textContent=v||'No action yet';l.classList.toggle('none',!v)}}
 }
 export function inspectorChange(e){
   const t=e.target,x=sel();if(!x)return;
@@ -971,7 +1108,31 @@ export function inspectorChange(e){
   else if(t.id==='af-runtime')rerender();
   else if(t.dataset.stepAgent)change(()=>{const s=x.steps.find(y=>y.id===t.dataset.stepAgent);if(s)s.agent=t.value;touch(x)});
 }
+// Alt+J / Alt+K: the next or previous agent in reading order of the org (or workflow), keeping the tab
+// and the field, so one field can be edited across many agents.
+function orgOrder(){const A=af(),out=[],walk=a=>{out.push(a);reportsOf(A,a.id).forEach(walk)};rootsOf(A).forEach(walk);return out}
+function stepSelection(by){
+  const x=sel();if(!x)return false;
+  const type=selected.type,list=type==='agent'?orgOrder():af().workflows;if(list.length<2)return true;
+  const i=list.findIndex(y=>y.id===x.id),next=list[(i+by+list.length)%list.length];
+  if(type==='agent')ui.tab=activeTab(x),keepUi();
+  select(type,next.id);
+  if(type==='agent'){const cv=$('#afCanvas')?.getBoundingClientRect(),n=document.querySelector(`#afCanvas [data-agent="${CSS.escape(next.id)}"]`)?.getBoundingClientRect();
+    if(cv&&n&&(n.left<cv.left||n.right>cv.right||n.top<cv.top||n.bottom>cv.bottom))center(next.id)}
+  return true;
+}
+const stepKey=e=>matches(e,'agentflow.nextAgent')?1:matches(e,'agentflow.prevAgent')?-1:0;
 export function inspectorKey(e){
+  const by=stepKey(e),typing=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable;
+  // A shortcut rebound to a bare letter must not take that letter from a text field.
+  if(by&&(!typing||e.altKey||e.ctrlKey||e.metaKey)){if(stepSelection(by)){e.preventDefault();e.stopPropagation()}return}
+  // The tab bar: arrows and Home/End move and select (and stay out of the canvas's arrow keys).
+  if(e.target.getAttribute?.('role')==='tab'&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)){
+    const a=sel();if(!a?.kind)return;e.preventDefault();e.stopPropagation();
+    if(e.key==='ArrowUp'||e.key==='ArrowDown')return;
+    const t=tabsFor(a),i=t.indexOf(e.target.dataset.afTab),n=t.length;
+    showTab(e.key==='Home'?t[0]:e.key==='End'?t[n-1]:t[(i+(e.key==='ArrowRight'?1:-1)+n)%n],{focus:true});return;
+  }
   const m=/^af-new-(\w+)$/.exec(e.target.id||'');
   // Backspace in an empty chip field removes the last chip.
   if(m&&e.key==='Backspace'&&!e.target.value){const x=sel();if(x?.[m[1]]?.length){e.preventDefault();change(()=>{x[m[1]].pop();touch(x)})}return}
@@ -980,6 +1141,7 @@ export function inspectorKey(e){
 }
 export function key(e){
   if(e.key==='Escape'){if(menuOpen())return;if(closeJob())return;if(selected)select(null);return}
+  if(stepKey(e)&&selected){if(stepSelection(stepKey(e)))e.preventDefault();return}
   if(matches(e,'agentflow.delete')&&sel()){e.preventDefault();removeSelected();return}
   if(matches(e,'agentflow.addAgent')){e.preventDefault();addAgent()}
   else if(matches(e,'agentflow.addWorkflow')){e.preventDefault();addWorkflow()}

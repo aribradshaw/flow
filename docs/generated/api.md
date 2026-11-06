@@ -2101,7 +2101,7 @@ Add an agent to the AgentFlow org chart. References (reportsTo, supervisor, proj
 | `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
 | `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
 | `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
-| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (the runner starts it then); "" for none. |
+| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (a note carried in the brief for an AI agent; the reference runner does not start work from it); "" for none. |
 | `job` | union |  | The runner job it was promoted from: {runner, id} (see runners.report jobs); null or "" for none. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |
@@ -2224,7 +2224,7 @@ Change an agent's fields. Lists you send (inputs, outputs, tools, projects, card
 | `models` | string[] |  | Model ids the runner reported (runners.list), in order: the primary first, then fallbacks it tries when one fails (or, with auto, the pool it picks from). Also sets model to the first. Wins over model when both are sent. |
 | `model` | string |  | One model id, e.g. claudeAgent:claude-sonnet-5-5: the same as sending models with just it ("" for none). Always reads back as the first of models. |
 | `auto` | boolean |  | false (the default): the runner starts on the first of models and falls back in order. true: models is a pool and the runner picks one per card. |
-| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (the runner starts it then); "" for none. |
+| `schedule` | string |  | When it runs, in plain words or cron, e.g. "Weekdays 09:00" (a note carried in the brief for an AI agent; the reference runner does not start work from it); "" for none. |
 | `job` | union |  | The runner job it was promoted from: {runner, id} (see runners.report jobs); null or "" for none. |
 | `inputs` | string[] |  | What it takes in. |
 | `outputs` | string[] |  | What it produces. |

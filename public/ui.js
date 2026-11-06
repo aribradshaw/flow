@@ -8,9 +8,27 @@ export const clone=x=>structuredClone(x);
 export const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const fileName=s=>s.replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')||'export';
 
-// Icon-only button. The tooltip text doubles as its accessible name.
-export function ib(name,tip,{key='',cls='',attrs='',label=tip}={}){
-  return `<button type="button" class="ib ${cls}" data-tip="${esc(tip)}"${key?` data-key="${esc(key)}"`:''} aria-label="${esc(label)}" ${attrs}>${icon(name)}</button>`;
+// Icon-only button. The tooltip's first line doubles as its accessible name; pressed marks a toggle.
+export function ib(name,tip,{key='',cls='',attrs='',label=tip.split('\n')[0],pressed}={}){
+  return `<button type="button" class="ib ${cls}" data-tip="${esc(tip)}"${key?` data-key="${esc(key)}"`:''} aria-label="${esc(label)}"${pressed===undefined?'':` aria-pressed="${!!pressed}"`} ${attrs}>${icon(name)}</button>`;
+}
+// A visible info button for an explanation: it takes focus and shows its tip on tap too, so the text
+// moved out of a form stays reachable by keyboard and on touch.
+export const hint=(text,label='More information')=>`<button type="button" class="hint" data-tip="${esc(text)}" data-tip-tap aria-label="${esc(`${label}: ${text}`)}">${icon('info',12)}</button>`;
+// One property row: icon and short label on the left, the control on the right, about 30px tall.
+// `for` names the field the label belongs to (pickers and groups name themselves). stack puts the
+// control under the label, for things that need the full width.
+export function prop(label,control,{ic='',for:id='',hint:h='',cls='',stack=false}={}){
+  const inner=`${ic?icon(ic,13):''}<span>${esc(label)}</span>`;
+  return `<div class="prop${stack?' stack':''}${cls?' '+cls:''}"><div class="prop-l">${id?`<label for="${esc(id)}">${inner}</label>`:`<span class="prop-n">${inner}</span>`}${h?hint(h,label):''}</div><div class="prop-v">${control}</div></div>`;
+}
+// A single choice as a compact segmented control. Only the chosen option shows its word (mode
+// 'icons'), the rest show their icon with the word in a tip and an accessible name, so the current
+// value is always readable. mode 'labels' shows every word. options: [{value,label,icon?,lead?,tip?}],
+// lead being ready-made HTML such as a status dot. Each button gets data-<attr> and id <idp>-<value>.
+export function choice(attr,options,cur,{label='',idp='',mode='icons',size=13,cls=''}={}){
+  return `<div class="opts ${mode}${cls?' '+cls:''}" role="group"${label?` aria-label="${esc(label)}"`:''}>${options.map(o=>{const on=o.value===cur,lead=o.lead||(o.icon?icon(o.icon,size):'');
+    return `<button type="button" class="${on?'on':''}"${idp?` id="${esc(idp)}-${esc(o.value)}"`:''} data-${attr}="${esc(o.value)}" aria-pressed="${on}" aria-label="${esc(o.label)}" data-tip="${esc(o.tip||o.label)}">${lead}${on||mode==='labels'||!lead?`<span>${esc(o.label)}</span>`:''}</button>`}).join('')}</div>`;
 }
 
 export function download(name,text,type){
@@ -29,7 +47,7 @@ function place(el){
   tip.innerHTML=esc(el.dataset.tip)+(el.dataset.key?`<kbd>${esc(el.dataset.key)}</kbd>`:'');
   const host=el.closest('dialog[open]')||document.body;if(tip.parentElement!==host)host.append(tip);
   tip.classList.add('on');tipFor=el;
-  const descriptions=new Set((el.getAttribute('aria-describedby')||'').split(/\s+/).filter(Boolean));descriptions.add(tip.id);el.setAttribute('aria-describedby',[...descriptions].join(' '));
+  const descriptions=new Set((el.getAttribute('aria-describedby')||'').split(/\s+/).filter(Boolean));if(el.dataset.tip!==el.getAttribute('aria-label'))descriptions.add(tip.id);if(descriptions.size)el.setAttribute('aria-describedby',[...descriptions].join(' '));
   // Measure independently of the previous anchor's position. Otherwise a tip
   // near the right edge can shrink to its remaining available width.
   tip.style.left='0px';tip.style.top='0px';
@@ -51,6 +69,23 @@ export function initTooltips(){
     hideTip();if(!el||e.buttons)return;
     tipFor=el;tipTimer=setTimeout(()=>place(el),warm?0:Number(el.dataset.tipDelay||350));
   });
+  // Touch has no hover: a long press shows the tip (and its release does not also press the control),
+  // and an info button shows it on tap. The next tap, scroll or key hides it.
+  let press=0,from=null,held=false;
+  const unpress=()=>{clearTimeout(press);press=0};
+  document.addEventListener('pointerdown',e=>{
+    unpress();held=false;if(e.pointerType!=='touch')return;
+    const el=e.target.closest?.('[data-tip]');if(!el)return;
+    from=[e.clientX,e.clientY];press=setTimeout(()=>{held=true;place(el)},500);
+  },{passive:true});
+  document.addEventListener('pointermove',e=>{if(press&&from&&Math.hypot(e.clientX-from[0],e.clientY-from[1])>10)unpress()},{passive:true});
+  for(const ev of ['pointerup','pointercancel'])document.addEventListener(ev,unpress,{passive:true});
+  document.addEventListener('keydown',()=>{held=false},{capture:true,passive:true});
+  document.addEventListener('contextmenu',e=>{if(held)e.preventDefault()},true);
+  document.addEventListener('click',e=>{
+    if(held){held=false;e.preventDefault();e.stopPropagation();return}
+    const el=e.target.closest?.('[data-tip-tap]');if(el){e.preventDefault();place(el)}
+  },true);
   document.addEventListener('focusin',e=>{const el=e.target.closest?.('[data-tip]');hideTip();if(el?.matches(':focus-visible')){tipFor=el;place(el)}});
   document.addEventListener('focusout',hideTip);
   document.addEventListener('pointerout',e=>{if(!e.relatedTarget)hideTip()});
@@ -120,9 +155,9 @@ const swatch=it=>it.avatar?av(it.avatar,'pk-av')
 const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;
 export const pickerOpen=key=>picker?.key===key;
-export function pickerButton(key,label,items,selected,{cls='',tip=''}={}){
+export function pickerButton(key,label,items,selected,{cls='',tip='',count=true}={}){
   const sel=items.filter(i=>selected.includes(i.value)),n=sel.length;
-  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
+  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n&&count?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
 }
 export function closePicker(refocus=false){
   if(!picker)return;const p=picker;picker=null;p.el.classList.remove('picker');p.el.classList.add('picker','leaving');popOut(p.el);document.removeEventListener('pointerdown',p.out,true);removeEventListener('resize',p.place);

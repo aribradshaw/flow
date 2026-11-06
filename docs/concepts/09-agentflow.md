@@ -9,7 +9,7 @@ Flow stores the design. It does not run agents itself. A runner of your choice (
 An agent has `name, kind, title, status, live, reportsTo, supervisor, purpose, instructions, runtime, models[], model, auto, schedule, inputs[], outputs[], tools[]`, an optional `job`, and links `projects[], cards[], items[]`.
 
 - `kind`: `agent` (an AI agent), `human`, `team` (a group heading in the org) or `automation` (a scripted job without AI, such as a backup timer, that runs on its own schedule outside Flow; see [Automations](#automations)).
-- `schedule` says when it runs, in plain words or cron, such as "Weekdays 09:00" or `30 22 * * *` (`""` for none). For an AI agent, its runner starts it then.
+- `schedule` says when it runs, in plain words or cron, such as "Weekdays 09:00" or `30 22 * * *` (`""` for none). For an AI agent it is a note carried in the brief: the reference runner works by Live and its queue, and does not start work from it.
 - `job` is `{runner, id}`: the runner job it was promoted from (see [Scheduled jobs](#scheduled-jobs)). It is absent when there is none; send `null` or `""` to `agents.update` to clear it.
 - `status`: `draft`, `active`, `paused` or `retired`.
 - `reportsTo` is another agent. Together these form the AgentFlow org chart. An agent cannot report to itself or to anyone below it (`reports_loop`). A saved loop is broken when the workspace loads.

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
   workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName,
-  cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
+  setupSteps,cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -510,4 +510,24 @@ test('jobs across runners, grouped for display, and promoted into the org once',
   assert.deepEqual(cleaned.agents.find(x=>x.id===auto.id).job,auto.job,'the link survives cleaning');
   while(af.agents.length<LIMITS.agents)newAgent(af);
   assert.equal(promoteJob(af,'Home','t2'),null,'refused at the agent limit');
+});
+
+test('setupSteps: what an AI agent needs before a runner can work it',()=>{
+  const af=seedAgentflow(),a=newAgent(af,{name:'A',kind:'agent'}),done=()=>setupSteps(af,a).map(s=>[s.key,s.done]);
+  assert.deepEqual(setupSteps(af,a).map(s=>s.label),['Runner','Model','Cards']);
+  assert.deepEqual(done(),[['runner',false],['model',false],['cards',false]],'a new agent has none of them');
+  a.runtime='   ';assert.equal(setupSteps(af,a)[0].done,false,'a blank runner name is no runner');
+  a.runtime='Home';a.models=['m1'];a.model='m1';
+  assert.deepEqual(done(),[['runner',true],['model',true],['cards',false]]);
+  a.models=[];assert.equal(setupSteps(af,a)[1].done,true,'an agent not yet cleaned may only have model');
+  a.model='';assert.equal(setupSteps(af,a)[1].done,false);
+  a.models=['m1'];a.projects=['p1'];
+  assert.equal(setupSteps(af,a)[2].done,false,'a linked project gives a runner no work: its queue reads direct card links');
+  a.cards=['k1'];assert.ok(setupSteps(af,a).every(s=>s.done));
+  for(const kind of ['human','team','automation'])assert.deepEqual(setupSteps(af,{...a,kind}),[],`a ${kind} has no setup`);
+});
+test('only direct card links reach an agent\'s work queue, which is why setup asks for cards',()=>{
+  const db=base(),af=cleanAgentflow({agents:[{id:'a',name:'A',kind:'agent',projects:['p1']}]},db);db.agentflow=af;
+  assert.deepEqual(workQueue(db,'a'),[],'a project link alone queues nothing');
+  assert.deepEqual(workFor(db,af.agents[0]).cards.map(c=>c.id),['k1'],'though the panel lists the project\'s open cards');
 });

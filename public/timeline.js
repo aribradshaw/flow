@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,download,pickerButton,openPicker} from './ui.js';
+import {$,esc,ib,uid,clone,download,pickerButton,openPicker,prop,hint} from './ui.js';
 import {store,change,checkpoint,commit,save,PALETTE} from './store.js';
 import {cardsForItem,isOpen} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
@@ -375,7 +375,9 @@ function addTag(input){
   $('#ti-proj')?.focus();
 }
 
-const segBtn=(field,v,x,on)=>`<button type="button" class="ib${on?' on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}">${icon(x.icon)}</button>`;
+// One option of a segmented item field. The chosen one shows its word: the icons alone are unreadable cold.
+const segBtn=(field,v,x,on)=>`<button type="button" id="ti-${field}-${v}" class="${on?'on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}">${icon(x.icon,13)}${on?`<span>${esc(x.word||x.label)}</span>`:''}</button>`;
+const setField=(field,name,entries,cur)=>`<div class="ti-set"><div class="cd-lab">${esc(name)}${cur?'':' <em>none</em>'}</div><div class="opts" role="group" aria-label="${esc(name)}">${entries.map(([v,x])=>segBtn(field,v,x,cur===v)).join('')}</div></div>`;
 // An item opens as a modal growing from its bar or card (modal.js); the Projects panel stays a side panel.
 let modal=null,modalFor=null;
 const itemEl=id=>document.querySelector(`#timelineView [data-item="${CSS.escape(id)}"]`);
@@ -406,31 +408,32 @@ function itemHtml(i){
   const inRelease=i.kind==='release'?db().timeline.filter(x=>x.release===i.id):[],linked=cardsForItem(db(),i.id);
   return `<div class="ihead cd-h"><span class="k" style="color:${color(i)}">${icon(k.icon)}</span><strong>${k.label}</strong><span class="sp"></span>
     ${ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})}${ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
-    <form id="tedit" class="ibody ti-body" autocomplete="off">
-    <label for="ti-title">Title</label><input id="ti-title" maxlength="200" required value="${esc(i.title)}">
-    <label>Type</label><div class="seg">${Object.entries(KINDS).map(([v,x])=>segBtn('kind',v,x,i.kind===v)).join('')}</div>
-    <label>Status</label><div class="seg">${statusEntries().map(([v,x])=>segBtn('status',v,x,i.status===v)).join('')}</div>
-    <label>Priority</label><div class="seg">${Object.entries(PRIORITY).map(([v,x])=>segBtn('priority',v,x,i.priority===v)).join('')}</div>
-    <div class="two"><div><label for="ti-start">${k.range?'Start':'Date'} <em>${dated(i)?'':'unscheduled'}</em></label><input id="ti-start" type="date" value="${i.start}"></div>
-    <div><label for="ti-end">End <em>optional</em></label><input id="ti-end" type="date" min="${i.start}" value="${i.end}"${dated(i)?'':' disabled'}></div></div>
-    ${i.kind!=='release'?`<label for="ti-release">Target release</label><select id="ti-release"><option value="">None</option>${releases.map(r=>`<option value="${esc(r.id)}"${i.release===r.id?' selected':''}>${esc(r.title)}${dated(r)?' · '+esc(fmt(r.start)):''}</option>`).join('')}</select>`:''}
+    <form id="tedit" class="ti-body ti-form" autocomplete="off">
+    <div class="ibody ti-top"><label for="ti-title">Title</label><input id="ti-title" class="cd-title" maxlength="200" required value="${esc(i.title)}">
+      <div class="ti-sets">${setField('kind','Type',Object.entries(KINDS),i.kind)}${setField('status','Status',statusEntries(),i.status)}${setField('priority','Priority',Object.entries(PRIORITY).map(([v,x])=>[v,{...x,word:x.label.split(' ')[0]}]),i.priority)}</div></div>
+    <div class="cd-grid"><div class="cd-main ibody">
+    <label for="ti-notes">Notes</label><textarea id="ti-notes" rows="4" maxlength="4000">${esc(i.notes)}</textarea>
     <label for="ti-proj">Projects</label><div class="tags-edit">${i.projects.map(id=>{const p=project(id);return p?`<span class="tag" style="--c:${p.color}">${esc(p.name)}<button type="button" data-untag="${esc(id)}" data-tip="Remove" aria-label="Remove ${esc(p.name)}">${icon('x',10)}</button></span>`:''}).join('')}
       <input id="ti-proj" list="ti-proj-list" placeholder="${i.projects.length?'':'Add project…'}" aria-label="Add project"></div>
     <datalist id="ti-proj-list">${sugg.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
-    ${inRelease.length?`<label>In this release · ${inRelease.filter(closed).length}/${inRelease.length} done</label><ul class="links">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(statusInfo(x.status).label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
-    ${linked.length?`<label>DevOps cards · ${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</label><ul class="links">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="Open card in DevOps">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
-    <label for="ti-owner">Owner</label><input id="ti-owner" list="ti-people" maxlength="120" value="${esc(i.owner)}"><datalist id="ti-people">${people.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
-    <label for="ti-link">Link</label><div class="linkrow"><input id="ti-link" type="url" maxlength="500" placeholder="https://" value="${esc(i.link)}">${link}</div>
-    <label for="ti-notes">Notes</label><textarea id="ti-notes" rows="4" maxlength="4000">${esc(i.notes)}</textarea></form>`;
+    ${inRelease.length?`<div class="cd-lab">In this release <em>${inRelease.filter(closed).length}/${inRelease.length} done</em></div><ul class="links" aria-label="In this release">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(statusInfo(x.status).label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
+    ${linked.length?`<div class="cd-lab">DevOps cards <em>${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</em></div><ul class="links" aria-label="DevOps cards">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="Open card in DevOps">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
+    </div><aside class="cd-side ibody">
+    <div class="rail-g" role="group" aria-label="Schedule and ownership">
+      <div class="two">${prop(`${k.range?'Start':'Date'}${dated(i)?'':' · unscheduled'}`,`<input id="ti-start" type="date" value="${i.start}">`,{for:'ti-start',stack:true})}${prop('End · optional',`<input id="ti-end" type="date" min="${i.start}" value="${i.end}"${dated(i)?'':' disabled'}>`,{for:'ti-end',stack:true})}</div>
+      ${i.kind!=='release'?prop('Target release',`<select id="ti-release"><option value="">None</option>${releases.map(r=>`<option value="${esc(r.id)}"${i.release===r.id?' selected':''}>${esc(r.title)}${dated(r)?' · '+esc(fmt(r.start)):''}</option>`).join('')}</select>`,{ic:'rocket',for:'ti-release'}):''}
+      ${prop('Owner',`<input id="ti-owner" list="ti-people" maxlength="120" placeholder="None" value="${esc(i.owner)}"><datalist id="ti-people">${people.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>`,{ic:'user',for:'ti-owner'})}
+      ${prop('Link',`<input id="ti-link" type="url" maxlength="500" placeholder="https://" value="${esc(i.link)}">${link}`,{ic:'link',for:'ti-link'})}
+    </div></aside></div></form>`;
 }
 function projectsHtml(){
   const sugg=chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase())).slice(0,30),cs=cards();
   return `<div class="ihead"><span class="k">${icon('tag')}</span><strong>Projects</strong><span class="sp"></span>${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
-    <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length;
-      return `<div class="prow"><input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"><em data-tip="${n} item${n===1?'':'s'}">${n}</em>${ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
+    <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`;
+      return `<div class="prow"><input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"><em tabindex="0" role="img" data-tip="${items}" aria-label="${items}">${n}</em>${ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
         <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"><option value="">Not under an entity</option>${cs.map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select></div>`}).join('')}
     <div class="prow"><input id="pnew" maxlength="80" placeholder="New project" aria-label="New project name">${ib('plus','Add project',{attrs:'data-ti="padd"'})}</div>
-    ${sugg.length?`<label>From your mind maps</label><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
+    ${sugg.length?`<div class="cd-lab">From your mind maps ${hint('Entity and area names from your charts. Click one to add it as a project.','From your mind maps')}</div><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project" aria-label="Add ${esc(s)} as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
 }
 export function inspectorClick(e){
   const b=e.target.closest('button');if(!b)return;

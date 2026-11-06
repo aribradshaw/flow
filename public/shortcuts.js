@@ -43,6 +43,8 @@ export const SHORTCUTS=[
   {id:'agentflow.zoomOut',scope:'agentflow',keys:['-'],desc:'Zoom out'},
   {id:'agentflow.nudge',scope:'agentflow',keys:['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'],desc:'Nudge the selected agent (Alt: 1px)',fixed:true},
   {id:'agentflow.delete',scope:'agentflow',keys:['Delete','Backspace'],desc:'Delete the selected agent or workflow'},
+  {id:'agentflow.nextAgent',scope:'agentflow',keys:['Alt+J'],desc:'Next agent or workflow (side panel open; works inside fields)'},
+  {id:'agentflow.prevAgent',scope:'agentflow',keys:['Alt+K'],desc:'Previous agent or workflow (side panel open; works inside fields)'},
   {id:'devops.drag',scope:'devops',keys:['Space'],desc:'Pick up a focused card; arrows move it, Space drops',fixed:true},
 ];
 const byId=new Map(SHORTCUTS.map(s=>[s.id,s]));

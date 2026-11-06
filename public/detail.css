@@ -1,0 +1,85 @@
+/* Detail surfaces: DevOps card, Timeline item, Projects panel and MindMap inspector. Loaded after style.css. */
+/* Shared shell */
+@media (min-width:721px){.cd-grid{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}}
+.cd-lab{display:flex;align-items:center;gap:5px;margin:10px 0 3px;font-size:11px;font-weight:600;color:var(--muted)}
+.cd-lab em{font-style:normal;font-weight:400;font-variant-numeric:tabular-nums}
+.cd-side{padding:2px 14px 10px}
+.cd-side .prop{grid-template-columns:110px minmax(0,1fr)}
+.cd-side .prop-l span{white-space:nowrap}
+.rail-g{padding:5px 0}
+.rail-g+.rail-g{border-top:1px solid var(--line)}
+.prop-v>.ib,.prop-v>a.ib{width:26px;height:26px}
+.prop-v .pk-btn.wide{max-width:none}
+.prop-v .pk-btn.wide .pk-t,.pk-btn.wide .pk-t{flex:1;min-width:0;text-align:left}
+.prop-v>.pk-btn .pk-dots{flex:none}
+.cd-side .dc-hint{padding:4px 0;color:var(--muted)}
+.cd-side .prop-pair{display:grid;grid-template-columns:110px minmax(0,1fr);gap:6px}
+.prop-pair .prop{grid-template-columns:auto minmax(0,1fr);column-gap:4px}
+.prop-pair>.prop:first-child{grid-template-columns:auto 34px}
+.prop-pair>.prop:first-child input{padding:0 2px;text-align:center}
+.prop-pair input[type=date]{min-width:0;padding:0 2px;font-size:12px}
+.prop-pair input[type=number]::-webkit-inner-spin-button{display:none}
+.cd-side .two{gap:6px}
+.cd-side .two .prop.stack{margin-top:2px}
+.cd-side .two input[type=date]{height:26px}
+
+dialog.card-modal,dialog.item-modal{overflow:hidden}
+@media (max-width:720px){.cd-side{padding-inline:20px}}
+
+/* DevOps card */
+.dc-prog{flex:0 0 56px;height:4px;overflow:hidden;border-radius:2px;background:var(--line)}
+.dc-prog i{display:block;height:100%;border-radius:2px;background:var(--flygon-green);transition:width .18s}
+.dc-prog.all i{background:#3f7a44}
+.cd-main .dc-list li{min-height:26px}
+.cd-main .dc-row{margin-top:2px}
+.dc-list .ib{position:relative}
+.dc-list .ib::after{content:'';position:absolute;inset:-1px}
+.dc-lk{position:relative}
+.dc-lk::after{content:'';position:absolute;inset:-6px}
+.prop-v .dc-sel{flex:1;gap:3px;min-height:26px;padding:1px 0}
+.prop-v .dc-sel .pk-btn{flex:none;width:auto;height:22px;padding:0 5px}
+.prop-v .dc-sel .pk-btn::after{content:'';position:absolute;inset:-1px}
+.dc-newbtn{position:relative;display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 6px;font-size:11.5px;font-weight:500;color:var(--muted)}
+.dc-newbtn::after{content:'';position:absolute;inset:-1px}
+.dc-newbtn[aria-expanded=true]{border-color:var(--flygon-green);color:var(--flygon-dark)}
+.dc-newrow[hidden]{display:none}
+.dc-agchips{display:flex;flex-wrap:wrap;gap:3px;padding:1px 0 2px 116px}
+.dc-agchip{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:24px;padding:0 7px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font-size:11.5px}
+.dc-agchip:hover{background:var(--hover)}
+.dc-agchip .i{flex:none;color:var(--muted)}
+.dc-agchip span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cd-side .dc-meta{margin:0;padding-top:7px;border-top:1px solid var(--line);font-size:10.5px;line-height:1.5;color:var(--muted);white-space:nowrap}
+.dc-meta time{border-radius:2px}
+
+/* Timeline item: title and segmented fields across the top, then the shared two columns. */
+.ti-body.ti-form{display:flex;flex-direction:column;padding:0}
+.ti-form>.cd-grid{flex:none;overflow:visible;border-top:1px solid var(--line)}
+.ti-top{flex:none;padding:0 20px 10px}
+.ti-top>label{margin-top:8px}
+.ti-sets{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:2px}
+.ti-set{min-width:0}
+.ti-set .cd-lab{margin:6px 0 3px}
+.ti-set .opts button span{max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.item-modal .cd-main{padding:0 20px 14px}
+.item-modal .cd-main>label{margin-top:8px}
+.item-modal .cd-main textarea{min-height:92px}
+.item-modal .cd-side{padding-bottom:6px}
+.item-modal .cd-main .links{margin-bottom:2px}
+.tag button{position:relative}
+.tag button::after{content:'';position:absolute;inset:-7px}
+
+/* Projects panel */
+#pedit .prow{margin:3px 0;gap:4px 6px}
+#pedit .prow:has(.under){padding-bottom:3px;border-bottom:1px solid var(--line)}
+#pedit .prow .sel-btn{margin:-2px 0 0 28px}
+#pedit .prow em{color:var(--muted)}
+
+/* MindMap inspector */
+#edit .prop{margin-top:6px}
+#edit>.kind-prop{margin-top:8px}
+#edit .prop .opts{flex:none}
+.pp-prop .pp-row{gap:6px}
+.pp-prop .pp-acts{display:flex;align-items:center;flex-wrap:nowrap;gap:0}
+.pp-prop .pp-acts .ib{width:26px;height:26px}
+#edit .pct{flex:1}
+#edit .pct input{width:100%;height:26px}

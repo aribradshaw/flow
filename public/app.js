@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource} from './ui.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice} from './ui.js';
 import {store,chart,change,checkpoint,commit,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
@@ -516,21 +516,20 @@ canvas.addEventListener('contextmenu',e=>{
 });
 
 // ---------- inspector ----------
-const segBtn=(attr,val,ic,label,on)=>`<button type="button" class="ib${on?' on':''}" data-${attr}="${val}" data-tip="${label}" aria-label="${label}" aria-pressed="${on}">${icon(ic)}</button>`;
 // A person's photo and email. A shared card shows its photo read-only (its email never crosses a share).
 // With no photo of its own, a card that is the signed-in user's (their email or, with no email, the only
 // person with their name) shows their account photo. "This is me" links a card with no email to the
 // account by setting the email only, so the live account photo keeps showing.
 function photoHtml(n,shared){
   const src=personPhoto(n),mine=!n.image&&!!src,me=sessionUser();
-  if(shared)return src?`<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}</div>`:'';
-  return `<label>Photo</label><div class="pp-row">${personAvatar(n,{size:48,cls:'pp-av'})}<div class="pp-acts">
-      <button type="button" class="txt" data-i="photoUpload" data-tip="PNG, JPEG or WebP · cropped to a 128 px square">${icon('upload',13)}Upload photo</button><input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp" hidden>
-      ${n.image?`<button type="button" class="txt" data-i="photoRemove">${icon('trash',13)}Remove</button>`:''}
-      ${me?.image&&n.image!==me.image?`<button type="button" class="txt" data-i="photoMine" data-tip="Use your account photo and email (${esc(me.email)})">${icon('user',13)}Use my photo</button>`:''}
-      ${me?.email&&!n.email?`<button type="button" class="txt" data-i="thisIsMe" data-tip="Link this card to your account (${esc(me.email)}) so it shows your account photo">${icon('check',13)}This is me</button>`:''}</div></div>
-    ${mine?`<p class="pp-note">Showing your account photo: ${n.email?'this email is yours':'this card has your name'}.</p>`:''}
-    <label for="pemail">Email</label><input id="pemail" type="email" maxlength="200" placeholder="Matches them to an account" value="${esc(n.email||'')}">`;
+  if(shared)return src?prop('Photo',`<div class="pp-row">${personAvatar(n,{size:32,cls:'pp-av'})}</div>`,{cls:'pp-prop'}):'';
+  return prop('Photo',`<div class="pp-row">${personAvatar(n,{size:32,cls:'pp-av'})}<div class="pp-acts">
+      ${ib('upload','Upload photo\nPNG, JPEG or WebP · cropped to a 128 px square',{attrs:'id="photoUploadBtn" data-i="photoUpload"'})}<input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp" hidden>
+      ${me?.image&&n.image!==me.image?ib('user',`Use my photo\nYour account photo and email (${me.email})`,{attrs:'id="photoMineBtn" data-i="photoMine"'}):''}
+      ${me?.email&&!n.email?ib('idCard',`This is me\nLink this card to your account (${me.email}) so it shows your account photo`,{attrs:'id="thisIsMeBtn" data-i="thisIsMe"'}):''}
+      ${n.image?ib('trash','Remove photo',{cls:'danger',attrs:'id="photoRemoveBtn" data-i="photoRemove"'}):''}</div></div>`,{cls:'pp-prop'})
+    +`${mine?`<p class="pp-note">Showing your account photo: ${n.email?'this email is yours':'this card has your name'}.</p>`:''}`
+    +prop('Email',`<input id="pemail" type="email" maxlength="200" placeholder="name@example.com" value="${esc(n.email||'')}">`,{for:'pemail',hint:'Matches this person to an account'});
 }
 // Any picked image becomes a 128x128 centre-cropped WebP (JPEG where WebP encoding is missing) data URL.
 async function squarePhoto(blob){
@@ -559,7 +558,7 @@ async function useMyPhoto(){
   }catch(err){toast('Could not use your photo · '+err.message,true)}
 }
 const options=id=>chart().nodes.map(n=>`<option value="${esc(n.id)}"${id===n.id?' selected':''}>${esc(n.name)}</option>`).join('');
-let inspectorFor=null;
+let inspectorFor=null,inspectedId=null;
 // strip=false: a focus change in split view, which leaves the chart's strip (possibly under the pointer) alone.
 function renderInspector(strip=true){
   const pane=$('#inspector');inspectorFor=tab;
@@ -567,15 +566,17 @@ function renderInspector(strip=true){
   if(tab==='devops'){dv.renderInspector(pane);return}
   if(tab==='agentflow'){af.renderInspector(pane);return}
   const n=node(selected),e=edge(selected);
+  // A button pressed inside the panel keeps focus across the re-render; if it is gone, focus falls back to a field.
+  const was=document.activeElement,pressed=was?.tagName==='BUTTON'&&pane.contains(was)&&inspectedId===(n||e)?.id?was.id:'';inspectedId=(n||e)?.id;
   // The panel slides in and out; its old content stays visible while it leaves.
   panel(pane,!!(n||e),{onHidden:()=>{if(!node(selected)&&!edge(selected))pane.innerHTML=''}});
   if(n){
     const k=KINDS[n.type],links=chart().edges.filter(x=>x.from===n.id||x.to===n.id),l=linkOf(n),ro=!canEdit(n)?' disabled':'';
     pane.innerHTML=`<div class="ihead"><span class="k ${n.type}">${icon(k.icon)}</span><strong>${k.label}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(sharedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''}<span class="sp"></span>
-      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
+      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
       ${l?'':ib('trash','Delete card',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label><input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
-      ${l?'':`<label>Kind</label><div class="seg">${Object.entries(KINDS).map(([t,x])=>segBtn('kind',t,x.icon,x.label,t===n.type)).join('')}</div>`}
+      ${l?'':prop('Kind',choice('kind',Object.entries(KINDS).map(([t,x])=>({value:t,label:x.label,icon:x.icon})),n.type,{label:'Kind',idp:'kind'}),{cls:'kind-prop'})}
       ${l?.stub?'':`<label for="notes">Notes</label><textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
       ${n.type==='person'?photoHtml(n,!!l):''}
       ${l?historyHtml(n,'node'):''}
@@ -585,12 +586,13 @@ function renderInspector(strip=true){
   }else if(e){
     const own=e.type==='ownership',l=linkOf(e),ro=!canEdit(e)?' disabled':'';
     pane.innerHTML=`<div class="ihead"><span class="k">${icon(own?'connect':'dashed')}</span><strong>${own?'Ownership':'Grouping'}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}">${icon('link',11)}Shared</span>`:''}<span class="sp"></span>
-      ${l?'':ib('swap','Reverse direction',{attrs:'data-i="reverse"'})+ib('trash','Delete connection',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
-      <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="fromNode">From</label><select id="fromNode"${l?' disabled':''}>${options(e.from)}</select><label for="toNode">To</label><select id="toNode"${l?' disabled':''}>${options(e.to)}</select>
-      ${l?'':`<label>Type</label><div class="seg wide"><button type="button" class="${own?'on':''}" data-etype="ownership" data-tip="Solid arrow with an ownership percentage">${icon('arrowR',14)}Ownership</button><button type="button" class="${own?'':'on'}" data-etype="group" data-tip="Dashed line that implies no ownership">${icon('dashed',14)}Grouping</button></div>`}
-      ${own?`<label for="percent">Share</label><div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>`:''}${l?historyHtml(e,'edge'):''}</form>`;
+      ${l?'':ib('swap','Reverse direction',{attrs:'id="i-reverse" data-i="reverse"'})+ib('trash','Delete connection',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
+      <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}${prop('From',`<select id="fromNode"${l?' disabled':''}>${options(e.from)}</select>`,{for:'fromNode'})}${prop('To',`<select id="toNode"${l?' disabled':''}>${options(e.to)}</select>`,{for:'toNode'})}
+      ${l?'':`<label>Type</label><div class="seg wide"><button type="button" id="etype-ownership" class="${own?'on':''}" data-etype="ownership" data-tip="Solid arrow with an ownership percentage">${icon('arrowR',14)}Ownership</button><button type="button" id="etype-group" class="${own?'':'on'}" data-etype="group" data-tip="Dashed line that implies no ownership">${icon('dashed',14)}Grouping</button></div>`}
+      ${own?prop('Share',`<div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>`,{for:'percent'}):''}${l?historyHtml(e,'edge'):''}</form>`;
   }
   if(linkOf(n||e))loadHistory(pane);
+  if(pressed)(document.getElementById(pressed)||$('#photoUploadBtn')||$('#name')||$('#fromNode'))?.focus({preventScroll:true});
   if(strip)renderStrip();
 }
 // Selecting an entity or area shows its slice of the Timeline along the bottom of the canvas.

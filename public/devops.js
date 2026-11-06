@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto} from './ui.js';
+import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto,prop,hint} from './ui.js';
 import {busy,skeletonAppend,panel,flipList} from './motion.js';
 import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
@@ -12,7 +12,7 @@ import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard
 // board, its filters and the card panel (in the shared #inspector), and handles drag and gates.
 const UIKEY='flygon-flow-devops-ui',MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ITEM_KINDS={feature:'Feature',milestone:'Milestone',release:'Release',deadline:'Deadline',project:'Project',phase:'Phase',event:'Event'};
-const LINK_ICONS={pr:'pr',commit:'commit',url:'link'};
+const LINK_ICONS={pr:'pr',commit:'commit',url:'link'},ROLE_ICONS={developer:'terminal',tester:'checkSq',requester:'inbox'};
 const FILTERS=()=>({projects:[],entity:'',assignees:[],agents:[],labels:[],q:'',hideDone:false});
 let ui=FILTERS();
 try{const saved=JSON.parse(localStorage.getItem(UIKEY))||{};
@@ -37,6 +37,7 @@ const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===i
 const today=()=>{const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`};
 const fmt=s=>`${MONTHS[+s.slice(5,7)-1]} ${+s.slice(8)}${s.slice(0,4)!==today().slice(0,4)?`, ${s.slice(0,4)}`:''}`;
 const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+const day=iso=>{const d=new Date(iso);return d.toLocaleDateString([],{month:'short',day:'numeric',...(d.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})})};
 const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="background:${bg};color:${fg}"${l.name.length>12?` data-tip="${esc(l.name)}"`:''}>${esc(l.name)}</span>`};
 const bubble=(id,roles)=>{const n=nodeById(id);return n?personAvatar(n,{tip:`${n.name} · ${roles.join(', ')}`}):''};
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
@@ -248,7 +249,7 @@ export function focus({person,entity,agent,cardId}={}){
 // ---------- card panel (shared #inspector) ----------
 // The card detail opens as a modal that grows out of the card (modal.js); the shared side panel
 // stays empty on this tab. #devops/card/<number> deep-links to it; Back closes it.
-let modal=null,modalFor=null,pushed=false;
+let modal=null,modalFor=null,pushed=false,labelForm=false;
 const cardEl=id=>document.querySelector(`#devopsView [data-card="${CSS.escape(id)}"]`);
 const cardHash=c=>`#devops/card/${c.number}`;
 export function renderInspector(pane){
@@ -266,8 +267,9 @@ export function renderInspector(pane){
         if(selected===id){selected=null;rerender()}
         if(!m.quiet)requestAnimationFrame(()=>cardEl(id)?.focus({preventScroll:true}));
       }});
-    modal=m;
+    modal=m;labelForm=false;
   }
+  if(modalFor!==c.id)labelForm=false;
   modalFor=modal.forId=c.id;modal.from(cardEl(c.id));
   if(location.hash!==cardHash(c)){if(location.hash.startsWith('#devops/card/'))history.replaceState(null,'',cardHash(c));else{history.pushState(null,'',cardHash(c));pushed=true}}
   // Keep focus and caret in place when the body is re-rendered after an edit.
@@ -293,41 +295,50 @@ function modalKey(e){
   const next=list[list.findIndex(x=>x.id===c.id)+dir];if(!next)return;
   e.preventDefault();selected=next.id;reveal=true;rerender();
 }
+// A picker row's name for assistive tech: its visible text is only the value.
+const named=(name,html)=>html.replace('<button ',()=>`<button aria-label="${esc(name)}" `);
 function cardDetailHtml(c){
   const ppl=people(),items=[...db().timeline].sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
   const projectOpts=db().projects.map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
-  const done=c.checklist.filter(x=>x.done).length;
+  const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
   return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong><span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
     ${c.column==='uat'?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
     ${ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
     <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">
     <label for="dc-title">Title</label><input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}">
     <label for="dc-desc">Description</label><textarea id="dc-desc" rows="9" maxlength="8000" placeholder="Why this card exists, what should be delivered">${esc(c.description)}</textarea>
-    <label>Checklist${c.checklist.length?` <em>${done}/${c.checklist.length}</em>`:''}</label><ul class="dc-list">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`})}</li>`).join('')}</ul>
+    <div class="cd-lab">Checklist${total?` <em>${done}/${total}</em><span class="dc-prog${done===total?' all':''}" role="progressbar" aria-label="Checklist progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><i style="width:${done/total*100}%"></i></span>`:''}</div>
+    <ul class="dc-list" aria-label="Checklist">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`})}</li>`).join('')}</ul>
     <div class="dc-row"><input id="dc-chk" maxlength="300" placeholder="Add an item and press Enter" aria-label="New checklist item">${ib('plus','Add item',{attrs:'data-dc="chkAdd"'})}</div>
-    <label>Links <em>pull request, commit or URL</em></label><ul class="dc-list">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`})}</li>`).join('')}</ul>
+    <div class="cd-lab">Links ${hint('A pull request, a commit or any URL','Links')}</div>
+    <ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`})}</li>`).join('')}</ul>
     <div class="dc-row"><select id="dc-lkind" aria-label="Link type">${Object.entries(LINK_KINDS).map(([k,n])=>opt(k,n,'pr')).join('')}</select><input id="dc-lurl" maxlength="500" placeholder="https:// or a commit SHA" aria-label="Link">${ib('plus','Add link',{attrs:'data-dc="linkAdd"'})}</div>
     </div><aside class="cd-side ibody">
-    <div class="two"><div><label for="dc-col">Column</label><select id="dc-col">${dv().columns.map(x=>opt(x.id,x.name,c.column)).join('')}</select></div>
-      <div><label for="dc-proj">Project</label><select id="dc-proj">${opt('','No project',c.project)}${projectOpts}</select></div></div>
-    <label>Labels</label><div class="dc-ls"><div class="dc-sel">${c.labels.map(label).filter(Boolean).map(pill).join('')}${pickerButton('dc-labels',c.labels.length?'Edit':'Add labels',labelItems(),[],{cls:'mini'})}</div>
-      <div class="dc-row"><input id="dc-newlabel" maxlength="40" placeholder="New label" aria-label="New label name"><select id="dc-newsec" aria-label="Label section">${SECTIONS.map(([s,n])=>opt(s,n,'area')).join('')}</select>${ib('plus','Add label',{attrs:'data-dc="labelAdd"'})}</div></div>
-    <div class="two"><div><label for="dc-pts">Points</label><input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}"></div>
-      <div><label for="dc-due">Due date</label><input id="dc-due" type="date" value="${c.due}"></div></div>
-    <label>Assignees</label>${ppl.length?`<div class="dc-roles">${ROLES.map(role=>{const ids=c.assignees.filter(a=>a.role===role).map(a=>a.node);
-      return `<div class="dc-role"><small>${role[0].toUpperCase()+role.slice(1)}</small>${pickerButton('dc-role-'+role,ids.length?ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', '):'None',personItems(),ids,{cls:'mini wide'})}</div>`}).join('')}</div>`
-      :`<div class="dc-hint">Add people to a mind map to assign them.</div>`}
-    <label for="dc-item">Timeline item</label><div class="linkrow"><select id="dc-item">${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}</div>
-    ${agentRow(c)}
-    <div class="dc-meta">Created ${esc(when(c.created))}<br>Updated ${esc(when(c.updated))}</div></aside></form>`;
+    <div class="rail-g" role="group" aria-label="Planning">
+      ${prop('Column',`<select id="dc-col">${dv().columns.map(x=>opt(x.id,x.name,c.column)).join('')}</select>`,{ic:'board',for:'dc-col'})}
+      ${prop('Project',`<select id="dc-proj">${opt('','No project',c.project)}${projectOpts}</select>`,{ic:'tag',for:'dc-proj'})}
+      <div class="prop-pair">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}">`,{ic:'target',for:'dc-pts'})}${prop('Due',`<input id="dc-due" type="date" value="${c.due}">`,{ic:'calendar',for:'dc-due'})}</div>
+      ${prop('Timeline item',`<select id="dc-item">${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
+    </div>
+    <div class="rail-g" role="group" aria-label="People">
+      ${ppl.length?ROLES.map(role=>{const ids=c.assignees.filter(a=>a.role===role).map(a=>a.node),name=role[0].toUpperCase()+role.slice(1),who=ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', ');
+        return prop(name,named(`${name}: ${who||'None'}`,pickerButton('dc-role-'+role,who||'None',personItems(),ids,{cls:'mini wide',count:false})),{ic:ROLE_ICONS[role]})}).join('')
+        :`<div class="dc-hint">Add people to a mind map to assign them.</div>`}
+      ${agentRow(c)}
+    </div>
+    <div class="rail-g" role="group" aria-label="Labels">
+      ${prop('Labels',`<div class="dc-sel">${c.labels.map(label).filter(Boolean).map(pill).join('')}${named(c.labels.length?'Edit labels':'Add labels',pickerButton('dc-labels',c.labels.length?'Edit':'Add',labelItems(),[],{cls:'mini'}))}<button type="button" class="txt dc-newbtn" id="dc-newbtn" data-dc="labelNew" data-tip="Create a new label" aria-label="New label" aria-expanded="${labelForm}" aria-controls="dc-newrow">${icon('plus',11)}New</button></div>`,{ic:'list'})}
+      <div class="dc-row dc-newrow" id="dc-newrow"${labelForm?'':' hidden'}><input id="dc-newlabel" maxlength="40" placeholder="New label" aria-label="New label name"><select id="dc-newsec" aria-label="Label section">${SECTIONS.map(([s,n])=>opt(s,n,'area')).join('')}</select>${ib('plus','Add label',{attrs:'data-dc="labelAdd"'})}</div>
+    </div>
+    <div class="dc-meta"><time datetime="${esc(c.created)}" tabindex="0" data-tip="Created ${esc(when(c.created))}" aria-label="Created ${esc(when(c.created))}">Created ${esc(day(c.created))}</time><span aria-hidden="true"> · </span><time datetime="${esc(c.updated)}" tabindex="0" data-tip="Updated ${esc(when(c.updated))}" aria-label="Updated ${esc(when(c.updated))}">Updated ${esc(day(c.updated))}</time></div></aside></form>`;
 }
 // AgentFlow agents working this card (the link is stored on the agent, agentflow-core.js).
 const agentItems=()=>[...(db().agentflow?.agents||[])].sort((a,b)=>a.name.localeCompare(b.name)).map(a=>{const [bg,fg]=memberColor(a.id);return {value:a.id,label:a.name,sub:a.title,avatar:{text:initials(a.name),bg,fg}}});
 function agentRow(c){
   if(!db().agentflow?.agents.length)return '';
-  const on=agentsForCard(db().agentflow,c.id);
-  return `<label>Delegated to <em>AgentFlow agents · their work queue</em></label>${pickerButton('dc-agents',on.length?on.map(a=>a.name).join(', '):'None',agentItems(),on.map(a=>a.id),{cls:'mini wide'})}
-    ${on.length?`<ul class="links">${on.map(a=>`<li><button type="button" data-dc-agent="${esc(a.id)}" data-tip="Open in AgentFlow">${icon('bot',12)}<span>${esc(a.name)}</span><em>${esc(a.title)}</em></button></li>`).join('')}</ul>`:''}`;
+  const on=agentsForCard(db().agentflow,c.id),names=on.map(a=>a.name).join(', ');
+  return prop('Delegated to',named(`Delegated to: ${names||'None'}`,pickerButton('dc-agents',names||'None',agentItems(),on.map(a=>a.id),{cls:'mini wide',count:false}))+hint('AgentFlow agents working this card. It joins their work queue.','Delegated to'),{ic:'bot'})
+    +(on.length?`<div class="dc-agchips">${on.map(a=>`<button type="button" class="dc-agchip" id="dc-ag-${esc(a.id)}" data-dc-agent="${esc(a.id)}" data-tip="${esc(a.title?`Open in AgentFlow\n${a.title}`:'Open in AgentFlow')}" aria-label="Open ${esc(a.name)} in AgentFlow${a.title?`, ${esc(a.title)}`:''}">${icon('bot',12)}<span>${esc(a.name)}</span></button>`).join('')}</div>`:'');
 }
 function addLabel(){
   const i=$('#dc-newlabel'),name=i?.value.trim(),c=card(selected);if(!name||!c)return;
@@ -355,6 +366,7 @@ export function inspectorClick(e){
       if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}
       touch(c);commit(before);rerender()}});return}
   if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
+  if(b.dataset.dc==='labelNew'){labelForm=!labelForm;$('#dc-newrow').hidden=!labelForm;b.setAttribute('aria-expanded',labelForm);if(labelForm)$('#dc-newlabel')?.focus();return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
   if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
   ({approve:()=>approve(c.id),delete:()=>remove(c.id),close:()=>select(null),labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>openItem(c.item),

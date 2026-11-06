@@ -450,6 +450,20 @@ try{
   assert(await js(`document.querySelector('dialog.acct-dlg[open] [role=tab][aria-selected=true]')?.dataset.tab`)==='shortcuts','Settings reopens on the last tab');
   await js(`document.querySelector('[data-sc-reset-all]').click()`);await sleep(100);
   assert(await js(`document.querySelector('[data-sc="chart.addEntity"]').textContent.trim()==='E'&&document.querySelector('[data-sc="chart.addPerson"]').textContent.trim()==='P'`),'Reset all restores the defaults');
+  // Settings › Environment and API keys: long blocks open on demand, and that state outlives a redraw.
+  await js(`document.querySelector('#acctTab-environment').click()`);await sleep(350);
+  assert(await js(`(()=>{const p=document.querySelector('#acctPanel'),b=document.querySelector('#workflowToggle'),c=document.querySelector('[data-env-list] .cur');return p.scrollHeight<=p.clientHeight&&b.getAttribute('aria-expanded')==='false'&&document.getElementById(b.getAttribute('aria-controls')).hidden&&/Delivery · 6 statuses · 7 columns/.test(b.textContent)&&/Private/.test(c.textContent)&&/Owner: You/.test(c.textContent)&&!document.querySelector('#acctPanel dl')})()`),'Settings › Environment fits without scrolling: details are badges on the current row and Workflow is collapsed with a summary');
+  await js(`document.querySelector('#workflowToggle').click()`);await sleep(50);
+  assert(await js(`(()=>{const i=document.querySelector('#wf-status-planned'),c=document.querySelector('#wf-column-requests');return !document.querySelector('#workflowBody').hidden&&i.offsetHeight>0&&i.placeholder==='Planned'&&i.getAttribute('aria-label')==='Status: Planned'&&c.getAttribute('aria-label')==='Column: Requests / Sprinted'&&i.closest('label').dataset.tip==='Planned'&&!i.closest('label').textContent.trim()})()`),'the Workflow disclosure opens to one compact row per status and column');
+  await js(`document.querySelector('#acctTab-apikeys').click()`);await sleep(350);
+  assert(await js(`(()=>{const f=document.querySelector('#akForm'),u=document.querySelector('#akUse'),seq=[...document.querySelector('.ak').children];return f.hidden&&u.hidden&&seq.indexOf(document.querySelector('[data-ak-list]'))<seq.indexOf(u)&&/curl/.test(document.querySelector('#akUseBtn').textContent)})()`),'Settings › API keys starts with the key list, the form and the how-to folded away');
+  await js(`document.querySelector('#akNewBtn').focus();document.querySelector('#akNewBtn').click()`);await sleep(250);
+  assert(await js(`document.activeElement.id==='akName'&&document.querySelector('#akNewBtn').getAttribute('aria-expanded')==='true'&&/like a password/.test(document.querySelector('#akForm').textContent)&&document.querySelector('#akScope-write').scrollHeight<=document.querySelector('#akScope-write').clientHeight`),'New key opens the form, focuses its name and shows the password warning, with Read & write on one line');
+  await js(`document.querySelector('#acctTab-environment').click()`);await sleep(350);
+  assert(await js(`!document.querySelector('#workflowBody').hidden`),'the Workflow disclosure stays open after a redraw');
+  await js(`document.querySelector('#workflowToggle').click();document.querySelector('#acctTab-apikeys').click()`);await sleep(350);
+  assert(await js(`!document.querySelector('#akForm').hidden`),'the New key form stays open after a redraw');
+  await js(`document.querySelector('#akNewBtn').click();document.querySelector('#acctTab-shortcuts').click()`);await sleep(200);
   await js(`document.querySelector('dialog.acct-dlg[open]').close()`);await sleep(100);
   // Agent inbox end to end: the CLI queues a patch, the open app merges it as one undoable step.
   const patchFile=join(savesDir,'patch.json');
@@ -490,8 +504,19 @@ try{
   db=await saved();const lead=db.agentflow.agents[0];
   assert(db.agentflow.agents.length===4&&db.agentflow.workflows.length===1&&await js(`document.querySelectorAll('.af-node').length`)===4,'the template adds a small org and a workflow');
   assert(await js(`!document.querySelector('#inspector').hidden&&document.querySelector('#af-name')?.value`)==='Chief of staff','the new org lead opens in the side panel');
+  const afTab=async k=>{await js(`document.querySelector('#af-tab-${k}').click()`);await sleep(50)};
+  assert(await js(`document.querySelector('#af-tab-run').getAttribute('aria-selected')==='true'&&!document.querySelector('#af-pane-run').hidden&&document.querySelector('#af-pane-job').hidden&&!!document.querySelector('#af-new-inputs')`),'an AI agent still being set up opens on Run, with the other tabs in the DOM');
+  assert(await js(`[...document.querySelectorAll('.af-setup [data-af-setup]')].map(b=>b.textContent).join()`)==='Runner,Model,Cards','the setup strip offers each missing step');
+  await js(`document.querySelector('#af-setup-cards').click()`);await sleep(50);
+  assert(await js(`document.querySelector('#af-tab-links').getAttribute('aria-selected')==='true'&&document.activeElement.dataset.picker`)==='af-cards','a setup chip jumps to its tab and field');
+  await js(`document.querySelector('#af-tab-links').focus()`);await key('Home',36);await sleep(50);
+  assert(await js(`document.activeElement.id`)==='af-tab-job'&&!await js(`document.querySelector('#af-pane-job').hidden`),'Home in the tab bar selects the first tab');
+  await key('ArrowRight',39);await key('ArrowRight',39);await sleep(50);
+  assert(await js(`document.activeElement.id`)==='af-tab-org'&&await js(`document.querySelector('#af-pane-org').hidden`)===false&&await js(`document.querySelectorAll('#inspector [role=tab][tabindex="0"]').length`)===1,'arrow keys move along the tab bar with one tab stop');
+  await afTab('org');
   assert(await js(`(()=>{const b=document.querySelector('#af-reports');b.click();const l=[...document.querySelectorAll('.picker:not(.leaving) .pk-opt .pk-l')].map(o=>o.textContent);b.click();return l.join()})()`)==='Nobody (top level)','an agent cannot report to its own reports');
   await js(`(()=>{const i=document.querySelector('#af-name');i.focus();i.select();return 1})()`);await call('Input.insertText',{text:'Ops lead'});
+  await afTab('job');
   await js(`document.querySelector('#af-new-inputs').focus()`);await call('Input.insertText',{text:'Customer email'});await key('Enter',13);
   db=await saved();
   assert(db.agentflow.agents[0].name==='Ops lead'&&db.agentflow.agents[0].inputs.includes('Customer email')&&await js(`document.activeElement.id`)==='af-new-inputs','agent fields autosave and list inputs add on Enter');
@@ -586,8 +611,17 @@ try{
     assert((await saved()).agentflow.agents.length===n0&&await js(`document.querySelectorAll('#afCanvas .k-automation').length`)===0&&!await js(`!!document.querySelector('.af-tray [data-af=goAgent]')`),'promoting undoes one step at a time');
     await key('z',90,2);await js(`document.querySelector('[data-af=tray]').click()`);await sleep(100);
     assert(!(await saved()).agentflow.runners.length&&await js(`document.querySelector('.af-tray').hidden`),'(seeded report undone, tray closed)');}
+  // Alt+J and Alt+K step through the org from inside a field and keep it focused.
+  {await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);await afTab('job');
+  await js(`document.querySelector('#af-purpose').focus()`);await call('Input.dispatchKeyEvent',{type:'keyDown',key:'j',code:'KeyJ',modifiers:1,windowsVirtualKeyCode:74});await sleep(100);
+  const nm=await js(`document.querySelector('#af-name').value`);
+  assert(nm!=='Ops lead'&&await js(`document.activeElement.id`)==='af-purpose'&&await js(`document.querySelector('#af-tab-job').getAttribute('aria-selected')`)==='true','Alt+J selects the next agent and keeps the same field and tab');
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'k',code:'KeyK',modifiers:1,windowsVirtualKeyCode:75});await sleep(100);
+  assert(await js(`document.querySelector('#af-name').value`)==='Ops lead'&&await js(`document.activeElement.id`)==='af-purpose','Alt+K goes back');
+  await js(`document.activeElement.blur()`);}
   // Link a card from the agent, then follow the link back from the card.
   await js(`document.querySelector('[data-agent="${lead.id}"]').click()`);await sleep(100);
+  await afTab('links');
   await js(`document.querySelector('#inspector [data-picker=af-cards]').click()`);await sleep(100);
   await js(`[...document.querySelectorAll('.picker .pk-opt')].find(o=>o.textContent.includes('QA Card A'))?.click()`);await key('Escape',27);await sleep(100);
   const afCard=(await saved()).devops.cards.find(c=>c.title==='QA Card A');
@@ -597,6 +631,14 @@ try{
   await js(`document.querySelector('[data-flow]').click()`);await sleep(100);
   await js(`document.querySelector('#inspector [data-afi=addStep]').click()`);await sleep(100);
   assert((await saved()).agentflow.workflows[0].steps.length===5&&/^af-act-/.test(await js('document.activeElement.id')),'a step can be added to a workflow');
+  {const open=()=>js(`document.querySelectorAll('.af-rail [aria-expanded=true]').length`),rows=`document.querySelectorAll('.af-rail .af-sr')`;
+  assert(await open()===1&&await js(`${rows}[4].getAttribute('aria-expanded')`)==='true','a new step opens in place');
+  await js(`${rows}[0].click()`);await sleep(50);
+  assert(await open()===1&&await js(`${rows}[0].getAttribute('aria-expanded')`)==='true'&&!!await js(`document.querySelector('#af-act-'+document.querySelector('.af-rail li').dataset.step)`),'one step is open at a time, and collapsed editors stay in the DOM');
+  const sec=`document.querySelectorAll('.af-rail li')[1]`;await js(`${rows}[1].click()`);await sleep(50);
+  await js(`${sec}.querySelector('[data-step-up]').focus();${sec}.querySelector('[data-step-up]').click()`);await sleep(80);
+  assert(await js(`document.activeElement.dataset.stepDown||''`)&&await js(`document.activeElement.dataset.stepDown===document.querySelectorAll('.af-rail li')[0].dataset.step`),'moving a step to the top keeps focus on it');
+  await key('z',90,2);await sleep(50);await js(`document.activeElement.blur()`);}
   await js(`document.activeElement.blur()`);await rclick(...await center('[data-flow] strong'));await menuPick('Duplicate workflow');
   db=await saved();assert(db.agentflow.workflows.length===2&&db.agentflow.workflows[1].steps.length===5&&db.agentflow.workflows[1].steps.every((s,i)=>s.id!==db.agentflow.workflows[0].steps[i].id),'a workflow card\'s menu duplicates it with new ids');
   await js(`document.activeElement.blur()`);await key('z',90,2);await sleep(100);

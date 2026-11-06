@@ -1,0 +1,210 @@
+/* AgentFlow side panel: sticky summary, tabs, pipeline, model rows, step rail.
+   Loaded after style.css. #inspector prefixes win over style.css's .ibody input rules. */
+body[data-tab=agentflow] #inspector{scrollbar-width:thin}
+
+/* ---------- sticky block ---------- */
+.af-top{position:sticky;top:0;z-index:3;background:#fff}
+.af-top .ihead{position:static}
+@supports (animation-timeline:scroll()){
+  /* A soft edge only once the tab content has scrolled under it. */
+  @keyframes af-top-edge{from{box-shadow:none}to{box-shadow:0 6px 10px -8px #141e1c40}}
+  .af-top{animation:af-top-edge linear both;animation-timeline:scroll(nearest block);animation-range:0 12px}
+}
+@media (max-height:600px){.af-top{position:static}}
+.af-panel .af-hero{align-items:center;gap:9px;padding:8px 12px 6px}
+.af-panel .af-hero .af-av{align-self:flex-start;margin-top:3px}
+.af-panel .af-hero.one .af-av{margin-top:0;align-self:center;width:30px;height:30px;border-radius:8px}
+.af-panel .af-hero.one .af-av .i{width:16px;height:16px}
+#inspector .af-hero-m{display:flex;flex-direction:column;gap:0}
+#inspector input.af-name-in,#inspector input.af-role-in{display:block;width:calc(100% + 5px);margin:0 0 0 -5px;padding:0 5px;border-color:transparent;background:transparent;box-shadow:none;text-overflow:ellipsis}
+#inspector input.af-name-in{height:24px;font-size:14px;font-weight:650}
+#inspector input.af-role-in{height:20px;font-size:11.5px;color:var(--muted)}
+#inspector input.af-role-in::placeholder{color:var(--muted)}
+#inspector input.af-name-in:hover,#inspector input.af-role-in:hover{border-color:var(--line)}
+#inspector input.af-name-in:focus,#inspector input.af-role-in:focus{border-color:var(--line2);background:#fff;color:var(--ink);text-overflow:clip}
+#inspector .af-hero label.af-live.af-live-c{margin:0;padding:3px 7px 3px 4px}
+.af-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px;padding:0 12px 7px}
+/* Bare groups with narrow resting buttons so Automation + Retired fit one row; ::after keeps a 24px
+   target. The chosen kind drops its icon: the avatar and header above already show it. */
+.af-row .opts{padding:0;border:0;background:none}
+.af-row .opts button{min-width:22px;padding:0 3px;font-size:10.5px;gap:3px}
+.af-row .opts button.on{padding:0 4px;background:#fff;box-shadow:inset 0 0 0 1px var(--line2)}
+.af-row .opts button::after{content:'';position:absolute;inset:0 -1px}
+.af-row .opts button.on[data-af-kind] .i{display:none}
+.af-row .opts .dot{flex:none;display:block;margin:0}
+.af-setup{display:flex;align-items:center;gap:5px;min-height:24px;margin:0 12px 6px;padding:0 3px 0 7px;border-radius:5px;background:var(--flygon-tint);font-size:11px;font-weight:600;color:var(--accent)}
+.af-setup-n{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.af-setup-bar{flex:1 1 16px;min-width:14px;height:4px;overflow:hidden;border-radius:2px;background:#fff}
+.af-setup-bar i{display:block;height:100%;border-radius:2px;background:var(--flygon-green)}
+.af-setup-c{position:relative;flex:none;height:18px;padding:0 6px;border:1px solid var(--accent-line);border-radius:9px;background:#fff;color:var(--accent);font-size:10.5px;font-weight:600;line-height:1}
+.af-setup-c::after{content:'';position:absolute;inset:-3px -1px}
+.af-setup-c:hover{background:var(--flygon-light)}
+.af-top>.af-warn{margin:0 12px 6px;padding:4px 7px;font-size:11px}
+.af-tabs{display:flex;gap:0;padding:0 8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.af-tab{position:relative;flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;height:30px;padding:0 4px;border:0;border-radius:0;background:none;color:var(--muted);font-size:11.5px;font-weight:600;white-space:nowrap}
+.af-tab:hover{color:var(--ink);background:var(--bg)}
+.af-tab.on{color:var(--ink)}
+.af-tab.on .i{color:var(--accent)}
+.af-tab.on::after{content:'';position:absolute;left:4px;right:4px;bottom:-1px;height:2px;border-radius:1px 1px 0 0;background:var(--accent)}
+.af-tab:focus-visible{outline:2px solid var(--accent-line);outline-offset:-2px}
+.af-tab small{display:inline-flex;align-items:center;justify-content:center;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--bg);color:var(--muted);font-size:9.5px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;box-shadow:inset 0 0 0 1px var(--line)}
+.af-tab small .af-jdot{display:block;width:6px;height:6px}
+
+/* ---------- tab panels ---------- */
+.af-pane{padding:8px 12px 4px}
+.af-pane[hidden]{display:none}
+.af-panel .dc-hint{color:var(--muted)}
+.af-panel .links em,.af-panel .links .i{color:var(--muted)}
+.af-panel .af-field{margin-bottom:8px}
+.af-panel .prop+.af-field{margin-top:4px}
+.af-panel .af-field>label,.af-ph>label,.af-mh>label{display:flex;align-items:center;gap:5px;margin:0;font-size:11.5px;font-weight:600;color:var(--muted)}
+.af-panel .af-field>label{margin-bottom:3px}
+.af-ph .i,.af-h .i{flex:none;color:var(--muted)}
+.af-ph{display:flex;align-items:center;gap:3px;min-height:18px;margin-bottom:3px}
+.af-ph-tools,.af-ph-instr{margin-top:9px}
+.af-ph-instr .sp{flex:1}
+.af-count{flex:none;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.af-h{display:flex;align-items:center;gap:5px;min-height:18px;margin:9px 0 3px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.af-h-n{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.af-h em{margin-left:auto;font-style:normal;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+/* A short field that makes room while you type. It shrinks a beat after blur, so a click on
+   something below it lands before the layout moves. */
+#inspector textarea.af-grow{display:block;min-height:0;height:45px;padding-bottom:0;overflow:hidden;resize:none;transition:height .12s ease .18s}
+#inspector textarea.af-grow:focus{height:112px;padding-bottom:4px;overflow:auto;transition-delay:0s}
+#inspector #af-instr{display:block;min-height:0;height:78px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.4}
+.ib.af-instr-open{width:24px;height:24px}
+
+/* Pipeline: inputs, the agent, outputs. Stubs and a bus on each column meet the glyph's line. */
+.af-pipe{display:grid;grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr);row-gap:3px}
+.af-pipe .af-ph{margin:0}
+.af-ph-inputs{grid-column:1}.af-ph-outputs{grid-column:3;padding-left:9px}
+.af-plist{position:relative;align-self:center;display:flex;flex-direction:column;gap:3px;min-width:0}
+.af-plist-inputs{grid-column:1;padding-right:9px}
+.af-plist-outputs{grid-column:3;padding-left:9px}
+.af-plist::after{content:'';position:absolute;top:11px;bottom:11px;width:1px;background:var(--line2)}
+.af-plist-inputs::after{right:0}.af-plist-outputs::after{left:0}
+.af-plist>*{position:relative}
+.af-plist>*::before{content:'';position:absolute;top:50%;width:9px;height:1px;background:var(--line2)}
+.af-plist-inputs>*::before{right:-10px}.af-plist-outputs>*::before{left:-10px}
+.af-plist .af-chip{display:flex;width:100%;max-width:none}
+.af-plist .af-chip>span{flex:1;min-width:0}
+.af-chip button{position:relative}
+.af-chip button::after{content:'';position:absolute;inset:-4px}
+.af-pmid{position:relative;grid-column:2;display:flex;align-items:center;justify-content:center;align-self:stretch;min-height:22px}
+.af-pmid::before{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line2)}
+.af-pmid::after{content:'';position:absolute;right:-1px;top:50%;margin-top:-3px;border-left:5px solid var(--line2);border-top:3.5px solid transparent;border-bottom:3.5px solid transparent}
+.af-pmid span{position:relative;z-index:1;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--flygon-tint);color:var(--accent);box-shadow:0 0 0 1px var(--accent-line)}
+.af-padd-inputs{grid-column:1;padding-right:9px}
+.af-padd-outputs{grid-column:3;padding-left:9px}
+.af-plist .af-padd{padding:0}
+#inspector .af-padd input{display:block;width:100%;height:24px;padding:0 8px;border:1px dashed var(--line2);border-radius:11px;background:transparent;box-shadow:none;font-size:11.5px}
+#inspector .af-padd input:hover{border-color:var(--muted)}
+#inspector .af-padd input:focus{border-style:solid;border-color:var(--flygon-green);background:#fff;box-shadow:0 0 0 2px var(--flygon-light)}
+#inspector .af-padd input::placeholder,#inspector .af-chips input::placeholder{color:var(--muted)}
+
+/* ---------- Run tab ---------- */
+.af-combo{flex:1;min-width:0}
+#inspector .af-combo input{height:26px}
+.af-combo-b{width:24px;height:26px}
+@media (hover:hover){
+  .prop-v .af-combo:not(:hover):not(:focus-within) input,.prop-v .af-combo:not(:hover):not(:focus-within) .af-combo-b{border-color:transparent;background:transparent;box-shadow:none}
+}
+.af-panel .prop{grid-template-columns:94px minmax(0,1fr)}
+.af-runline{display:flex;align-items:flex-start;gap:5px;margin:-2px 0 4px 100px;padding-left:6px;font-size:11px;line-height:1.35;color:var(--muted)}
+.af-rdot{flex:none;width:7px;height:7px;margin-top:4px;border-radius:50%;background:#2f8a4f}
+.af-rdot.stale{background:var(--warn)}.af-rdot.none{background:#c4cbc8}
+.af-mh{display:flex;align-items:center;gap:3px;min-height:28px;margin-top:4px}
+.af-mh .sp{flex:1}
+.af-panel label.af-tog.af-auto{display:inline-flex;gap:5px;margin:0;font-size:11.5px;font-weight:600;color:var(--muted)}
+.af-panel label.af-tog.af-auto.on{color:var(--ink)}
+.af-tog.af-auto>span:last-child{gap:3px;flex-wrap:nowrap}
+.af-models{margin:0 0 4px}
+.af-m{position:relative;gap:6px;min-height:0;height:30px;padding:0 6px}
+.af-m>em{width:16px;height:16px;font-size:9.5px}
+.af-m-l{display:block;flex:1;min-width:0;overflow:hidden;border-radius:3px;white-space:nowrap;text-overflow:ellipsis}
+.af-m-l b{font-weight:550}
+.af-m-l:focus-visible{outline:2px solid var(--accent-line);outline-offset:-1px}
+.af-m-miss{display:flex;flex:none;color:var(--warn)}
+.af-m-b{position:absolute;top:0;right:0;bottom:0;align-items:center;padding:0 2px 0 8px;background:linear-gradient(90deg,#fff0,#fff 8px);opacity:0;pointer-events:none}
+.af-m:hover .af-m-b,.af-m:focus-within .af-m-b{opacity:1;pointer-events:auto}
+.af-m-b .ib{width:24px;height:24px}
+@media (hover:none){
+  .af-m-b{position:static;padding:0;background:none;opacity:1;pointer-events:auto}
+}
+.af-bill{cursor:default}
+.pk-btn.af-madd{height:28px;margin-bottom:6px}
+.pk-btn.af-madd small{color:var(--muted)}
+
+/* The promoted job: one status line, then Details. */
+.af-jobline{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;line-height:1.35}
+.af-jobline .af-jdot{margin-top:5px}
+.af-jobline-t{flex:1;min-width:0}
+.af-jobline-t b{font-weight:600}
+.af-jobline-w{color:var(--warn)}
+.af-more{position:relative;flex:none;display:inline-flex;align-items:center;gap:2px;height:20px;padding:0 2px 0 6px;border:0;border-radius:var(--r);background:none;color:var(--accent);font-size:11px;font-weight:600}
+.af-more::after{content:'';position:absolute;inset:-2px 0}
+.af-more:hover{background:var(--hover)}
+.af-more .af-chev,.af-sr .af-chev{display:flex;color:var(--muted);transition:transform .12s}
+.af-more[aria-expanded=true] .af-chev,.af-sr[aria-expanded=true] .af-chev{transform:rotate(180deg)}
+.af-jobnote{margin:2px 0 6px 13px;font-size:11px}
+.af-pane .af-jobinfo[hidden]{display:none}
+
+/* ---------- Org tab ---------- */
+.af-orgchain{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-bottom:6px}
+.af-link{display:inline-flex;align-items:center;gap:4px;max-width:118px;height:22px;padding:0 7px 0 6px;border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--ink);font-size:11px;font-weight:550}
+.af-link span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.af-link .i{flex:none;color:var(--muted)}
+button.af-link:hover{border-color:var(--line2);background:var(--hover)}
+.af-link.me{border-color:var(--accent-line);background:var(--flygon-tint);color:var(--accent)}
+.af-link.me .i{color:var(--accent)}
+.af-link.n{background:#fff;color:var(--muted)}
+.af-sepr{display:flex;flex:none;color:var(--muted)}
+.af-panel .links button{min-height:26px}
+
+/* ---------- workflow: the rail ---------- */
+.af-rail{margin:0;padding:0;list-style:none}
+.af-rail>li{position:relative}
+.af-rail>li::before{content:'';position:absolute;left:13px;top:0;bottom:0;width:1px;background:var(--line2)}
+.af-rail>li:first-child::before{top:16px}
+.af-rail>li:last-child:not(.open)::before{bottom:16px}
+.af-sr{position:relative;display:flex;align-items:center;gap:6px;width:100%;min-height:34px;padding:0 4px;border:0;border-radius:6px;background:none;text-align:left}
+.af-sr:hover{background:var(--bg)}
+.af-rail>li.open>.af-sr{background:var(--flygon-tint)}
+.af-sr>em{flex:none;display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 1px var(--line2);font-size:10px;font-style:normal;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.af-rail>li.open>.af-sr>em{background:var(--flygon-dark);box-shadow:none;color:#fff}
+.af-sr-ic{flex:none;display:grid;place-items:center;width:18px;height:18px;color:var(--muted)}
+.af-sr .bub{flex:none}
+.af-sr-m{flex:1;display:flex;flex-direction:column;min-width:0;line-height:1.2}
+.af-sr-m b{overflow:hidden;font-size:11.5px;font-weight:600;white-space:nowrap;text-overflow:ellipsis}
+.af-sr-a{overflow:hidden;font-size:11px;color:var(--ink);white-space:nowrap;text-overflow:ellipsis}
+.af-sr-a.none{color:var(--muted)}
+.af-sr-o{display:flex;flex:none;color:var(--muted)}
+.af-sr>.af-chev{opacity:0}
+.af-sr:hover>.af-chev,.af-sr:focus-visible>.af-chev,.af-sr[aria-expanded=true]>.af-chev{opacity:1}
+@media (hover:none){.af-sr>.af-chev{opacity:1}}
+.af-sed{display:flex;flex-direction:column;gap:3px;margin:3px 0 6px 28px}
+.af-sed[hidden]{display:none}
+#inspector .af-sed select,#inspector .af-sed input{width:100%;height:26px;font-size:12px}
+.af-sed-b{display:flex;align-items:center}
+.af-sed-b .sp{flex:1}
+.af-sed-b .ib{width:24px;height:24px}
+.af-sed-b .ib[disabled]{opacity:.3;pointer-events:none}
+.af-addstep{display:flex;align-items:center;gap:7px;width:100%;height:28px;padding:0 4px;border:0;border-radius:6px;background:none;color:var(--accent);font-size:11.5px;font-weight:600;text-align:left}
+.af-addstep:hover{background:var(--bg)}
+.af-addstep i{display:grid;place-items:center;width:19px;height:19px;border:1px dashed var(--accent-line);border-radius:50%}
+.af-panel .af-sec{margin-top:6px}
+
+/* The large instructions editor. */
+dialog.af-instr-dlg{width:min(760px,calc(100vw - 32px));height:min(640px,calc(100vh - 48px))}
+.af-instr-dlg .modal-body{flex:1}
+.af-instr-h{display:flex;align-items:center;gap:7px;height:44px;padding:0 8px 0 14px;border-bottom:1px solid var(--line)}
+.af-instr-h .i{color:var(--accent)}
+.af-instr-h strong{font-size:13px}
+.af-instr-h .ib .i{color:inherit}
+.af-instr-dlg textarea{flex:1;width:100%;min-height:0;padding:12px 14px;border:0;border-radius:0;outline:0;box-shadow:none;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+
+@media (pointer:coarse){
+  .af-tab{height:36px}
+  .af-sr{min-height:40px}
+  .af-setup-c{height:24px}
+}

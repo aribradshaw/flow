@@ -8,7 +8,7 @@
 //                        preview of exactly what the recipient will see.
 //   historyHtml / loadHistory / postComment   the History and comment box of a linked record.
 import {store} from './store.js';
-import {esc} from './ui.js';
+import {esc,hint} from './ui.js';
 import {icon} from './icons.js';
 import {detailModal} from './modal.js';
 
@@ -122,14 +122,13 @@ export function openShareDialog({nodeId=null,scope=null,from=null}={}){
 export async function sharingPane(currentEnvId,ownEnvs){
   const [mine,incoming,reqs]=await Promise.all([api.list(currentEnvId).catch(()=>null),api.incoming().catch(()=>({shares:[]})),api.requests().catch(()=>({requests:[],mine:[]}))]);
   const permSel=(attr,id,cur,max='edit')=>`<select ${attr}="${esc(id)}" aria-label="Permission">${PERMS.filter(([v])=>RANK[v]<=RANK[max]).map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select>`;
-  const by=mine?`<h3 class="acct-sub">Shared by you from ${esc(store.db.environment?.name||'this environment')}</h3>
-    <p class="acct-muted">Select a card on a mind map and choose Share in its panel, or <button type="button" class="txt" data-sh-new>share something…</button></p>
+  const sec=(title,tip='',action='')=>`<div class="acct-sec"><h3 class="acct-sub">${esc(title)}</h3>${tip?hint(tip,title):''}${action?`<span class="acct-sec-a">${action}</span>`:''}</div>`;
+  const by=mine?`${sec(`Shared by you from ${store.db.environment?.name||'this environment'}`,'Select a card on a mind map and choose Share in its panel, or use Share something to pick what to share.','<button type="button" class="txt" id="shNew" data-sh-new>Share something…</button>')}
     <ul class="env-list">${mine.shares.map(s=>`<li><span class="env-n">${esc(s.recipientEmail)}<em class="sh-sub">${esc(s.scopeLabel)}</em></span>${permSel('data-sh-perm',s.id,s.permission)}<button type="button" class="txt" data-sh-revoke="${esc(s.id)}" data-who="${esc(s.recipientEmail)}">Revoke</button></li>`).join('')||'<li class="acct-muted">Not shared with anyone</li>'}</ul>`:'';
   const pending=reqs.requests||[];
-  const asks=pending.length?`<h3 class="acct-sub">Requests to share</h3><ul class="env-list">${pending.map(r=>`<li><span class="env-n">${esc(r.requestedBy)} asks to share with ${esc(r.toEmail)}${r.note?`<em class="sh-sub">${esc(r.note)}</em>`:''}</span>${permSel('data-sh-req-perm',r.id,r.permission,r.permission)}<button type="button" class="txt primary" data-sh-approve="${esc(r.id)}">Approve</button><button type="button" class="txt" data-sh-deny="${esc(r.id)}">Deny</button></li>`).join('')}</ul>`:'';
+  const asks=pending.length?`${sec('Requests to share')}<ul class="env-list">${pending.map(r=>`<li><span class="env-n">${esc(r.requestedBy)} asks to share with ${esc(r.toEmail)}${r.note?`<em class="sh-sub">${esc(r.note)}</em>`:''}</span>${permSel('data-sh-req-perm',r.id,r.permission,r.permission)}<button type="button" class="txt primary" data-sh-approve="${esc(r.id)}">Approve</button><button type="button" class="txt" data-sh-deny="${esc(r.id)}">Deny</button></li>`).join('')}</ul>`:'';
   const own=new Map(ownEnvs.map(e=>[e.id,e.name]));
-  const withMe=`<h3 class="acct-sub">Shared with you</h3>
-    <p class="acct-muted">Add a share to one of your environments: its cards appear there as linked boxes with your own layout. Co-owners show as read-only name stubs.</p>
+  const withMe=`${sec('Shared with you','Add a share to one of your environments: its cards appear there as linked boxes with your own layout. Co-owners show as read-only name stubs.')}
     <ul class="env-list sh-in">${incoming.shares.map(s=>`<li><div class="sh-in-h"><span class="env-n">${esc(s.scopeLabel)}<em class="sh-sub">from ${esc(s.ownerEmail)} · ${esc(s.ownerEnvName||'')} · ${esc(PERMS.find(p=>p[0]===s.permission)?.[1]||s.permission)}</em></span>
         ${s.envs.includes(currentEnvId)?`<button type="button" class="txt" data-sh-detach="${esc(s.id)}">Remove from this environment</button>`:`<button type="button" class="txt primary" data-sh-attach="${esc(s.id)}">Add to ${esc(own.get(currentEnvId)||'this environment')}</button>`}</div>
         ${s.envs.filter(e=>e!==currentEnvId).length?`<span class="acct-muted">Also in: ${s.envs.filter(e=>e!==currentEnvId).map(e=>esc(own.get(e)||e)).join(', ')}</span>`:''}

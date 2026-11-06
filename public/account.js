@@ -12,7 +12,8 @@
 
 import {store,change} from './store.js';
 import {STATUS_DEFAULTS,WORKFLOW_PRESETS,cleanWorkflow} from './workflow.js';
-import {esc,setSessionUser,sessionPhoto} from './ui.js';
+import {esc,hint,setSessionUser,sessionPhoto} from './ui.js';
+import {icon} from './icons.js';
 import {popIn,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
 import {loadDevlog,currentVersion,mountDevlog} from './devlog.js';
@@ -34,6 +35,7 @@ const I={
   plus:'<path d="M12 5v14M5 12h14"/>',
   fingerprint:'<path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .13-5.35 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/>',
   reset:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+  chevron:'<path d="m9 6 6 6-6 6"/>',
 };
 const svg=(n,s=16)=>`<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 
@@ -175,7 +177,17 @@ addEventListener('keydown',e=>{
 
 // ---- settings: Account · Environment · Sharing · API keys · Shortcuts · DevLog (last tab remembered in prefs) ----
 const TABS=[['account','Account'],['environment','Environment'],['sharing','Sharing'],['apikeys','API keys'],['shortcuts','Shortcuts'],['devlog','DevLog']];
-let dlg=null,recording=null,scMsg=null;
+let dlg=null,recording=null,scMsg=null,workflowOpen=false;
+// One section header for every Settings tab: title, optional hint, optional action on the right.
+const sec=(title,{tip='',action=''}={})=>`<div class="acct-sec"><h3 class="acct-sub">${esc(title)}</h3>${tip?hint(tip,title):''}${action?`<span class="acct-sec-a">${action}</span>`:''}</div>`;
+// Replacing markup removes the focused control: put focus back on the control with the same id, or on
+// the panel when that control is gone, so it never drops to the page behind the dialog.
+async function keepFocus(panel,render){
+  const was=document.activeElement,inside=panel.contains(was),id=inside?was.id:'';
+  await render();
+  const now=document.activeElement;
+  if(inside&&dlg&&!was.isConnected&&(now===document.body||now===dlg))(id&&document.getElementById(id)||panel).focus();
+}
 function accountPane(){
   const u=user();
   return `<div class="acct-card">${avatar(u,44)}<div class="acct-id"><strong>${esc(u?.name||'')}</strong><span>${esc(u?.email||'')}</span></div></div>
@@ -220,43 +232,51 @@ async function fillInvites(panel){
   const box=panel.querySelector('[data-invites]');if(!box)return;
   let r;try{r=await fetch('/api/invites',{cache:'no-store'})}catch{return}
   if(!r.ok)return;const {invites=[]}=await r.json();
-  box.innerHTML=`<h3 class="acct-sub">Invite to Flow</h3>
+  await keepFocus(panel,()=>{box.innerHTML=`${sec('Invite to Flow')}
     <p class="acct-muted">Invited people get an email with a link to sign in at ${esc(location.origin)} with OneProfileID using that address, and start in their own private workspace. They see nothing of yours unless you share it.</p>
     <form class="env-row" data-invite-form><input id="inviteEmail" type="email" placeholder="name@example.com" aria-label="Email to invite" required><button type="submit" class="txt primary">Invite</button></form>
     <p class="acct-err" data-invite-err hidden></p><p class="acct-muted" data-invite-msg hidden></p>
-    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited'}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>`;
+    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited'}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" id="inviteResend-${esc(i.email)}" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>`});
 }
+const STATUS_ICONS={planned:'planned',active:'active',risk:'alert',blocked:'blocked',done:'check',cancelled:'ban'};
+const COLUMN_ICONS={requests:'inbox',doing:'active',blocked:'blocked',uat:'target',done:'check',must:'flag',nice:'star'};
+// One rename row: the stage's icon and input. Its fixed name is the tip and part of the input's name,
+// and the placeholder is what an empty field saves as under the chosen preset.
+const stageRow=(field,glyph,fixed,kind,value,fallback,max,editable)=>`<label class="workflow-row" data-tip="${esc(fixed)}">${glyph}<input id="wf-${field.replace(':','-')}" name="${field}" maxlength="${max}" value="${esc(value)}" placeholder="${esc(fallback)}" aria-label="${esc(`${kind}: ${fixed}`)}"${editable?'':' disabled'}></label>`;
 function envPane(){
   const u=user(),e=env();if(!e)return '<p class="acct-muted">No environment loaded.</p>';
-  const owner=e.ownerEmail?(e.ownerEmail===u?.email?'You':e.ownerEmail):'Not set';
   const editable=!opid()||e.ownerEmail===u?.email;
-  const workflow=cleanWorkflow(store.db.workflow);
-  return `<dl class="acct-dl"><dt>Name</dt><dd>${esc(e.name)}</dd><dt>Owner</dt><dd>${esc(owner)}</dd>
-    <dt>Visibility</dt><dd><span class="acct-vis ${e.visibility==='public'?'pub':''}">${svg(e.visibility==='public'?'globe':'lock',11)}${e.visibility==='public'?'Public':'Private'}</span>
-      <span class="acct-muted">${e.visibility==='public'?'Anyone signed in can view it; only the owner can edit.':'Only the owner can see it.'}</span></dd></dl>
-    ${e.ownerEmail===u?.email||!opid()?'<p><button type="button" class="txt" data-sh-env>Share this environment…</button></p>':''}
-    <h3 class="acct-sub">Your environments</h3>
+  const workflow=cleanWorkflow(store.db.workflow),preset=WORKFLOW_PRESETS[workflow.preset],columns=store.db.devops.columns;
+  const statusIds=Object.keys(STATUS_DEFAULTS),summary=`${preset.name} · ${statusIds.length} statuses · ${columns.length} columns`;
+  return `${sec('Your environments',{action:e.ownerEmail===u?.email||!opid()?'<button type="button" class="txt" id="shEnv" data-sh-env>Share this environment…</button>':''})}
     <ul class="env-list" data-env-list><li class="acct-muted">Loading…</li></ul>
-    <form class="env-row" data-env-new><input id="envNew" maxlength="80" placeholder="New environment name" aria-label="New environment name"><button type="submit" class="txt">Create</button></form>
+    <form class="env-row" data-env-new><input id="envNew" maxlength="80" placeholder="New environment name" aria-label="New environment name"><button type="submit" class="txt" id="envCreate">Create</button></form>
     <p class="acct-err" data-env-err hidden></p>
-    <h3 class="acct-sub">Workflow</h3>
-    <p class="acct-muted">Choose a starting layout, then name the timeline statuses and DevOps columns for this workspace. Existing cards keep their stage.</p>
-    <form data-workflow-form>
-      <label for="workflowPreset">Preset</label>
-      <select id="workflowPreset" data-workflow-preset${editable?'':' disabled'}>${Object.entries(WORKFLOW_PRESETS).map(([id,p])=>`<option value="${id}"${workflow.preset===id?' selected':''}>${esc(p.name)}</option>`).join('')}</select>
+    <div class="acct-sec acct-sec-disc"><h3 class="acct-sub"><button type="button" class="acct-disc" id="workflowToggle" data-workflow-toggle aria-expanded="${workflowOpen}" aria-controls="workflowBody">${svg('chevron',14)}<span class="acct-disc-t">Workflow</span><span class="acct-disc-s">${esc(summary)}</span></button></h3>${hint('Choose a starting layout, then name the timeline statuses and DevOps columns for this workspace. Existing cards keep their stage.','Workflow')}</div>
+    <form id="workflowBody" class="workflow-body" data-workflow-form${workflowOpen?'':' hidden'}>
+      <div class="workflow-preset"><label for="workflowPreset">Preset</label>
+      <select id="workflowPreset" data-workflow-preset${editable?'':' disabled'}>${Object.entries(WORKFLOW_PRESETS).map(([id,p])=>`<option value="${id}"${workflow.preset===id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
       <h4>Timeline statuses</h4>
-      <div class="workflow-fields">${Object.entries(STATUS_DEFAULTS).map(([id,label])=>`<label>${esc(label)}<input name="status:${id}" maxlength="40" value="${esc(workflow.statuses[id])}"${editable?'':' disabled'}></label>`).join('')}</div>
+      <div class="workflow-fields">${statusIds.map(id=>stageRow(`status:${id}`,icon(STATUS_ICONS[id],13),STATUS_DEFAULTS[id],'Status',workflow.statuses[id],preset.statuses[id],40,editable)).join('')}</div>
       <h4>DevOps columns</h4>
-      <div class="workflow-fields">${store.db.devops.columns.map(c=>`<label>${esc(WORKFLOW_PRESETS.delivery.columns[c.id])}<input name="column:${c.id}" maxlength="80" value="${esc(c.name)}"${editable?'':' disabled'}></label>`).join('')}</div>
-      ${editable?'<button type="submit" class="txt">Save workflow</button>':''}
+      <div class="workflow-fields">${columns.map(c=>stageRow(`column:${c.id}`,icon(COLUMN_ICONS[c.id]||'board',13),WORKFLOW_PRESETS.delivery.columns[c.id],'Column',c.name,preset.columns[c.id],80,editable)).join('')}</div>
+      ${editable?'<div class="workflow-foot"><button type="submit" class="txt" id="workflowSave">Save workflow</button></div>':''}
     </form>`;
 }
 let renamingEnv=null;
+// The open environment's details sit on its row, so its name is not repeated above the list.
+function envBadges(){
+  const u=user(),e=env();if(!e)return '';
+  const pub=e.visibility==='public',owner=e.ownerEmail?(e.ownerEmail===u?.email?'You':e.ownerEmail):'Not set';
+  return `<span class="env-badges"><span class="acct-vis">${icon('check',11)}Current</span><span class="acct-vis ${pub?'pub':''}">${svg(pub?'globe':'lock',11)}${pub?'Public':'Private'}${hint(pub?'Anyone signed in can view it; only the owner can edit.':'Only the owner can see it.','Visibility')}</span><span class="acct-vis env-owner">Owner: ${esc(owner)}</span></span>`;
+}
 async function fillEnvList(panel){
   const box=panel.querySelector('[data-env-list]');if(!box)return;
   const list=await listEnvironments(),cur=currentEnv();
-  box.innerHTML=list.map(x=>`<li data-env="${esc(x.id)}">${renamingEnv===x.id?`<form class="env-row grow" data-env-rename-form="${esc(x.id)}"><input value="${esc(x.name)}" maxlength="80" aria-label="Environment name" data-env-rename-input><button type="submit" class="txt">Save</button></form>`
-    :`<span class="env-n">${esc(x.name)}</span>${x.id===cur?'<span class="env-s">Open</span>':`<button type="button" class="txt" data-env-open="${esc(x.id)}">Open</button>`}<button type="button" class="txt" data-env-rename="${esc(x.id)}">Rename</button>${x.id!=='default-workspace'&&list.length>1?`<button type="button" class="txt" data-env-archive="${esc(x.id)}">Archive</button>`:''}`}</li>`).join('')||'<li class="acct-muted">None yet</li>';
+  // An environment you can open but do not own is not in your list; keep its row and details anyway.
+  const rows=list.some(x=>x.id===cur)||!env()?list:[{id:cur,name:env().name,notListed:true},...list];
+  box.innerHTML=rows.map(x=>`<li data-env="${esc(x.id)}"${x.id===cur?' class="cur"':''}>${renamingEnv===x.id?`<form class="env-row grow" data-env-rename-form="${esc(x.id)}"><input id="envRenameInput" value="${esc(x.name)}" maxlength="80" aria-label="Environment name" data-env-rename-input><button type="submit" class="txt">Save</button></form>`
+    :`<span class="env-n">${esc(x.name)}</span>${x.id===cur?envBadges():`<button type="button" class="txt" id="envOpen-${esc(x.id)}" data-env-open="${esc(x.id)}">Open</button>`}${x.notListed?'':`<span class="env-acts"><button type="button" class="txt" id="envRename-${esc(x.id)}" data-env-rename="${esc(x.id)}">Rename</button>${x.id!=='default-workspace'&&list.length>1?`<button type="button" class="txt" id="envArchive-${esc(x.id)}" data-env-archive="${esc(x.id)}">Archive</button>`:''}</span>`}`}</li>`).join('')||'<li class="acct-muted">None yet</li>';
   box.querySelector('[data-env-rename-input]')?.focus();
 }
 async function openEnv(id){
@@ -280,11 +300,13 @@ async function drawTab(id){
   const tab=TABS.some(([t])=>t===id)?id:'account';
   for(const b of dlg.querySelectorAll('[role=tab]')){const on=b.dataset.tab===tab;b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1}
   const panel=dlg.querySelector('[role=tabpanel]');panel.setAttribute('aria-labelledby','acctTab-'+tab);
-  if(tab==='devlog'){panel.innerHTML='<div class="hp-log"></div>';await mountDevlog(panel.firstChild)}
-  else if(tab==='apikeys')await renderApiKeysTab(panel);
-  else if(tab==='sharing'){panel.innerHTML='<p class="acct-muted">Loading…</p>';const html=await sharingPane(currentEnv(),await listEnvironments());if(dlg&&panel.isConnected&&panel.getAttribute('aria-labelledby')==='acctTab-sharing')panel.innerHTML=html}
-  else panel.innerHTML=tab==='account'?accountPane():tab==='environment'?envPane():shortcutsPane();
-  if(tab==='account')fillInvites(panel);if(tab==='environment')fillEnvList(panel);
+  await keepFocus(panel,async()=>{
+    if(tab==='devlog'){panel.innerHTML='<div class="hp-log"></div>';await mountDevlog(panel.firstChild)}
+    else if(tab==='apikeys')await renderApiKeysTab(panel);
+    else if(tab==='sharing'){panel.innerHTML='<p class="acct-muted">Loading…</p>';const html=await sharingPane(currentEnv(),await listEnvironments());if(dlg&&panel.isConnected&&panel.getAttribute('aria-labelledby')==='acctTab-sharing')panel.innerHTML=html}
+    else panel.innerHTML=tab==='account'?accountPane():tab==='environment'?envPane():shortcutsPane();
+    if(tab==='account')fillInvites(panel);if(tab==='environment')await fillEnvList(panel);
+  });
   if(getPref('settingsTab')!==tab)setPref('settingsTab',tab);
 }
 // Settings closes with a short fade and its backdrop fades too (instant with reduced motion).
@@ -312,6 +334,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     if(t===d||t.closest?.('[data-close]'))return closeDlg(d);
     const tb=t.closest?.('[role=tab]');if(tb){drawTab(tb.dataset.tab);return}
     const panel=d.querySelector('[role=tabpanel]'),envErr=m=>{const p=panel.querySelector('[data-env-err]');if(p){p.textContent=m;p.hidden=!m}};
+    const wt=t.closest?.('[data-workflow-toggle]');if(wt){workflowOpen=!workflowOpen;wt.setAttribute('aria-expanded',workflowOpen);const body=panel.querySelector('[data-workflow-form]');body.hidden=!workflowOpen;if(workflowOpen)body.scrollIntoView({block:'nearest'});return}
     if(t.closest?.('[data-photo-change]')){panel.querySelector('[data-photo-file]')?.click();return}
     if(t.closest?.('[data-photo-remove]')){savePhoto(panel,null);return}
     const eo=t.closest?.('[data-env-open]');if(eo){openEnv(eo.dataset.envOpen).then(()=>drawTab('environment'));return}
@@ -343,8 +366,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     if(ev.target.matches?.('[data-workflow-preset]')){
       const preset=WORKFLOW_PRESETS[ev.target.value];if(!preset)return;
       const form=ev.target.closest('form');
-      for(const [id,name] of Object.entries(preset.statuses))form.elements.namedItem(`status:${id}`).value=name;
-      for(const [id,name] of Object.entries(preset.columns))form.elements.namedItem(`column:${id}`).value=name;
+      for(const [kind,names] of [['status',preset.statuses],['column',preset.columns]])for(const [id,name] of Object.entries(names)){const input=form.elements.namedItem(`${kind}:${id}`);input.value=name;input.placeholder=name}
     }
   });
   d.addEventListener('keydown',ev=>ev.stopPropagation());
@@ -364,7 +386,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
         await drawTab('environment');alertBox('Workflow saved','ok');
       }
       else if(f.matches('[data-env-new]')){const name=f.querySelector('input').value.trim();if(!name)return;const id=await createEnvironment(name);await switchEnvironment(id);await drawTab('environment')}
-      else if(f.matches('[data-env-rename-form]')){const name=f.querySelector('input').value.trim();if(!name)return;await renameEnvironment(f.dataset.envRenameForm,name);renamingEnv=null;await drawTab('environment')}
+      else if(f.matches('[data-env-rename-form]')){const name=f.querySelector('input').value.trim();if(!name)return;await renameEnvironment(f.dataset.envRenameForm,name);renamingEnv=null;await drawTab('environment');document.getElementById('envRename-'+f.dataset.envRenameForm)?.focus()}
       else if(f.matches('[data-sh-ask]')){
         await shareApi.request(f.dataset.shAsk,{toEmail:f.querySelector('input').value.trim()});alertBox('Asked the owner. They approve or deny it.','ok');await drawTab('sharing');
       }
@@ -391,7 +413,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
       const next=tabs[ev.key==='Home'?0:ev.key==='End'?n-1:(i+(ev.key==='ArrowRight'?1:n-1))%n];next.focus();drawTab(next.dataset.tab);
     }
   });
-  d.showModal();popIn(d);drawTab(tab).then(()=>d.querySelector('[aria-selected=true]')?.focus());
+  d.showModal();popIn(d);return drawTab(tab).then(()=>d.querySelector('[aria-selected=true]')?.focus());
 }
 onPrefs((p,k)=>{if(dlg&&(k==='shortcuts'||k==='*')&&!recording){const cur=dlg.querySelector('[aria-selected=true]')?.dataset.tab;if(cur==='shortcuts')drawTab('shortcuts')}});
 loadDevlog();

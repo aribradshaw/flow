@@ -291,6 +291,14 @@ export function liveProblem(af,a){
   return '';
 }
 
+// What an AI agent needs before a runner can work it, in order: [{key,label,done}]. Empty for other
+// kinds. Cards counts direct links only: a runner takes work from the queue (workQueue), which reads
+// a.cards. A linked project's cards show in the panel (workFor) but never reach the queue.
+export function setupSteps(af,a){
+  if(a?.kind!=='agent')return [];
+  return [{key:'runner',label:'Runner',done:!!String(a.runtime??'').trim()},{key:'model',label:'Model',done:modelChoices(af,a).length>0},{key:'cards',label:'Cards',done:(a.cards||[]).length>0}];
+}
+
 export function newAgent(af,over={}){
   const now=new Date().toISOString();
   const a={id:id(),name:'New agent',kind:'agent',title:'',status:'draft',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',models:[],model:'',auto:false,schedule:'',
