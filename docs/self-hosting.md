@@ -26,3 +26,18 @@ Once you have that registration:
 To offer **Continue with OneProfileID** for passkeys and existing OneProfileID browser sessions, ask the operator for a separate OneProfileID SSO client registered with `https://your-origin.example/api/auth/sso/callback`. Set both `OPID_SSO_CLIENT_ID` and `OPID_SSO_CLIENT_SECRET` (32+ characters). `OPID_SSO_ISSUER` optionally overrides the default OneProfileID issuer. These settings add the OneProfileID passkey route; native email/password sign-in works without them.
 
 `RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
+
+## Embed Flow in another site
+
+By default Flow refuses to be shown inside another site's frame (`Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`), which protects against clickjacking. To show Flow in a dashboard, a home-screen app or a kiosk, list the sites that may embed it in `FLOW_FRAME_ANCESTORS`, separated by spaces or commas:
+
+```sh
+FLOW_FRAME_ANCESTORS="http://127.0.0.1:8770 https://dashboard.example.ts.net"
+```
+
+- Each entry is a bare origin: scheme, host and an optional port, with no path or wildcard. Use the exact address the embedding page is opened at; `http://localhost:8770` and `http://127.0.0.1:8770` are different origins. An invalid entry stops the server at startup.
+- Flow then sends `frame-ancestors 'self'` plus those origins and leaves out `X-Frame-Options`.
+- On an https instance with sign-in, Flow's sign-in cookies switch to `SameSite=None; Secure` so the framed app stays signed in. Browsers that block third-party cookies still do; sign in from the frame's own **Open in new tab** link or allow cookies for your Flow origin. Local single-user mode has no sign-in cookies.
+- Leave the variable unset to keep embedding off. Restart the server after changing it.
+
+Embedding only controls where Flow may appear. People still sign in to Flow, and API keys work the same way.

@@ -701,6 +701,8 @@ function resolveStatic(url){
   return file;
 }
 const server=http.createServer(async(req,res)=>{
+  // Who may frame Flow (lib/embed.mjs): this origin only, unless FLOW_FRAME_ANCESTORS adds others.
+  try{for(const [k,v] of Object.entries(await auth.embed.headers(req)))res.setHeader(k,v)}catch{}
   if(req.url.split('?')[0]==='/api/instance'&&req.method==='GET'){
     const name=String(process.env.FLOW_INSTANCE_NAME||'Flow').trim().slice(0,80)||'Flow';
     const accent=/^#[0-9a-fA-F]{6}$/.test(process.env.FLOW_ACCENT_COLOR||'')?process.env.FLOW_ACCENT_COLOR:'#7cb980';
