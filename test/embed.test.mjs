@@ -26,19 +26,40 @@ describe('parseAncestors',()=>{
 
 describe('headers',()=>{
   test('off: frame-ancestors self and X-Frame-Options SAMEORIGIN',async()=>{
-    assert.deepEqual(await embedding('').headers({}),{'Content-Security-Policy':"frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN'});
+    const e=embedding('');
+    assert.deepEqual(e.headers(await e.decide({})),{'Content-Security-Policy':"frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN'});
   });
   test('on: lists the origins and leaves out X-Frame-Options',async()=>{
     const e=embedding('http://127.0.0.1:8770 https://dash.example.com');
     assert.equal(e.on,true);
-    assert.deepEqual(await e.headers({}),{'Content-Security-Policy':"frame-ancestors 'self' http://127.0.0.1:8770 https://dash.example.com"});
+    assert.deepEqual(e.headers(await e.decide({})),{'Content-Security-Policy':"frame-ancestors 'self' http://127.0.0.1:8770 https://dash.example.com"});
   });
-  test('the policy hook adds per-request origins; invalid ones are ignored',async()=>{
+});
+
+describe('per-request policy',()=>{
+  test('adds origins for one request only; invalid ones are ignored',async()=>{
     try{
       useEmbedPolicy(req=>req.account==='a'?['https://a.example.com']:['not an origin']);
-      assert.equal((await embedding('').headers({account:'a'}))['Content-Security-Policy'],"frame-ancestors 'self' https://a.example.com");
-      assert.deepEqual(await embedding('').headers({account:'b'}),{'Content-Security-Policy':"frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN'});
+      const e=embedding('');
+      const a=await e.decide({account:'a'}),b=await e.decide({account:'b'});
+      assert.equal(e.headers(a)['Content-Security-Policy'],"frame-ancestors 'self' https://a.example.com");
+      assert.equal(a.framedCookies,true,'a request allowed to be framed gets framed cookies by default');
+      assert.deepEqual(e.headers(b),{'Content-Security-Policy':"frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN'});
+      assert.equal(b.framedCookies,false);
     }finally{useEmbedPolicy(null)}
+  });
+  test('decides the cookies per request, including Partitioned, over the env-var default',async()=>{
+    try{
+      useEmbedPolicy(req=>req.embed?{framedCookies:true,partitioned:true}:{framedCookies:false});
+      const e=embedding('https://dash.example.com');
+      const c='flow_sid=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=60';
+      assert.equal(e.cookie(c,true,await e.decide({embed:true})),'flow_sid=abc; Path=/; HttpOnly; Max-Age=60; SameSite=None; Secure; Partitioned');
+      assert.equal(e.cookie(c,true,await e.decide({})),c);
+    }finally{useEmbedPolicy(null)}
+  });
+  test('a policy that throws falls back to the default',async()=>{
+    try{useEmbedPolicy(()=>{throw Error('x')});const e=embedding('https://dash.example.com');assert.deepEqual((await e.decide({})).origins,['https://dash.example.com'])}
+    finally{useEmbedPolicy(null)}
   });
 });
 
