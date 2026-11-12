@@ -25,6 +25,8 @@ Once you have that registration:
 
 To offer **Continue with OneProfileID** for passkeys and existing OneProfileID browser sessions, ask the operator for a separate OneProfileID SSO client registered with `https://your-origin.example/api/auth/sso/callback`. Set both `OPID_SSO_CLIENT_ID` and `OPID_SSO_CLIENT_SECRET` (32+ characters). `OPID_SSO_ISSUER` optionally overrides the default OneProfileID issuer. These settings add the OneProfileID passkey route; native email/password sign-in works without them.
 
+With the SSO client set, the sign-in screen also offers **Sign in with your phone** for screens that cannot use passkeys, such as kiosk web views: it shows a QR code and a short code, the person approves on their phone with a passkey, and the screen signs in. It uses the OAuth device flow with the same SSO client, so the operator must enable device sign-in for that client. The screen starts on this option when the browser has no passkey support (no `PublicKeyCredential`), its user agent contains `Saguaro`, or the page was once opened with `?saguaro=1`. Set `OPID_DEVICE_SIGN_IN=off` to turn it off.
+
 `RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
 
 ## Embed Flow in another site

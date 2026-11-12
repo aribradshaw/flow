@@ -435,6 +435,17 @@ function alertBox(msg){
   document.body.append(t);popIn(t);setTimeout(()=>popOut(t),4000);
 }
 
+// Screens that cannot use passkeys: no WebAuthn at all (WebKitGTK kiosks), or a Saguaro screen
+// (its user agent says so, or the page was opened once with ?saguaro=1). They start on
+// "Sign in with your phone" (lib/device-signin.mjs).
+function noPasskeys(){
+  try{if(new URLSearchParams(location.search).get('saguaro')==='1')localStorage.setItem('flow.saguaro','1')}catch{}
+  let flagged=false;try{flagged=localStorage.getItem('flow.saguaro')==='1'}catch{}
+  return !window.PublicKeyCredential||/Saguaro/i.test(navigator.userAgent)||flagged;
+}
+const fmtCode=c=>{const x=String(c||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();return x.length===8?x.slice(0,4)+'-'+x.slice(4):x};
+const clock=s=>`${Math.floor(s/60)}:${String(Math.max(0,s%60)).padStart(2,'0')}`;
+
 let opidUi=null;
 const loadOpidUi=()=>opidUi||=import(OPID_UI).catch(()=>null);
 
@@ -451,7 +462,19 @@ function showSignIn(){
       <button type="button" class="acct-submit fallback" data-sso hidden>Continue with OneProfileID</button>
       <p class="acct-hint">${svg('fingerprint',14)}Face ID, Touch ID, Windows Hello or a security key</p>
       <p class="acct-err" role="alert" hidden></p>
+      ${session.device?`<button type="button" class="acct-link" data-phone>Sign in with your phone</button>`:''}
       <button type="button" class="acct-link" data-pw>Use email and password instead</button>
+    </div>`:''}
+    ${session.device?`<div class="acct-form acct-device" id="flow-device" hidden>
+      <p class="acct-muted acct-device-lead">Scan with your phone's camera, then approve with your passkey.</p>
+      <div class="acct-qr" aria-busy="true"><span class="acct-qr-skel"></span></div>
+      <p class="acct-muted acct-device-or">Or open <strong class="acct-device-url"></strong> and enter</p>
+      <p class="acct-device-code" aria-label="Sign-in code"></p>
+      <p class="acct-device-time" aria-hidden="true"></p>
+      <p class="acct-device-status" role="status">Getting a code…</p>
+      <p class="acct-err" role="alert" hidden></p>
+      <button type="button" class="acct-submit" data-device-new hidden>Get a new code</button>
+      <button type="button" class="acct-link" data-device-back>Sign in on this screen instead</button>
     </div>`:''}
     <form id="flow-login" class="acct-form" novalidate${session.sso?' hidden':''}>
       <label for="acctEmail">Email</label><input id="acctEmail" name="email" type="email" autocomplete="username" required>
@@ -473,9 +496,10 @@ function showSignIn(){
   document.body.append(o);
   document.body.classList.add('acct-locked');
   for(const el of document.querySelectorAll('body > header, body > main'))el.inert=true;
-  const ssoBox=o.querySelector('#flow-sso');
+  const ssoBox=o.querySelector('#flow-sso'),phoneBox=o.querySelector('#flow-device');
   const focusSso=()=>{const h=o.querySelector('#acctSso');customElements.whenDefined('opid-sign-in').then(()=>(h.shadowRoot?.querySelector('button')||h).focus())};
-  if(ssoBox)focusSso();else o.querySelector('#acctEmail').focus();
+  const phoneFirst=phoneBox&&ssoBox&&noPasskeys();
+  if(phoneFirst){}else if(ssoBox)focusSso();else o.querySelector('#acctEmail').focus();
 
   loadOpidUi().then(m=>{if(!m||!customElements.get('opid-sign-in'))for(const f of o.querySelectorAll('.fallback'))f.hidden=false});
   const login=o.querySelector('#flow-login'),tfa=o.querySelector('#flow-2fa');
@@ -492,6 +516,56 @@ function showSignIn(){
       failed:'Sign-in did not complete. Try again.',unavailable:'OneProfileID is temporarily unavailable. Try again shortly.'};
     const q=new URLSearchParams(location.search),why=q.get('signin');
     if(why){err(ssoBox,SIGNIN[why]||SIGNIN.failed);q.delete('signin');history.replaceState(null,'',location.pathname+(q.size?'?'+q:'')+location.hash)}
+  }
+  // Sign in with your phone: show a QR code and a short code, poll until the phone approves.
+  if(phoneBox){
+    const q=c=>phoneBox.querySelector(c),status=q('.acct-device-status'),again=q('[data-device-new]');
+    let timer=0,tick=0,expires=0,live=false,renewals=0;
+    const stopTimers=()=>{clearTimeout(timer);clearInterval(tick);timer=tick=0};
+    const say=m=>{status.textContent=m};
+    const problem=(m,canRetry=true)=>{stopTimers();live=false;err(phoneBox,m);say('');q('.acct-device-time').textContent='';again.hidden=!canRetry;if(canRetry)again.focus()};
+    const countdown=()=>{const left=Math.max(0,Math.round((expires-Date.now())/1000));q('.acct-device-time').textContent=left?`Code expires in ${clock(left)}`:''};
+    async function begin(auto=false){
+      stopTimers();live=true;err(phoneBox,'');again.hidden=true;
+      q('.acct-qr').replaceChildren(Object.assign(document.createElement('span'),{className:'acct-qr-skel'}));q('.acct-qr').setAttribute('aria-busy','true');
+      q('.acct-device-code').textContent='';q('.acct-device-url').textContent='';say('Getting a code…');
+      let r;try{r=await post('/api/auth/device/start',{})}catch{r={ok:false,data:{error:'Could not reach the server. Check your connection.'}}}
+      if(!live||phoneBox.hidden)return;
+      if(!r.ok)return problem(r.data.error||'Sign in with your phone is unavailable right now.');
+      if(!auto)renewals=0;
+      const d=r.data,img=document.createElement('img');
+      img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(d.qr);img.alt='QR code for '+d.verificationUriComplete;img.width=img.height=200;
+      q('.acct-qr').replaceChildren(img);q('.acct-qr').removeAttribute('aria-busy');
+      q('.acct-device-url').textContent=d.verificationUri.replace(/^https?:\/\//,'');
+      q('.acct-device-code').textContent=fmtCode(d.userCode);
+      expires=Date.now()+d.expiresIn*1000;countdown();tick=setInterval(countdown,1000);
+      say('Waiting for your phone…');
+      timer=setTimeout(poll,d.interval*1000);
+    }
+    async function poll(){
+      if(!live||phoneBox.hidden)return;
+      let r;try{r=await post('/api/auth/device/poll',{})}catch{r={ok:false,status:0,data:{}}}
+      if(!live||phoneBox.hidden)return;
+      const st=r.data?.status;
+      if(r.ok&&st==='done'){stopTimers();say('Signed in. Opening Flygon Flow…');return done()}
+      if(st==='expired'){
+        // Unattended screens keep a fresh code up for a few hours, then wait for a tap.
+        if(renewals<12){renewals++;return begin(true)}
+        return problem('The code expired.');
+      }
+      if(st==='denied')return problem(r.data.error||'The sign-in was declined on the phone.');
+      if(st==='refused')return problem(r.data.error||'This OneProfileID account does not have access to Flygon Flow.');
+      if(st==='failed'||st==='missing')return problem(r.data.error||'Sign-in did not complete. Start again.');
+      // pending, slow_down, a busy server or a dropped connection: keep waiting.
+      const wait=r.data?.retryIn||r.data?.interval||5;
+      timer=setTimeout(poll,Math.max(1,wait)*1000);
+    }
+    const toPhone=()=>{if(ssoBox)ssoBox.hidden=true;login.hidden=true;phoneBox.hidden=false;q('[data-device-back]').focus();begin()};
+    const leavePhone=()=>{stopTimers();live=false;phoneBox.hidden=true;post('/api/auth/device/cancel',{}).catch(()=>{});ssoBox.hidden=false;focusSso()};
+    ssoBox.querySelector('[data-phone]').addEventListener('click',toPhone);
+    q('[data-device-back]').addEventListener('click',leavePhone);
+    again.addEventListener('click',()=>begin());
+    if(phoneFirst)toPhone();
   }
   const busy=(f,on)=>{f.querySelectorAll('input,button').forEach(x=>x.disabled=on);const b=f.querySelector('opid-sign-in');if(b)b.toggleAttribute('loading',on)};
   const done=()=>location.reload();

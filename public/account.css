@@ -79,11 +79,25 @@ body.acct-locked>header,body.acct-locked>main{filter:blur(6px) saturate(.7);poin
 .acct-err{margin:4px 0 0;padding:8px 10px;border-radius:8px;background:#f8e9e7;color:var(--danger);font-size:12.5px;line-height:1.4}
 .acct-err[hidden]{display:none}
 
+/* sign in with your phone */
+.acct-device{align-items:center;text-align:center;gap:4px}
+.acct-device-lead{margin-top:0}
+.acct-qr{display:grid;place-items:center;width:216px;height:216px;margin:6px 0;border:1px solid var(--line);border-radius:12px;background:#fff}
+.acct-qr img{display:block;width:200px;height:200px;image-rendering:pixelated}
+.acct-qr-skel{width:200px;height:200px;border-radius:8px;background:var(--line);animation:acct-pulse 1.2s ease-in-out infinite alternate}
+.acct-device-or{margin:4px 0 0}
+.acct-device-url{color:var(--ink);font-weight:600}
+.acct-device-code{margin:2px 0;color:var(--flygon-dark);font:700 34px/1.15 Consolas,"Cascadia Mono",monospace;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.acct-device-code:empty,.acct-device-time:empty,.acct-device-status:empty{display:none}
+.acct-device-time{margin:0;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.acct-device-status{margin:4px 0 0;color:var(--ink);font-size:13px}
+.acct-device .acct-submit{align-self:stretch}
+@keyframes acct-pulse{to{opacity:.45}}
 .acct-toast{position:fixed;right:16px;bottom:16px;z-index:220;max-width:min(360px,calc(100vw - 32px));padding:10px 14px;border-radius:8px;background:#1f2927;color:#eef3f1;font-size:12.5px;box-shadow:0 8px 24px #141e1c40}
 @keyframes acct-fade{from{opacity:0}}
 
 @media (prefers-reduced-motion:reduce){
-  .acct-btn,.acct-btn .acct-av,.acct-gate,.acct-btn.wait .acct-av{transition:none;animation:none}
+  .acct-btn,.acct-btn .acct-av,.acct-gate,.acct-btn.wait .acct-av,.acct-qr-skel{transition:none;animation:none}
 }
 
 /* menu: Settings row with the version on the right */
