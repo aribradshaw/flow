@@ -10,8 +10,12 @@ function fixture({membership=true,startLimit,deviceStatus='pending'}={}){
   let clock=1_000_000;
   const calls=[],exchanges=[],completes=[];
   const state={status:deviceStatus,slowDown:false,expired:false,used:false};
+  const holds={};
+  const holder=name=>gate=>{let reached;const p=new Promise(r=>reached=r);holds[name]={gate,reached};return {reached:p}};
   const fetchImpl=async(url,init)=>{
-    const path=new URL(url).pathname,fields=Object.fromEntries(new URLSearchParams(String(init.body)));
+    const path=new URL(url).pathname;
+    if(path==='/api/auth/oauth2/token'&&holds.token){const h=holds.token;delete holds.token;h.reached();await h.gate}
+    const fields=Object.fromEntries(new URLSearchParams(String(init.body)));
     calls.push({path,fields,auth:init.headers.authorization});
     const reply=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
     if(init.headers.authorization!=='Basic '+Buffer.from(`flow-client:${SECRET}`).toString('base64'))return reply(401,{error:'invalid_client'});
@@ -30,6 +34,7 @@ function fixture({membership=true,startLimit,deviceStatus='pending'}={}){
     return reply(404,{});
   };
   const native={request:async(path,{body})=>{exchanges.push({path,body});
+    if(holds.exchange){const h=holds.exchange;delete holds.exchange;h.reached();await h.gate}
     return {ok:true,status:200,payload:{user:{id:'u-1',email:'person@example.test'},memberships:membership?[{localId:'u-1'}]:[]},cookies:['oneprofileid.session_token=synthetic; Path=/; HttpOnly']}}};
   const complete=async(req,set)=>{completes.push(set);
     return membership?{status:200,user:{id:'u-1',email:'person@example.test'},set:[...set,'flow_sid=synthetic-sid; Path=/; HttpOnly']}:{status:403,error:'This OneProfileID account does not have access to Flygon Flow.',set}};
@@ -41,7 +46,7 @@ function fixture({membership=true,startLimit,deviceStatus='pending'}={}){
       for(const c of o.set)if(c.startsWith('flow_device=')){const v=c.split(';')[0];cookie=/Max-Age=0/.test(c)?'':v}
       return o;
     }}};
-  return {d,state,calls,exchanges,completes,browser,advance:ms=>{clock+=ms}};
+  return {d,state,calls,exchanges,completes,browser,advance:ms=>{clock+=ms},holdToken:holder('token'),holdExchange:holder('exchange')};
 }
 const tokenPolls=f=>f.calls.filter(c=>c.path==='/api/auth/oauth2/token').length;
 
@@ -146,4 +151,21 @@ test('configuration: https issuer and a real secret are required',()=>{
   assert.throws(()=>createDeviceSignIn({...base,issuer:'http://identity.example/api/auth'}));
   assert.throws(()=>createDeviceSignIn({...base,clientSecret:'short'}));
   assert.doesNotThrow(()=>createDeviceSignIn({...base,issuer:'http://127.0.0.1:9/api/auth',secure:false}));
+});
+
+test('cancelling while a poll is waiting on OneProfileID opens no session',async()=>{
+  for(const step of ['token','exchange']){
+    const f=fixture({deviceStatus:'approved'}),screen=f.browser();
+    await screen.call('start');f.advance(5000);
+    let release;const gate=new Promise(r=>release=r);
+    const hold=step==='token'?f.holdToken(gate):f.holdExchange(gate);
+    const req={headers:{cookie:screen.cookie}},polling=f.d.poll(req,{});
+    await hold.reached;
+    await f.d.cancel(req);
+    release();
+    const o=await polling;
+    assert.equal(o.body.status,'missing',step);
+    assert.equal(f.completes.length,0,step+': no Flow session');
+    assert.ok(!o.set.some(c=>c.startsWith('flow_sid=')),step);
+  }
 });
