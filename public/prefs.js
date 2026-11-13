@@ -1,4 +1,4 @@
-// User preferences: {shortcuts:{id:[combos]}, settingsTab, ...} (room for reducedMotion, defaultTab…).
+// User preferences: {shortcuts:{id:[combos]}, settingsTab, devopsSort:{column:sort}, ...} (room for reducedMotion, defaultTab…).
 // Kept in localStorage (flygon-flow-prefs) as the offline cache and on the server per user
 // (GET/PUT /api/prefs). On start the server copy wins; every change is written to both.
 const KEY='flygon-flow-prefs',MAX=32000;
@@ -20,6 +20,6 @@ export async function syncPrefs(){
     const r=await fetch('/api/prefs',{cache:'no-store'});if(!r.ok)return;
     const {prefs:server}=await r.json();
     if(server&&typeof server==='object'&&Object.keys(server).length){prefs={...prefs,...server,shortcuts:{...(server.shortcuts||{})}};cache();for(const f of listeners)f(prefs,'*')}
-    else if(Object.keys(prefs.shortcuts).length||prefs.settingsTab!=='account')push();
+    else if(Object.keys(prefs.shortcuts).length||prefs.settingsTab!=='account'||prefs.devopsSort)push();
   }catch{}
 }

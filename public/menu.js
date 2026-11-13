@@ -3,9 +3,10 @@ import {esc} from './ui.js';
 import {popIn,popOut} from './motion.js';
 
 // Right-click (context) menus, shared by every canvas.
-//   openMenu(at, items, {label})
+//   openMenu(at, items, {label, align, onClose})
 //     at: the contextmenu event (opens at the pointer; a keyboard-opened menu, from the menu key or
 //         Shift+F10, opens under the focused element), an Element (opens under it) or {x, y}.
+//     align: 'end' lines a menu opened under an Element up with its right edge; onClose() runs when it closes.
 //     items: [{label, icon, key, danger, disabled, checked, run(), items:[…]}] and '-' for a separator.
 //       key: a shortcut label to show (keyLabel(id)); checked: true/false adds a check column;
 //       items: a submenu (one level), opened by hover, click, Enter or →.
@@ -36,11 +37,11 @@ function place(el,x,y,flipFrom){
 export function closeMenu(refocus=true){
   if(!menu)return;const m=menu;menu=null;
   document.removeEventListener('pointerdown',m.out,true);removeEventListener('resize',m.close);removeEventListener('blur',m.close);document.removeEventListener('wheel',m.out,true);
-  m.sub?.el.remove();popOut(m.el);
+  m.sub?.el.remove();popOut(m.el);m.onClose?.();
   if(refocus&&m.back?.isConnected&&(document.activeElement===document.body||m.el.contains(document.activeElement)))m.back.focus({preventScroll:true});
 }
 
-export function openMenu(at,items,{label='Menu'}={}){
+export function openMenu(at,items,{label='Menu',align='',onClose=null}={}){
   closeMenu(false);
   items=items.filter((it,i,a)=>it!=='-'||(i>0&&i<a.length-1&&a[i-1]!=='-'));
   if(!items.some(usable))return;
@@ -50,8 +51,10 @@ export function openMenu(at,items,{label='Menu'}={}){
   }else if(at?.type){x=at.clientX;y=at.clientY}else{x=at.x;y=at.y}
   at?.preventDefault?.();
   const el=document.createElement('div');el.className='cm';el.innerHTML=panelHtml(items,label);
-  (document.querySelector('dialog[open]')||document.body).append(el);place(el,x,y);popIn(el);
-  const m={el,items,back,sub:null,active:-1};
+  (document.querySelector('dialog[open]')||document.body).append(el);
+  if(align==='end'&&at instanceof Element)x=at.getBoundingClientRect().right-el.offsetWidth;
+  place(el,x,y);popIn(el);
+  const m={el,items,back,sub:null,active:-1,onClose};
   const rows=p=>[...p.querySelectorAll(':scope > .cm-item')];
   const listOf=p=>p===el.firstChild?items:m.sub?.items||[];
   function focusRow(p,i){const r=rows(p);if(!r.length)return;const list=listOf(p),idx=list.map((it,k)=>k).filter(k=>usable(list[k]));if(!idx.length)return;

@@ -18,3 +18,7 @@ Some moves need a confirmation or a decision. The app asks for it, and API calle
 | → `doing` with no developer | `pick-dev`: choose who develops it |
 
 Labels have a section (`priority`, `urgency`, `area`, `topic`, `other`) and a colour key. Due dates turn amber two days before they are due and red once they are overdue.
+
+## Board order and column sorts
+
+Board order is the order of the cards in the board (`cards.list` returns it); dragging a card within a column changes it. In the app, each column header has a sort menu: Manual (board order), newest or oldest first, recently updated, due date, points, priority (Urgency labels, then Priority labels, in the order they are listed) or card number and title. A sort is a view for one person: it is kept in their preferences, never in the workspace, and it does not change the board order or any card. Cards missing the sorted value (no due date, no points, no priority label) go last, and ties keep board order. Reordering inside a sorted column is refused until it is back on Manual; moving a card into a sorted column puts it at the end of the board order.

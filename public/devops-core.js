@@ -136,3 +136,34 @@ export const openCardsFor=(db,{person,entity}={})=>filterCards(db,{assignee:pers
 export const initials=name=>String(name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0].toUpperCase()).join('')||'?';
 const KEYS=Object.keys(COLORS);
 export const memberColor=nodeId=>{let h=0;for(const ch of nodeId)h=(h*31+ch.charCodeAt(0))|0;return colorOf(KEYS[Math.abs(h)%KEYS.length])};
+
+// Column sorts: a view only (per column, per user, kept in prefs); never rewrites the saved order.
+// [key, menu label, short header label]. 'manual' is board order (the order of db.devops.cards).
+export const SORTS=[['manual','Manual','Manual'],['newest','Newest first','Newest'],['oldest','Oldest first','Oldest'],['updated','Recently updated','Updated'],
+  ['due','Due date: soonest first','Due soon'],['due-late','Due date: latest first','Due late'],['points-high','Points: most to least','Most pts'],['points-low','Points: least to most','Least pts'],
+  ['priority','Priority','Priority'],['number','Card number','Number'],['title','Title A to Z','A to Z']];
+export const sortKey=k=>SORTS.some(([s])=>s===k)?k:'manual';
+// Priority rank: Urgency labels outrank Priority labels; within a section, the order the labels are listed
+// (the seeded Urgent, High, Medium, Low). Lower is higher priority; cards with neither sort last.
+export function priorityRank(labels=[]){
+  const rank=new Map();let i=0;
+  for(const s of ['urgency','priority'])for(const l of labels)if(l.section===s)rank.set(l.id,i++);
+  return c=>{let r=Infinity;for(const id of c.labels||[])if(rank.has(id))r=Math.min(r,rank.get(id));return r};
+}
+const nameCmp=new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
+// Sort a column's cards (given in board order) for display. Missing values (no due date, no points, no
+// priority label) always go last; ties keep board order, so the sort is stable. Returns a new array.
+export function sortCards(cards,sort,labels=[]){
+  const k=sortKey(sort);if(k==='manual')return [...cards];
+  const pr=k==='priority'?priorityRank(labels):null;
+  // [value, direction]: direction 1 ascending, -1 descending; null/'' values are missing.
+  const val={newest:c=>[c.created,-1],oldest:c=>[c.created,1],updated:c=>[c.updated,-1],due:c=>[c.due||null,1],'due-late':c=>[c.due||null,-1],
+    'points-high':c=>[c.points??null,-1],'points-low':c=>[c.points??null,1],priority:c=>{const r=pr(c);return [r===Infinity?null:r,1]},
+    number:c=>[c.number,1],title:c=>[c.title,1]}[k];
+  const cmp=(a,b)=>typeof a==='string'&&typeof b==='string'?(k==='title'?nameCmp.compare(a,b):a<b?-1:a>b?1:0):a-b;
+  return cards.map((c,i)=>[c,i,...val(c)]).sort((x,y)=>{
+    const a=x[2],b=y[2],ma=a==null,mb=b==null;
+    if(ma||mb)return ma&&mb?x[1]-y[1]:ma?1:-1;
+    return cmp(a,b)*x[3]||x[1]-y[1];
+  }).map(x=>x[0]);
+}

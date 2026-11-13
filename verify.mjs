@@ -489,6 +489,32 @@ try{
   await key('ArrowUp',38);await key(' ',32,0,' ');await sleep(200);
   assert(await order()==='QA Card C,QA Card B'&&await clean(),'drag: arrows move it and Space drops it');
   await key('z',90,2);
+  // Column sort (a per-user view): choose by keyboard, drag rules, reload keeps it, Manual restores board order.
+  {const shownOrder=()=>js(`[...document.querySelectorAll('[data-dcol=requests] .dcard')].map(c=>c.querySelector('.dc-title').textContent).join()`);
+    const sortBtn='[data-dcol=requests] .dcol-sort',sortPref=()=>js(`JSON.parse(localStorage.getItem('flygon-flow-prefs')||'{}').devopsSort?.requests||''`);
+    assert(await shownOrder()==='QA Card B,QA Card C'&&await js(`(()=>{const b=document.querySelector('${sortBtn}'),h=b.closest('.dcol-h').getBoundingClientRect(),r=b.getBoundingClientRect(),n=b.closest('.dcol-h').querySelector('.nm').getBoundingClientRect();return b.getAttribute('aria-haspopup')==='menu'&&b.getAttribute('aria-expanded')==='false'&&!b.classList.contains('on')&&Math.abs(h.right-2-r.right)<3&&r.left>n.right})()`),'sort: each column header has a sort menu button at its top right, in Manual (board order) by default');
+    await js(`document.querySelector('${sortBtn}').focus()`);await key('ArrowDown',40);await sleep(150);
+    assert(await js(`document.querySelector('${sortBtn}').getAttribute('aria-expanded')==='true'&&document.activeElement?.closest('.cm [role=menu]')?.getAttribute('aria-label')==='Sort Requests / Sprinted'&&[...document.querySelectorAll('.cm [role=menuitemcheckbox]')].map(i=>i.textContent.trim()).join('|')==='${['Manual','Newest first','Oldest first','Recently updated','Due date: soonest first','Due date: latest first','Points: most to least','Points: least to most','Priority','Card number','Title A to Z'].join('|')}'&&document.querySelector('.cm [aria-checked=true]')?.textContent.trim()==='Manual'`),'sort: ↓ on the button opens the sort menu (every option, Manual checked)');
+    await key('ArrowDown',40);await key('Enter',13);await sleep(350);
+    assert(await shownOrder()==='QA Card C,QA Card B'&&await order()==='QA Card B,QA Card C'&&await sortPref()==='newest','sort: Newest first reorders the column on screen only; the saved board order is unchanged and the choice is a user pref');
+    assert(await js(`(()=>{const b=document.querySelector('${sortBtn}');return document.activeElement===b&&b.classList.contains('on')&&b.textContent.trim()==='Newest'&&b.getAttribute('aria-expanded')==='false'&&/Newest first/.test(b.getAttribute('aria-label'))})()`),'sort: the button shows the sort as a subtle chip and keeps focus');
+    [x,y]=await center(`[data-card="${C.id}"]`);[bx,by]=await center(`[data-card="${B.id}"]`);
+    await mouse('mousePressed',x,y);for(let i=1;i<=10;i++)await mouse('mouseMoved',x,y+(by+14-y)*i/10);await mouse('mouseReleased',x,by+14);await sleep(400);
+    assert(await shownOrder()==='QA Card C,QA Card B'&&await order()==='QA Card B,QA Card C'&&await clean()&&/Switch to Manual to reorder/.test(await js(`document.querySelector('#toast')?.textContent||''`)),'sort: dragging within a sorted column is refused with a "Switch to Manual" toast');
+    [x,y]=await center(`[data-card="${A.id}"]`);const [rx,ry]=await center('[data-dcol=requests] .dcol-b');await drag(x,y,rx,ry);await sleep(400);
+    assert((await saved()).devops.cards.find(c=>c.id===A.id).column==='requests'&&await order()==='QA Card B,QA Card C,QA Card A'&&await clean(),'sort: a card dragged into a sorted column moves there (end of the board order)');
+    await key('z',90,2);await sleep(200);
+    await sleep(500);await js(`history.replaceState(null,'','#devops')`);await call('Page.reload');await sleep(1800);
+    await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(250);
+    assert(await shownOrder()==='QA Card C,QA Card B'&&await js(`document.querySelector('${sortBtn}').classList.contains('on')`)&&(await (await fetch(BASE+'api/prefs')).json()).prefs?.devopsSort?.requests==='newest','sort: the column sort survives a reload and is saved with the user prefs on the server');
+    // Narrow screens: the button stays in its header and the menu fits the window.
+    await call('Emulation.setDeviceMetricsOverride',{width:390,height:800,deviceScaleFactor:1,mobile:true});await sleep(250);
+    await js(`document.querySelector('[data-dcol=requests]').scrollIntoView({inline:'start'})`);await js(`document.querySelector('${sortBtn}').click()`);await sleep(150);
+    assert(await js(`(()=>{const m=document.querySelector('.cm').getBoundingClientRect(),b=document.querySelector('${sortBtn}').getBoundingClientRect(),c=document.querySelector('[data-dcol=requests]').getBoundingClientRect();return m.left>=0&&m.right<=innerWidth&&b.right<=c.right&&b.left>=c.left})()`),'sort: on a phone-width window the button fits its column and the menu fits the window');
+    await key('Escape',27);await sleep(100);
+    await call('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});await sleep(500);
+    await js(`document.querySelector('${sortBtn}').click()`);await sleep(150);await js(`document.querySelector('.cm [role=menuitemcheckbox]').click()`);await sleep(350);
+    assert(await shownOrder()==='QA Card B,QA Card C'&&await sortPref()===''&&await js(`!document.querySelector('${sortBtn}').classList.contains('on')`),'sort: Manual restores the board order');}
   // Paging: a column renders 20 cards, then "Load more".
   await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(100);
   for(let i=0;i<21;i++)await js(`document.querySelector('[data-dv=colAdd][data-col=nice]').click()`);

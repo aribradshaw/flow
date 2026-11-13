@@ -3,10 +3,12 @@ import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto,prop,hint}
 import {busy,skeletonAppend,panel,flipList} from './motion.js';
 import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
+import {openMenu} from './menu.js';
+import {getPref,setPref} from './prefs.js';
 import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
-import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor} from './devops-core.js';
+import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,sortCards} from './devops-core.js';
 import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
@@ -51,6 +53,29 @@ const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',yea
 const day=iso=>{const d=new Date(iso);return d.toLocaleDateString([],{month:'short',day:'numeric',...(d.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})})};
 const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="background:${bg};color:${fg}"${l.name.length>12?` data-tip="${esc(l.name)}"`:''}>${esc(l.name)}</span>`};
 const bubble=(id,roles)=>{const n=nodeById(id);return n?personAvatar(n,{tip:`${n.name} · ${roles.join(', ')}`}):''};
+// Column sorts (devops-core.js SORTS): per column, kept in the user's prefs, never in the workspace.
+const sortOf=col=>sortKey(getPref('devopsSort')?.[col]);
+const sortName=k=>SORTS.find(([s])=>s===k)?.[1]||'Manual';
+// A column's cards (in board order) as shown. Manual on Done lists the most recently moved first.
+function ordered(col,list){
+  const k=sortOf(col);
+  if(k==='manual')return col==='done'?[...list].sort((a,b)=>b.moved.localeCompare(a.moved)):list;
+  return sortCards(list,k,dv().labels);
+}
+function setSort(col,k){
+  const all={...(getPref('devopsSort')||{})};
+  if(k==='manual')delete all[col];else all[col]=k;
+  setPref('devopsSort',all);render();
+  $('#devopsView').querySelector(`[data-dcol="${col}"] .dcol-sort`)?.focus({preventScroll:true});
+}
+function sortMenu(b){
+  // A press on the button while its menu is open closes the menu (outside pointerdown) and should not reopen it.
+  if(Date.now()-(+b.dataset.closed||0)<400)return;
+  const col=b.closest('[data-dcol]').dataset.dcol,cur=sortOf(col),groups=[['manual'],['newest','oldest','updated'],['due','due-late'],['points-high','points-low'],['priority','number','title']];
+  b.setAttribute('aria-expanded','true');
+  openMenu(b,groups.flatMap((g,i)=>[...(i?['-']:[]),...g.map(k=>({label:k==='manual'&&col==='done'?'Manual (recently moved first)':sortName(k),checked:cur===k,run:()=>setSort(col,k)}))]),
+    {label:`Sort ${colName(col)}`,align:'end',onClose(){b.setAttribute('aria-expanded','false');b.dataset.closed=Date.now()}});
+}
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
 export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;
@@ -59,6 +84,7 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
     const pick=e.target.closest('[data-pick]');if(pick){finishPick(pick.dataset.pick);return}
     if(e.target.classList.contains('dv-modal')){finishPick('');return}
     const pk=e.target.closest('[data-picker]');if(pk){openFilter(pk);return}
+    const so=e.target.closest('.dcol-sort');if(so){sortMenu(so);return}
     const b=e.target.closest('[data-dv]');if(b)action(b.dataset.dv,b);
   });
   el.addEventListener('change',e=>{
@@ -71,7 +97,9 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
   });
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
   // Enter opens a card; Space picks it up (drag.js).
-  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}});
+  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
+    // A menu button: ↓ / ↑ open the sort menu too.
+    const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}});
   sortable=createSortable(el,{
     item:'[data-card]',list:'.dcol-b',listOf:x=>x.closest('[data-dcol]'),keyOf:z=>z.dataset.dcol,idOf:x=>x.dataset.card,
     ignore:'button,a,input,select,.dv-more',scroller:()=>el.querySelector('.dv-scroll'),
@@ -91,6 +119,16 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
 let lastMove=null,deferred=false;
 async function dropCard({id,from,to,beforeId,afterId},ctx){
   const c=card(id);if(!c)return false;
+  // A sorted column shows a view, not the board order: reordering inside it is refused (dropping it back in
+  // its own slot is quiet), and a card moved into it goes to the end of the board order.
+  if(sortOf(to)!=='manual'){
+    if(from===to){
+      const vis=ordered(to,filterCards(db(),ui).filter(x=>x.column===to)).slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
+      if((vis[i-1]?.id??null)!==(afterId??null)||(vis[i+1]?.id??null)!==(beforeId??null))toast(`${colName(to)} is sorted by ${sortName(sortOf(to)).toLowerCase()}. Switch to Manual to reorder.`);
+      return false;
+    }
+    lastMove={from,to};return requestMove(id,to,Infinity,ctx);
+  }
   const peers=dv().cards.filter(x=>x.column===to&&x.id!==id),at=x=>peers.findIndex(p=>p.id===x);
   const index=beforeId&&at(beforeId)>=0?at(beforeId):afterId&&at(afterId)>=0?at(afterId)+1:afterId||!beforeId?Infinity:0;
   lastMove={from,to};
@@ -188,14 +226,18 @@ function cardHtml(c){
 // Six slots: four working columns, Done, then the two backlogs stacked in one slot.
 // Done lists the most recently moved cards first so paging hides the old ones.
 function colHtml(col,cards){
-  let list=cards.filter(c=>c.column===col.id);
-  if(col.id==='done')list=list.sort((a,b)=>b.moved.localeCompare(a.moved));
+  const list=ordered(col.id,cards.filter(c=>c.column===col.id)),sk=sortOf(col.id);
   let n=shown.get(col.id)||PAGE;
   const at=list.findIndex(c=>c.id===selected);
   if(reveal&&at>=n){n=Math.ceil((at+1)/PAGE)*PAGE;shown.set(col.id,n)}
   const left=list.length-n;
-  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em>${list.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}</div>
+  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em>${list.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}${sortButton(col,sk)}</div>
     <div class="dcol-b">${list.slice(0,n).map(cardHtml).join('')}${left>0?`<button type="button" class="txt dv-more" data-dv="more" data-col="${col.id}">Load more (${left} left)</button>`:''}</div></section>`;
+}
+// Top right of each column header. Sorted: it shows the sort's short name, in the accent colour.
+function sortButton(col,k){
+  const short=SORTS.find(([s])=>s===k)[2],on=k!=='manual';
+  return `<button type="button" class="dcol-sort${on?' on':''}" aria-haspopup="menu" aria-expanded="false" aria-label="Sort ${esc(col.name)}: ${esc(sortName(k))}" data-tip="${on?`Sorted: ${esc(sortName(k))}\nThe board order is kept; choose Manual to reorder`:'Sort this column'}">${icon('sort',13)}${on?`<span>${esc(short)}</span>`:''}</button>`;
 }
 function boardHtml(cards){
   const cols=dv().columns,main=cols.filter(c=>!BACKLOG.includes(c.id)&&(!ui.hideDone||c.id!=='done')),stack=cols.filter(c=>BACKLOG.includes(c.id));
@@ -309,7 +351,7 @@ function modalKey(e){
   if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable)return;
   const dir=matches(e,'devops.prevCard')?-1:matches(e,'devops.nextCard')?1:0;if(!dir)return;
   const c=card(selected);if(!c)return;
-  let list=filterCards(db(),ui).filter(x=>x.column===c.column);if(c.column==='done')list=list.sort((a,b)=>b.moved.localeCompare(a.moved));
+  const list=ordered(c.column,filterCards(db(),ui).filter(x=>x.column===c.column));
   const next=list[list.findIndex(x=>x.id===c.id)+dir];if(!next)return;
   e.preventDefault();selected=next.id;reveal=true;rerender();
 }

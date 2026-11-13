@@ -346,7 +346,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .dcol.backlog .dcard{background:#fbfbfb}
 .dv-more{flex:none;width:100%;height:26px;color:var(--muted);font-weight:600}
 .dcol-h{flex:none;display:flex;align-items:center;gap:5px;height:32px;padding:0 2px 0 10px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-.dcol-h .nm{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:default}
+.dcol-h .nm{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:default}
+/* Column sort (top right): a quiet icon in board order; sorted, a tinted chip naming the sort. */
+.dcol-sort{flex:none;display:inline-flex;align-items:center;gap:3px;height:22px;min-width:22px;max-width:96px;padding:0 4px;border:1px solid transparent;border-radius:5px;background:none;
+  color:var(--muted);font:inherit;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;cursor:pointer;transition:background .1s,color .1s}
+.dcol-sort .i{flex:none}.dcol-sort span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dcol-sort:hover,.dcol-sort[aria-expanded=true]{background:var(--hover);color:var(--ink)}
+.dcol-sort.on{border-color:color-mix(in srgb,var(--flygon-green) 60%,transparent);background:var(--flygon-tint);color:var(--flygon-dark)}
+.dcol-sort.on:hover,.dcol-sort.on[aria-expanded=true]{background:color-mix(in srgb,var(--flygon-light) 60%,#fff)}
 .dcol-h em{font-style:normal;font-weight:600;color:var(--faint);font-variant-numeric:tabular-nums}
 .dcol-h .ib{width:24px;height:24px;opacity:0}.dcol:hover .dcol-h .ib,.dcol-h .ib:focus-visible{opacity:1}
 .dcol[data-dcol=done] .dcol-h em{color:var(--flygon-dark)}
@@ -1134,6 +1141,7 @@ body.split-drag .pane{pointer-events:none}
 }
 @media (pointer:coarse){
   .opts button{min-width:32px;height:32px}
+  .dcol-sort{min-width:30px;height:28px}
   .prop{min-height:36px}
 }
 
