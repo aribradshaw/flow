@@ -213,7 +213,7 @@ const isLinked=id=>typeof id==='string'&&id.startsWith('sh.');
 function stripLinked(d){
   if(!d||typeof d!=='object')return d;
   const out={...d,charts:(d.charts||[]).map(c=>({...c,nodes:(c.nodes||[]).filter(n=>!isLinked(n.id)),edges:(c.edges||[]).filter(e=>!isLinked(e.id))}))};
-  delete out.shares;
+  delete out.shares;delete out.shareMembers;
   if(Array.isArray(d.projects))out.projects=d.projects.filter(x=>!isLinked(x?.id));
   if(Array.isArray(d.timeline))out.timeline=d.timeline.filter(x=>!isLinked(x?.id));
   if(d.devops&&typeof d.devops==='object')out.devops={...d.devops,cards:(d.devops.cards||[]).filter(x=>!isLinked(x?.id)),labels:(d.devops.labels||[]).filter(x=>!isLinked(x?.id))};
@@ -237,20 +237,41 @@ async function attachedShares(envId,user){
   }
   return out;
 }
+// The members of a share (its owner and the recipients of the same records), who can be assigned to its cards.
+const membersOf=async s=>core.shareMembers(s,await shares.list({ownerEnv:s.ownerEnv}));
+// Conflicts are shown to the person who lost them for a day (docs/sharing.md).
+const CONFLICT_MS=864e5;
 // The workspace as its owner sees it: their own data plus the linked copies of shares placed in it.
 // shared: a signature of those shares (ids, permissions and the owners' revisions), so a client polling
-// with ?since=<rev> still hears about the owner's edits.
+// with ?since=<rev> still hears about the owner's edits. conflicts: recent edits by others that overwrote
+// this user's value on a shared record (core.conflictView).
 async function withShares(envId,user,data){
-  if(!data)return {data,shared:''};
+  if(!data)return {data,shared:'',conflicts:[]};
   // Sharing must never break reading one's own workspace: on any failure, serve it without linked copies.
-  try{return await project(envId,user,data)}catch(e){console.error('share projection failed',e?.message);return {data:dropDangling(structuredClone(stripLinked(data))),shared:''}}
+  try{return await project(envId,user,data)}catch(e){console.error('share projection failed',e?.message);return {data:dropDangling(structuredClone(stripLinked(data))),shared:'',conflicts:[]}}
 }
 async function project(envId,user,data){
-  let d=structuredClone(stripLinked(data));const sig=[],meta=[];
+  const own=stripLinked(data);let d=structuredClone(own);const sig=[],meta=[],conflicts=[],since=new Date(Date.now()-CONFLICT_MS).toISOString();
   for(const {share:s,home} of user.token?[]:await attachedShares(envId,user)){
-    d=core.applyProjection(d,core.projectForRecipient(home.data,s,await shares.placements(s.id,envId)));
+    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
+    d=core.applyProjection(d,p);
     sig.push(`${s.id}:${s.permission}:${home.rev}`);
-    meta.push({id:s.id,permission:s.permission,ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name});
+    meta.push({id:s.id,permission:s.permission,ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members});
+    const sc=core.resolveScope(home.data,s);
+    for(const e of await shares.history({envId:s.ownerEnv,over:user.email,since,limit:200}))
+      if(sc[SCOPE_KEY[e.kind]]?.includes(e.recordId))conflicts.push(core.conflictView(e,{ownerDb:home.data,share:s,members}));
+  }
+  // The owner's own shared records: recipients of this environment's shares can be assigned to the cards
+  // shared with them (person cards with their email already can), and conflicts they lost.
+  if(!user.token&&sameEmail(data.environment?.ownerEmail||user.email,user.email)){
+    const out=await shares.list({ownerEnv:envId}),emails=new Set((own.charts||[]).flatMap(c=>c.nodes||[]).filter(n=>n.type==='person'&&n.email).map(n=>n.email.toLowerCase())),members=new Map();
+    for(const s of out){
+      const e=s.recipientEmail.toLowerCase();if(emails.has(e))continue;
+      const m=members.get(e)||members.set(e,{id:core.memberId(e),email:e,name:e,cards:new Set()}).get(e);
+      for(const id of core.resolveScope(own,s).cardIds)m.cards.add(id);
+    }
+    if(members.size)d.shareMembers=[...members.values()].map(m=>({...m,cards:[...m.cards]}));
+    if(out.length)for(const e of await shares.history({envId,over:user.email,since,limit:200}))conflicts.push(core.conflictView(e));
   }
   for(const sid of core.linkedShareIds(d))if(!meta.some(m=>m.id===sid)){
     d=core.revokeEffects(d,{id:sid}).db;
@@ -258,26 +279,57 @@ async function project(envId,user,data){
     for(const c of d.charts)if(c.id===core.shareChartId(sid)&&c.name.startsWith('Shared · '))c.name='Formerly shared';
   }
   d=dropDangling(d);if(meta.length)d.shares=meta;
-  return {data:d,shared:sig.join(',')};
+  const seen=new Set();
+  return {data:d,shared:sig.join(','),conflicts:conflicts.filter(c=>{const k=[c.kind,c.id,c.field,c.at].join('|');return !seen.has(k)&&seen.add(k)})};
 }
+const SCOPE_KEY={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
 // A recipient saved their workspace: layout of linked cards becomes placements, and field edits their
 // share permits go to the owner's workspace (with history). Anything else is dropped (it comes back on
-// the next read).
-async function applyRecipientSave(envId,user,data){
+// the next read). base: the browser's fieldBase (what its copy held before each change), so a stale copy
+// never overwrites the owner, and an edit that overwrote someone's unseen change records them as `over`.
+async function applyRecipientSave(envId,user,data,base){
   for(const {share:s} of await attachedShares(envId,user)){
+    const members=await membersOf(s);
     for(let attempt=0;attempt<3;attempt++){
       const home=await workspaces.get(s.ownerEnv);if(!home?.data)break;
-      const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId));
-      const {placements,edits}=core.extractRecipientChanges(p,data);
+      const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
+      const {placements,edits}=core.extractRecipientChanges(p,data,base);
       if(attempt===0)await shares.place(s.id,envId,placements);
       const patch=[],hist=[];
-      for(const e of edits){const r=core.applyRecipientEdit(home.data,s,e,user);if(r.ok){patch.push(...r.ownerDbPatch);hist.push(...r.history)}}
+      for(const e of edits){
+        const r=core.applyRecipientEdit(home.data,s,e,user,{members});if(!r.ok)continue;
+        patch.push(...r.ownerDbPatch);hist.push(...r.history);
+        // Last write wins; the person whose value this replaced unseen gets a notice on that field.
+        if(e.clash)for(const h of r.history.filter(h=>e.clash.includes(h.field))){
+          const norm=(x,v)=>core.historyForRecipient(home.data,s,{kind:x.kind,field:x.field,new:v},members).new;
+          h.over=core.overwritten(await shares.history({envId:s.ownerEnv,kind:h.kind,recordId:h.recordId,limit:50}),h.field,h.old,user.email,s.ownerEmail,norm)||undefined;
+        }
+      }
       if(!patch.length)break;
       const out=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:core.applyOwnerPatch(home.data,patch),by:user.email,owner:home.owner,visibility:home.visibility,name:home.name});
       if(out.conflict)continue;
       await shares.record(hist);break;
     }
   }
+}
+// The owner saved an environment that has shares: changes to shared records become field history (so
+// recipients see who changed what), and one that overwrote a recipient's unseen change records them as
+// `over` (they get a notice on that field).
+async function recordOwnerChanges(envId,user,before,after,base){
+  if(!before||!after)return;
+  const list=await shares.list({ownerEnv:envId});if(!list.length)return;
+  const entries=core.ownerChanges(before,after,list,user,base),byId=new Map(list.map(s=>[s.id,s])),found=new Map();
+  for(const e of entries){
+    if(!e.clash)continue;
+    const k=[e.kind,e.recordId,e.field].join('|');
+    if(!found.has(k)){
+      // A recipient's entry holds the people they could see: compare in their terms.
+      const norm=(x,v)=>x.field==='assignees'&&byId.get(x.shareId)?core.historyForRecipient(before,byId.get(x.shareId),{kind:x.kind,field:x.field,new:v}).new:v;
+      found.set(k,core.overwritten(await shares.history({envId,kind:e.kind,recordId:e.recordId,limit:50}),e.field,e.old,user.email,'',norm));
+    }
+    if(found.get(k))e.over=found.get(k);
+  }
+  await shares.record(entries.map(({clash,...e})=>e));
 }
 // A new, empty workspace (one blank chart) for an environment.
 const emptyWorkspace=(id,name,owner)=>({active:'chart-'+id,charts:[{id:'chart-'+id,name:'Untitled chart',nodes:[],edges:[]}],projects:[],timeline:[],environment:{id,name,ownerEmail:owner,visibility:'private',members:[]}});
@@ -339,7 +391,7 @@ async function workspace(req,res){
     // Linked copies are added for the environment's owner only; anyone else gets the stored data as is.
     const v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
     if(w&&since===w.rev&&(u.searchParams.get('shared')||'')===v.shared){json(res,200,{env:envId,rev:w.rev,shared:v.shared,unchanged:true});return true}
-    json(res,200,{env:envId,rev:w?.rev||0,data:v.data,shared:v.shared,updatedAt:w?.updatedAt||null,owner:ownerOf(w,envId),readOnly:!!w&&!mine});
+    json(res,200,{env:envId,rev:w?.rev||0,data:v.data,shared:v.shared,conflicts:v.conflicts||[],updatedAt:w?.updatedAt||null,owner:ownerOf(w,envId),readOnly:!!w&&!mine});
     return true;
   }
   if(req.method==='PUT'){
@@ -373,8 +425,11 @@ async function workspace(req,res){
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80)});
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
+        // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
+        const base=body.fieldBase&&typeof body.fieldBase==='object'&&!Array.isArray(body.fieldBase)?body.fieldBase:null;
+        await recordOwnerChanges(envId,user,stored,data,base).catch(e=>console.error('share history failed',e?.message));
         // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
-        if(!user.token)await applyRecipientSave(envId,user,body.data).catch(e=>console.error('share write-back failed',e?.message));
+        if(!user.token)await applyRecipientSave(envId,user,body.data,base).catch(e=>console.error('share write-back failed',e?.message));
         const v=user.token?{shared:''}:await withShares(envId,user,data);
         json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
@@ -582,7 +637,8 @@ async function sharesApi(req,res){
       let list=await shares.history({shareId:s.id,kind,recordId:id,limit:200});
       // A recipient only sees the history of records that are still shared with them.
       if(!isOwner){const home=await workspaces.get(s.ownerEnv),sc=home?.data?core.resolveScope(home.data,s):null,k={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
-        list=sc?list.filter(e=>sc[k[e.kind]]?.includes(e.recordId)):[]}
+        const members=sc?await membersOf(s):[];
+        list=sc?list.filter(e=>sc[k[e.kind]]?.includes(e.recordId)).map(e=>{const {over,...x}=core.historyForRecipient(home.data,s,e,members);return x}):[]}
       json(res,200,{history:list});return true;
     }
     res.writeHead(405);res.end();return true;

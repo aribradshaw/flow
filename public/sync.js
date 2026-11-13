@@ -1,5 +1,5 @@
 import {store,adoptRemote} from './store.js';
-import {merge3,same,size,isSeed} from './sync-core.js';
+import {merge3,same,size,isSeed,fieldBase,clashes,withHeld} from './sync-core.js';
 
 // Server sync: the server's copy of the environment is the source of truth; browser storage is the
 // offline cache. On load the browser asks the server for its workspace:
@@ -10,13 +10,18 @@ import {merge3,same,size,isSeed} from './sync-core.js';
 // browser merges and retries. Remote changes are picked up every 20 s while the tab is visible.
 const SKEY='flygon-flow-sync-v1',DEBOUNCE=700,POLL=20000;
 // shared: the server's signature of shares placed in this environment (owner edits change it, not rev).
-let st={env:null,rev:0,base:null,dirty:false,shared:''};
+// held: fields a merge kept from this copy over someone else's change (sync-core clashes), sent once.
+let st={env:null,rev:0,base:null,dirty:false,shared:'',held:null};
 try{Object.assign(st,JSON.parse(localStorage.getItem(SKEY))||{})}catch{}
 const persist=()=>{try{localStorage.setItem(SKEY,JSON.stringify(st))}catch{}};
 let via='',timer=0,busy=false,again=false,edits=0,backoff=0,stopped=false,allowShrink=false;
 const status=(s,t)=>store.onStatus(s,t);
 const time=()=>new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-const take=(data,rev,env,shared='')=>{adoptRemote(data);st={env,rev,base:data,dirty:false,shared};persist()};
+// Conflicts this user lost on shared records, from the server (share.js shows them on the field).
+const keepConflicts=list=>{if(Array.isArray(list))store.conflicts=list};
+const take=(data,rev,env,shared='',conflicts)=>{keepConflicts(conflicts);adoptRemote(data);st={env,rev,base:data,dirty:false,shared,held:null};persist()};
+// Remember fields both sides changed before a merge keeps this copy's value.
+const hold=(base,local,remote)=>{const c=clashes(base,local,remote);if(Object.keys(c).length)st.held=withHeld(st.held,c)};
 
 export function startSync(){
   store.onSaved=({replace}={})=>{st.dirty=true;edits++;if(replace)allowShrink=true;persist();schedule(DEBOUNCE)};
@@ -46,7 +51,7 @@ export async function pull(){
       // Not this user's environment (another person's cache in this browser, or an archived one):
       // switch to the user's own default. The other copy stays in the disk backup.
       const d=await get('',0).catch(()=>null);
-      if(d?.status===200&&d.data.env&&d.data.data){take(d.data.data,d.data.rev,d.data.env,d.data.shared);status('ok','Opened your workspace');}
+      if(d?.status===200&&d.data.env&&d.data.data){take(d.data.data,d.data.rev,d.data.env,d.data.shared,d.data.conflicts);status('ok','Opened your workspace');}
       else stopped=true;
       return;
     }
@@ -68,10 +73,11 @@ export async function pull(){
       // This browser holds a different, non-trivial workspace: keep it as its own environment.
       st.env=local.environment.id;st.rev=0;st.dirty=true;persist();schedule(0);return;
     }
-    if(fresh||(!st.dirty&&st.env===d.env)){take(d.data,d.rev,d.env,d.shared);status('ok',`Up to date with ${via||'the server'} · rev ${d.rev} · ${time()}`);return}
+    if(fresh||(!st.dirty&&st.env===d.env)){take(d.data,d.rev,d.env,d.shared,d.conflicts);status('ok',`Up to date with ${via||'the server'} · rev ${d.rev} · ${time()}`);return}
     // Both sides have changes: merge, keep both copies (server history + disk backup), upload.
     const merged=merge3(st.env===d.env?st.base??undefined:undefined,local,d.data);
-    adoptRemote(merged);st={env:d.env,rev:d.rev,base:d.data,dirty:!same(merged,d.data),shared:d.shared||''};persist();
+    if(st.env===d.env)hold(st.base,local,d.data);
+    keepConflicts(d.conflicts);adoptRemote(merged);st={env:d.env,rev:d.rev,base:d.data,dirty:!same(merged,d.data),shared:d.shared||'',held:st.env===d.env?st.held:null};persist();
     if(st.dirty)schedule(0);else status('ok',`Up to date with ${via||'the server'} · rev ${d.rev} · ${time()}`);
   }finally{busy=false;if(again){again=false;schedule(0)}}
 }
@@ -85,12 +91,14 @@ async function push(){
       // Never plant the untouched sample chart on the server as a workspace.
       if(isSeed(store.db)&&!st.base){st.dirty=false;persist();return}
       const sent=JSON.parse(JSON.stringify(store.db)),e0=edits;
+      // What this copy held before each field it changed (shared records: docs/sharing.md).
+      const base=st.base?withHeld(fieldBase(st.base,sent),st.held):null;
       status('saving','Saving to the server…');
       let r;
-      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,...(allowShrink?{allowShrink:true}:{})})});}
+      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,...(base?{fieldBase:base}:{}),...(allowShrink?{allowShrink:true}:{})})});}
       catch{r=null}
       const d=r?await r.json().catch(()=>({})):{};
-      if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.dirty=edits!==e0;
+      if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.held=null;st.dirty=edits!==e0;
         // Shared cards: the server re-projects them (refused edits come back), so read the result.
         if(d.shared){st.shared='';setTimeout(pull,400)}
         // The server kept runners as they reported themselves (this copy was missing some), or a higher
@@ -99,6 +107,7 @@ async function push(){
         persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;return}
       if(r?.status===409&&d.data){
         const merged=merge3(st.base??undefined,store.db,d.data);
+        hold(st.base,store.db,d.data);
         adoptRemote(merged);st.rev=d.rev;st.base=d.data;st.dirty=true;persist();continue;
       }
       if(r?.status===422){status('warn',d.error||'The server refused a save that would remove most of the workspace');return}
@@ -117,7 +126,7 @@ export async function switchEnvironment(id){
   if(st.dirty)throw Error('Your latest changes are not saved to the server yet. Try again in a moment.');
   const r=await get(id,0);
   if(r.status!==200||!r.data.data)throw Error(r.data.error||'Could not open that environment');
-  take(r.data.data,r.data.rev,r.data.env,r.data.shared);stopped=false;
+  take(r.data.data,r.data.rev,r.data.env,r.data.shared,r.data.conflicts);stopped=false;
 }
 // Re-read the current environment now (e.g. after adding or removing a share).
 export async function refresh(){st.shared='\u0000';persist();for(let i=0;i<20&&busy;i++)await new Promise(r=>setTimeout(r,100));await pull()}

@@ -52,6 +52,43 @@ function mergeById(b,l,r){
   });
   return out;
 }
+// Shared records (docs/sharing.md): the fields another person may change too, by kind.
+export const SHARED_FIELDS={node:['name','notes'],edge:['percent'],project:['name','color'],
+  item:['title','kind','status','priority','start','end','owner','link','notes','release'],
+  card:['title','description','column','points','due','labels','checklist','links','assignees']};
+const recordsOf=d=>({node:(d?.charts||[]).flatMap(c=>c.nodes||[]),edge:(d?.charts||[]).flatMap(c=>c.edges||[]),project:d?.projects||[],item:d?.timeline||[],card:d?.devops?.cards||[]});
+// For each record a save changes, the value each changed field had in the copy it started from:
+// {node|edge|project|item|card:{id:{field:value}}}. The server tells a real edit of a shared record from
+// a copy that is only out of date, and notices an edit that overwrote someone else's change.
+export function fieldBase(base,local){
+  const out={};if(!base||!local)return out;
+  const B=recordsOf(base),L=recordsOf(local);
+  for(const kind of Object.keys(SHARED_FIELDS)){
+    const was=new Map(B[kind].map(x=>[x.id,x]));
+    for(const x of L[kind]){const b=was.get(x?.id);if(!b)continue;
+      for(const f of SHARED_FIELDS[kind])if(!same(b[f],x[f]))((out[kind]??={})[x.id]??={})[f]=b[f]??null}
+  }
+  return out;
+}
+// Fields a merge kept from local although remote had changed them too (to something else): the value
+// both started from, in fieldBase's shape. Sent with the next save so the server knows the local value
+// replaced a change this copy never showed (a conflict, last write wins).
+export function clashes(base,local,remote){
+  const out={};if(!base||!local||!remote)return out;
+  const B=recordsOf(base),R=recordsOf(remote),L=recordsOf(local);
+  for(const kind of Object.keys(SHARED_FIELDS)){
+    const was=new Map(B[kind].map(x=>[x.id,x])),there=new Map(R[kind].map(x=>[x.id,x]));
+    for(const x of L[kind]){const b=was.get(x?.id),r=there.get(x?.id);if(!b||!r)continue;
+      for(const f of SHARED_FIELDS[kind])if(!same(b[f],x[f])&&!same(b[f],r[f])&&!same(x[f],r[f]))((out[kind]??={})[x.id]??={})[f]=b[f]??null}
+  }
+  return out;
+}
+// fieldBase with held clashes laid over it (a held field keeps its older base).
+export function withHeld(base,held){
+  const out=structuredClone(base||{});
+  for(const [kind,recs] of Object.entries(held||{}))for(const [id,fields] of Object.entries(recs||{}))Object.assign((out[kind]??={})[id]??={},fields);
+  return out;
+}
 // Undo snapshots are whole workspaces, so a change from the server must be carried into each of them
 // or undo would erase it. Replays before -> after onto every snapshot with the same merge rules; when
 // both changed a field, what arrived wins, so undo never brings back a value someone has since replaced.

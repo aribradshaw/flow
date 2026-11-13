@@ -9,7 +9,9 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
-  createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds} from '../lib/sharing-core.mjs';
+  createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
+  shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView} from '../lib/sharing-core.mjs';
+import {fieldBase,clashes,withHeld} from '../public/sync-core.js';
 import {shareStore,SCHEMA,migrate} from '../lib/shares.mjs';
 
 const OWNER='owner@example.test',BO='bo@example.test',KIM='kim@example.test';
@@ -281,14 +283,125 @@ async function storageChecks(store){
   await store.record(applyRecipientEdit(owner(),await store.get(s.id),{kind:'node',id:'marsh',comment:'ok'},{email:BO}).history);
   const h=await store.history({envId:'default-workspace',kind:'node',recordId:'marsh'});
   assert.deepEqual(h.map(x=>[x.field,x.old,x.new,x.by]),[['comment',null,'ok',BO],['notes','','x',BO],['name','Marsh Holdings LLC','Marsh 2',BO]]);
+  // A conflict: the person whose value an edit overwrote, found by email and time.
+  await store.record([{shareId:s.id,envId:'default-workspace',kind:'node',recordId:'marsh',field:'name',old:'Marsh 2',new:'Marsh 3',by:OWNER,at:new Date().toISOString(),over:BO.toUpperCase(),clash:true}]);
+  const lost=await store.history({envId:'default-workspace',over:BO,since:new Date(Date.now()-60000).toISOString()});
+  assert.deepEqual(lost.map(x=>[x.field,x.old,x.new,x.by,x.over]),[['name','Marsh 2','Marsh 3',OWNER,BO]]);
+  assert.equal(lost[0].clash,undefined,'the clash flag is not stored');
+  assert.equal((await store.history({over:BO,since:new Date(Date.now()+60000).toISOString()})).length,0);
+  assert.equal((await store.history({over:OWNER})).length,0);
+  assert.equal(h.find(x=>x.field==='name').over,undefined,'ordinary entries have no over');
   await store.revoke(s.id);
   assert.ok((await store.get(s.id)).revokedAt);
   assert.equal((await store.list({recipientEmail:BO})).length,0);
   assert.equal((await store.list({recipientEmail:BO,includeRevoked:true})).length,1);
   assert.deepEqual(await store.placements(s.id,'bo-env'),[]);
   assert.deepEqual(await store.attachedTo('bo-env'),[],'a revoked share is detached everywhere');
-  assert.equal((await store.history({shareId:s.id})).length,3,'history outlives the revoke');
+  assert.equal((await store.history({shareId:s.id})).length,4,'history outlives the revoke');
 }
+
+describe('members (card #63): owner and recipients can be assigned to shared cards',()=>{
+  // Owner has a person card with their email, outside Bo's scope; Kim got the same records by re-share.
+  const withMe=()=>{const d=owner();d.charts[0].nodes.push({...N('me','Owner Person','person',900,900),email:OWNER});return d};
+  test('members: the owner and the recipients of the same records, nobody else',()=>{
+    const s=share({kind:'person',nodeId:'bo'}),kim={...s,id:'s-kim',recipientEmail:KIM},other={...s,id:'s-x',recipientEmail:'x@example.test',scope:{kind:'project',projectId:'p-fms'}},gone={...s,id:'s-y',recipientEmail:'y@example.test',revokedAt:'2026-11-01T00:00:00.000Z'};
+    assert.deepEqual(shareMembers(s,[s,kim,other,gone]),[OWNER,BO,KIM]);
+    assert.deepEqual(shareMembers(s),[OWNER,BO]);
+  });
+  test('the projection shows in-scope people and members, never other people of the owner',()=>{
+    const db=withMe(),s=share({kind:'person',nodeId:'bo'});
+    db.devops.cards[0].assignees.push({node:'me',role:'requester'},{node:'@kim@example.test',role:'tester'},{node:'@x@example.test',role:'tester'});
+    const p=projectForRecipient(db,s,[],{members:[OWNER,BO,KIM]}),c=p.cards.find(x=>parseLinkedId(x.id).id==='k-cb');
+    assert.deepEqual(c.assignees,[{node:linkedId(s.id,'bo'),role:'developer'},{node:memberId(OWNER),role:'requester'},{node:memberId(KIM),role:'tester'}],'Cleo and non-members stay hidden');
+    assert.deepEqual(p.share.members.map(m=>[m.id,m.name,m.owner]),[[memberId(OWNER),'Owner Person',true],[memberId(BO),BO,false],[memberId(KIM),KIM,false]]);
+    assert.ok(!p.nodes.some(n=>parseLinkedId(n.id).id==='me'),"the owner's person card is not projected as a card");
+    assert.ok(!JSON.stringify(p).includes('Cleo'));
+  });
+  test('assignee edits: in-scope people and members only; hidden people stay on the owner\'s card',()=>{
+    const db=withMe(),s=share({kind:'person',nodeId:'bo'}),bo={email:BO},m={members:[OWNER,BO,KIM]};
+    const r=applyRecipientEdit(db,s,{kind:'card',id:linkedId(s.id,'k-cb'),fields:{assignees:[{node:linkedId(s.id,'bo'),role:'tester'},{node:memberId(OWNER),role:'requester'},{node:memberId(KIM)}]}},bo,m);
+    assert.ok(r.ok,r.error);
+    assert.deepEqual(applyOwnerPatch(db,r.ownerDbPatch).devops.cards[0].assignees,[{node:'cleo',role:'tester'},{node:'bo',role:'tester'},{node:'me',role:'requester'},{node:'@kim@example.test',role:'developer'}],
+      "Cleo (hidden) stays; the owner is stored as their person card, Kim as @email");
+    assert.ok(!JSON.stringify(r.history).includes('cleo'),'history holds only what Bo can see');
+    for(const node of [linkedId(s.id,'cleo'),'cleo','@stranger@example.test',linkedId('other','bo'),linkedId(s.id,'marsh')])
+      assert.equal(applyRecipientEdit(db,s,{kind:'card',id:'k-cb',fields:{assignees:[{node}]}},bo,m).error,'invalid',node);
+    assert.equal(applyRecipientEdit(db,s,{kind:'card',id:'k-cb',fields:{assignees:[{node:memberId(KIM)}]}},bo).error,'invalid','without Kim\'s share she is not a member');
+    assert.equal(applyRecipientEdit(db,s,{kind:'card',id:'k-cb',fields:{assignees:[{node:linkedId(s.id,'bo'),role:'developer'}]}},bo,m).ownerDbPatch.length,0,'unchanged');
+    assert.equal(applyRecipientEdit(db,share({kind:'person',nodeId:'bo'},'comment'),{kind:'card',id:'k-cb',fields:{assignees:[]}},bo,m).error,'permission');
+  });
+  test('history as the recipient sees it: their ids, hidden people left out',()=>{
+    const db=owner(),s=share({kind:'person',nodeId:'bo'});
+    const e={kind:'card',recordId:'k-cb',field:'assignees',old:[{node:'cleo',role:'tester'},{node:'bo',role:'developer'}],new:[{node:'bo',role:'developer'}]};
+    assert.deepEqual(historyForRecipient(db,s,e).old,[{node:linkedId(s.id,'bo'),role:'developer'}]);
+    assert.deepEqual(historyForRecipient(db,s,{kind:'card',recordId:'k-cb',field:'labels',old:[],new:['l-high']}).new,[linkedId(s.id,'l-high')]);
+  });
+});
+
+describe('timeline release references',()=>{
+  test('a release is kept as its linked id when shared, and edits map it back',()=>{
+    const db=owner(),s=share({kind:'person',nodeId:'bo'});
+    db.timeline.push({id:'i-late',title:'Late task',kind:'feature',status:'planned',start:'',end:'',priority:'',release:'i-cb',projects:['p-cb'],owner:'',link:'',notes:''});
+    db.timeline.push({id:'i-out',title:'Elsewhere',kind:'feature',status:'planned',start:'',end:'',priority:'',release:'i-fms',projects:['p-cb'],owner:'',link:'',notes:''});
+    const p=projectForRecipient(db,s),get=id=>p.timeline.find(i=>parseLinkedId(i.id).id===id);
+    assert.equal(get('i-late').release,linkedId(s.id,'i-cb'));
+    assert.equal(get('i-out').release,'','a release outside the scope is not named');
+    const r=applyRecipientEdit(db,s,{kind:'item',id:'i-out',fields:{release:linkedId(s.id,'i-cb')}},{email:BO});
+    assert.deepEqual(r.ownerDbPatch,[{kind:'item',id:'i-out',field:'release',value:'i-cb'}]);
+    assert.equal(applyRecipientEdit(db,s,{kind:'item',id:'i-late',fields:{release:'i-fms'}},{email:BO}).error,'invalid','an out-of-scope release is refused');
+    assert.ok(applyRecipientEdit(db,s,{kind:'item',id:'i-late',fields:{release:''}},{email:BO}).ok);
+  });
+});
+
+describe('conflicts (card #61): last write wins, the loser is told',()=>{
+  const renamed=(db,title)=>{db.devops.cards[0].title=title;return db};
+  test('with a base, a stale copy is not an edit; a change over an unseen value is a clash',()=>{
+    const s=share({kind:'person',nodeId:'bo'}),seen=applyProjection(recipient(),projectForRecipient(owner(),s));
+    const id=linkedId(s.id,'k-cb'),card=d=>d.devops.cards.find(c=>c.id===id);
+    // Owner renames meanwhile: the projection Bo is checked against has the new title.
+    const now=projectForRecipient(renamed(owner(),'Owner title'),s);
+    const stale=structuredClone(seen);stale.charts[0].nodes[0].name='Bo renames his own card';
+    assert.deepEqual(extractRecipientChanges(now,stale,fieldBase(seen,stale)).edits,[],'an out-of-date copy never overwrites the owner');
+    assert.equal(extractRecipientChanges(now,stale).edits[0]?.fields.title,'Ad copy','without a base (older clients) it would');
+    const mine=structuredClone(seen);card(mine).title='Bo title';card(mine).points=5;
+    const e=extractRecipientChanges(now,mine,fieldBase(seen,mine)).edits[0];
+    assert.deepEqual(e.fields,{title:'Bo title',points:5});assert.deepEqual(e.clash,['title'],'points did not change on the owner side');
+    const fresh=applyProjection(recipient(),now),mine2=structuredClone(fresh);card(mine2).title='Bo title';
+    assert.equal(extractRecipientChanges(now,mine2,fieldBase(fresh,mine2)).edits[0].clash,undefined,'an edit over the value Bo saw is no conflict');
+    const same=structuredClone(seen);card(same).title='Owner title';
+    assert.deepEqual(extractRecipientChanges(now,same,fieldBase(seen,same)).edits,[],'both made the same change');
+  });
+  test('owner saves become history for every share that covers the record; unseen overwrites are clashes',()=>{
+    const s=share({kind:'person',nodeId:'bo'}),k={...s,id:'s-kim',recipientEmail:KIM},gone={...s,id:'s-gone',revokedAt:'2026-11-01T00:00:00.000Z'},other=share({kind:'project',projectId:'p-fms'});
+    const before=owner(),after=renamed(owner(),'Owner title');after.devops.cards[2].title='FMS v2';after.charts[0].nodes.find(n=>n.id==='memo').notes='changed';
+    const h=ownerChanges(before,after,[s,k,gone,other],{email:OWNER});
+    assert.deepEqual(h.map(e=>[e.shareId,e.kind,e.recordId,e.field,e.old,e.new,e.by,!!e.clash]),[[s.id,'card','k-cb','title','Ad copy','Owner title',OWNER,false],['s-kim','card','k-cb','title','Ad copy','Owner title',OWNER,false],[other.id,'card','k-fms','title','FMS deck','FMS v2',OWNER,false]],
+      'private and revoked records are not recorded');
+    const c=ownerChanges(before,after,[s],{email:OWNER},{card:{'k-cb':{title:'Bo title'}}});
+    assert.equal(c[0].clash,true,'the owner\'s copy held another value: it overwrote a change they never saw');
+    assert.equal(ownerChanges(before,after,[s],{email:OWNER},{card:{'k-cb':{title:'Ad copy'}}})[0].clash,undefined);
+  });
+  test('the loser is whoever wrote the replaced value; never the writer',()=>{
+    const hist=[{field:'title',new:'Bo title',by:BO},{field:'title',new:'Old',by:OWNER}];
+    assert.equal(overwritten(hist,'title','Bo title',OWNER),BO);
+    assert.equal(overwritten(hist,'title','Bo title',BO),null);
+    assert.equal(overwritten(hist,'title','Something else',BO,OWNER),OWNER,'a value from before any shared edit is the owner\'s');
+    assert.equal(overwritten([],'title','x',OWNER,''),null);
+  });
+  test('conflicts are shown in the loser\'s ids',()=>{
+    const s=share({kind:'person',nodeId:'bo'}),e={kind:'card',recordId:'k-cb',field:'labels',old:['l-high'],new:[],by:OWNER,at:'2026-11-13T00:00:00.000Z'};
+    assert.deepEqual(conflictView(e),{kind:'card',id:'k-cb',field:'labels',by:OWNER,at:e.at,previous:['l-high'],value:[]});
+    assert.deepEqual(conflictView(e,{ownerDb:owner(),share:s}),{kind:'card',id:linkedId(s.id,'k-cb'),field:'labels',by:OWNER,at:e.at,previous:[linkedId(s.id,'l-high')],value:[]});
+  });
+  test('sync-core: fieldBase lists what a save changed; clashes what a merge kept over a remote change',()=>{
+    const base=owner(),local=renamed(owner(),'Mine'),remote=renamed(owner(),'Theirs');
+    local.charts[0].nodes[0].x=1;local.timeline[0].notes='n';
+    assert.deepEqual(fieldBase(base,local),{card:{'k-cb':{title:'Ad copy'}},item:{'i-cb':{notes:''}}},'layout is not a shared field');
+    assert.deepEqual(clashes(base,local,remote),{card:{'k-cb':{title:'Ad copy'}}});
+    assert.deepEqual(clashes(base,local,renamed(owner(),'Mine')),{},'the same change is no clash');
+    assert.deepEqual(withHeld({card:{'k-cb':{title:'Theirs'}}},{card:{'k-cb':{title:'Ad copy'}}}),{card:{'k-cb':{title:'Ad copy'}}},'a held field keeps its older base');
+  });
+});
 
 describe('storage',()=>{
   test('JSON files',async()=>{

@@ -261,3 +261,67 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   assert.equal((await mcp('flow_test_'+'y'.repeat(40),{jsonrpc:'2.0',id:5,method:'tools/list'})).status,401);
   await owner('DELETE',`/api/shares/${s.data.share.id}`);
 });
+
+// Cards #61 and #63 on the real server: members as assignees, stale copies, and conflicts both ways.
+test('shared cards: members can be assigned, stale copies never overwrite, and the loser of a conflict is told',async()=>{
+  const {fieldBase}=await import('../public/sync-core.js');
+  let a=(await owner('GET','/api/workspace?env=default-workspace')).data;
+  a.data.charts[0].nodes.push(N('me','Owner Person','person',1200,900,{email:OWNER}));
+  const now=new Date().toISOString();
+  a.data.devops={...a.data.devops,cards:[...(a.data.devops?.cards||[]),{id:'k-ad',number:90,title:'Ad copy',description:'',column:'requests',project:'p-cb',labels:[],points:null,due:'',
+    assignees:[{node:'bo',role:'developer'},{node:'cleo',role:'tester'}],checklist:[],links:[],item:'',created:now,updated:now,moved:now}]};
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:a.rev,data:a.data})).status,200);
+  const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['bo','campaign']},permission:'edit'})).data.share;
+  assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
+  const L=id=>`sh.${s.id}.${id}`,card=d=>d.devops.cards.find(c=>c.id===L('k-ad')),home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data;
+  const save=async(r,d)=>{const x=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,fieldBase:fieldBase(r.data.data,d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
+
+  // Bo sees in-scope people and the share's members; Cleo (outside the scope) stays hidden.
+  let r=await bo('GET','/api/workspace?env='+boEnv);
+  assert.deepEqual(card(r.data.data).assignees,[{node:L('bo'),role:'developer'}]);
+  const meta=r.data.data.shares.find(x=>x.id===s.id);
+  assert.deepEqual(meta.members.map(m=>[m.id,m.name]),[['@'+OWNER,'Owner Person'],['@'+BO,BO]]);
+  assert.ok(!JSON.stringify(r.data).includes('Cleo Park')&&!JSON.stringify(r.data).includes('"cleo"'));
+  let d=structuredClone(r.data.data);card(d).assignees.push({node:'@'+OWNER,role:'tester'});
+  await save(r,d);
+  let h=await home();
+  assert.deepEqual(h.data.devops.cards.find(c=>c.id==='k-ad').assignees,[{node:'cleo',role:'tester'},{node:'bo',role:'developer'},{node:'me',role:'tester'}],'the owner is assigned as their person card; Cleo stays');
+  assert.ok(!JSON.stringify((await bo('GET',`/api/shares/${s.id}/history?kind=card&id=k-ad`)).data).includes('cleo'),'the history Bo reads leaves Cleo out');
+
+  // The owner renames the card; Bo's copy is stale. An unrelated save of his does not undo the rename.
+  const stale=await bo('GET','/api/workspace?env='+boEnv);
+  h.data.devops.cards.find(c=>c.id==='k-ad').title='Ad copy v2';
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:h.rev,data:h.data})).status,200);
+  d=structuredClone(stale.data.data);d.charts[0].nodes.push(N('bo-note','Bo note','note',5,5));
+  const s1=await save(stale,d);
+  assert.equal((await home()).data.devops.cards.find(c=>c.id==='k-ad').title,'Ad copy v2','a stale copy never overwrites the owner');
+
+  // Bo, still on the old title, renames it: last write wins, and the owner is told on that field.
+  d=structuredClone(d);card(d).title='Bo copy';
+  await save({data:{rev:s1.data.rev,data:stale.data.data}},d);
+  h=await home();
+  assert.equal(h.data.devops.cards.find(c=>c.id==='k-ad').title,'Bo copy');
+  const lost=h.conflicts.find(c=>c.id==='k-ad'&&c.field==='title');
+  assert.ok(lost,JSON.stringify(h.conflicts));
+  assert.deepEqual([lost.kind,lost.by,lost.previous,lost.value],['card',BO,'Ad copy v2','Bo copy']);
+  assert.ok(!(await bo('GET','/api/workspace?env='+boEnv)).data.conflicts.length,'the winner sees no notice');
+  assert.ok(h.data.shareMembers.some(m=>m.id==='@'+BO&&m.cards.includes('k-ad')),'the owner can assign Bo on the card shared with him');
+
+  // Restore (just another edit, over the value the owner now sees): no new conflict for Bo.
+  const base=structuredClone(h.data);h.data.devops.cards.find(c=>c.id==='k-ad').title='Ad copy v2';
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:h.rev,data:h.data,fieldBase:fieldBase(base,h.data)})).status,200);
+  assert.ok(!(await bo('GET','/api/workspace?env='+boEnv)).data.conflicts.length);
+
+  // The other way: Bo writes the description, then the owner's merged copy (which never showed it) wins.
+  r=await bo('GET','/api/workspace?env='+boEnv);d=structuredClone(r.data.data);card(d).description='Bo notes';await save(r,d);
+  h=await home();assert.equal(h.data.devops.cards.find(c=>c.id==='k-ad').description,'Bo notes');
+  h.data.devops.cards.find(c=>c.id==='k-ad').description='Owner notes';
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:h.rev,data:h.data,fieldBase:{card:{'k-ad':{description:''}}}})).status,200);
+  r=await bo('GET','/api/workspace?env='+boEnv);
+  const mine=r.data.conflicts.find(c=>c.field==='description');
+  assert.deepEqual(mine&&[mine.kind,mine.id,mine.by,mine.previous,mine.value],['card',L('k-ad'),OWNER,'Bo notes','Owner notes']);
+  const hist=(await bo('GET',`/api/shares/${s.id}/history?kind=card&id=k-ad`)).data.history;
+  assert.ok(hist.some(e=>e.field==='description'&&e.by===OWNER&&e.new==='Owner notes'),"the owner's edits are in the share's history too");
+  assert.ok(hist.every(e=>e.over===undefined),'who lost is not part of the history a recipient reads');
+  await owner('DELETE',`/api/shares/${s.id}`);
+});
