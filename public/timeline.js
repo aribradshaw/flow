@@ -5,6 +5,7 @@ import {cardsForItem,isOpen,readyToClose} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
 import {panel} from './motion.js';
+import {linkOf,canEdit,locked,lockedMsg,linkedTip,sharedBadge,sharedChip,sharedNote,sameSource,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
 // Timeline items: {id,title,kind,status,priority,release,start,end?,projects[],owner,link,notes}; dates are YYYY-MM-DD.
 // start may be '' (unscheduled backlog): those items only appear on the Board and List.
@@ -42,7 +43,7 @@ let ui={view:'gantt',scale:'month',month:today().slice(0,7),groupBy:'project',pr
 try{Object.assign(ui,JSON.parse(localStorage.getItem(UIKEY))||{})}catch{}
 if(!VIEWS.includes(ui.view))ui.view='gantt';
 const keepUi=()=>{try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
-let selected=null,drag=null,jump=true,G=null,rerender=()=>{},openCard=()=>{};
+let selected=null,drag=null,jump=true,G=null,rerender=()=>{},openCard=()=>{},toast=()=>{};
 const edited=new WeakSet();
 
 const db=()=>store.db,item=id=>db().timeline.find(i=>i.id===id),project=id=>db().projects.find(p=>p.id===id);
@@ -58,7 +59,7 @@ const releaseOf=i=>i.kind!=='release'&&i.release?item(i.release):null;
 function itemTip(i){
   const names=i.projects.map(p=>project(p)?.name).filter(Boolean),days=dated(i)?span(i)[1]-span(i)[0]+1:0,rel=releaseOf(i);
   return [i.title,`${KINDS[i.kind].label} · ${dateLabel(i)}${days>1?` · ${days} days`:''}`,statusInfo(i.status).label+(late(i)?' · overdue':'')+(i.priority?` · ${PRIORITY[i.priority].label}`:''),
-    i.kind!=='card'&&readyToClose(db(),i)&&'All its cards are done: ready to mark complete',rel&&`Target: ${rel.title}${dated(rel)?` (${fmt(rel.start)})`:''}`,names.join(', '),i.owner&&`Owner: ${i.owner}`].filter(Boolean).join('\n');
+    i.kind!=='card'&&readyToClose(db(),i)&&'All its cards are done: ready to mark complete',rel&&`Target: ${rel.title}${dated(rel)?` (${fmt(rel.start)})`:''}`,names.join(', '),i.owner&&`Owner: ${i.owner}`,linkOf(i)&&linkedTip(linkOf(i))].filter(Boolean).join('\n');
 }
 const statusMark=i=>['risk','blocked','done'].includes(i.status)?`<span class="smark ${i.status}">${icon(STATUS[i.status].icon,11)}</span>`
   :i.kind!=='card'&&readyToClose(db(),i)?`<span class="smark ready">${icon('check',11)}</span>`:'';
@@ -68,7 +69,7 @@ const cardName=id=>cards().find(n=>n.id===id)?.name||'';
 // Names that could become projects: chart entity/area names not already used.
 const chartNames=type=>[...new Set(db().charts.flatMap(c=>c.nodes.filter(n=>type.includes(n.type)).map(n=>n.name.trim())))].filter(Boolean);
 
-export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openCard;
+export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openCard;toast=opts.toast||toast;
   const el=$('#timelineView');
   el.addEventListener('click',e=>{
     const dc=e.target.closest('[data-card]');if(dc){openCard(dc.dataset.card);return}
@@ -85,7 +86,8 @@ export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openC
     if(e.button!==0||e.target.closest('button'))return;
     const it=e.target.closest('[data-item]'),i=it&&item(it.dataset.item);if(!i)return;
     if(ui.view==='list'){select(i.id);return}
-    drag={id:i.id,end:!!e.target.closest('[data-end]'),sx:e.clientX,sy:e.clientY,s0:i.start,e0:i.end,before:snapshot(),moved:false};
+    // A shared item the user may not edit opens on click but does not move.
+    drag={id:i.id,end:!!e.target.closest('[data-end]'),sx:e.clientX,sy:e.clientY,s0:i.start,e0:i.end,before:snapshot(),moved:false,locked:locked(i)};
     el.setPointerCapture(e.pointerId);
   });
   // Calendar drops on a day, the Board drops on a status column.
@@ -93,6 +95,7 @@ export function mount(opts){rerender=opts.rerender;openCard=opts.openCard||openC
   el.addEventListener('pointermove',e=>{
     if(!drag)return;
     if(!drag.moved&&Math.abs(e.clientX-drag.sx)+Math.abs(e.clientY-drag.sy)<5)return;
+    if(drag.locked){if(!drag.told){drag.told=true;toast(lockedMsg(item(drag.id)),true)}return}
     drag.moved=true;const i=item(drag.id);
     if(ui.view==='gantt'){
       const dd=Math.round((e.clientX-drag.sx)/G.ppd);
@@ -215,8 +218,8 @@ function packed(items,x,ppd,laneColor){
     if(i.card){html+=`<div class="ti pt dvc ${cls}" data-card="${esc(i.id)}" data-tip="${esc(`DevOps #${i.card.number} · ${colName(i.card.column)}\n${i.card.title}\nDue ${fmt(i.start)} · ${project(i.card.project)?.name||''}\nClick to open the card`)}" data-tip-delay="300" style="left:${L}px;top:${r*ROW+4}px;--c:${c}"><span class="mk">${icon('branch',12)}</span><span class="nm"><span>${esc(i.title)}</span></span></div>`;continue}
     const attrs=`data-item="${esc(i.id)}" data-tip="${esc(itemTip(i))}" data-tip-delay="450"`;
     html+=range
-      ?`<div class="ti bar ${cls}${inside?'':' out'}" ${attrs} style="left:${x0}px;top:${r*ROW+4}px;width:${w}px;--c:${c}"><span class="nm">${statusMark(i)}<span>${esc(i.title)}</span></span><span class="end" data-end></span></div>`
-      :`<div class="ti pt k-${i.kind} ${cls}" ${attrs} style="left:${L}px;top:${r*ROW+4}px;--c:${c}"><span class="mk">${icon(KINDS[i.kind].icon,13)}</span><span class="nm">${statusMark(i)}<span>${esc(i.title)}</span></span></div>`;
+      ?`<div class="ti bar ${cls}${inside?'':' out'}" ${attrs} style="left:${x0}px;top:${r*ROW+4}px;width:${w}px;--c:${c}"><span class="nm">${sharedBadge(i,{inline:true,tip:false})}${statusMark(i)}<span>${esc(i.title)}</span></span><span class="end" data-end></span></div>`
+      :`<div class="ti pt k-${i.kind} ${cls}" ${attrs} style="left:${L}px;top:${r*ROW+4}px;--c:${c}"><span class="mk">${icon(KINDS[i.kind].icon,13)}</span><span class="nm">${sharedBadge(i,{inline:true,tip:false})}${statusMark(i)}<span>${esc(i.title)}</span></span></div>`;
   }
   return {html,rows:Math.max(1,ends.length)};
 }
@@ -313,7 +316,7 @@ function calendar(){
       const chips=shown.slice(0,lastSlot+1).map(o=>{
         if(!o)return '<div class="chip gap"></div>';
         const {i,s}=o,head=n===o.a,cls=`${isRange(i)?' rng':''}${n>s[0]?' cl':''}${n<s[1]?' cr':''}${head?'':' cont'}`;
-        return `<div class="chip s-${i.status}${cls}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" data-tip="${esc(itemTip(i))}" data-tip-delay="450" style="--c:${color(i)}">${head?icon(KINDS[i.kind].icon,11):''}<span>${head?esc(i.title):''}</span></div>`;
+        return `<div class="chip s-${i.status}${cls}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" data-tip="${esc(itemTip(i))}" data-tip-delay="450" style="--c:${color(i)}">${head?icon(KINDS[i.kind].icon,11):''}${head?sharedBadge(i,{inline:true,tip:false}):''}<span>${head?esc(i.title):''}</span></div>`;
       }).join('');
       const more=hidden.length?`<div class="more" data-tip="${esc(hidden.map(o=>o.i.title).join('\n'))}">+${hidden.length} more</div>`:'';
       cells+=`<div class="cell${n<first||n>=last?' out':''}${n===t?' today':''}" data-date="${date}"><span class="dn">${+date.slice(8)}</span>${chips}${more}</div>`;
@@ -327,7 +330,7 @@ function list(){
   if(!all.length)return `<div class="empty">${ib('plus','Add the first item',{key:keyLabel('timeline.add'),cls:'primary',attrs:'data-tl="add"'})}</div>`;
   const row=i=>`<div class="lr s-${i.status}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" tabindex="0" role="button">
       <span class="d"${late(i)?' data-tip="Overdue"':''}>${esc(dated(i)?dateLabel(i):releaseOf(i)?'→ '+releaseOf(i).title:'')}</span><span class="k" data-tip="${KINDS[i.kind].label}" style="color:${color(i)}">${icon(KINDS[i.kind].icon,13)}</span>
-      <span class="t">${i.priority?`<span class="pr ${i.priority}" data-tip="${PRIORITY[i.priority].label}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}${esc(i.title)}</span><span class="tags">${i.projects.map(p=>tag(project(p))).join('')}</span><span class="o">${esc(i.owner)}</span><span class="s" data-tip="${esc(statusInfo(i.status).label)}">${icon(STATUS[i.status].icon,13)}</span></div>`;
+      <span class="t">${sharedBadge(i,{inline:true})}${i.priority?`<span class="pr ${i.priority}" data-tip="${PRIORITY[i.priority].label}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}${esc(i.title)}</span><span class="tags">${i.projects.map(p=>tag(project(p))).join('')}</span><span class="o">${esc(i.owner)}</span><span class="s" data-tip="${esc(statusInfo(i.status).label)}">${icon(STATUS[i.status].icon,13)}</span></div>`;
   const now=today().slice(0,7);let html='',cur='',marked=false;
   for(const i of items){
     const ym=i.start.slice(0,7);
@@ -343,7 +346,7 @@ function board(){
   const sort=(a,b)=>PRANK[a.priority]-PRANK[b.priority]||(a.start||'9999').localeCompare(b.start||'9999')||a.title.localeCompare(b.title);
   const card=i=>{
     const rel=releaseOf(i),when=dated(i)?dateLabel(i):rel?`→ ${rel.title}${dated(rel)?' · '+fmt(rel.start):''}`:'';
-    return `<div class="card s-${i.status}${selected===i.id?' sel':''}${late(i)?' late':''}" data-item="${esc(i.id)}" tabindex="0" role="button" data-tip="${esc(itemTip(i))}" data-tip-delay="700" style="--c:${color(i)}">
+    return `<div class="card s-${i.status}${selected===i.id?' sel':''}${late(i)?' late':''}${linkOf(i)?' linked':''}" data-item="${esc(i.id)}" tabindex="0" role="button" data-tip="${esc(itemTip(i))}" data-tip-delay="700" style="--c:${color(i)}">${sharedBadge(i,{tip:false})}
       <div class="ct">${icon(KINDS[i.kind].icon,13)}<span>${esc(i.title)}</span>${i.priority?`<span class="pr ${i.priority}">${icon(PRIORITY[i.priority].icon,12)}</span>`:''}</div>
       <div class="cmeta">${i.projects.slice(0,2).map(p=>tag(project(p))).join('')}${when?`<span class="cd">${esc(when)}</span>`:''}${i.owner?`<span class="ow">${esc(i.owner)}</span>`:''}</div></div>`;
   };
@@ -364,8 +367,9 @@ export function add(over={}){
   });
   const t=$('#ti-title');t?.focus();t?.select();
 }
-function remove(id){change(()=>{db().timeline=db().timeline.filter(i=>i.id!==id);for(const i of db().timeline)if(i.release===id)i.release='';for(const c of db().devops.cards)if(c.item===id)c.item='';selected=null})}
-function duplicate(id){const i=item(id);if(i)change(()=>{const c={...clone(i),id:uid(),title:i.title+' (copy)'};db().timeline.push(c);selected=c.id})}
+const refuse=i=>{toast(linkOf(i)?.permission==='edit'?'Shared items belong to their owner. Remove the share in Settings › Sharing.':lockedMsg(i),true)};
+function remove(id){if(linkOf(item(id))){refuse(item(id));return}change(()=>{db().timeline=db().timeline.filter(i=>i.id!==id);for(const i of db().timeline)if(i.release===id)i.release='';for(const c of db().devops.cards)if(c.item===id)c.item='';selected=null})}
+function duplicate(id){const i=item(id);if(linkOf(i)){refuse(i);return}if(i)change(()=>{const c={...clone(i),id:uid(),title:i.title+' (copy)'};db().timeline.push(c);selected=c.id})}
 export function projectByName(name){
   const found=db().projects.find(p=>p.name.toLowerCase()===name.toLowerCase());if(found)return found;
   const p={id:uid(),name:name.slice(0,80),color:PALETTE[db().projects.length%PALETTE.length],entity:''};db().projects.push(p);return p;
@@ -377,8 +381,8 @@ function addTag(input){
 }
 
 // One option of a segmented item field. The chosen one shows its word: the icons alone are unreadable cold.
-const segBtn=(field,v,x,on)=>`<button type="button" id="ti-${field}-${v}" class="${on?'on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}">${icon(x.icon,13)}${on?`<span>${esc(x.word||x.label)}</span>`:''}</button>`;
-const setField=(field,name,entries,cur)=>`<div class="ti-set"><div class="cd-lab">${esc(name)}${cur?'':' <em>none</em>'}</div><div class="opts" role="group" aria-label="${esc(name)}">${entries.map(([v,x])=>segBtn(field,v,x,cur===v)).join('')}</div></div>`;
+const segBtn=(field,v,x,on,dis)=>`<button type="button" id="ti-${field}-${v}" class="${on?'on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}"${dis?' disabled':''}>${icon(x.icon,13)}${on?`<span>${esc(x.word||x.label)}</span>`:''}</button>`;
+const setField=(field,name,entries,cur,dis=false)=>`<div class="ti-set"><div class="cd-lab">${esc(name)}${cur?'':' <em>none</em>'}</div><div class="opts" role="group" aria-label="${esc(name)}">${entries.map(([v,x])=>segBtn(field,v,x,cur===v,dis)).join('')}</div></div>`;
 // An item opens as a modal growing from its bar or card (modal.js); the Projects panel stays a side panel.
 let modal=null,modalFor=null;
 const itemEl=id=>document.querySelector(`#timelineView [data-item="${CSS.escape(id)}"]`);
@@ -396,50 +400,66 @@ export function renderInspector(pane){
   modalFor=modal.forId=i.id;modal.from(itemEl(i.id));
   const a=document.activeElement,keep=modal.el.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
   modal.body.innerHTML=itemHtml(i);
+  if(linkOf(i))loadHistory(modal.body);
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
   else if(!modal.el.contains(document.activeElement))modal.el.querySelector('#ti-title')?.focus({preventScroll:true});
 }
+// How a conflict notice names an earlier value of an item field.
+const clash=(i,f)=>clashHtml(i,f,{show:v=>f==='release'?item(v)?.title||'none':f==='kind'?KINDS[v]?.label||v:f==='status'?statusInfo(v)?.label||v:f==='priority'?PRIORITY[v]?.label||'none':v});
 function itemHtml(i){
+  // A linked item (docs/sharing.md): view and comment lock every field; edit unlocks the ones its owner
+  // allows. Its projects are the owner's.
+  const l=linkOf(i),ed=canEdit(i),ro=ed?'':' disabled';
   const k=KINDS[i.kind],people=chartNames(['person']);
   const sugg=[...db().projects.filter(p=>!i.projects.includes(p.id)).map(p=>p.name),...chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase()))];
   const link=/^https?:\/\//i.test(i.link)?`<a class="ib" href="${esc(i.link)}" target="_blank" rel="noopener" data-tip="Open link" aria-label="Open link">${icon('external')}</a>`:'';
   // Releases sharing a project come first in the target-release picker.
-  const releases=db().timeline.filter(r=>r.kind==='release'&&r.id!==i.id).sort((a,b)=>(b.projects.some(p=>i.projects.includes(p))-a.projects.some(p=>i.projects.includes(p)))||(a.start||'9999').localeCompare(b.start||'9999'));
+  const releases=db().timeline.filter(r=>r.kind==='release'&&r.id!==i.id&&sameSource(r,i)).sort((a,b)=>(b.projects.some(p=>i.projects.includes(p))-a.projects.some(p=>i.projects.includes(p)))||(a.start||'9999').localeCompare(b.start||'9999'));
   const inRelease=i.kind==='release'?db().timeline.filter(x=>x.release===i.id):[],linked=cardsForItem(db(),i.id);
-  return `<div class="ihead cd-h"><span class="k" style="color:${color(i)}">${icon(k.icon)}</span><strong>${k.label}</strong><span class="sp"></span>
-    ${ib('check',i.status==='done'?`Reopen (now ${statusInfo('done').label})`:`Mark ${statusInfo('done').label}`,{key:keyLabel('timeline.complete'),cls:i.status==='done'?'on':'',attrs:'data-ti="complete"'})}${ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})}${ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
+  return `<div class="ihead cd-h"><span class="k" style="color:${color(i)}">${icon(k.icon)}</span><strong>${k.label}</strong>${sharedChip(i)}<span class="sp"></span>
+    ${ed?ib('check',i.status==='done'?`Reopen (now ${statusInfo('done').label})`:`Mark ${statusInfo('done').label}`,{key:keyLabel('timeline.complete'),cls:i.status==='done'?'on':'',attrs:'data-ti="complete"'}):''}${l?'':ib('copy','Duplicate',{key:keyLabel('timeline.duplicate'),attrs:'data-ti="dup"'})+ib('trash','Delete item',{key:keyLabel('timeline.delete'),cls:'danger',attrs:'data-ti="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
     <form id="tedit" class="ti-body ti-form" autocomplete="off">
-    ${readyToClose(db(),i)?`<div class="ti-ready" role="status">${icon('check',14)}<span>${linked.length===1?'Its only card is':`All ${linked.length} of its cards are`} done. Is this complete?</span><button type="button" class="txt" data-ti="complete">Mark ${esc(statusInfo('done').label)}</button></div>`:''}
-    <div class="ibody ti-top"><label for="ti-title">Title</label><input id="ti-title" class="cd-title" maxlength="200" required value="${esc(i.title)}">
-      <div class="ti-sets">${setField('kind','Type',Object.entries(KINDS),i.kind)}${setField('status','Status',statusEntries(),i.status)}${setField('priority','Priority',Object.entries(PRIORITY).map(([v,x])=>[v,{...x,word:x.label.split(' ')[0]}]),i.priority)}</div></div>
+    ${ed&&readyToClose(db(),i)?`<div class="ti-ready" role="status">${icon('check',14)}<span>${linked.length===1?'Its only card is':`All ${linked.length} of its cards are`} done. Is this complete?</span><button type="button" class="txt" data-ti="complete">Mark ${esc(statusInfo('done').label)}</button></div>`:''}
+    <div class="ibody ti-top">${sharedNote(i)}<label for="ti-title">Title</label>${clash(i,'title')}<input id="ti-title" class="cd-title" maxlength="200" required value="${esc(i.title)}"${ro}>
+      <div class="ti-sets">${setField('kind','Type',Object.entries(KINDS),i.kind,!ed)}${setField('status','Status',statusEntries(),i.status,!ed)}${setField('priority','Priority',Object.entries(PRIORITY).map(([v,x])=>[v,{...x,word:x.label.split(' ')[0]}]),i.priority,!ed)}</div>${clash(i,'kind')}${clash(i,'status')}${clash(i,'priority')}</div>
     <div class="cd-grid"><div class="cd-main ibody">
-    <label for="ti-notes">Notes</label><textarea id="ti-notes" rows="4" maxlength="4000">${esc(i.notes)}</textarea>
-    <label for="ti-proj">Projects</label><div class="tags-edit">${i.projects.map(id=>{const p=project(id);return p?`<span class="tag" style="--c:${p.color}">${esc(p.name)}<button type="button" data-untag="${esc(id)}" data-tip="Remove" aria-label="Remove ${esc(p.name)}">${icon('x',10)}</button></span>`:''}).join('')}
-      <input id="ti-proj" list="ti-proj-list" placeholder="${i.projects.length?'':'Add project…'}" aria-label="Add project"></div>
+    <label for="ti-notes">Notes</label>${clash(i,'notes')}<textarea id="ti-notes" rows="4" maxlength="4000"${ro}>${esc(i.notes)}</textarea>
+    <label for="ti-proj">Projects</label><div class="tags-edit">${i.projects.map(id=>{const p=project(id);return p?`<span class="tag" style="--c:${p.color}">${esc(p.name)}${l?'':`<button type="button" data-untag="${esc(id)}" data-tip="Remove" aria-label="Remove ${esc(p.name)}">${icon('x',10)}</button>`}</span>`:''}).join('')}
+      ${l?'':`<input id="ti-proj" list="ti-proj-list" placeholder="${i.projects.length?'':'Add project…'}" aria-label="Add project">`}</div>
     <datalist id="ti-proj-list">${sugg.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
     ${inRelease.length?`<div class="cd-lab">In this release <em>${inRelease.filter(closed).length}/${inRelease.length} done</em></div><ul class="links" aria-label="In this release">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(statusInfo(x.status).label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
     ${linked.length?`<div class="cd-lab">DevOps cards <em>${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</em></div><ul class="links" aria-label="DevOps cards">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="Open card in DevOps">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
+    ${l?historyHtml(i,'item'):''}
     </div><aside class="cd-side ibody">
     <div class="rail-g" role="group" aria-label="Schedule and ownership">
-      <div class="two">${prop(`${k.range?'Start':'Date'}${dated(i)?'':' · unscheduled'}`,`<input id="ti-start" type="date" value="${i.start}">`,{for:'ti-start',stack:true})}${prop('End · optional',`<input id="ti-end" type="date" min="${i.start}" value="${i.end}"${dated(i)?'':' disabled'}>`,{for:'ti-end',stack:true})}</div>
-      ${i.kind!=='release'?prop('Target release',`<select id="ti-release"><option value="">None</option>${releases.map(r=>`<option value="${esc(r.id)}"${i.release===r.id?' selected':''}>${esc(r.title)}${dated(r)?' · '+esc(fmt(r.start)):''}</option>`).join('')}</select>`,{ic:'rocket',for:'ti-release'}):''}
-      ${prop('Owner',`<input id="ti-owner" list="ti-people" maxlength="120" placeholder="None" value="${esc(i.owner)}"><datalist id="ti-people">${people.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>`,{ic:'user',for:'ti-owner'})}
-      ${prop('Link',`<input id="ti-link" type="url" maxlength="500" placeholder="https://" value="${esc(i.link)}">${link}`,{ic:'link',for:'ti-link'})}
+      <div class="two">${prop(`${k.range?'Start':'Date'}${dated(i)?'':' · unscheduled'}`,`<input id="ti-start" type="date" value="${i.start}"${ro}>`,{for:'ti-start',stack:true})}${prop('End · optional',`<input id="ti-end" type="date" min="${i.start}" value="${i.end}"${dated(i)&&ed?'':' disabled'}>`,{for:'ti-end',stack:true})}</div>${clash(i,'start')}${clash(i,'end')}
+      ${i.kind!=='release'?prop('Target release',`<select id="ti-release"${ro}><option value="">None</option>${releases.map(r=>`<option value="${esc(r.id)}"${i.release===r.id?' selected':''}>${esc(r.title)}${dated(r)?' · '+esc(fmt(r.start)):''}</option>`).join('')}</select>${clash(i,'release')}`,{ic:'rocket',for:'ti-release'}):''}
+      ${prop('Owner',`<input id="ti-owner" list="ti-people" maxlength="120" placeholder="None" value="${esc(i.owner)}"${ro}><datalist id="ti-people">${people.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>${clash(i,'owner')}`,{ic:'user',for:'ti-owner'})}
+      ${prop('Link',`<input id="ti-link" type="url" maxlength="500" placeholder="https://" value="${esc(i.link)}"${ro}>${link}${clash(i,'link')}`,{ic:'link',for:'ti-link'})}
     </div></aside></div></form>`;
 }
 function projectsHtml(){
   const sugg=chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase())).slice(0,30),cs=cards();
   return `<div class="ihead"><span class="k">${icon('tag')}</span><strong>Projects</strong><span class="sp"></span>${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
-    <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`;
-      return `<div class="prow"><input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"><em tabindex="0" role="img" data-tip="${items}" aria-label="${items}">${n}</em>${ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
-        <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"><option value="">Not under an entity</option>${cs.map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select></div>`}).join('')}
+    <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`,l=linkOf(p),ro=canEdit(p)?'':' disabled';
+      // A shared project: its name and colour follow the share's permission; where it sits is the owner's.
+      return `<div class="prow${l?' linked':''}">${sharedBadge(p,{inline:true})}<input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"${ro}><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"${ro}><em tabindex="0" role="img" data-tip="${items}" aria-label="${items}">${n}</em>${l?'':ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
+        <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"${l?' disabled':''}><option value="">Not under an entity</option>${cs.filter(c=>c.id===p.entity||sameSource(c,p)).map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select>${clashHtml(p,'name')}${clashHtml(p,'color')}</div>`}).join('')}
     <div class="prow"><input id="pnew" maxlength="80" placeholder="New project" aria-label="New project name">${ib('plus','Add project',{attrs:'data-ti="padd"'})}</div>
     ${sugg.length?`<div class="cd-lab">From your mind maps ${hint('Entity and area names from your charts. Click one to add it as a project.','From your mind maps')}</div><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project" aria-label="Add ${esc(s)} as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
 }
 export function inspectorClick(e){
   const b=e.target.closest('button');if(!b)return;
   const i=item(selected);
+  if(i&&clashClick(b,i,(f,v)=>change(()=>{i[f]=v;if(f==='start'&&!v)i.end=''}),rerender))return;
+  if(selected==='projects'&&(b.dataset.clashSee||b.dataset.clashRestore||b.dataset.clashDismiss)){
+    const p=project(b.closest('.prow')?.querySelector('[data-pname]')?.dataset.pname);if(p)clashClick(b,p,(f,v)=>change(()=>p[f]=v),rerender);return;
+  }
+  if(b.dataset.i==='shComment'&&i){postComment(modal.body,i).catch(err=>toast(err.message,true));return}
+  if(i&&locked(i)&&(b.dataset.tset||b.dataset.untag||b.dataset.ti==='complete')){toast(lockedMsg(i),true);return}
+  if(i&&linkOf(i)&&b.dataset.untag)return;
+  if(b.dataset.pdel&&linkOf(project(b.dataset.pdel))){toast('Shared projects belong to their owner.',true);return}
   if(b.dataset.tset&&i){
     const [f,v]=b.dataset.tset.split(':');
     change(()=>{i[f]=f==='priority'&&i.priority===v?'':v;if(f==='kind'&&KINDS[v].range&&dated(i)&&!isRange(i))i.end=n2d(d2n(i.start)+13);if(f==='kind'&&v==='release')i.release=''});return;
@@ -464,13 +484,13 @@ export function inspectorInput(e){
   if(t.id==='ti-proj'){if(e.inputType==='insertReplacementText'||!e.inputType)addTag(t);return}
   if(t.id==='pnew'||t.dataset.punder||t.id==='ti-release')return;
   if(t.dataset.pname||t.dataset.pcolor){
-    const p=project(t.dataset.pname||t.dataset.pcolor),form=$('#pedit');if(!p)return;
+    const p=project(t.dataset.pname||t.dataset.pcolor),form=$('#pedit');if(!p||locked(p))return;
     if(t.dataset.pname&&!t.value.trim())return;
     if(!edited.has(form)){checkpoint();edited.add(form)}
     if(t.dataset.pname)p.name=t.value.trim();else p.color=t.value;
     save();renderView();return;
   }
-  const form=$('#tedit'),i=item(selected);if(!form||!i)return;
+  const form=$('#tedit'),i=item(selected);if(!form||!i||locked(i)||t.matches('[data-sh-comment]'))return;
   const title=$('#ti-title').value.trim(),start=$('#ti-start').value,end=$('#ti-end').value;
   if(!title)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
@@ -481,9 +501,9 @@ export function inspectorInput(e){
 }
 export function inspectorChange(e){
   const t=e.target;
-  if(t.id==='ti-proj')addTag(t);
-  if(t.id==='ti-release'){const i=item(selected);if(i)change(()=>i.release=t.value)}
-  if(t.dataset.punder){const p=project(t.dataset.punder);if(p)change(()=>p.entity=t.value)}
+  if(t.id==='ti-proj'&&!linkOf(item(selected)))addTag(t);
+  if(t.id==='ti-release'){const i=item(selected);if(i&&!locked(i))change(()=>i.release=t.value)}
+  if(t.dataset.punder){const p=project(t.dataset.punder);if(p&&!linkOf(p))change(()=>p.entity=t.value)}
 }
 export function inspectorKey(e){
   // The item panel keeps its keys to itself, so its shortcut is handled here. Letters still type in its fields.
@@ -493,7 +513,7 @@ export function inspectorKey(e){
   if(e.target.id==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
 }
 // Mark done, or reopen a done item as planned.
-const toggleDone=id=>{const i=item(id);if(i)change(()=>i.status=i.status==='done'?'planned':'done')};
+const toggleDone=id=>{const i=item(id);if(i&&locked(i)){toast(lockedMsg(i),true);return}if(i)change(()=>i.status=i.status==='done'?'planned':'done')};
 export function key(e){
   if(e.key==='Escape'){selected=null;rerender();return}
   if(matches(e,'timeline.delete')&&item(selected)){e.preventDefault();remove(selected);return}

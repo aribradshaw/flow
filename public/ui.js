@@ -155,9 +155,9 @@ const swatch=it=>it.avatar?av(it.avatar,'pk-av')
 const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;
 export const pickerOpen=key=>picker?.key===key;
-export function pickerButton(key,label,items,selected,{cls='',tip='',count=true}={}){
+export function pickerButton(key,label,items,selected,{cls='',tip='',count=true,disabled=false}={}){
   const sel=items.filter(i=>selected.includes(i.value)),n=sel.length;
-  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n&&count?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
+  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}${disabled?' disabled':''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n&&count?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
 }
 export function closePicker(refocus=false){
   if(!picker)return;const p=picker;picker=null;p.el.classList.remove('picker');p.el.classList.add('picker','leaving');popOut(p.el);document.removeEventListener('pointerdown',p.out,true);removeEventListener('resize',p.place);

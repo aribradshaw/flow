@@ -17,7 +17,7 @@ import {matches,keyLabel} from './shortcuts.js';
 import {onPrefs,syncPrefs} from './prefs.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
-import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog} from './share.js';
+import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
 fetch('/api/instance').then(r=>r.ok?r.json():null).then(v=>{
@@ -575,9 +575,9 @@ function renderInspector(strip=true){
     pane.innerHTML=`<div class="ihead"><span class="k ${n.type}">${icon(k.icon)}</span><strong>${k.label}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(sharedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''}<span class="sp"></span>
       ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
       ${l?'':ib('trash','Delete card',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
-      <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label><input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
+      <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label>${clashHtml(n,'name')}<input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
       ${l?'':prop('Kind',choice('kind',Object.entries(KINDS).map(([t,x])=>({value:t,label:x.label,icon:x.icon})),n.type,{label:'Kind',idp:'kind'}),{cls:'kind-prop'})}
-      ${l?.stub?'':`<label for="notes">Notes</label><textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
+      ${l?.stub?'':`<label for="notes">Notes</label>${clashHtml(n,'notes')}<textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
       ${n.type==='person'?photoHtml(n,!!l):''}
       ${l?historyHtml(n,'node'):''}
       ${n.type==='note'||l?'':(c=>`<label>DevOps</label><button type="button" class="txt dv-open" data-i="devops" data-tip="${n.type==='person'?'Open cards assigned to this person':'Open cards in the projects under this card'}">${icon('branch',13)}<span>${c} open card${c===1?'':'s'}</span>${icon('arrowR',13)}</button>`)(openCardsFor(store.db,n.type==='person'?{person:n.id}:{entity:n.id}).length)}
@@ -589,7 +589,7 @@ function renderInspector(strip=true){
       ${l?'':ib('swap','Reverse direction',{attrs:'id="i-reverse" data-i="reverse"'})+ib('trash','Delete connection',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}${prop('From',`<select id="fromNode"${l?' disabled':''}>${options(e.from)}</select>`,{for:'fromNode'})}${prop('To',`<select id="toNode"${l?' disabled':''}>${options(e.to)}</select>`,{for:'toNode'})}
       ${l?'':`<label>Type</label><div class="seg wide"><button type="button" id="etype-ownership" class="${own?'on':''}" data-etype="ownership" data-tip="Solid arrow with an ownership percentage">${icon('arrowR',14)}Ownership</button><button type="button" id="etype-group" class="${own?'':'on'}" data-etype="group" data-tip="Dashed line that implies no ownership">${icon('dashed',14)}Grouping</button></div>`}
-      ${own?prop('Share',`<div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>`,{for:'percent'}):''}${l?historyHtml(e,'edge'):''}</form>`;
+      ${own?prop('Share',`<div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>${clashHtml(e,'percent')}`,{for:'percent'}):''}${l?historyHtml(e,'edge'):''}</form>`;
   }
   if(linkOf(n||e))loadHistory(pane);
   if(pressed)(document.getElementById(pressed)||$('#photoUploadBtn')||$('#name')||$('#fromNode'))?.focus({preventScroll:true});
@@ -646,6 +646,7 @@ pane.addEventListener('click',e=>{
   if(tab==='agentflow')return af.inspectorClick(e);
   const b=e.target.closest('button');if(!b)return;
   const n=node(selected),ed=edge(selected);
+  if(clashClick(b,n||ed,(f,v)=>change(()=>{(n||ed)[f]=v}),render))return;
   if(b.dataset.kind&&n){if(!linkOf(n))change(()=>n.type=b.dataset.kind)}
   else if(b.dataset.etype&&ed){if(!linkOf(ed))change(()=>{ed.type=b.dataset.etype;if(ed.type==='group')ed.percent=''})}
   else if(b.dataset.i==='share'&&n)openShareDialog({nodeId:n.id,from:b});
@@ -719,7 +720,7 @@ setPeopleSource(()=>peopleOf(store.db||{}));
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
-tl.mount({rerender:render,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
+tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
 dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast});
 // AgentFlow agents and workflows link to cards and timeline items.
 af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});

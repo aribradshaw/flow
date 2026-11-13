@@ -7,6 +7,7 @@ import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor} from './devops-core.js';
+import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
 // board, its filters and the card panel (in the shared #inspector), and handles drag and gates.
@@ -33,7 +34,17 @@ const touch=c=>c.updated=new Date().toISOString();
 // Assignees are the org chart's person cards, across every chart.
 function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n of c.nodes)if(types.includes(n.type)&&!m.has(n.id))m.set(n.id,n);return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))}
 const people=()=>nodesOf(['person']);
-const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}return null};
+// Members of shares (docs/sharing.md) are assigned as '@<email>': on a linked card, the share's members;
+// on one's own shared card, the recipients it is shared with (db.shareMembers, from the server).
+const memberList=()=>{const m=new Map();for(const x of [...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
+const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
+// Who can be assigned to a card. A linked card: the person cards of its share and the share's members,
+// never anyone else of the owner's. One's own card: one's person cards, plus recipients it is shared with.
+function peopleFor(c){
+  if(!c)return [...people(),...memberList().values()];
+  if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>({...m,type:'person'}))];
+  return [...people(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id)).map(m=>({...m,type:'person'}))];
+}
 const today=()=>{const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`};
 const fmt=s=>`${MONTHS[+s.slice(5,7)-1]} ${+s.slice(8)}${s.slice(0,4)!==today().slice(0,4)?`, ${s.slice(0,4)}`:''}`;
 const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
@@ -97,6 +108,7 @@ function select(id){selected=id;rerender()}
 async function requestMove(id,col,index=Infinity,ctx=null){
   const c=card(id);if(!c)return false;
   const no=()=>{if(!ctx)rerender();return false};
+  if(locked(c)){toast(lockedMsg(c),true);return no()}
   if(c.column===col){
     const all=dv().cards.filter(x=>x.column===col);
     if(Math.min(index,all.length-1)===all.indexOf(c))return no();
@@ -105,7 +117,7 @@ async function requestMove(id,col,index=Infinity,ctx=null){
   const g=gateFor(c,col);
   if(g==='confirm-done'&&!await ask(`Move #${c.number} straight to Done?\nDone means completed. Cards normally go through UAT first, where they are tested and then approved.`,{ok:'Move to Done'}))return no();
   if(g==='confirm-reopen'&&!await ask(`Move #${c.number} out of Done and back to ${colName(col)}?\nDone means completed; moving it reopens the work.`,{ok:'Reopen'}))return no();
-  if(g==='pick-dev'&&people().length){
+  if(g==='pick-dev'&&peopleFor(c).length){
     ctx?.hideClone();
     return new Promise(done=>{pending={id,col,index,done};pop={type:'pick'};rerender()});
   }
@@ -118,7 +130,7 @@ function finishPick(nodeId){
   change(()=>{moveCard(dv(),p.id,p.col,p.index);if(nodeId)card(p.id).assignees.push({node:nodeId,role:'developer'})});
   p.done?.(true);
 }
-function approve(id){const c=card(id);if(c?.column==='uat')change(()=>moveCard(dv(),id,'done'))}
+function approve(id){const c=card(id);if(c?.column==='uat'&&!locked(c))change(()=>moveCard(dv(),id,'done'))}
 
 // ---------- header, toolbar and board ----------
 export function headerHtml(){
@@ -134,8 +146,9 @@ function sanitize(){
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
 const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
-const personItems=()=>people().map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
-const labelItems=()=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
+const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
+// A linked card takes its owner's labels (the ones of its share); they are read-only everywhere.
+const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||!linkOf(c)||sameSource(l,c))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
 const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
 function openFilter(b){
   const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
@@ -161,7 +174,8 @@ let cardAgents=new Map();
 const agentBub=a=>{const [bg,fg]=memberColor(a.id);return `<span class="bub agent" style="background:${bg};color:${fg}" data-tip="Agent: ${esc(a.name)}${a.title?` · ${esc(a.title)}`:''}">${icon('bot',11)}</span>`};
 function cardHtml(c){
   const ags=cardAgents.get(c.id)||[],ls=c.labels.map(label).filter(Boolean),p=project(c.project),tone=dueTone(c,today()),done=c.checklist.filter(x=>x.done).length,ppl=byPerson(c);
-  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}`)}"${p?` style="--pc:${p.color}"`:''}>
+  const l=linkOf(c);
+  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${locked(c)?' ro':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
     ${ls.length?`<div class="dc-labels">${ls.slice(0,3).map(pill).join('')}${ls.length>3?`<span class="dc-more" data-tip="${esc(ls.slice(3).map(l=>l.name).join(', '))}">+${ls.length-3}</span>`:''}</div>`:''}
     <div class="dc-title" data-tip="${c.title.length>90?esc(c.title):''}" data-tip-delay="700">${esc(c.title)}</div>
     <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${c.points!=null?`<span class="dc-pts">${c.points} pts</span>`:''}
@@ -191,7 +205,7 @@ function popHtml(){
   if(pop.type==='pick'){
     const c=card(pending?.id);if(!c)return '';
     return `<div class="dv-modal"><div class="pop dv-pick" role="dialog" aria-label="Pick a developer"><strong>Who is developing #${c.number}?</strong><p>Cards in Doing usually have a developer.</p>
-      <div class="dv-people">${people().map(p=>`<button type="button" data-pick="${esc(p.id)}">${bubble(p.id,['developer'])}<span>${esc(p.name)}</span></button>`).join('')}</div>
+      <div class="dv-people">${peopleFor(c).map(p=>`<button type="button" data-pick="${esc(p.id)}">${bubble(p.id,['developer'])}<span>${esc(p.name)}</span></button>`).join('')}</div>
       <button type="button" class="txt" data-pick="">Leave unassigned</button></div></div>`;
   }
   return '';
@@ -233,7 +247,10 @@ function rename(colId){
   const v=prompt('Column name',colName(colId))?.trim();
   if(v&&v!==colName(colId))change(()=>{dv().columns.find(c=>c.id===colId).name=v.slice(0,80);dv().namesCustomized=true});
 }
-function remove(id){change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null})}
+function remove(id){
+  if(linkOf(card(id))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
+  change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null});
+}
 
 // Opened from the chart (a person or entity) or the timeline (a linked card).
 // agent: that agent's work queue (open cards delegated to it), from AgentFlow.
@@ -275,6 +292,7 @@ export function renderInspector(pane){
   // Keep focus and caret in place when the body is re-rendered after an edit.
   const a=document.activeElement,keep=modal.el.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
   modal.body.innerHTML=cardDetailHtml(c);
+  if(linkOf(c))loadHistory(modal.body);
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
   else if(!modal.el.contains(document.activeElement))modal.el.querySelector('#dc-title')?.focus({preventScroll:true});
@@ -297,37 +315,45 @@ function modalKey(e){
 }
 // A picker row's name for assistive tech: its visible text is only the value.
 const named=(name,html)=>html.replace('<button ',()=>`<button aria-label="${esc(name)}" `);
+// How a conflict notice names an earlier value of a card field.
+const showField=f=>v=>!Array.isArray(v)?(f==='column'?colName(v):v)
+  :f==='labels'?v.map(id=>label(id)?.name||'a label').join(', '):f==='assignees'?v.map(a=>`${nodeById(a.node)?.name||'someone'} (${a.role})`).join(', ')
+  :v.map(x=>x.text??x.url).join(', ');
+const clash=(c,f)=>clashHtml(c,f,{show:showField(f)});
 function cardDetailHtml(c){
-  const ppl=people(),items=[...db().timeline].sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
+  // A linked card (docs/sharing.md): view and comment lock every field; edit unlocks the ones its owner allows.
+  const l=linkOf(c),ed=canEdit(c),ro=ed?'':' disabled',mine=l?' disabled':'';
+  const ppl=peopleFor(c),items=[...db().timeline].filter(i=>!l||sameSource(i,c)).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
   const projectOpts=db().projects.map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
   const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
-  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong><span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
-    ${c.column==='uat'?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
-    ${ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
-    <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">
-    <label for="dc-title">Title</label><input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}">
-    <label for="dc-desc">Description</label><textarea id="dc-desc" rows="9" maxlength="8000" placeholder="Why this card exists, what should be delivered">${esc(c.description)}</textarea>
+  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
+    ${c.column==='uat'&&ed?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
+    ${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
+    <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">${sharedNote(c)}
+    <label for="dc-title">Title</label>${clash(c,'title')}<input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}"${ro}>
+    <label for="dc-desc">Description</label>${clash(c,'description')}<textarea id="dc-desc" rows="9" maxlength="8000" placeholder="${ed?'Why this card exists, what should be delivered':''}"${ro}>${esc(c.description)}</textarea>
     <div class="cd-lab">Checklist${total?` <em>${done}/${total}</em><span class="dc-prog${done===total?' all':''}" role="progressbar" aria-label="Checklist progress" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><i style="width:${done/total*100}%"></i></span>`:''}</div>
-    <ul class="dc-list" aria-label="Checklist">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`})}</li>`).join('')}</ul>
-    <div class="dc-row"><input id="dc-chk" maxlength="300" placeholder="Add an item and press Enter" aria-label="New checklist item">${ib('plus','Add item',{attrs:'data-dc="chkAdd"'})}</div>
+    ${clash(c,'checklist')}<ul class="dc-list" aria-label="Checklist">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"${ro}><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ed?ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`}):''}</li>`).join('')}</ul>
+    ${ed?`<div class="dc-row"><input id="dc-chk" maxlength="300" placeholder="Add an item and press Enter" aria-label="New checklist item">${ib('plus','Add item',{attrs:'data-dc="chkAdd"'})}</div>`:''}
     <div class="cd-lab">Links ${hint('A pull request, a commit or any URL','Links')}</div>
-    <ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`})}</li>`).join('')}</ul>
-    <div class="dc-row"><select id="dc-lkind" aria-label="Link type">${Object.entries(LINK_KINDS).map(([k,n])=>opt(k,n,'pr')).join('')}</select><input id="dc-lurl" maxlength="500" placeholder="https:// or a commit SHA" aria-label="Link">${ib('plus','Add link',{attrs:'data-dc="linkAdd"'})}</div>
+    ${clash(c,'links')}<ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ed?ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`}):''}</li>`).join('')}</ul>
+    ${ed?`<div class="dc-row"><select id="dc-lkind" aria-label="Link type">${Object.entries(LINK_KINDS).map(([k,n])=>opt(k,n,'pr')).join('')}</select><input id="dc-lurl" maxlength="500" placeholder="https:// or a commit SHA" aria-label="Link">${ib('plus','Add link',{attrs:'data-dc="linkAdd"'})}</div>`:''}
+    ${l?historyHtml(c,'card'):''}
     </div><aside class="cd-side ibody">
     <div class="rail-g" role="group" aria-label="Planning">
-      ${prop('Column',`<select id="dc-col">${dv().columns.map(x=>opt(x.id,x.name,c.column)).join('')}</select>`,{ic:'board',for:'dc-col'})}
-      ${prop('Project',`<select id="dc-proj">${opt('','No project',c.project)}${projectOpts}</select>`,{ic:'tag',for:'dc-proj'})}
-      <div class="prop-pair">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}">`,{ic:'target',for:'dc-pts'})}${prop('Due',`<input id="dc-due" type="date" value="${c.due}">`,{ic:'calendar',for:'dc-due'})}</div>
-      ${prop('Timeline item',`<select id="dc-item">${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
+      ${prop('Column',`<select id="dc-col"${ro}>${dv().columns.map(x=>opt(x.id,x.name,c.column)).join('')}</select>${clash(c,'column')}`,{ic:'board',for:'dc-col'})}
+      ${prop('Project',`<select id="dc-proj"${mine}>${opt('','No project',c.project)}${projectOpts}</select>`,{ic:'tag',for:'dc-proj'})}
+      <div class="prop-pair">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}"${ro}>${clash(c,'points')}`,{ic:'target',for:'dc-pts'})}${prop('Due',`<input id="dc-due" type="date" value="${c.due}"${ro}>${clash(c,'due')}`,{ic:'calendar',for:'dc-due'})}</div>
+      ${prop('Timeline item',`<select id="dc-item"${mine}>${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
     </div>
     <div class="rail-g" role="group" aria-label="People">
       ${ppl.length?ROLES.map(role=>{const ids=c.assignees.filter(a=>a.role===role).map(a=>a.node),name=role[0].toUpperCase()+role.slice(1),who=ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', ');
-        return prop(name,named(`${name}: ${who||'None'}`,pickerButton('dc-role-'+role,who||'None',personItems(),ids,{cls:'mini wide',count:false})),{ic:ROLE_ICONS[role]})}).join('')
-        :`<div class="dc-hint">Add people to a mind map to assign them.</div>`}
+        return prop(name,named(`${name}: ${who||'None'}`,pickerButton('dc-role-'+role,who||'None',personItems(c),ids,{cls:'mini wide',count:false,disabled:!ed})),{ic:ROLE_ICONS[role]})}).join('')+clash(c,'assignees')
+        :`<div class="dc-hint">${l?'Nobody on this card\'s share can be assigned.':'Add people to a mind map to assign them.'}</div>`}
       ${agentRow(c)}
     </div>
     <div class="rail-g" role="group" aria-label="Labels">
-      ${prop('Labels',`<div class="dc-sel">${c.labels.map(label).filter(Boolean).map(pill).join('')}${named(c.labels.length?'Edit labels':'Add labels',pickerButton('dc-labels',c.labels.length?'Edit':'Add',labelItems(),[],{cls:'mini'}))}<button type="button" class="txt dc-newbtn" id="dc-newbtn" data-dc="labelNew" data-tip="Create a new label" aria-label="New label" aria-expanded="${labelForm}" aria-controls="dc-newrow">${icon('plus',11)}New</button></div>`,{ic:'list'})}
+      ${prop('Labels',`<div class="dc-sel">${c.labels.map(label).filter(Boolean).map(pill).join('')}${ed?named(c.labels.length?'Edit labels':'Add labels',pickerButton('dc-labels',c.labels.length?'Edit':'Add',labelItems(c),[],{cls:'mini'})):''}${l?'':`<button type="button" class="txt dc-newbtn" id="dc-newbtn" data-dc="labelNew" data-tip="Create a new label" aria-label="New label" aria-expanded="${labelForm}" aria-controls="dc-newrow">${icon('plus',11)}New</button>`}</div>${clash(c,'labels')}`,{ic:'list'})}
       <div class="dc-row dc-newrow" id="dc-newrow"${labelForm?'':' hidden'}><input id="dc-newlabel" maxlength="40" placeholder="New label" aria-label="New label name"><select id="dc-newsec" aria-label="Label section">${SECTIONS.map(([s,n])=>opt(s,n,'area')).join('')}</select>${ib('plus','Add label',{attrs:'data-dc="labelAdd"'})}</div>
     </div>
     <div class="dc-meta"><time datetime="${esc(c.created)}" tabindex="0" data-tip="Created ${esc(when(c.created))}" aria-label="Created ${esc(when(c.created))}">Created ${esc(day(c.created))}</time><span aria-hidden="true"> · </span><time datetime="${esc(c.updated)}" tabindex="0" data-tip="Updated ${esc(when(c.updated))}" aria-label="Updated ${esc(when(c.updated))}">Updated ${esc(day(c.updated))}</time></div></aside></form>`;
@@ -355,9 +381,14 @@ function addLink(){const i=$('#dc-lurl'),u=i?.value.trim(),c=card(selected);if(!
 export function inspectorClick(e){
   const b=e.target.closest('button');if(!b)return;
   const c=card(selected);if(!c)return;
-  if(b.dataset.picker==='dc-labels'){openPicker(b,{items:labelItems(),selected:c.labels,label:'Labels',placeholder:'Search labels',onChange(v){change(()=>{c.labels=v;touch(c)})}});return}
+  if(clashClick(b,c,(f,v)=>change(()=>{if(f==='column')moveCard(dv(),c.id,v);else c[f]=v;touch(c)}),rerender))return;
+  if(b.dataset.i==='shComment'){postComment(modal.body,c).catch(err=>toast(err.message,true));return}
+  // Delegating to one's own agents is one's own data; every other button here changes the card.
+  const field=(b.dataset.picker&&b.dataset.picker!=='dc-agents')||b.dataset.chkdel||b.dataset.ldel||['approve','labelAdd','labelNew','chkAdd','linkAdd'].includes(b.dataset.dc);
+  if(field&&locked(c)){toast(lockedMsg(c),true);return}
+  if(b.dataset.picker==='dc-labels'){openPicker(b,{items:labelItems(c),selected:c.labels,label:'Labels',placeholder:'Search labels',onChange(v){change(()=>{c.labels=v;touch(c)})}});return}
   if(b.dataset.picker?.startsWith('dc-role-')){const role=b.dataset.picker.slice(8);
-    openPicker(b,{items:personItems(),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
+    openPicker(b,{items:personItems(c),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
       onChange(v){change(()=>{c.assignees=[...c.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(c)})}});return}
   if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
     onChange(v){
@@ -375,7 +406,7 @@ export function inspectorClick(e){
 // Text fields autosave as you type: one undo step per open form.
 export function inspectorInput(e){
   const t=e.target,c=card(selected),form=$('#dedit');
-  if(!c||!form||!['dc-title','dc-pts','dc-due','dc-desc'].includes(t.id))return;
+  if(!c||!form||!['dc-title','dc-pts','dc-due','dc-desc'].includes(t.id)||locked(c))return;
   const title=$('#dc-title').value.trim(),pts=$('#dc-pts').value;if(!title)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
   Object.assign(c,{title,points:pts===''||!Number.isFinite(+pts)?null:Math.max(0,Math.min(1000,+pts)),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
@@ -383,6 +414,9 @@ export function inspectorInput(e){
 }
 export function inspectorChange(e){
   const t=e.target,c=card(selected);if(!c)return;
+  // A linked card's project and timeline item are its owner's; locked cards take no field changes.
+  if(t.matches('[data-sh-comment]'))return;
+  if((linkOf(c)&&(t.id==='dc-proj'||t.id==='dc-item'))||(locked(c)&&(t.id==='dc-col'||t.dataset.chk))){rerender();return}
   if(t.id==='dc-col')requestMove(c.id,t.value);
   else if(t.id==='dc-proj')change(()=>{c.project=t.value;touch(c)});
   else if(t.id==='dc-item')change(()=>{c.item=t.value;touch(c)});

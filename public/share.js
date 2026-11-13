@@ -7,6 +7,12 @@
 //                        one card, a project, a label or the whole environment), who, permission, and a live
 //                        preview of exactly what the recipient will see.
 //   historyHtml / loadHistory / postComment   the History and comment box of a linked record.
+//   sharedBadge / sharedChip / sharedNote / linkedTip   how the timeline and DevOps mark linked records
+//                        (the chart draws its own .sh-badge on linked boxes), and who owns them.
+//   locked(x) / lockedMsg(x)   a linked record the user may not change (view, comment, a stub).
+//   shareOf(x) / members(x)    the share a linked record came from; its members (owner and recipients).
+//   clashHtml / clashClick     the "Changed by X just now — see previous" notice on a field whose value
+//                        someone else overwrote (store.conflicts from sync.js), with a one-click restore.
 import {store} from './store.js';
 import {esc,hint} from './ui.js';
 import {icon} from './icons.js';
@@ -21,6 +27,24 @@ export function linkOf(x){
 }
 export const canEdit=x=>{const l=linkOf(x);return !l||(!l.readOnly&&RANK[l.permission]>=2)};
 export const canComment=x=>{const l=linkOf(x);return !!l&&!l.readOnly&&RANK[l.permission]>=1};
+export const locked=x=>!canEdit(x);
+const PERM_WORDS={view:'view only',comment:'can comment',edit:'can edit'};
+// Timeline items and DevOps cards: who shared it and what this user may do with it.
+export const linkedTip=l=>l.stub?sharedTip(l):`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. ${l.permission==='edit'?'Fields the owner allows are editable; the rest are locked.':l.permission==='comment'?'You can comment; its fields are locked.':'Its fields are locked.'}`;
+export const lockedMsg=x=>{const l=linkOf(x);return !l?'':l.stub?'Co-owner cards are read-only.':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. Ask the owner for edit access.`};
+// The link badge of the chart's linked boxes, for timeline items and DevOps cards. inline: in a row.
+export function sharedBadge(x,{inline=false,tip=true}={}){
+  const l=linkOf(x);if(!l)return '';
+  const label=l.stub?'Co-owner stub, read-only':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`;
+  return `<span class="sh-badge${inline?' in':''}${l.stub?' stub':''}" role="img" aria-label="${esc(label)}"${tip?` data-tip="${esc(linkedTip(l))}"`:''}>${icon(l.stub?'ban':'link',inline?9:11)}</span>`;
+}
+export const sharedChip=x=>{const l=linkOf(x);return l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(linkedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''};
+export const sharedNote=x=>{const l=linkOf(x);return l?`<p class="sh-note">${esc(linkedTip(l))}</p>`:''};
+// Two records from the same place: both one's own, or both from the same share.
+export const sameSource=(x,y)=>(linkOf(x)?.shareId||'')===(linkOf(y)?.shareId||'');
+export const shareOf=x=>{const l=linkOf(x);return l&&(store.db.shares||[]).find(s=>s.id===l.shareId)||null};
+// Members of the share a linked record came from: [{id ('@email' or a linked person card), name, image?, owner}].
+export const members=x=>shareOf(x)?.members||[];
 export const sharedTip=l=>l.stub?`Co-owner of a card shared with you${l.ownerEmail?' by '+l.ownerEmail:''}. Name only; read-only.`:`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERMS.find(p=>p[0]===l.permission)?.[1].toLowerCase()||l.permission}. Your layout is your own.`;
 
 const call=async(method,path,body)=>{
@@ -135,4 +159,34 @@ export async function sharingPane(currentEnvId,ownEnvs){
         <form class="env-row" data-sh-ask="${esc(s.id)}"><input type="email" required placeholder="Ask ${esc(s.ownerEmail)} to share it with…" aria-label="Email to ask the owner to share with"><button type="submit" class="txt">Ask</button></form></li>`).join('')||'<li class="acct-muted">Nothing is shared with you yet</li>'}</ul>`;
   const sent=(reqs.mine||[]).filter(r=>r.status==='pending');
   return by+asks+withMe+(sent.length?`<p class="acct-muted">Waiting for the owner: ${sent.map(r=>esc(r.toEmail)).join(', ')}</p>`:'')+'<p class="acct-err" data-sh-err hidden></p>';
+}
+
+// ---- Conflicts (docs/sharing.md): last write wins; the person who lost sees it on the field ----
+// store.conflicts: [{kind, id, field, by, at, previous, value}] from the server (sync.js), for this user.
+const SEEN='flygon-flow-conflicts-seen',same=(a,b)=>JSON.stringify(a===undefined||a===''?null:a)===JSON.stringify(b===undefined||b===''?null:b);
+let seen;try{seen=new Set(JSON.parse(localStorage.getItem(SEEN))||[])}catch{seen=new Set()}
+const ckey=c=>[c.id,c.field,c.at].join('|');
+const forget=c=>{seen.add(ckey(c));try{localStorage.setItem(SEEN,JSON.stringify([...seen].slice(-300)))}catch{}};
+// The newest conflict on x.field that still shows the value that replaced this user's.
+export function clashOf(x,field){
+  if(!x)return null;
+  return (store.conflicts||[]).filter(c=>c.id===x.id&&c.field===field&&!seen.has(ckey(c))&&same(x[field],c.value)).sort((a,b)=>b.at.localeCompare(a.at))[0]||null;
+}
+const ago=t=>{const s=(Date.now()-Date.parse(t))/1000;return s<90?'just now':s<3600?`${Math.round(s/60)} min ago`:s<86400?`${Math.round(s/3600)} h ago`:when(t)};
+const shown=v=>v===null||v===undefined||v===''||(Array.isArray(v)&&!v.length)?'empty':typeof v==='string'?v.length>200?v.slice(0,200)+'…':v:Array.isArray(v)?v.map(x=>x?.text??x?.url??x?.name??x?.node??x).join(', '):String(v);
+// show(value) -> text for the previous value (names for ids). Restore is offered when the user may edit x.
+export function clashHtml(x,field,{show=shown}={}){
+  const c=clashOf(x,field);if(!c)return '';
+  return `<div class="sh-clash" role="status">${icon('alert',12)}<span>Changed by <b>${esc(c.by)}</b> ${esc(ago(c.at))} — <button type="button" class="sh-lnk" data-clash-see="${esc(field)}" aria-expanded="false">see previous</button></span>
+    <div class="sh-clash-prev" hidden><span>Before: <s>${esc(String(show(c.previous)||'empty'))}</s></span>${canEdit(x)?`<button type="button" class="txt" data-clash-restore="${esc(field)}">Restore</button>`:''}<button type="button" class="txt" data-clash-dismiss="${esc(field)}">Dismiss</button></div></div>`;
+}
+// A click in a panel: true when it was one of the notice's buttons. apply(field, value) restores (an
+// ordinary edit, so the share's permission applies); rerender() redraws after a dismiss.
+export function clashClick(b,x,apply,rerender){
+  const f=b?.dataset.clashSee||b?.dataset.clashRestore||b?.dataset.clashDismiss;if(!f)return false;
+  if(b.dataset.clashSee){const box=b.closest('.sh-clash')?.querySelector('.sh-clash-prev');if(box){box.hidden=!box.hidden;b.setAttribute('aria-expanded',String(!box.hidden))}return true}
+  const c=clashOf(x,f);if(!c)return true;
+  forget(c);
+  if(b.dataset.clashRestore&&canEdit(x))apply(f,structuredClone(c.previous));else rerender();
+  return true;
 }

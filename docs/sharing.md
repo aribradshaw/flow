@@ -20,7 +20,9 @@ scope   = {kind:'environment'}
 permission = 'view' | 'comment' | 'edit'
 request = {id, shareId, ownerEmail, requestedBy, toEmail, permission, note, status:'pending'|'approved'|'denied', decidedAt, decidedBy, newShareId}
 placement = {shareId, envId, recordId (owner id), chartId, x, y, w, h}
-history = {shareId, envId (owner env), kind, recordId (owner id), field, old, new, by, at}
+history = {shareId, envId (owner env), kind, recordId (owner id), field, old, new, by, at, over?}
+          over: whose value this change overwrote without them seeing it (a conflict, below)
+members = shareMembers(share, sharesOfOwnerEnv)   the owner, then the recipients of active shares of the same records
 ```
 
 ### Scope (`resolveScope(db, share)`)
@@ -37,11 +39,12 @@ The scope is always computed **live** from the owner's current data, so a new ch
 The result is `{share, chart, nodes, edges, projects, timeline, cards, labels}`, or `null` once the share is revoked.
 - Every record gets the id **`sh.<shareId>.<owner id>`**, so ids never collide with the recipient's own (all seeded charts use ids like `flygon` and `bo`). Detection always uses this prefix, because the browser's `clean*` functions strip unknown fields. Records also carry `linked:{share, id, home, permission, stub?, readOnly?}`, which survives on nodes and edges.
 - Nodes copy only `name, type, notes, x, y, w, h`. Stubs copy only `name, type`. Edges come through when both ends are scoped, and stub edges come through when they connect a stub to a scoped node.
-- References are rewritten or dropped: an item's out-of-scope project tags are removed. So are `release` titles that are not shared, card assignees outside the scope (e.g. Cleo on a Campfire Studio card), and `project`/`item` references outside the scope. Labels used by shared cards come along as read-only labels.
+- References are rewritten or dropped: an item's out-of-scope project tags are removed. So are `release` references to items that are not shared (a shared one becomes its linked id), card assignees outside the scope who are not members (e.g. Cleo on a Campfire Studio card), and `project`/`item` references outside the scope. Labels used by shared cards come along as read-only labels.
+- **Members** (`projectForRecipient(…, {members})`, card #63): a share's members are its owner and the recipients of every active share of the same records (same owner environment and scope, i.e. a share and the re-shares approved from it). They come along as `share.members: [{id, email, name, image?, owner}]` and can be assigned to its cards. A member's id is `@<email>`, or their linked person card when the owner has an in-scope person card with that email. A member's name and photo come from the owner's person card with their email (it is the member's own card); otherwise the name is the email. No other person of the owner's crosses: an assignee outside the scope stays hidden unless they are a member.
 - A node without a placement sits in the share's own chart (`sh.<shareId>.chart`, named "Shared · <owner env name>") at the owner's x/y. A placement can move it into any of the recipient's charts.
 - `applyProjection(recipientDb, projection)` merges the projection in (pure; re-applying is idempotent). Records that left the scope are removed, together with the recipient's private edges to them. Private edges to records that are still shared survive refreshes.
 
-### Edits (`applyRecipientEdit(ownerDb, share, edit, user)`)
+### Edits (`applyRecipientEdit(ownerDb, share, edit, user, {members})`)
 `edit = {kind:'node'|'edge'|'project'|'item'|'card', id, fields:{...}}` or `{kind, id, comment:'text'}`. The id may be the owner id or the linked id.
 - Each permission allows: **view** nothing, **comment** comments only, **edit** whitelisted field changes plus comments.
 - Errors are `revoked`, `forbidden` (not the recipient), `permission`, `stub` (stubs and stub edges are immutable, even for comments), `out-of-scope` (including the owner's private nodes), `not-found` and `invalid` (with the `field`).
@@ -49,12 +52,21 @@ The result is `{share, chart, nodes, edges, projects, timeline, cards, labels}`,
   - node: `name`, `notes`
   - edge: `percent`
   - project: `name`, `color`
-  - item: `title`, `kind`, `status`, `priority`, `start`, `end`, `owner`, `link`, `notes`, `release`
-  - card: `title`, `description`, `column`, `points`, `due`, `labels` (owner label ids), `checklist`, `links`
+  - item: `title`, `kind`, `status`, `priority`, `start`, `end`, `owner`, `link`, `notes`, `release` (`''` or a shared release, as its linked or owner id)
+  - card: `title`, `description`, `column`, `points`, `due`, `labels` (owner label ids), `checklist`, `links`, `assignees`
+  - `assignees` holds the people the recipient can see: in-scope person cards (linked or owner ids) and members (`@email`); anything else is `invalid`. It replaces only those: the owner's hidden assignees stay on the card. A member is stored as the owner's person card with their email when there is one, else as `@email`. History records only the people the recipient can see.
 
   Layout (x, y, w, h, chart) is never an edit: it is a per-environment placement, and any permission may change it.
 - The result is `{ok, ownerDbPatch:[{kind,id,field,value}], history:[...]}`. Unchanged fields are skipped. `applyOwnerPatch(ownerDb, patch)` applies the patch and bumps a card's `updated`/`moved`. A comment is a history entry with `field:'comment'`, `old:null`, `new:text`.
-- `extractRecipientChanges(projection, submittedDb)` turns a workspace the recipient saved into `{placements, edits}`. Deleting a linked record in the recipient's copy does nothing (it comes back), and edits to stubs are ignored.
+- `extractRecipientChanges(projection, submittedDb, base)` turns a workspace the recipient saved into `{placements, edits}`. Deleting a linked record in the recipient's copy does nothing (it comes back), and edits to stubs are ignored. `base` is the browser's `fieldBase` (below). With it, only fields the recipient actually changed are edits, so a copy that is merely out of date never overwrites the owner. Without it (older clients, the CLI), every difference from the current projection is an edit, as before.
+
+### Conflicts (card #61)
+Two people can change the same field of a shared record at once (the owner and a recipient, or two recipients). The **last write wins**. The person whose value was replaced without them seeing it gets a notice on that field.
+- **What the browser sends.** Every save carries `fieldBase` (`public/sync-core.js`): for each record it changed, the value each changed field had in the copy it started from, `{node|edge|project|item|card:{id:{field:value}}}` (only the shared fields, `SHARED_FIELDS`). When a merge keeps the local value of a field that the server's copy had also changed (`clashes(base, local, remote)`), the older base is held and sent with the next save (`withHeld`). So the server can tell that this save replaced a value the browser never showed.
+- **Recipient saves**: an edit whose base is not the current value is a clash (`edit.clash:[field]`).
+- **Owner saves** (`ownerChanges(old, new, shares, user, base)`): every change to an editable field of a shared record is recorded as field history for each active share that covers it, so recipients see the owner's edits in History. If the owner's base is not the stored value, the entry is a clash. Edits through `/api/v1` and MCP are not recorded.
+- **The loser** (`overwritten(history, field, value, writer, fallback)`) is whoever wrote the replaced value: the author of the newest history entry for that field, if it still holds that value. Otherwise it is the owner for a recipient's write, or nobody for the owner's. It is never the writer. The winner's history entry gets `over: <loser email>`.
+- **The notice.** `GET /api/workspace` returns `conflicts: [{kind, id, field, by, at, previous, value}]` with the conflicts this user lost in the last 24 hours (`conflictView`). They use the user's own ids, and recipients see values in their terms (`historyForRecipient`). `share.js` shows "Changed by X just now — see previous" on that field while it still holds `value`. *See previous* shows the replaced value, with **Restore** and **Dismiss** buttons (dismissals are kept in the browser). Restore just sets the field back. It is an ordinary edit, so the share's permission applies, and since it is made over the value the user now sees, it is not a new conflict. Who lost (`over`) is never in the history a recipient reads.
 
 ### Revoke (`revokeEffects(recipientDb, share)`)
 This returns `{db, removed}`. Every `sh.<shareId>.*` record leaves the recipient's workspace, along with the recipient's private edges to those records. References from their own items and cards to shared projects, items, labels or assignees are cleared. The share's chart is removed when it is empty. The store keeps the share row (with `revokedAt`) and its history, and deletes its placements. `linkedShareIds(db)` lists the share ids present in a workspace, so stale ones can be cleaned up.
@@ -88,6 +100,9 @@ The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_shar
 - **Project ↔ node** matching is by `project.entity` id only. `devops-core.entityProjects` also matches by name, but a name match could leak an unrelated project.
 - **Re-share** permissions are capped at the requester's own.
 - **Comments** are stored as history entries (`field:'comment'`); records gain no new field.
+- **Members** are a share's owner plus the recipients of shares with the same scope (re-shares), not everyone who can see some card. So two recipients of the same records see each other's email as an assignable member, but recipients of other shares do not.
+- **Conflicts** are detected against what the editor's copy showed, not by time: an edit made after seeing the other person's value is never a conflict, however soon it comes. The notice lasts a day.
+- **Release references** are item ids (as the timeline stores them). The first projection treated them as titles, so they were always dropped. Now a shared release keeps its linked id.
 - **Edges**: only `percent` is editable on in-scope edges. Recipients cannot add or remove nodes or edges in the owner's data.
 - **Placement**: a linked edge is drawn only when both of its ends are placed in the same chart (charts cannot hold cross-chart edges).
 - **Card numbers**: a linked card may be renumbered by the recipient's `cleanDevops` when its number collides. That only affects the recipient's display, because `number` is not an editable field.
@@ -101,7 +116,8 @@ The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_shar
 - **Browser**: `public/share.js` (Share dialog with a live preview, linked-record helpers, History + comments, Settings › Sharing pane). `app.js` shows linked cards with a link badge (stubs dashed, with a ban badge), disables fields the permission does not allow, hides Kind/Delete/Duplicate on linked cards and refuses deleting them. Settings › Sharing lists shares by you (permission, revoke), pending requests (approve with a capped permission, deny) and shares with you (add to / remove from this environment, ask the owner to share it on). Settings › Environment has "Share this environment…".
 - **CLI**: `node tools/env.mjs share --env <id> --person "<name>" --permission view|comment|edit --email <email> --to <url> [--dry-run]` (also `--node`, `--project`, `--label`, `--whole`), `shares --env <id>`, `unshare <share id>`. It prints the exact preview before sharing.
 - **Tests**: `test/sharing-e2e.test.mjs` runs a real server with two synthetic users and the CLI (`npm test`).
-- **Not yet**: Timeline and DevOps panels do not show a shared badge or lock fields on linked items/cards; the server still enforces the permission (refused edits come back on the next sync).
+- **Timeline and DevOps** (card #63): shared items and cards carry the chart's link badge, in the board corner and inline in list rows, Gantt bars and calendar chips. The tooltip and the panel name the owner and the permission. Panels lock what the permission does not allow. **View** locks every field. **Comment** locks every field and adds a comment box. **Edit** unlocks the whitelisted fields only. A card's project and timeline item, an item's projects and a project's entity always stay with the owner, and so does deleting or duplicating. Dragging a locked card between columns, or a locked item on the Gantt, calendar or board, is refused with a notice. Shared cards take only their own share's labels (no new labels), and shared items only target shared releases. The server still enforces every rule.
+- **Assignees** (card #63): pickers on a shared card offer its share's in-scope person cards and its members, and never the owner's other people. On the owner's side, `GET /api/workspace` adds `shareMembers: [{id:'@email', email, name, cards:[ids]}]` for recipients without a person card of their own. The owner can assign them on the cards shared with them. Stored workspaces drop `shareMembers` along with `shares`.
 
 ## INTEGRATION (for the main agent, as written by the worker)
 

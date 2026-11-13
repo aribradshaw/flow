@@ -369,6 +369,53 @@ try{
   await key('Escape',27);
   await js(`document.querySelector('[data-tab=timeline]').click()`);await sleep(100);await key('Escape',27);
 
+  // Sharing (cards #61, #63; docs/sharing.md): linked DevOps cards and timeline items carry the chart's link
+  // badge and their owner, lock what the share does not allow, offer the share's members as assignees, and
+  // show "Changed by … — see previous" with a restore. Injected as if the server sent them (never uploaded).
+  {const before=await js(`(async()=>JSON.stringify((await import('/store.js')).store.db))()`);
+    await js(`(async()=>{const s=await import('/store.js'),d=structuredClone(s.store.db),now=new Date().toISOString(),blank={description:'',project:'',labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',created:now,updated:now,moved:now};
+      d.shares=[{id:'sv1',permission:'view',ownerEmail:'pat@example.test',ownerEnv:'other',ownerEnvName:'Pat',members:[{id:'@pat@example.test',name:'Pat Owner',owner:true}]},
+        {id:'sv2',permission:'edit',ownerEmail:'pat@example.test',ownerEnv:'other',ownerEnvName:'Pat',members:[{id:'@pat@example.test',name:'Pat Owner',owner:true},{id:'@me@example.test',name:'me@example.test'}]}];
+      d.devops.labels.push({id:'sh.sv2.l1',name:'Pat label',section:'area',color:'green'});
+      d.devops.cards.push({...blank,id:'sh.sv1.k1',number:801,title:'Shared view card',column:'requests',checklist:[{id:'x1',text:'Step',done:false}]},{...blank,id:'sh.sv2.k2',number:802,title:'Shared edit card',column:'requests',labels:['sh.sv2.l1']});
+      d.timeline.push({id:'sh.sv1.i1',title:'Shared view item',kind:'feature',status:'planned',start:'',end:'',priority:'',release:'',projects:[],owner:'',link:'',notes:''});
+      s.store.conflicts=[{kind:'card',id:'sh.sv2.k2',field:'title',by:'pat@example.test',at:now,previous:'My title',value:'Shared edit card'}];
+      s.adoptRemote(d)})()`);
+    await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(200);
+    assert(await js(`(()=>{const b=document.querySelector('.dcard[data-card="sh.sv1.k1"] .sh-badge');return !!b&&/pat@example\.test/.test(b.dataset.tip)&&/view only/.test(b.dataset.tip)&&!document.querySelector('.dcard[data-card="'+${JSON.stringify(A.id)}+'"] .sh-badge')})()`),'sharing: a shared DevOps card shows the link badge with its owner; own cards do not');
+    const open=async id=>{await js(`document.querySelector('.dcard[data-card="${id}"]').focus()`);await key('Enter',13);for(let i=0;i<20&&!await js(`document.querySelector('dialog.card-modal[open] #dc-title')?.value?.startsWith('Shared')||document.querySelector('dialog.card-modal[open] #dc-title')?.value==='My title'`);i++)await sleep(50)};
+    await open('sh.sv1.k1');
+    assert(await js(`(()=>{const m=document.querySelector('dialog.card-modal[open]');return !!m&&['#dc-title','#dc-desc','#dc-col','#dc-pts','#dc-due','#dc-proj','#dc-item','[data-chk]'].every(q=>m.querySelector(q)?.disabled)&&!m.querySelector('[data-dc=delete],[data-chkdel],#dc-chk,#dc-lurl,[data-picker=dc-labels],#dc-newbtn')&&[...m.querySelectorAll('[data-picker^=dc-role-]')].every(b=>b.disabled)})()`),'sharing: a view-only card locks every field, with no delete, add or remove controls');
+    assert(await js(`(()=>{const m=document.querySelector('dialog.card-modal[open]');return /Shared/.test(m.querySelector('.cd-h .sh-chip')?.textContent||'')&&/pat@example\.test/.test(m.querySelector('.sh-note')?.textContent||'')&&!!m.querySelector('[data-sh-hist]')&&!m.querySelector('[data-sh-comment]')})()`),'sharing: the card panel names its owner and shows its history (no comment box on view)');
+    await key('Escape',27);await sleep(150);
+    await open('sh.sv2.k2');
+    assert(await js(`(()=>{const m=document.querySelector('dialog.card-modal[open]');return !m.querySelector('#dc-title').disabled&&!m.querySelector('#dc-col').disabled&&m.querySelector('#dc-proj').disabled&&m.querySelector('#dc-item').disabled&&!m.querySelector('[data-dc=delete]')&&!m.querySelector('#dc-newbtn')&&!!m.querySelector('[data-sh-comment]')})()`),'sharing: edit unlocks the allowed fields; project, timeline item, new labels and delete stay with the owner');
+    await js(`document.querySelector('dialog.card-modal[open] [data-picker=dc-role-developer]').click()`);await sleep(150);
+    assert(await js(`[...document.querySelectorAll('.picker .pk-opt .pk-l')].map(x=>x.textContent).join()`)==='Pat Owner,me@example.test','sharing: a shared card offers the share\'s members as assignees, and none of the owner\'s other people');
+    await key('Escape',27);await sleep(100);
+    await js(`document.querySelector('dialog.card-modal[open] [data-picker=dc-labels]').click()`);await sleep(150);
+    assert(await js(`[...document.querySelectorAll('.picker .pk-opt')].map(x=>x.textContent.trim()).join()`)==='Pat label','sharing: a shared card only takes its owner\'s labels');
+    await key('Escape',27);await sleep(100);
+    assert(await js(`/Changed by pat@example\.test just now/.test(document.querySelector('dialog.card-modal[open] .sh-clash')?.textContent||'')&&document.querySelector('dialog.card-modal[open] .sh-clash-prev').hidden`),'conflict: the field someone else overwrote shows who changed it, with the previous value folded away');
+    await js(`document.querySelector('dialog.card-modal[open] [data-clash-see]').click()`);
+    assert(await js(`!document.querySelector('dialog.card-modal[open] .sh-clash-prev').hidden&&/My title/.test(document.querySelector('dialog.card-modal[open] .sh-clash-prev').textContent)`),'conflict: see previous shows the value that was replaced');
+    await js(`document.querySelector('dialog.card-modal[open] [data-clash-restore]').click()`);await sleep(150);
+    assert(await js(`(async()=>{const s=await import('/store.js');return s.store.db.devops.cards.find(c=>c.id==='sh.sv2.k2').title==='My title'&&!document.querySelector('dialog.card-modal[open] .sh-clash')})()`),'conflict: restore puts the previous value back (an ordinary edit) and the notice goes');
+    await key('Escape',27);await sleep(150);
+    // Timeline: badge in the list and on the board; a view-only item opens locked and cannot be deleted.
+    await js(`document.querySelector('[data-tab=timeline]').click()`);await sleep(150);await key('3',51,0,'3');await sleep(150);
+    assert(await js(`!!document.querySelector('.lr[data-item="sh.sv1.i1"] .sh-badge.in')`),'sharing: a shared timeline item shows the link badge in the list');
+    await key('4',52,0,'4');await sleep(150);
+    assert(await js(`(()=>{const c=document.querySelector('.card[data-item="sh.sv1.i1"]');return !!c?.querySelector('.sh-badge')&&/pat@example\.test/.test(c.dataset.tip)})()`),'sharing: and on the board, with its owner in the tooltip');
+    await key('3',51,0,'3');await sleep(150);
+    [x,y]=await center('.lr[data-item="sh.sv1.i1"]');await mouse('mousePressed',x,y);await mouse('mouseReleased',x,y);await sleep(200);
+    assert(await js(`(()=>{const m=document.querySelector('dialog.item-modal[open]');return !!m&&['#ti-title','#ti-notes','#ti-start','#ti-owner','#ti-link'].every(q=>m.querySelector(q)?.disabled)&&[...m.querySelectorAll('[data-tset]')].every(b=>b.disabled)&&!m.querySelector('[data-ti=delete],[data-ti=dup],[data-ti=complete],#ti-proj')&&/pat@example\.test/.test(m.querySelector('.sh-note')?.textContent||'')})()`),'sharing: a view-only timeline item opens with every field locked, and no delete, duplicate or complete');
+    await js(`document.querySelector('dialog.item-modal[open] #ti-title').blur()`);await key('Delete',46);await sleep(100);
+    assert(await js(`(async()=>(await import('/store.js')).store.db.timeline.some(i=>i.id==='sh.sv1.i1'))()`),'sharing: the delete shortcut does not remove a shared item');
+    await key('Escape',27);await sleep(150);await key('1',49,0,'1');
+    await js(`(async()=>{const s=await import('/store.js');s.store.conflicts=[];s.adoptRemote(JSON.parse(${JSON.stringify(before)}))})()`);await sleep(150);
+  }
+
   // A fresh browser (no local data) gets the server's copy, never an empty or seed chart.
   await sleep(1500);
   {const w=await (await fetch(BASE+'api/workspace?env=default-workspace')).json();

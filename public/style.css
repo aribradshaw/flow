@@ -617,6 +617,26 @@ dialog.ask-dlg{width:min(380px,92vw);padding:18px 20px 14px}
 .node.stub{border-style:dashed;background:#fbfcfb;color:var(--muted)}
 .node .sh-badge{position:absolute;top:-7px;right:-7px;display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#fff;box-shadow:0 0 0 2px #fff}
 .node.stub .sh-badge{background:var(--muted)}
+/* The same badge on shared DevOps cards and timeline board cards (corner), and inline in rows and bars. */
+.dcard .sh-badge,.card.linked>.sh-badge{position:absolute;top:-6px;right:-6px;z-index:1;display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#fff;box-shadow:0 0 0 2px #fff}
+.card.linked{position:relative}
+.sh-badge.in{position:static;display:inline-flex;align-items:center;justify-content:center;flex:none;width:13px;height:13px;margin-right:4px;border-radius:50%;background:var(--accent);color:#fff;vertical-align:-2px}
+.sh-badge.stub{background:var(--muted)}
+.ti.bar.s-active .sh-badge.in{box-shadow:0 0 0 1px #fff}
+.dcard.ro{cursor:pointer}
+.prow.linked{align-items:center}
+.cd-h .sh-chip{margin-right:4px}
+.opts button:disabled,.pk-btn:disabled{opacity:.55;cursor:default}
+.opts button:disabled:not(.on){background:none}
+/* Conflict notice: someone else's write replaced this user's value on a shared field (docs/sharing.md). */
+.sh-clash{display:flex;flex-wrap:wrap;align-items:center;gap:3px 6px;margin:3px 0 4px;padding:4px 7px;border-radius:var(--r);background:#fdf3e3;color:#6b4a00;font-size:11.5px;line-height:1.4}
+.sh-clash>.i{flex:none;color:var(--warn)}
+.sh-clash b{font-weight:600}
+.sh-lnk{padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}
+.sh-clash-prev{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;width:100%}
+.sh-clash-prev[hidden]{display:none}
+.sh-clash-prev s{color:#7a6a4a;overflow-wrap:anywhere}
+.sh-clash-prev .txt{height:22px;padding:0 7px;font-size:11.5px}
 .sh-chip{display:inline-flex;align-items:center;gap:3px;margin-left:7px;padding:0 6px;border-radius:9px;background:var(--accent-2);color:var(--accent);font-size:10.5px;font-weight:600;line-height:17px}
 .sh-chip.stub{background:var(--hover);color:var(--muted)}
 .sh-note{margin:10px 0 0;padding:6px 8px;border-radius:var(--r);background:var(--accent-2);color:var(--accent);font-size:11.5px;line-height:1.45}
