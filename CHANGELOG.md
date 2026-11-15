@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- The Flow CLI is on npm as `flygon-flow` (`npx flygon-flow …`).
+
 - Timeline items whose linked cards are all done now show a green check and ask whether they're complete. They never close on their own.
 
 - Timeline items can be marked done with one click in their panel, or D. Done and cancelled items now grey out and fade in every view, so finished work no longer looks active.

@@ -133,8 +133,8 @@ flow refresh                       # refetch the API description
   offers the same tools, built from the cached OpenAPI document, and forwards each call to REST. With a
   default environment set, `env` becomes optional in its tools.
 
-`npx flygon-flow` resolves only once the package is on npm. `package.json` is `"private": true` today,
-so use `npx github:aribradshaw/flow …` or a checkout until it is published.
+`npx flygon-flow …` installs the published package. From a checkout, use `node tools/flow.mjs …`
+or `npx github:aribradshaw/flow …`.
 
 ## REST convention (shared by the CLI, `flow mcp` and the fixture tests)
 
@@ -199,9 +199,7 @@ Mounted in `server.mjs`: `/api/v1` (REST + `/api/v1/openapi.json`), `/api/keys` 
    placeholders, then query for GET/DELETE and JSON body for POST/PATCH; errors
    `{error:{code,message}}`). If it differs, change `requestFor` in `lib/api-spec.mjs`, the only place
    that encodes the convention.
-3. **package.json** already has `"bin": {"flow": "tools/flow.mjs"}` and `"test:mcp"` on this branch.
-   Optionally add `node --check lib/mcp.mjs && node --check lib/api-spec.mjs && node --check tools/flow.mjs`
-   to `check`. To make `npx flygon-flow` work, publish the package (drop `"private"`, add `"files"`) or
-   keep the `github:` form.
+3. **package.json** has `"bin": {"flow": "tools/flow.mjs", "flygon-flow": "tools/flow.mjs"}` and a
+   `files` list for the published CLI tarball. `npx flygon-flow` uses the npm package.
 4. **Tests**: `npm run test:mcp` (fixture registry and loopback server only). verify.mjs needs no change.
 5. Optionally add a short "MCP and CLI" section to README.md that links to this file.

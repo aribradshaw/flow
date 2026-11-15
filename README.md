@@ -135,7 +135,7 @@ Hosted sign-in currently requires a native app registration provisioned by a One
 `node verify.mjs` tests all of this against a loopback mock of OneProfileID with synthetic users; it never contacts the real service or database.
 
 ## Versions and DevLog
-Public release tags use the Bradshaw Versioning number of the deployed release that contains the tagged commit (`vYEAR.MONTH.UPDATE`, see below) and user-facing notes in [CHANGELOG.md](CHANGELOG.md). The source CLI currently runs from a clone with `node tools/flow.mjs`; the npm package is private and has not been published. See [Release process](docs/releases.md).
+Public release tags use the Bradshaw Versioning number of the deployed release that contains the tagged commit (`vYEAR.MONTH.UPDATE`, see below) and user-facing notes in [CHANGELOG.md](CHANGELOG.md). The CLI is `npx flygon-flow …`, or `node tools/flow.mjs` from a clone. See [Release process](docs/releases.md) and [MCP and CLI](docs/mcp-cli.md).
 
 Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers (`YEAR.MONTH.UPDATE`, zero-based project year = calendar year − 2026, calendar months, America/Phoenix timezone), assigned per production deploy rather than per commit.
 
