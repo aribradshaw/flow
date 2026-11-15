@@ -4,6 +4,10 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- Settings › Sharing shows mind map / project / DevOps counts per share, warns when a mind map share includes no board cards, and offers one-click Widen to whole environment so people get the full board (not only a subtree).
+
+- Settings › Connect (was API keys) walks you through linking Claude, Cursor, Codex or ChatGPT: host and environment filled in, copy-paste setup per client, and a DIY prompt for any agent chat.
+
 - The Flow CLI is on npm as `flygon-flow` (`npx flygon-flow …`).
 
 - Timeline items whose linked cards are all done now show a green check and ask whether they're complete. They never close on their own.

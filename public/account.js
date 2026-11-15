@@ -175,8 +175,8 @@ addEventListener('keydown',e=>{
   if(signingIn||(document.querySelector('dialog.acct-dlg[open]')&&!e.target.closest?.('dialog.acct-dlg')))e.stopPropagation();
 },true);
 
-// ---- settings: Account · Environment · Sharing · API keys · Shortcuts · DevLog (last tab remembered in prefs) ----
-const TABS=[['account','Account'],['environment','Environment'],['sharing','Sharing'],['apikeys','API keys'],['shortcuts','Shortcuts'],['devlog','DevLog']];
+// ---- settings: Account · Environment · Sharing · Connect · Shortcuts · DevLog (last tab remembered in prefs) ----
+const TABS=[['account','Account'],['environment','Environment'],['sharing','Sharing'],['apikeys','Connect'],['shortcuts','Shortcuts'],['devlog','DevLog']];
 let dlg=null,recording=null,scMsg=null,workflowOpen=false;
 // One section header for every Settings tab: title, optional hint, optional action on the right.
 const sec=(title,{tip='',action=''}={})=>`<div class="acct-sec"><h3 class="acct-sub">${esc(title)}</h3>${tip?hint(tip,title):''}${action?`<span class="acct-sec-a">${action}</span>`:''}</div>`;
@@ -345,7 +345,14 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     // Sharing: owner actions (permission, revoke, requests) and recipient actions (add to / remove from an environment).
     const shErr=m=>{const p=panel.querySelector('[data-sh-err]');if(p){p.textContent=m;p.hidden=!m}};
     const shDo=(fn,after)=>fn().then(async()=>{if(after)await refresh();await drawTab('sharing')}).catch(e=>shErr(e.message));
-    if(t.closest?.('[data-sh-new],[data-sh-env]')){closeDlg(d);openShareDialog(t.closest('[data-sh-env]')?{scope:{kind:'environment'}}:{});return}
+    const shWiden=t.closest?.('[data-sh-widen]');
+    if(shWiden||t.closest?.('[data-sh-new],[data-sh-env]')){
+      closeDlg(d);
+      // Widen keeps their current permission and email; a fresh whole-environment share starts at view.
+      openShareDialog(shWiden?{scope:{kind:'environment'},email:shWiden.dataset.email,permission:shWiden.dataset.perm||'edit'}
+        :t.closest('[data-sh-env]')?{scope:{kind:'environment'}}:{});
+      return;
+    }
     const sr=t.closest?.('[data-sh-revoke]');if(sr){ask(`Stop sharing with ${sr.dataset.who}?\nThe shared cards disappear from their workspace. Their own data stays.`,{ok:'Revoke',danger:true}).then(ok=>{if(ok)shDo(()=>shareApi.revoke(sr.dataset.shRevoke))});return}
     const sa=t.closest?.('[data-sh-approve]');if(sa){shDo(()=>shareApi.decide(sa.dataset.shApprove,true,panel.querySelector(`[data-sh-req-perm="${sa.dataset.shApprove}"]`)?.value));return}
     const sd=t.closest?.('[data-sh-deny]');if(sd){shDo(()=>shareApi.decide(sd.dataset.shDeny,false));return}

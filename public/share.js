@@ -101,15 +101,24 @@ function scopeOptions(nodeId){
   return out;
 }
 const list=(title,items,empty)=>`<h4 class="sh-pv-h">${title} <em>${items.length}</em></h4>${items.length?`<ul class="sh-pv-l">${items.join('')}</ul>`:`<p class="acct-muted">${empty}</p>`}`;
+const more=(n,cap)=>n>cap?`<li class="acct-muted">…and ${n-cap} more</li>`:'';
 function previewHtml(p){
-  return list('Cards',p.nodes.map(n=>`<li>${esc(n.name)} <em>${esc(n.type)}</em></li>`),'No cards')
-    +list('Co-owners, name only',p.stubs.map(t=>`<li>${icon('ban',11)} ${esc(t.name)} <em>${t.edge==='group'?'groups':t.percent?esc(t.percent)+'% of':'owns'} ${esc(t.owns)}</em></li>`),'None')
-    +list('Projects',p.projects.map(x=>`<li><i class="sh-dot" style="background:${esc(x.color||'#ccc')}"></i>${esc(x.name)}</li>`),'None')
+  const cards=(p.cards||[]).slice(0,24).map(c=>`<li>#${esc(c.number)} ${esc(c.title)}</li>`);
+  const tip=p.tip?`<p class="sh-pv-tip" role="status">${icon('alert',12)} ${esc(p.tip)}</p>`:'';
+  return tip
+    +list('Mind map',p.nodes.map(n=>`<li>${esc(n.name)} <em>${esc(n.type)}</em></li>`),'No mind map cards')
+    +list('Co-owners, name only',p.stubs.map(t=>`<li>${icon('ban',11)} ${esc(t.name)} <em>${t.edge==='group'?'groups':t.percent?esc(t.percent)+'% of':'owns'} ${esc(t.owns)}</em></li>`),'None — stubs never bring DevOps cards')
+    +list('Projects',p.projects.map(x=>`<li><i class="sh-dot" style="background:${esc(x.color||'#ccc')}"></i>${esc(x.name)}</li>`),'None linked by entity to the mind map cards above')
+    +list('DevOps cards',cards.concat(more((p.cards||[]).length,24)),'None — pick “The whole environment” to share the full board')
     +`<p class="acct-muted">${p.items.length} timeline item${p.items.length===1?'':'s'} · ${p.cards.length} DevOps card${p.cards.length===1?'':'s'}. Nothing else in this environment is shared.</p>`;
 }
-export function openShareDialog({nodeId=null,scope=null,from=null}={}){
+export function openShareDialog({nodeId=null,scope=null,from=null,email='',permission='view'}={}){
   const opts=scopeOptions(nodeId),first=scope?JSON.stringify(scope):opts[0][0];
-  if(scope&&!opts.some(o=>o[0]===first))opts.unshift([first,'Selected']);
+  if(scope&&!opts.some(o=>o[0]===first))opts.unshift([first,scope.kind==='environment'?`The whole environment (${store.db.environment?.name||'workspace'})`:'Selected']);
+  // Prefer the whole-environment option near the top when sharing from Settings (no card picked).
+  if(!nodeId&&scope?.kind==='environment'){
+    const i=opts.findIndex(([v])=>v===first);if(i>0){const [row]=opts.splice(i,1);opts.unshift(row)}
+  }
   let seq=0,shown=null;
   const m=detailModal({cls:'share-modal',label:'Share',from,events:{
     change:e=>{if(e.target.id==='shScope')refresh()},
@@ -119,15 +128,17 @@ export function openShareDialog({nodeId=null,scope=null,from=null}={}){
       msg.className='sh-msg';msg.textContent='';btn.disabled=true;
       try{
         const d=await api.create({env:envId(),scope:JSON.parse(b.querySelector('#shScope').value),recipientEmail:b.querySelector('#shEmail').value.trim(),permission:b.querySelector('#shPerm').value});
-        msg.className='sh-msg ok';msg.textContent=`${d.existing?'Updated the share with':'Shared with'} ${d.share.recipientEmail} (${d.share.permission}). They add it to their workspace from Settings › Sharing.`;
+        const n=d.preview?.summary?.cards??d.preview?.cards?.length;
+        msg.className='sh-msg ok';msg.textContent=`${d.existing?'Updated the share with':'Shared with'} ${d.share.recipientEmail} (${d.share.permission})${n!=null?` · ${n} DevOps card${n===1?'':'s'}`:''}. They add it to their workspace from Settings › Sharing.`;
       }catch(err){msg.className='sh-msg err';msg.textContent=err.message}
       finally{btn.disabled=false}
     }}});
   m.body.innerHTML=`<div class="ihead cd-h"><span class="k">${icon('link')}</span><strong>Share</strong><span class="sp"></span><button type="button" class="ib" data-sh-close aria-label="Close">${icon('x')}</button></div>
     <form class="ibody sh-form" autocomplete="off">
+      <p class="acct-muted sh-lead">DevOps cards follow only when their project is linked to a shared mind map card. To share the full board and map, choose <strong>The whole environment</strong>.</p>
       <label for="shScope">What</label><select id="shScope">${opts.map(([v,t])=>`<option value="${esc(v)}"${v===first?' selected':''}>${esc(t)}</option>`).join('')}</select>
-      <div class="sh-two"><div><label for="shEmail">With <em>their OneProfileID email</em></label><input id="shEmail" type="email" required placeholder="name@example.com"></div>
-        <div><label for="shPerm">Permission</label><select id="shPerm">${PERMS.map(([v,t])=>`<option value="${v}"${v==='view'?' selected':''}>${t}</option>`).join('')}</select></div></div>
+      <div class="sh-two"><div><label for="shEmail">With <em>their OneProfileID email</em></label><input id="shEmail" type="email" required placeholder="name@example.com" value="${esc(email)}"></div>
+        <div><label for="shPerm">Permission</label><select id="shPerm">${PERMS.map(([v,t])=>`<option value="${v}"${v===(permission||'view')?' selected':''}>${t}</option>`).join('')}</select></div></div>
       <label>They will see exactly this</label><div class="sh-pv" data-sh-pv aria-live="polite"><p class="acct-muted">Loading…</p></div>
       <p class="sh-msg" data-sh-msg role="status"></p>
       <div class="ask-b"><button type="button" class="txt" data-sh-close>Close</button><button type="submit" class="txt primary">Share</button></div>
@@ -138,7 +149,7 @@ export function openShareDialog({nodeId=null,scope=null,from=null}={}){
     try{const d=await api.preview(envId(),JSON.parse(v));if(n!==seq)return;shown=v;box.innerHTML=previewHtml(d.preview)}
     catch(e){if(n===seq)box.innerHTML=`<p class="sh-msg err">${esc(e.message==='Not found'?'Only the owner of this environment can share it. Save it to the server first.':e.message)}</p>`}
   }
-  refresh();setTimeout(()=>m.body.querySelector('#shEmail')?.focus(),50);
+  refresh();setTimeout(()=>{(email?m.body.querySelector('#shScope'):m.body.querySelector('#shEmail'))?.focus()},50);
   return m;
 }
 
@@ -147,8 +158,13 @@ export async function sharingPane(currentEnvId,ownEnvs){
   const [mine,incoming,reqs]=await Promise.all([api.list(currentEnvId).catch(()=>null),api.incoming().catch(()=>({shares:[]})),api.requests().catch(()=>({requests:[],mine:[]}))]);
   const permSel=(attr,id,cur,max='edit')=>`<select ${attr}="${esc(id)}" aria-label="Permission">${PERMS.filter(([v])=>RANK[v]<=RANK[max]).map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select>`;
   const sec=(title,tip='',action='')=>`<div class="acct-sec"><h3 class="acct-sub">${esc(title)}</h3>${tip?hint(tip,title):''}${action?`<span class="acct-sec-a">${action}</span>`:''}</div>`;
-  const by=mine?`${sec(`Shared by you from ${store.db.environment?.name||'this environment'}`,'Select a card on a mind map and choose Share in its panel, or use Share something to pick what to share.','<button type="button" class="txt" id="shNew" data-sh-new>Share something…</button>')}
-    <ul class="env-list">${mine.shares.map(s=>`<li><span class="env-n">${esc(s.recipientEmail)}<em class="sh-sub">${esc(s.scopeLabel)}</em></span>${permSel('data-sh-perm',s.id,s.permission)}<button type="button" class="txt" data-sh-revoke="${esc(s.id)}" data-who="${esc(s.recipientEmail)}">Revoke</button></li>`).join('')||'<li class="acct-muted">Not shared with anyone</li>'}</ul>`:'';
+  const sumLine=s=>{const u=s.summary;if(!u)return '';
+    return `<em class="sh-sub sh-counts">${u.nodes} mind map · ${u.projects} project${u.projects===1?'':'s'} · ${u.cards} DevOps card${u.cards===1?'':'s'}${u.stubs?` · ${u.stubs} co-owner stub${u.stubs===1?'':'s'}`:''}</em>`;
+  };
+  const widenBtn=s=>s.scope?.kind==='environment'?'':`<button type="button" class="txt primary" data-sh-widen="${esc(s.id)}" data-email="${esc(s.recipientEmail)}" data-perm="${esc(s.permission)}" title="Share the whole environment with them so they get every DevOps card and mind map card">Widen to whole environment</button>`;
+  const by=mine?`${sec(`Shared by you from ${store.db.environment?.name||'this environment'}`,'Mind map shares only include DevOps cards whose project is linked to a shared card. Use Widen or Share whole environment when someone should see the full board.','<span class="sh-acts"><button type="button" class="txt primary" id="shEnvTop" data-sh-env>Share whole environment…</button><button type="button" class="txt" id="shNew" data-sh-new>Share something…</button></span>')}
+    <ul class="env-list sh-out">${mine.shares.map(s=>`<li class="sh-out-row"><div class="sh-out-main"><span class="env-n">${esc(s.recipientEmail)}<em class="sh-sub">${esc(s.scopeLabel)}</em>${sumLine(s)}${s.tip?`<em class="sh-sub sh-tip">${esc(s.tip)}</em>`:''}</span>
+      <div class="sh-out-actions">${permSel('data-sh-perm',s.id,s.permission)}${widenBtn(s)}<button type="button" class="txt" data-sh-revoke="${esc(s.id)}" data-who="${esc(s.recipientEmail)}">Revoke</button></div></div></li>`).join('')||'<li class="acct-muted">Not shared with anyone</li>'}</ul>`:'';
   const pending=reqs.requests||[];
   const asks=pending.length?`${sec('Requests to share')}<ul class="env-list">${pending.map(r=>`<li><span class="env-n">${esc(r.requestedBy)} asks to share with ${esc(r.toEmail)}${r.note?`<em class="sh-sub">${esc(r.note)}</em>`:''}</span>${permSel('data-sh-req-perm',r.id,r.permission,r.permission)}<button type="button" class="txt primary" data-sh-approve="${esc(r.id)}">Approve</button><button type="button" class="txt" data-sh-deny="${esc(r.id)}">Deny</button></li>`).join('')}</ul>`:'';
   const own=new Map(ownEnvs.map(e=>[e.id,e.name]));

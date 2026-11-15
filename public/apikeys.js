@@ -1,18 +1,19 @@
-// Settings › API keys: create, list and revoke the signed-in user's API keys (lib/apikeys-routes.mjs),
-// plus copy-paste setup for curl, MCP (Claude Code, Codex) and the CLI.
+// Settings › Connect: create, list and revoke the signed-in user's API keys (lib/apikeys-routes.mjs),
+// plus copy-paste setup for agents (Claude, Cursor, Codex, ChatGPT DIY prompt) and the CLI.
 //
 //   renderApiKeysTab(container)  Renders the whole tab into container (e.g. the Settings tabpanel)
 //                                and returns a promise that settles once the list has loaded.
 //                                Listeners are bound to the container's content, so re-rendering is safe.
 //
 // A new key is shown once, with Copy and a "you won't see this again" warning; afterwards only its
-// prefix is ever shown. Snippets use placeholders only and never include a real key. Rows, the reveal
-// box and errors animate in and out (motion.js; nothing snaps); prefers-reduced-motion turns that off.
-// Styles are in apikeys.css, linked once on import.
+// prefix is ever shown. Snippets use the current host and environment id, with a key placeholder only
+// (never a real key). Rows, the reveal box and errors animate in and out (motion.js; nothing snaps);
+// prefers-reduced-motion turns that off. Styles are in apikeys.css, linked once on import.
 
 import {esc,hint} from './ui.js';
 import {enter,popIn,busy} from './motion.js';
 import {ask} from './modal.js';
+import {currentEnv} from './sync.js';
 
 if(!document.querySelector('link[data-apikeys]')){
   const l=document.createElement('link');
@@ -24,24 +25,114 @@ const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 const EASE='cubic-bezier(.2,.7,.2,1)';
 const LEVELS=[['read','Read',['read']],['write','Read & write',['read','write']],['admin','Admin',['read','write','admin']]];
 const EXPIRY=[['30','30 days'],['90','90 days'],['365','1 year'],['','Never']];
-const HOST='https://<your-flow-host>',ENVID='<environment-id>';
-// Placeholders only: the real key is pasted by the user. The /api/v1, /mcp and CLI names follow docs/api-keys.md.
+// Placeholders only for the key. Host and env come from the open app (see ctx()).
+const KEYPH=(m)=>`flow_${m}_<your-key>`;
+function ctx(mode='live'){
+  const host=(typeof location!=='undefined'&&location.origin&&!location.origin.startsWith('file:'))?location.origin:'https://<your-flow-host>';
+  const env=currentEnv()||'<environment-id>';
+  return {host,env,key:KEYPH(mode),skill:`${host}/skill.md`,mcp:`${host}/mcp`,openapi:`${host}/api/v1/openapi.json`};
+}
+// The /api/v1, /mcp and CLI names follow docs/api-keys.md and docs/mcp-cli.md.
 export const SNIPPETS=[
-  ['curl','curl',m=>`export FLOW_API_KEY="flow_${m}_<your-key>"
-curl -H "Authorization: Bearer $FLOW_API_KEY" \\
-  "${HOST}/api/v1/workspace?env=${ENVID}"`],
-  ['claude','Claude Code',m=>`claude mcp add --transport http flygon-flow "${HOST}/mcp" \\
-  --header "Authorization: Bearer flow_${m}_<your-key>"`],
-  ['codex','Codex',m=>`# ~/.codex/config.toml
+  ['prompt','DIY prompt',m=>{
+    const {host,env,key,skill,mcp,openapi}=ctx(m);
+    return `Connect me to Flygon Flow.
+
+Server: ${host}
+Environment id: ${env}
+API key: ${key}
+  (paste the key you copied from Settings › Connect — treat it like a password)
+
+Prefer MCP at ${mcp} with header:
+  Authorization: Bearer <the key>
+
+If you cannot use MCP, use the REST API (OpenAPI: ${openapi}) with the same Bearer key.
+Agent skill / rules: ${skill}
+
+Then call envs.list (or GET /api/v1/envs) and cards.list for env "${env}" so we know it works.`;
+  }],
+  ['claude','Claude Code',m=>{
+    const {mcp,key}=ctx(m);
+    return `claude mcp add --transport http flygon-flow "${mcp}" \\
+  --header "Authorization: Bearer ${key}"
+
+# optional: --scope user  (every project)
+# then in Claude Code: /mcp`;
+  }],
+  ['desktop','Claude Desktop',m=>{
+    const {host,env,key}=ctx(m);
+    return `# Settings › Developer › Edit Config  (claude_desktop_config.json)
+# Or Settings › Connectors › custom connector: ${host}/mcp + Bearer header
+{
+  "mcpServers": {
+    "flygon-flow": {
+      "command": "npx",
+      "args": ["-y", "github:aribradshaw/flow", "mcp"],
+      "env": {
+        "FLOW_URL": "${host}",
+        "FLOW_API_KEY": "${key}",
+        "FLOW_ENV": "${env}"
+      }
+    }
+  }
+}`;
+  }],
+  ['cursor','Cursor',m=>{
+    const {mcp}=ctx(m);
+    return `# ~/.cursor/mcp.json  (or .cursor/mcp.json in a project)
+{
+  "mcpServers": {
+    "flygon-flow": {
+      "url": "${mcp}",
+      "headers": {
+        "Authorization": "Bearer \${env:FLOW_API_KEY}"
+      }
+    }
+  }
+}
+
+# then in your shell
+export FLOW_API_KEY="${KEYPH(m)}"`;
+  }],
+  ['codex','Codex',m=>{
+    const {mcp,key}=ctx(m);
+    return `# ~/.codex/config.toml
 [mcp_servers.flygon-flow]
-url = "${HOST}/mcp"
+url = "${mcp}"
 bearer_token_env_var = "FLOW_API_KEY"
 
 # then, in your shell
-export FLOW_API_KEY="flow_${m}_<your-key>"`],
-  ['cli','CLI',m=>`export FLOW_URL="${HOST}"
-export FLOW_API_KEY="flow_${m}_<your-key>"
-flow cards list --env ${ENVID}`],
+export FLOW_API_KEY="${key}"`;
+  }],
+  ['chatgpt','ChatGPT',m=>{
+    const {host,env,key,skill,openapi}=ctx(m);
+    return `# ChatGPT Custom GPT → Configure → Actions
+# 1. Import OpenAPI from: ${openapi}
+# 2. Authentication: API Key → Bearer → paste your flow_… key
+# 3. Instructions: paste the DIY prompt (or this block)
+
+You are connected to Flygon Flow at ${host}.
+Environment id: ${env}
+OpenAPI: ${openapi}
+Skill: ${skill}
+Auth: Authorization: Bearer ${key}
+
+List environments, then work only in env "${env}". Prefer the smallest API calls that answer the user.`;
+  }],
+  ['cli','CLI',m=>{
+    const {host,env,key}=ctx(m);
+    return `export FLOW_URL="${host}"
+export FLOW_API_KEY="${key}"
+npx github:aribradshaw/flow login --url "$FLOW_URL" --key "$FLOW_API_KEY"
+flow env use ${env}
+flow cards list --env ${env}`;
+  }],
+  ['curl','curl',m=>{
+    const {host,env,key}=ctx(m);
+    return `export FLOW_API_KEY="${key}"
+curl -H "Authorization: Bearer $FLOW_API_KEY" \\
+  "${host}/api/v1/workspace?env=${env}"`;
+  }],
 ];
 const I={
   copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
@@ -83,7 +174,7 @@ function ago(iso){
 const level=scopes=>scopes?.includes('admin')?'admin':scopes?.includes('write')?'write':'read';
 const expired=k=>k.expiresAt&&Date.parse(k.expiresAt)<=Date.now();
 // What is open and half typed outlives a redraw of the tab. The key itself is never kept.
-const ui={form:false,use:false,snip:'curl',scope:'read',draft:{}};
+const ui={form:false,use:false,snip:'prompt',scope:'read',draft:{}};
 
 async function api(method,path,body){
   const r=await fetch(path,{method,cache:'no-store',headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
@@ -92,10 +183,28 @@ async function api(method,path,body){
   return data;
 }
 
+const SNIP_HINT={
+  prompt:'Paste into ChatGPT, Claude.ai, or any agent chat. Replace &lt;your-key&gt; with the key you copied above.',
+  claude:'Run in a terminal where <code>claude</code> is installed, then check with <code>/mcp</code>.',
+  desktop:'Paste into Claude Desktop\'s config, or add a custom connector with the MCP URL and Bearer header.',
+  cursor:'Save as MCP config, set <code>FLOW_API_KEY</code> in your environment, then reload Cursor MCP.',
+  codex:'Add to Codex config and export <code>FLOW_API_KEY</code> in the shell that runs Codex.',
+  chatgpt:'Custom GPT Actions import the OpenAPI URL; auth is Bearer with your key. ChatGPT needs Actions (or a connector) — plain chat cannot call Flow alone.',
+  cli:'Log in once, then use <code>flow …</code> from any shell.',
+  curl:'Quick check that the key and environment work.',
+};
+
 export async function renderApiKeysTab(container){
   if(!container)return;
   const st={keys:[],envs:[],mode:'live'};
+  const {host,env}=ctx();
   container.innerHTML=`<div class="ak">
+    <ol class="ak-steps">
+      <li><strong>Create a key</strong> for the environment your agent should use (Read &amp; write for edits).</li>
+      <li><strong>Copy the setup</strong> for Claude, Cursor, Codex, ChatGPT, or paste the DIY prompt into any agent chat.</li>
+      <li><strong>Ask the agent</strong> to list environments or cards — if that works, you are connected.</li>
+    </ol>
+    <p class="acct-muted ak-ctx">This app: <code>${esc(host)}</code> · current env <code>${esc(env)}</code> · skill <code>${esc(host)}/skill.md</code></p>
     <div class="acct-sec"><h3 class="acct-sub">Your keys</h3>${hint('API keys let scripts, the CLI and AI agents (MCP) read or change one of your environments without signing in.','API keys')}<span class="acct-sec-a"><button type="button" class="txt ak-add" id="akNewBtn" data-ak-toggle aria-expanded="${ui.form}" aria-controls="akForm">${svg('plus')}<span>New key</span></button></span></div>
     <div class="ak-slot" data-ak-reveal></div>
     <form class="ak-form" id="akForm" data-ak-form${ui.form?'':' hidden'}>
@@ -107,7 +216,7 @@ export async function renderApiKeysTab(container){
     </form>
     <div class="ak-slot" data-ak-err></div>
     <ul class="ak-list" data-ak-list></ul>
-    <div class="acct-sec acct-sec-disc"><h3 class="acct-sub"><button type="button" class="acct-disc" id="akUseBtn" data-ak-use aria-expanded="${ui.use}" aria-controls="akUse">${svg('chevron')}<span class="acct-disc-t">Use a key</span><span class="acct-disc-s">${SNIPPETS.map(([,n])=>esc(n)).join(' · ')}</span></button></h3></div>
+    <div class="acct-sec acct-sec-disc"><h3 class="acct-sub"><button type="button" class="acct-disc" id="akUseBtn" data-ak-use aria-expanded="${ui.use}" aria-controls="akUse">${svg('chevron')}<span class="acct-disc-t">Connect an agent</span><span class="acct-disc-s">${SNIPPETS.map(([,n])=>esc(n)).join(' · ')}</span></button></h3></div>
     <div class="ak-snips" id="akUse" data-ak-snips${ui.use?'':' hidden'}></div>
   </div>`;
   const root=container.firstElementChild,$=s=>root.querySelector(s);
@@ -130,7 +239,7 @@ export async function renderApiKeysTab(container){
     const s=SNIPPETS.find(([id])=>id===ui.snip)||SNIPPETS[0],focused=document.activeElement?.closest?.('[data-ak-snips]')?document.activeElement.id:'';
     $('[data-ak-snips]').innerHTML=`<div class="seg txt ak-tabs" role="radiogroup" aria-label="Snippet for">${SNIPPETS.map(([id,n])=>`<button type="button" role="radio" id="akSnip-${id}" data-ak-snip="${id}" aria-checked="${id===s[0]}" class="${id===s[0]?'on':''}">${n}</button>`).join('')}</div>
       <div class="ak-code"><pre id="akSnipCode" tabindex="0"><code>${esc(s[2](st.mode))}</code></pre><button type="button" class="txt ak-copy" id="akCopySnip" data-ak-copy-snip>${svg('copy')}<span>Copy</span></button></div>
-      <p class="acct-muted ak-hint">Replace <code>&lt;your-flow-host&gt;</code>, <code>&lt;your-key&gt;</code> and <code>&lt;environment-id&gt;</code>. Keep keys in environment variables or a secret manager, not in code.</p>`;
+      <p class="acct-muted ak-hint">${SNIP_HINT[s[0]]||''} Keep keys in environment variables or a secret manager, not in code. Replace <code>&lt;your-key&gt;</code> only.</p>`;
     if(focused)document.getElementById(focused)?.focus();
   };
   const showErr=msg=>{
@@ -141,7 +250,7 @@ export async function renderApiKeysTab(container){
   };
   const showKey=(key,k)=>{
     const slot=$('[data-ak-reveal]');slot.innerHTML=`<div class="ak-new" role="status">
-      <div class="ak-warn">${svg('warn',16)}<div><strong>Copy “${esc(k.name)}” now. You won't see this key again.</strong><span>Only its prefix is kept for the list. If you lose it, revoke it and create a new one.</span></div></div>
+      <div class="ak-warn">${svg('warn',16)}<div><strong>Copy “${esc(k.name)}” now. You won't see this key again.</strong><span>Only its prefix is kept for the list. If you lose it, revoke it and create a new one. Then open <em>Connect an agent</em> below for a setup snippet or DIY prompt.</span></div></div>
       <div class="ak-keyrow"><input class="ak-key" readonly value="${esc(key)}" aria-label="New API key" spellcheck="false"><button type="button" class="txt primary ak-copy" data-ak-copy-key>${svg('copy')}<span>Copy</span></button></div>
       <div class="ak-actions"><button type="button" class="txt" data-ak-done>I've saved it</button></div></div>`;
     const box=slot.firstElementChild;reveal(box);
@@ -207,7 +316,7 @@ export async function renderApiKeysTab(container){
   });
 
   drawSnips();
-  enter(root,['.ak-form .ak-f','.acct-sec-disc','.ak-snips']);
+  enter(root,['.ak-steps','.ak-form .ak-f','.acct-sec-disc','.ak-snips']);
   const load=Promise.all([
     api('GET','/api/keys'),
     fetch('/api/environments',{cache:'no-store'}).then(r=>r.ok?r.json():{environments:[]}).catch(()=>({environments:[]})),
@@ -215,7 +324,8 @@ export async function renderApiKeysTab(container){
     if(!root.isConnected)return;
     st.keys=k.keys||[];st.mode=k.mode==='test'?'test':'live';st.envs=e.environments||[];
     envSel.insertAdjacentHTML('beforeend',st.envs.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(''));
-    if(ui.draft.env&&[...envSel.options].some(o=>o.value===ui.draft.env))envSel.value=ui.draft.env;
+    const prefer=ui.draft.env||currentEnv();
+    if(prefer&&[...envSel.options].some(o=>o.value===prefer))envSel.value=prefer;
     drawList();drawSnips();enter(list,['.ak-row']);
   }).catch(e=>{if(root.isConnected){list.innerHTML=empty;showErr(e.message)}});
   return busy(list,load,{rows:3,rowHeight:44});

@@ -28,9 +28,11 @@ Resources:
 
 ## Get an API key
 
-Create a key wherever the API-key work puts it in the app (that work is separate from this branch). Keys start
-with `flow_`. Anyone who has your key can act as you, so treat it like a password. Revoke a key in the
-same place.
+In the app: **Settings › Connect**. Create a key (they start with `flow_`), copy it once, then use
+**Connect an agent** for Claude Code, Claude Desktop, Cursor, Codex, ChatGPT, the CLI, curl, or a
+DIY prompt you can paste into any agent chat. Host and environment id are filled from the open app;
+only the key is a placeholder. Anyone who has your key can act as you, so treat it like a password.
+Revoke a key on the same tab.
 
 ## Claude Code
 

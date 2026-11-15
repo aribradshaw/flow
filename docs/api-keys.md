@@ -1,7 +1,10 @@
 # API keys (card #45)
 
-Settings › API keys lets each user create keys for **one of their environments** (or all of them) so
-scripts, the CLI and AI agents (MCP) can use Flygon Flow without a browser session.
+Settings › Connect lets each user create keys for **one of their environments** (or all of them) so
+scripts, the CLI and AI agents (MCP) can use Flygon Flow without a browser session. The tab shows a
+short how-to, fills in the current host and environment id, and offers copy-paste setup for Claude
+Code, Claude Desktop, Cursor, Codex, ChatGPT (Custom GPT Actions), the CLI, curl, plus a DIY prompt
+to paste into any agent chat.
 
 | Piece | File |
 | --- | --- |
@@ -61,12 +64,13 @@ scripts, the CLI and AI agents (MCP) can use Flygon Flow without a browser sessi
   still apply `canRead`/`canWrite` (or the workspace owner check) with `{email: auth.user.email}`, so
   a key stops working for an environment its owner no longer owns, or that was archived.
 - **`*` means "all environments the owner can access at request time"**, not a fixed list.
-- **Snippets use placeholders only**: `https://<your-flow-host>`, `flow_live_<your-key>` and
-  `<environment-id>`. The real key never appears in them, so screenshots of the tab are safe. The new
-  key's box clears its input before it animates away.
-- **Assumed paths:** `/api/v1/...` for the REST API, `/mcp` (streamable HTTP) for MCP, and `flow ...`
-  for the CLI command. They live in one array, `SNIPPETS` in `public/apikeys.js`. Adjust them there
-  if the /api/v1, MCP or CLI work picks different names.
+- **Snippets fill host and environment from the open app** (`location.origin` and `currentEnv()`),
+  and keep a key placeholder only (`flow_live_<your-key>` / `flow_test_<your-key>`). The real key
+  never appears in them, so screenshots of the tab are safe. The new key's box clears its input
+  before it animates away.
+- **Assumed paths:** `/api/v1/...` for the REST API, `/mcp` (streamable HTTP) for MCP,
+  `/skill.md` for the agent skill, and `flow ...` for the CLI. They live in one array, `SNIPPETS` in
+  `public/apikeys.js`. Adjust them there if the /api/v1, MCP or CLI work picks different names.
 
 ## Integrated (2026-10-29)
 Mounted in `server.mjs`: `/api/v1` (REST + `/api/v1/openapi.json`), `/api/keys` (Settings › API keys) and `/mcp`. Both `/api/v1` and `/mcp` take `Authorization: Bearer flow_…` keys or the owner token (`FLOW_SYNC_TOKEN`); the browser session also works for `/api/v1` from the app's own origin. A key only reaches the environment it was made for (`*` = all the owner's) and only its scopes; writes need `write`. The API works on each environment's own stored data, so linked copies of shares (docs/sharing.md) never appear through it. End-to-end checks: `test/sharing-e2e.test.mjs` (API keys, /api/v1 and /mcp on the real server).
@@ -130,7 +134,7 @@ if(!w||w.archivedAt||!sameEmail(w.owner,user.email)){json(res,404,{error:'Not fo
 
 ```js
 import {renderApiKeysTab} from './apikeys.js';
-const TABS=[['account','Account'],['environment','Environment'],['apikeys','API keys'],['shortcuts','Shortcuts'],['devlog','DevLog']];
+const TABS=[['account','Account'],['environment','Environment'],['apikeys','Connect'],['shortcuts','Shortcuts'],['devlog','DevLog']];
 // in drawTab(), next to the devlog branch:
 if(tab==='devlog'){panel.innerHTML='<div class="hp-log"></div>';await mountDevlog(panel.firstChild)}
 else if(tab==='apikeys')await renderApiKeysTab(panel);

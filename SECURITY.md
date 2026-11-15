@@ -21,6 +21,6 @@ Only the latest release on `main` gets security fixes. Versions are listed in `p
 
 ## Handling secrets
 
-- API keys (`flow_…`) are personal and scoped. Revoke one in Settings if it leaks.
+- API keys (`flow_…`) are personal and scoped. Revoke one in Settings › Connect if it leaks.
 - `.env` is never committed. CI runs without secrets.
 - Report any secret you find in this repository's history through the private channel above.

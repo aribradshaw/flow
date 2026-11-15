@@ -526,11 +526,25 @@ async function invitesApi(req,res){
 function previewOf(db,share){
   const sc=core.resolveScope(db,share),nodes=new Map((db.charts||[]).filter(c=>!share.scope?.chartId||c.id===share.scope.chartId).flatMap(c=>c.nodes||[]).map(n=>[n.id,n]));
   const items=new Map((db.timeline||[]).map(i=>[i.id,i])),cards=new Map((db.devops?.cards||[]).map(c=>[c.id,c]));
-  return {nodes:sc.nodeIds.map(id=>nodes.get(id)).filter(Boolean).map(n=>({id:n.id,name:n.name,type:n.type})),
+  const out={nodes:sc.nodeIds.map(id=>nodes.get(id)).filter(Boolean).map(n=>({id:n.id,name:n.name,type:n.type})),
     stubs:sc.stubs.map(t=>({id:t.nodeId,name:t.name,type:t.nodeType,owns:nodes.get(t.ownsNodeId)?.name||'',edge:t.type,percent:t.percent})),
     projects:(db.projects||[]).filter(p=>sc.projectIds.includes(p.id)).map(p=>({id:p.id,name:p.name,color:p.color})),
     items:sc.itemIds.map(id=>items.get(id)).filter(Boolean).map(i=>({id:i.id,title:i.title,kind:i.kind,start:i.start})),
-    cards:sc.cardIds.map(id=>cards.get(id)).filter(Boolean).map(c=>({id:c.id,number:c.number,title:c.title}))};
+    cards:sc.cardIds.map(id=>cards.get(id)).filter(Boolean).map(c=>({id:c.id,number:c.number,title:c.title,project:c.project}))};
+  // Counts for Settings › Sharing rows (and the Share dialog tip) without a second round-trip.
+  out.summary={nodes:out.nodes.length,stubs:out.stubs.length,projects:out.projects.length,items:out.items.length,cards:out.cards.length};
+  // Mind-map-only scopes often surprise people: co-owner stubs show on the chart, but DevOps cards
+  // only follow projects linked by entity id. Call that out so the owner can widen to the whole env.
+  const kind=share.scope?.kind;
+  out.tip=kind==='environment'?null
+    :!out.nodes.length&&!out.projects.length&&!out.cards.length?'Nothing matches this scope yet.'
+    :out.nodes.length&&!out.cards.length?'Mind map cards are in this share, but no DevOps cards. Board cards only come along when their project’s entity is one of those mind map cards. To share the whole board, pick “The whole environment”.'
+    :out.nodes.length&&out.stubs.length&&out.cards.length?'Co-owner stubs (name only) do not bring their own DevOps cards. Widen to the whole environment if they should see the full board.'
+    :null;
+  return out;
+}
+function shareSummary(db,share){
+  const p=previewOf(db,share);return {scopeLabel:scopeLabel(db,share.scope),summary:p.summary,tip:p.tip};
 }
 function scopeLabel(db,scope){
   const n=id=>(db?.charts||[]).flatMap(c=>c.nodes||[]).find(x=>x.id===id)?.name||'a card';
@@ -554,17 +568,19 @@ async function sharesApi(req,res){
   // The user's own (not archived) environment, or null.
   const ownEnv=async id=>{if(!ENV_ID.test(id||''))return null;const w=await workspaces.get(id);return w&&!w.archivedAt&&sameEmail(w.owner,user.email)?w:null};
   const ownShare=async id=>{const s=await shares.get(id);return s&&sameEmail(s.ownerEmail,user.email)?s:null};
-  const view=async s=>{const home=await workspaces.get(s.ownerEnv);return {...s,ownerEnvName:home?.name||home?.data?.environment?.name||'',scopeLabel:scopeLabel(home?.data,s.scope)}};
+  const view=async s=>{const home=await workspaces.get(s.ownerEnv);const sum=home?.data?shareSummary(home.data,s):{scopeLabel:scopeLabel(null,s.scope),summary:null,tip:null};
+    return {...s,ownerEnvName:home?.name||home?.data?.environment?.name||'',scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}};
   try{
     if(path==='/api/shares/preview'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
       if(!core.validScope(b.scope))return json(res,400,{error:'Pick what to share'});
-      json(res,200,{preview:previewOf(w.data,{scope:b.scope}),label:scopeLabel(w.data,b.scope)});
+      const preview=previewOf(w.data,{scope:b.scope});
+      json(res,200,{preview,label:scopeLabel(w.data,b.scope)});
     });return true}
     if(path==='/api/shares'&&req.method==='GET'){
       const w=await ownEnv(u.searchParams.get('env'));if(!w)return nf(),true;
       const list=await shares.list({ownerEnv:w.envId});
-      json(res,200,{shares:list.map(s=>({...s,scopeLabel:scopeLabel(w.data,s.scope)})),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId))});return true;
+      json(res,200,{shares:list.map(s=>{const sum=shareSummary(w.data,s);return {...s,scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}}),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId))});return true;
     }
     if(path==='/api/shares'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();

@@ -663,6 +663,16 @@ dialog.share-modal{width:min(560px,92vw);max-height:88vh}
 .sh-msg{margin:10px 0 0;font-size:12px;min-height:0}.sh-msg:empty{display:none}.sh-msg.ok{color:var(--accent)}.sh-msg.err{color:var(--danger)}
 .share-modal .ask-b{margin-top:12px}
 .sh-sub{display:block;font-style:normal;font-size:11px;color:var(--muted);font-weight:400}
+.sh-counts{margin-top:2px}
+.sh-tip{margin-top:4px;color:#6b4a00}
+.sh-lead{margin:0 0 10px;line-height:1.45}
+.sh-pv-tip{display:flex;gap:8px;align-items:flex-start;margin:8px 0;padding:8px 10px;border:1px solid #e8c98f;border-radius:8px;background:#fdf6e7;color:#6b4a00;font-size:12px;line-height:1.45}
+.sh-pv-tip .i{flex:none;margin-top:1px;color:var(--warn)}
+.sh-acts{display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.sh-out-row{align-items:flex-start}
+.sh-out-main{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 12px;width:100%}
+.sh-out-main .env-n{flex:1;min-width:160px}
+.sh-out-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;justify-content:flex-end}
 .sh-in li{flex-wrap:wrap}.sh-in-h{display:flex;align-items:center;gap:8px;width:100%}.sh-in-h .env-n{flex:1}
 .sh-in form{width:100%}
 
