@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- DevOps › Recently deleted (↺ in the board toolbar) lists every card removed in the last 180 days, whether by Delete, undo, a restored snapshot, an agent or the API, and restores it with its number (or the next one if taken). Agents and scripts use `cards.deleted` and `cards.restore` (API, MCP, CLI).
+
 - Settings › Sharing shows mind map / project / DevOps counts per share, warns when a mind map share includes no board cards, and offers one-click Widen to whole environment so people get the full board (not only a subtree).
 
 - Settings › Connect (was API keys) walks you through linking Claude, Cursor, Codex or ChatGPT: host and environment filled in, copy-paste setup per client, and a DIY prompt for any agent chat.

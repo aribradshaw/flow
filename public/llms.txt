@@ -59,6 +59,8 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [cards.create](/docs/cards.html#op-cards-create): `POST /api/v1/envs/{env}/cards` (write). Create a DevOps card
 - [cards.update](/docs/cards.html#op-cards-update): `PATCH /api/v1/envs/{env}/cards/{card}` (write). Update a DevOps card
 - [cards.move](/docs/cards.html#op-cards-move): `POST /api/v1/envs/{env}/cards/{card}/move` (write). Move a DevOps card
+- [cards.deleted](/docs/cards.html#op-cards-deleted): `GET /api/v1/envs/{env}/deleted-cards` (read). List recently deleted cards
+- [cards.restore](/docs/cards.html#op-cards-restore): `POST /api/v1/envs/{env}/deleted-cards/{entry}/restore` (write). Restore a deleted card
 
 ## API: Labels
 

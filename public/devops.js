@@ -9,6 +9,7 @@ import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,commit,save} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,sortCards} from './devops-core.js';
+import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
@@ -205,6 +206,7 @@ function toolbar(n){
     ${ib('check',ui.hideDone?'Show Done':'Hide Done',{cls:ui.hideDone?'on':'',attrs:'data-dv="hideDone"'})}
     <span class="dv-count">${n} card${n===1?'':'s'}</span>
     ${active?`<button type="button" class="txt" data-dv="clear">Clear</button>`:''}<span class="sp"></span>
+    ${ib('undo','Recently deleted · restore a card',{attrs:'data-dv="deleted"'})}
     ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>`;
 }
 // Agents a card is delegated to, built once per board render (cardAgents).
@@ -275,6 +277,7 @@ function action(name,b){
     hideDone(){ui.hideDone=!ui.hideDone;keepUi();render()},
     more(){const col=b.dataset.col,list=b.closest('.dcol-b');b.disabled=true;skeletonAppend(list,3);setTimeout(()=>{shown.set(col,(shown.get(col)||PAGE)+PAGE);render()},180)},
     clear(){ui=FILTERS();keepUi();render()},
+    deleted:()=>openDeleted(b),
   })[name]?.();
 }
 // A new card inherits the active filters so it stays visible.
@@ -291,7 +294,34 @@ function rename(colId){
 }
 function remove(id){
   if(linkOf(card(id))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
-  change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null});
+  change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null},{deletedCards:[id]});
+}
+
+// Recently deleted: every card removed from this environment (on the board, by undo, by a snapshot
+// restore, or through the API and MCP), kept on the server (GET .../deleted-cards, cards.restore).
+const VIA={board:'Deleted on the board',undo:'Undo or redo',snapshot:'Snapshot restore',save:'Workspace save',api:'API',mcp:'MCP',relay:'Local relay'};
+async function deletedApi(path,method='GET'){
+  const r=await fetch(`/api/v1/envs/${encodeURIComponent(currentEnv())}/deleted-cards${path}`,{method,cache:'no-store',headers:method==='GET'?{}:{'Content-Type':'application/json'},body:method==='GET'?undefined:'{}'});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'The server could not be reached');return d;
+}
+function openDeleted(from){
+  let list=null,err='';
+  const m=detailModal({cls:'deleted-modal',label:'Recently deleted cards',from,events:{click:async e=>{
+    if(e.target.closest('[data-del-close]')){m.close();return}
+    const b=e.target.closest('[data-restore]');if(!b)return;
+    b.disabled=true;
+    try{const d=await deletedApi(`/${encodeURIComponent(b.dataset.restore)}/restore`,'POST');toast(d.message,d.renumbered);await refresh();await load()}
+    catch(x){toast(x.message,true);b.disabled=false}
+  }}});
+  const row=e=>{const who=[VIA[e.via]||e.via,e.actor?`key “${e.actor}”`:'',e.deletedBy].filter(Boolean).join(' · ');
+    return `<li class="del-row${e.restoredAt?' done':''}"><div class="del-t"><strong>${e.number!=null?`#${e.number} `:''}${esc(e.title||'Untitled')}</strong>
+      <span class="acct-muted">${esc(new Date(e.deletedAt).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))} · ${esc(who)} · rev ${e.fromRev}</span></div>
+      ${e.restoredAt?`<span class="acct-muted">Restored${e.restoredNumber!=null?` as #${e.restoredNumber}`:''}</span>`:`<button type="button" class="txt primary" data-restore="${esc(e.id)}">Restore</button>`}</li>`};
+  const paint=()=>{m.body.innerHTML=`<div class="ihead cd-h"><span class="k">${icon('undo')}</span><strong>Recently deleted</strong><span class="sp"></span><button type="button" class="ib" data-del-close aria-label="Close">${icon('x')}</button></div>
+    <div class="ibody del-body"><p class="acct-muted">Cards removed in the last 180 days, by anyone or anything: Delete, undo, a restored snapshot, an agent or the API. Restore puts a card back with its number, or the next number if that one is taken.</p>
+    ${err?`<p class="sh-msg err">${esc(err)}</p>`:!list?'<p class="acct-muted">Loading…</p>':list.length?`<ul class="del-list">${list.map(row).join('')}</ul>`:'<p class="acct-muted">Nothing has been deleted.</p>'}</div>`};
+  async function load(){try{list=(await deletedApi('?limit=100')).items;err=''}catch(x){err=x.message==='Environment not found'?'Save this environment to the server to keep deleted cards.':x.message}paint()}
+  paint();load();
 }
 
 // Opened from the chart (a person or entity) or the timeline (a linked card).

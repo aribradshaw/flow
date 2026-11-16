@@ -19,6 +19,14 @@ Some moves need a confirmation or a decision. The app asks for it, and API calle
 
 Labels have a section (`priority`, `urgency`, `area`, `topic`, `other`) and a colour key. Due dates turn amber two days before they are due and red once they are overdue.
 
+## Recently deleted
+
+Every card that leaves the board is recorded on the server first, whatever removed it: **Delete** on the board, undo or redo, a snapshot restore or other whole-workspace save from a browser, or the API and MCP. The record holds the whole card as it was, who removed it (`deletedBy`; `via`: `board`, `undo`, `snapshot`, `save` for a tab running older code, `api`, `mcp`; and `actor`, the API key's name), when, the last revision it was in (`fromRev`) and the environment. Records are kept for 180 days, apart from the revision history, so a card can be restored long after its revision has rolled off.
+
+`cards.deleted` lists them, newest first (`q`: `#12` or title text; `pending: true` leaves out restored ones). `cards.restore` puts one back with the same id, column, fields and agent links. It keeps its number unless another card has taken it; then it gets the next number, `renumbered` is `true` and `message` says so. In the app, the ↺ button in the board's toolbar opens **Recently deleted**, with a Restore button per card.
+
+A save that removes cards without a Delete (an undo, a restored snapshot) still goes through, so the other changes in it are not lost; the answer lists them as `removedCards`, and the app says they can be restored from Recently deleted. A save from an older revision is refused with `409` as before, and the browser merges it, which keeps cards added meanwhile.
+
 ## Board order and column sorts
 
 Board order is the order of the cards in the board (`cards.list` returns it); dragging a card within a column changes it. In the app, each column header has a sort menu: Manual (board order), newest or oldest first, recently updated, due date, points, priority (Urgency labels, then Priority labels, in the order they are listed) or card number and title. A sort is a view for one person: it is kept in their preferences, never in the workspace, and it does not change the board order or any card. Cards missing the sorted value (no due date, no points, no priority label) go last, and ties keep board order. Reordering inside a sorted column is refused until it is back on Manual; moving a card into a sorted column puts it at the end of the board order.

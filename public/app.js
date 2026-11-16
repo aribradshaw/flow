@@ -694,6 +694,8 @@ function render(){
   if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
 store.onChange=render;
+// A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
+store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 setPeopleSource(()=>peopleOf(store.db||{}));
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());

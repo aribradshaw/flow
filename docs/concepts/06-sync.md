@@ -7,7 +7,8 @@ The server is the source of truth. Each environment's workspace is stored with a
 - A save that would drop most of a large workspace is refused with `422`, unless it is a deliberate load or replace.
 - AgentFlow runners belong to the server: only `runners.report` changes them. A `PUT` keeps the runners as they last reported (their models and scheduled jobs), even when the saved copy is missing them or holds an older report, such as a tab still running an older version of Flow. The answer then includes `runnersKept: true`, and the client reads the workspace again.
 - Card numbers only grow. A `PUT` with a lower `devops.nextNumber` keeps the server's and answers `countersKept: true`, so the client reads the workspace back.
-- Every write first keeps the previous revision in the history. Postgres keeps it in `flygon_flow_workspace_history`; without Postgres it goes to `BACKUP_DIR/workspaces/history/`.
+- Every write first keeps the previous revision in the history. Postgres keeps it in `flygon_flow_workspace_history`; without Postgres it goes to `BACKUP_DIR/workspaces/history/`. The last 100 revisions are kept.
+- A write that removes DevOps cards also records each card in `flygon_flow_card_deletes` (or `BACKUP_DIR/workspaces/deleted/`), in the same transaction, for 180 days (see Recently deleted on the DevOps board). A `PUT` may send `intent: {deleted: [card ids deleted on purpose], undo: true|false}` so the record says how each card left; other removed cards come back as `removedCards`.
 - Open tabs pick up remote changes every 20 seconds, and offline edits upload when the connection comes back.
 
 API writes go through the same revision check, so an agent's change and a human's edit never silently overwrite each other.

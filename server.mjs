@@ -401,7 +401,7 @@ async function workspace(req,res){
         if(local){
           const r=await relay(req,raw);
           // Keep this computer's copy current too: it is the offline fallback.
-          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email})}}catch{}}
+          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email,source:{via:'relay'}})}}catch{}}
           if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return}
           json(res,503,{error:'Offline: the server could not be reached',offline:true});return;
         }
@@ -422,7 +422,11 @@ async function workspace(req,res){
         // Card numbers only grow. A browser that sent a lower one reads the workspace back (below).
         const counted=keepCounters(w?.data,kept.data);
         const data={...counted,environment:{...(kept.data.environment||{}),id:envId,ownerEmail:owner}};
-        const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80)});
+        // Why cards left (lib/workspaces.mjs records each one): deleted on the board, an undo, or else a
+        // snapshot (a restored or merged whole workspace). Tabs running older code send no intent: 'save'.
+        const it=body.intent&&typeof body.intent==='object'&&!Array.isArray(body.intent)?body.intent:null;
+        const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
+        const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source});
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
         // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
@@ -431,7 +435,9 @@ async function workspace(req,res){
         // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
         if(!user.token)await applyRecipientSave(envId,user,body.data,base).catch(e=>console.error('share write-back failed',e?.message));
         const v=user.token?{shared:''}:await withShares(envId,user,data);
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{})});
+        // Cards removed other than by Delete: the browser says where to restore them (DevOps › Recently deleted).
+        const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;
@@ -700,7 +706,7 @@ async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key),envCheck:keyEnvCheck}),
+    ctx:user=>({user,store:apiStore(user.key),envCheck:keyEnvCheck,via:'mcp'}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 

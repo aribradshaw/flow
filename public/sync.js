@@ -11,7 +11,9 @@ import {merge3,same,size,isSeed,fieldBase,clashes,withHeld} from './sync-core.js
 const SKEY='flygon-flow-sync-v1',DEBOUNCE=700,POLL=20000;
 // shared: the server's signature of shares placed in this environment (owner edits change it, not rev).
 // held: fields a merge kept from this copy over someone else's change (sync-core clashes), sent once.
-let st={env:null,rev:0,base:null,dirty:false,shared:'',held:null};
+// intent: why the unsent edits removed cards, for the server's deleted-cards record: {deleted:[card ids
+// deleted on the board], undo:true if an undo or redo is among them}. Other removals count as a snapshot.
+let st={env:null,rev:0,base:null,dirty:false,shared:'',held:null,intent:null};
 try{Object.assign(st,JSON.parse(localStorage.getItem(SKEY))||{})}catch{}
 const persist=()=>{try{localStorage.setItem(SKEY,JSON.stringify(st))}catch{}};
 let via='',timer=0,busy=false,again=false,edits=0,backoff=0,stopped=false,allowShrink=false;
@@ -24,7 +26,9 @@ const take=(data,rev,env,shared='',conflicts)=>{keepConflicts(conflicts);adoptRe
 const hold=(base,local,remote)=>{const c=clashes(base,local,remote);if(Object.keys(c).length)st.held=withHeld(st.held,c)};
 
 export function startSync(){
-  store.onSaved=({replace}={})=>{st.dirty=true;edits++;if(replace)allowShrink=true;persist();schedule(DEBOUNCE)};
+  store.onSaved=({replace,undo,deletedCards}={})=>{st.dirty=true;edits++;if(replace)allowShrink=true;
+    const i=st.intent||{deleted:[],undo:false};if(undo)i.undo=true;if(Array.isArray(deletedCards))i.deleted=[...new Set([...i.deleted,...deletedCards])].slice(-500);st.intent=i;
+    persist();schedule(DEBOUNCE)};
   // Local edits made while the page was closed (or by another tool) count as unsynced.
   if(st.base&&!same(store.db,st.base))st.dirty=true;
   pull();
@@ -77,7 +81,7 @@ export async function pull(){
     // Both sides have changes: merge, keep both copies (server history + disk backup), upload.
     const merged=merge3(st.env===d.env?st.base??undefined:undefined,local,d.data);
     if(st.env===d.env)hold(st.base,local,d.data);
-    keepConflicts(d.conflicts);adoptRemote(merged);st={env:d.env,rev:d.rev,base:d.data,dirty:!same(merged,d.data),shared:d.shared||'',held:st.env===d.env?st.held:null};persist();
+    keepConflicts(d.conflicts);adoptRemote(merged);st={env:d.env,rev:d.rev,base:d.data,dirty:!same(merged,d.data),shared:d.shared||'',held:st.env===d.env?st.held:null,intent:st.env===d.env?st.intent:null};persist();
     if(st.dirty)schedule(0);else status('ok',`Up to date with ${via||'the server'} · rev ${d.rev} · ${time()}`);
   }finally{busy=false;if(again){again=false;schedule(0)}}
 }
@@ -95,16 +99,19 @@ async function push(){
       const base=st.base?withHeld(fieldBase(st.base,sent),st.held):null;
       status('saving','Saving to the server…');
       let r;
-      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,...(base?{fieldBase:base}:{}),...(allowShrink?{allowShrink:true}:{})})});}
+      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,intent:st.intent||{deleted:[],undo:false},...(base?{fieldBase:base}:{}),...(allowShrink?{allowShrink:true}:{})})});}
       catch{r=null}
       const d=r?await r.json().catch(()=>({})):{};
-      if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.held=null;st.dirty=edits!==e0;
+      if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.held=null;st.dirty=edits!==e0;if(!st.dirty)st.intent=null;
         // Shared cards: the server re-projects them (refused edits come back), so read the result.
         if(d.shared){st.shared='';setTimeout(pull,400)}
         // The server kept runners as they reported themselves (this copy was missing some), or a higher
         // next card number than this copy had: read them back.
         if(d.runnersKept||d.countersKept){st.shared='\u0000';setTimeout(pull,400)}
-        persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;return}
+        persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;
+        // Cards this save removed other than by Delete (an undo, a restored snapshot): say where to get them back.
+        if(Array.isArray(d.removedCards)&&d.removedCards.length)store.onRemoved?.(d.removedCards);
+        return}
       if(r?.status===409&&d.data){
         const merged=merge3(st.base??undefined,store.db,d.data);
         hold(st.base,store.db,d.data);

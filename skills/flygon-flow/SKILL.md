@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (38)
+## Operations (40)
 
 ### Environments
 
@@ -84,6 +84,8 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | `cards.create` | `cards_create` | `POST /api/v1/envs/{env}/cards` | write | Create a DevOps card |
 | `cards.update` | `cards_update` | `PATCH /api/v1/envs/{env}/cards/{card}` | write | Update a DevOps card |
 | `cards.move` | `cards_move` | `POST /api/v1/envs/{env}/cards/{card}/move` | write | Move a DevOps card |
+| `cards.deleted` | `cards_deleted` | `GET /api/v1/envs/{env}/deleted-cards` | read | List recently deleted cards |
+| `cards.restore` | `cards_restore` | `POST /api/v1/envs/{env}/deleted-cards/{entry}/restore` | write | Restore a deleted card |
 
 ### Labels
 
@@ -395,6 +397,28 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"column":"done","approve":true}'
+```
+
+### Recently deleted
+
+MCP: call `cards_deleted` with `{"env":"default-workspace"}`
+
+```sh
+flow cards deleted --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Restore #12
+
+MCP: call `cards_restore` with `{"env":"default-workspace","entry":"#12"}`
+
+```sh
+flow cards restore --input '{"env":"default-workspace","entry":"#12"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/%2312/restore" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 
 ### Labels

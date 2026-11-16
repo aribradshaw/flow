@@ -81,7 +81,7 @@ test('registry: every operation is documented, has examples and schemas, and the
     assert.doesNotThrow(()=>JSON.stringify(o),`${o.id}: plain data`);
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
-    'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','labels.list','labels.create','search',
+    'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
     'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
@@ -464,6 +464,83 @@ test('AgentFlow: a full workspace refuses new agents and workflows instead of dr
   r=await op('workflows.create',{env:ENV,name:'One too many'});
   assert.deepEqual([r.status,r.body.code],[409,'too_many_workflows']);
   assert.equal((await store.get(ENV)).data.agentflow.agents.length,500);
+});
+
+test('deleted cards: an agent creates a card, a stale snapshot drops it, and it is listed and restored with its number',async()=>{
+  // A browser holds a snapshot of the workspace (an undo step) from before the agent's card.
+  const snap=structuredClone((await store.get(ENV)).data);
+  const made=await op('cards.create',{env:ENV,title:'Made by an agent',description:'Original payload',checklist:[{text:'Step one'}]});
+  assert.equal(made.status,201);const num=made.body.card.number;
+  // A stale save from an older revision is refused (409 in the browser path; here the store reports it).
+  const old=(await store.get(ENV)).rev-1;
+  assert.equal((await store.put(ENV,{baseRev:old,data:snap,by:OWNER.email,source:{via:'undo'}})).conflict,true);
+  assert.equal((await op('cards.deleted',{env:ENV,q:'#'+num})).body.items.length,0,'a refused save records nothing');
+  // Sent from the current revision it passes the check and drops the card: recorded, not lost.
+  const w=await store.get(ENV);
+  const put=await store.put(ENV,{baseRev:w.rev,data:snap,by:OWNER.email,owner:w.owner,name:w.name,source:{via:'undo'}});
+  assert.ok(put.ok);assert.equal(put.deleted.length,1);
+  assert.ok(!((await store.get(ENV)).data.devops?.cards||[]).some(c=>c.number===num),'the card is gone from the board');
+  assert.equal((await op('cards.get',{env:ENV,card:num})).status,404);
+  const list=await op('cards.deleted',{env:ENV,pending:true});
+  assert.equal(list.status,200);
+  const e=list.body.items.find(x=>x.number===num);
+  assert.ok(e,'listed under recently deleted');
+  assert.equal(e.via,'undo');assert.equal(e.deletedBy,OWNER.email);assert.equal(e.env,ENV);
+  assert.equal(e.fromRev,w.rev);assert.equal(e.rev,w.rev+1);assert.equal(e.restoredAt,null);
+  assert.equal(e.card.description,'Original payload');assert.equal(e.card.checklist[0].text,'Step one');
+  assert.equal((await op('cards.deleted',{env:ENV,q:'made by'})).body.items[0].id,e.id,'title search');
+  // Restore by number: same id and number, back on the board.
+  const r=await op('cards.restore',{env:ENV,entry:'#'+num});
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.card.id,made.body.card.id);assert.equal(r.body.card.number,num);assert.equal(r.body.renumbered,false);assert.equal(r.body.message,`Restored #${num}.`);
+  assert.equal((await op('cards.get',{env:ENV,card:num})).body.card.description,'Original payload');
+  // Twice is refused; the entry says what it became.
+  const again=await op('cards.restore',{env:ENV,entry:e.id});
+  assert.equal(again.status,409);assert.equal(again.body.code,'already_restored');
+  const done=(await op('cards.deleted',{env:ENV})).body.items.find(x=>x.id===e.id);
+  assert.ok(done.restoredAt);assert.equal(done.restoredNumber,num);assert.equal(done.restoredBy,OWNER.email);
+  assert.ok(!(await op('cards.deleted',{env:ENV,pending:true})).body.items.some(x=>x.id===e.id),'pending leaves restored ones out');
+  assert.equal((await op('cards.restore',{env:ENV,entry:'del_nope'})).body.code,'deleted_card_not_found');
+  // Read-only keys may list but not restore.
+  assert.equal((await op('cards.deleted',{env:ENV},{key:'flow_ro'})).status,200);
+  assert.equal((await op('cards.restore',{env:ENV,entry:e.id},{key:'flow_ro'})).status,403);
+  assert.equal((await op('cards.deleted',{env:'bob-env'})).status,404,"someone else's environment");
+});
+
+test('deleted cards: a restored card whose number was taken gets the next number and says so',async()=>{
+  const a=(await op('cards.create',{env:ENV,title:'Will be deleted'})).body.card;
+  // Remove it with a plain save, then (as before the numbers fix) another card takes its number.
+  let w=await store.get(ENV);
+  const d=structuredClone(w.data);d.devops.cards=d.devops.cards.filter(c=>c.id!==a.id);
+  d.devops.cards.push({...d.devops.cards[0],id:'k-reused',number:a.number,title:'Reused number'});
+  assert.ok((await store.put(ENV,{baseRev:w.rev,data:d,by:OWNER.email,owner:w.owner,name:w.name})).ok);
+  const e=(await op('cards.deleted',{env:ENV,q:'#'+a.number})).body.items.find(x=>x.cardId===a.id);
+  assert.equal(e.via,'save','no source given');
+  const r=await op('cards.restore',{env:ENV,entry:a.id});
+  assert.equal(r.status,200);assert.equal(r.body.renumbered,true);assert.equal(r.body.previousNumber,a.number);
+  assert.ok(r.body.card.number>a.number);assert.match(r.body.message,new RegExp(`Restored as #${r.body.card.number}: #${a.number} is now another card`));
+  const cards=(await store.get(ENV)).data.devops.cards;
+  assert.equal(cards.filter(c=>c.number===a.number).length,1,'numbers stay unique');
+  assert.equal((await op('cards.create',{env:ENV,title:'After'})).body.card.number,r.body.card.number+1,'the next number moves on');
+});
+
+test('deleted cards: API and MCP writes name the key; agent links come back on restore',async()=>{
+  const ctx={user:{...OWNER,key:{name:'Runner key'}},store,envCheck:envCheckFor(store),via:'mcp'};
+  // An earlier test fills the workspace with agents: use one that has room for another card.
+  const ag={agent:(await invoke('agents.list',{env:ENV,limit:200},ctx)).items.find(a=>a.cards.length<50)};assert.ok(ag.agent);
+  const c=(await invoke('cards.create',{env:ENV,title:'Delegated',agents:[ag.agent.id]},ctx)).card;
+  // An API write that drops a card (the registry has no card delete; a workspace-level change stands in).
+  let w=await store.get(ENV);const d=structuredClone(w.data);d.devops.cards=d.devops.cards.filter(x=>x.id!==c.id);
+  for(const a of d.agentflow.agents)a.cards=a.cards.filter(x=>x!==c.id);
+  await store.put(ENV,{baseRev:w.rev,data:d,by:OWNER.email,owner:w.owner,name:w.name,source:{via:'mcp',actor:'Runner key'}});
+  const e=(await invoke('cards.deleted',{env:ENV,q:'Delegated'},ctx)).items[0];
+  assert.equal(e.via,'mcp');assert.equal(e.actor,'Runner key');assert.deepEqual(e.card.agents,[ag.agent.id]);
+  const r=await invoke('cards.restore',{env:ENV,entry:e.id},ctx);
+  assert.deepEqual(r.card.agents,[ag.agent.id],'delegated to the agent again');
+  // The registry's own writes pass ctx.via and the key name on to the store.
+  const real=store.put.bind(store);let seen=null;store.put=async(id,args)=>{seen=args.source;return real(id,args)};
+  try{await invoke('cards.update',{env:ENV,card:r.card.number,description:'x'},ctx)}finally{store.put=real}
+  assert.deepEqual(seen,{via:'mcp',actor:'Runner key'});
 });
 
 test('every operation was exercised over HTTP',()=>{

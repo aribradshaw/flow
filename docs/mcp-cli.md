@@ -109,6 +109,8 @@ flow env use default-workspace          # the default --env
 flow cards list --project Lantern
 flow cards list --env default-workspace --project Lantern --json
 flow cards move 42 --column doing
+flow cards deleted --q '#42'         # recently deleted cards (180 days)
+flow cards restore '#42'             # put #42 back (or an entry id from cards deleted)
 flow cards --help                  # the commands in a group;  flow cards move --help: its flags
 flow refresh                       # refetch the API description
 ```

@@ -73,6 +73,14 @@ Some moves need a confirmation or a decision. The app asks for it, and API calle
 
 Labels have a section (`priority`, `urgency`, `area`, `topic`, `other`) and a colour key. Due dates turn amber two days before they are due and red once they are overdue.
 
+### Recently deleted
+
+Every card that leaves the board is recorded on the server first, whatever removed it: **Delete** on the board, undo or redo, a snapshot restore or other whole-workspace save from a browser, or the API and MCP. The record holds the whole card as it was, who removed it (`deletedBy`; `via`: `board`, `undo`, `snapshot`, `save` for a tab running older code, `api`, `mcp`; and `actor`, the API key's name), when, the last revision it was in (`fromRev`) and the environment. Records are kept for 180 days, apart from the revision history, so a card can be restored long after its revision has rolled off.
+
+`cards.deleted` lists them, newest first (`q`: `#12` or title text; `pending: true` leaves out restored ones). `cards.restore` puts one back with the same id, column, fields and agent links. It keeps its number unless another card has taken it; then it gets the next number, `renumbered` is `true` and `message` says so. In the app, the ↺ button in the board's toolbar opens **Recently deleted**, with a Restore button per card.
+
+A save that removes cards without a Delete (an undo, a restored snapshot) still goes through, so the other changes in it are not lost; the answer lists them as `removedCards`, and the app says they can be restored from Recently deleted. A save from an older revision is refused with `409` as before, and the browser merges it, which keeps cards added meanwhile.
+
 ### Board order and column sorts
 
 Board order is the order of the cards in the board (`cards.list` returns it); dragging a card within a column changes it. In the app, each column header has a sort menu: Manual (board order), newest or oldest first, recently updated, due date, points, priority (Urgency labels, then Priority labels, in the order they are listed) or card number and title. A sort is a view for one person: it is kept in their preferences, never in the workspace, and it does not change the board order or any card. Cards missing the sorted value (no due date, no points, no priority label) go last, and ties keep board order. Reordering inside a sorted column is refused until it is back on Manual; moving a card into a sorted column puts it at the end of the board order.
@@ -105,7 +113,8 @@ The server is the source of truth. Each environment's workspace is stored with a
 - A save that would drop most of a large workspace is refused with `422`, unless it is a deliberate load or replace.
 - AgentFlow runners belong to the server: only `runners.report` changes them. A `PUT` keeps the runners as they last reported (their models and scheduled jobs), even when the saved copy is missing them or holds an older report, such as a tab still running an older version of Flow. The answer then includes `runnersKept: true`, and the client reads the workspace again.
 - Card numbers only grow. A `PUT` with a lower `devops.nextNumber` keeps the server's and answers `countersKept: true`, so the client reads the workspace back.
-- Every write first keeps the previous revision in the history. Postgres keeps it in `flygon_flow_workspace_history`; without Postgres it goes to `BACKUP_DIR/workspaces/history/`.
+- Every write first keeps the previous revision in the history. Postgres keeps it in `flygon_flow_workspace_history`; without Postgres it goes to `BACKUP_DIR/workspaces/history/`. The last 100 revisions are kept.
+- A write that removes DevOps cards also records each card in `flygon_flow_card_deletes` (or `BACKUP_DIR/workspaces/deleted/`), in the same transaction, for 180 days (see Recently deleted on the DevOps board). A `PUT` may send `intent: {deleted: [card ids deleted on purpose], undo: true|false}` so the record says how each card left; other removed cards come back as `removedCards`.
 - Open tabs pick up remote changes every 20 seconds, and offline edits upload when the connection comes back.
 
 API writes go through the same revision check, so an agent's change and a human's edit never silently overwrite each other.
@@ -1876,6 +1885,321 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
       "a1"
     ]
   }
+}
+```
+
+### `cards.deleted`
+
+List recently deleted cards
+
+`GET /api/v1/envs/{env}/deleted-cards` · scope `read` · MCP tool `cards_deleted`
+
+Cards removed from the board in the last 180 days, newest first, whatever removed them: deleting on the board, undo, a snapshot restore or other whole-workspace save, or the API and MCP. Each entry holds the whole card as it was, who removed it (deletedBy, via and, for an API key or MCP client, actor: the key's name), when, and the last revision it was in (fromRev). They outlive the revision history. Bring one back with cards.restore. Filters: q ("#12" or title text); pending: true leaves out the ones already restored.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `q` | string |  |  |
+| `pending` | boolean |  |  |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes | Entry id, for cards.restore. |
+| `items[].env` | string | yes |  |
+| `items[].cardId` | string | yes |  |
+| `items[].number` | integer | null | yes |  |
+| `items[].title` | string | yes |  |
+| `items[].card` | object | yes | The card as it was when it was removed. |
+| `items[].deletedAt` | string | yes |  |
+| `items[].deletedBy` | string | yes | Email of the account that saved the change. |
+| `items[].via` | enum | yes | board (deleted on the board), undo (undo or redo), snapshot (a snapshot restore or other whole-workspace save from a browser), save (a save from an older browser tab), api, mcp, relay. One of `board`, `undo`, `snapshot`, `save`, `api`, `mcp`, `relay`. |
+| `items[].actor` | string | yes | The API key's name, when an API key or MCP client removed it. |
+| `items[].fromRev` | integer | yes | The last revision the card was in. |
+| `items[].rev` | integer | yes | The revision that removed it. |
+| `items[].restoredAt` | string | null | yes |  |
+| `items[].restoredBy` | string |  |  |
+| `items[].restoredNumber` | integer | null |  | The number it was restored as. |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Recently deleted**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "del_6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "env": "default-workspace",
+      "cardId": "k1",
+      "number": 12,
+      "title": "Build sign-up form",
+      "card": {
+        "id": "k1",
+        "number": 12,
+        "title": "Build sign-up form",
+        "description": "",
+        "column": "requests",
+        "project": "p1",
+        "labels": [
+          "l-high"
+        ],
+        "points": 3,
+        "due": "2026-11-15",
+        "assignees": [
+          {
+            "node": "cleo",
+            "role": "developer"
+          }
+        ],
+        "checklist": [
+          {
+            "id": "x1",
+            "text": "Email field",
+            "done": false
+          }
+        ],
+        "links": [],
+        "item": "i1",
+        "created": "2026-10-29T17:00:00.000Z",
+        "updated": "2026-10-29T17:00:00.000Z",
+        "moved": "2026-10-29T17:00:00.000Z",
+        "agents": [
+          "a1"
+        ]
+      },
+      "deletedAt": "2026-10-29T17:00:00.000Z",
+      "deletedBy": "owner@example.test",
+      "via": "snapshot",
+      "actor": "",
+      "fromRev": 61,
+      "rev": 62,
+      "restoredAt": null,
+      "restoredBy": "",
+      "restoredNumber": null
+    }
+  ],
+  "nextCursor": null,
+  "rev": 62
+}
+```
+
+**Example: Card #12, not yet restored**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards?q=%2312&pending=true" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "del_6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "env": "default-workspace",
+      "cardId": "k1",
+      "number": 12,
+      "title": "Build sign-up form",
+      "card": {
+        "id": "k1",
+        "number": 12,
+        "title": "Build sign-up form",
+        "description": "",
+        "column": "requests",
+        "project": "p1",
+        "labels": [
+          "l-high"
+        ],
+        "points": 3,
+        "due": "2026-11-15",
+        "assignees": [
+          {
+            "node": "cleo",
+            "role": "developer"
+          }
+        ],
+        "checklist": [
+          {
+            "id": "x1",
+            "text": "Email field",
+            "done": false
+          }
+        ],
+        "links": [],
+        "item": "i1",
+        "created": "2026-10-29T17:00:00.000Z",
+        "updated": "2026-10-29T17:00:00.000Z",
+        "moved": "2026-10-29T17:00:00.000Z",
+        "agents": [
+          "a1"
+        ]
+      },
+      "deletedAt": "2026-10-29T17:00:00.000Z",
+      "deletedBy": "owner@example.test",
+      "via": "snapshot",
+      "actor": "",
+      "fromRev": 61,
+      "rev": 62,
+      "restoredAt": null,
+      "restoredBy": "",
+      "restoredNumber": null
+    }
+  ],
+  "nextCursor": null,
+  "rev": 62
+}
+```
+
+### `cards.restore`
+
+Restore a deleted card
+
+`POST /api/v1/envs/{env}/deleted-cards/{entry}/restore` · scope `write` · MCP tool `cards_restore`
+
+Put a deleted card back on the board: same id, column, fields, checklist and links, and its agent links where the agents still exist (labels, projects or people since removed are dropped). It keeps its number if no other card has taken it; otherwise it gets the next number, renumbered is true and message says so. entry is an id from cards.deleted, or a card number ("#12") or card id for its latest deletion. A card that is already back is refused with 409 already_restored.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `entry` | string | yes | Entry id from cards.deleted, or a card number ("#12") or card id. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `card` | object | yes |  |
+| `card.id` | string | yes |  |
+| `card.number` | integer | yes |  |
+| `card.title` | string | yes |  |
+| `card.description` | string |  |  |
+| `card.column` | string | yes |  |
+| `card.project` | string |  |  |
+| `card.labels` | string[] | yes |  |
+| `card.points` | number | null |  |  |
+| `card.due` | string |  |  |
+| `card.assignees` | object[] | yes |  |
+| `card.checklist` | object[] | yes |  |
+| `card.links` | object[] | yes |  |
+| `card.item` | string |  |  |
+| `card.created` | string |  |  |
+| `card.updated` | string |  |  |
+| `card.moved` | string |  |  |
+| `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
+| `renumbered` | boolean | yes |  |
+| `previousNumber` | integer | null | yes | The number it had before, when renumbered. |
+| `message` | string | yes |  |
+
+**Example: Restore #12**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/%2312/restore" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 63,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
+  },
+  "renumbered": false,
+  "previousNumber": null,
+  "message": "Restored #12."
+}
+```
+
+**Example: Its number was taken**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/del_6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11/restore" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "rev": 63,
+  "card": {
+    "id": "k1",
+    "number": 40,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z",
+    "agents": [
+      "a1"
+    ]
+  },
+  "renumbered": true,
+  "previousNumber": 12,
+  "message": "Restored as #40: #12 is now another card."
 }
 ```
 

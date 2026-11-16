@@ -653,6 +653,13 @@ dialog.ask-dlg{width:min(380px,92vw);padding:18px 20px 14px}
 .sh-hist li{padding:5px 0;border-top:1px solid var(--line)}
 .sh-hist .sh-who{font-weight:600}.sh-hist .sh-at{color:var(--faint)}.sh-hist s{color:var(--faint)}
 dialog.share-modal{width:min(560px,92vw);max-height:88vh}
+dialog.deleted-modal{width:min(560px,92vw);max-height:80vh}
+.deleted-modal .del-body{overflow:auto}
+.del-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.del-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r)}
+.del-row.done{opacity:.6}
+.del-t{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.del-t strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .share-modal .sh-form{overflow:auto}
 .sh-two{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:10px}
 .sh-pv{max-height:300px;overflow:auto;padding:4px 10px 8px;border:1px solid var(--line);border-radius:var(--r);background:#fbfcfb}

@@ -123,7 +123,8 @@ export function replaceDb(d){
   checkpoint();d=clone(d);if(!d.charts.some(c=>c.id===d.active))d.active=d.charts[0].id;
   store.db=normalize(d);save({replace:true});store.onChange();
 }
-export function change(fn){checkpoint();fn();save();store.onChange()}
+// opts go to save(): {deletedCards:[ids]} tells the server these cards were deleted on purpose (sync.js).
+export function change(fn,opts){checkpoint();fn();save(opts);store.onChange()}
 // Adopt a modified copy of the database (agent inbox) as one undoable, validated step.
 // Take the server's (or a merged) copy: no undo step and no upload of it again.
 // Undo and redo keep what arrived (they only take back this browser's own edits); a different
@@ -148,5 +149,5 @@ export function step(dir){
   if(!store.db.charts.some(c=>c.id===store.db.active))store.db.active=store.db.charts[0].id;
   // A number already handed out stays used, even if the card that took it is undone away.
   if(store.db.devops&&Number.isInteger(next))store.db.devops.nextNumber=Math.max(next,store.db.devops.nextNumber||1);
-  save();store.onChange();
+  save({undo:true});store.onChange();
 }
