@@ -17,6 +17,7 @@ import {matches,keyLabel} from './shortcuts.js';
 import {onPrefs,syncPrefs} from './prefs.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
+import {edgeGeometry,tidyLayout} from './mindmap-layout.js';
 import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
@@ -301,38 +302,6 @@ document.addEventListener('click',async e=>{
 // ---------- canvas ----------
 const DEFS=`<defs><marker id="arrow" viewBox="0 0 8 8" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.5 L8,4 L0,7.5 z" fill="#4d6e62"/></marker><marker id="arrowSel" viewBox="0 0 8 8" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.5 L8,4 L0,7.5 z" fill="#a8524c"/></marker></defs>`;
 
-// Each edge attaches to the facing sides of its two cards. Edges sharing a side are spread
-// along it (ordered by where the other card sits) so busy cards don't collect a knot of lines.
-const NORMAL={t:[0,-1],b:[0,1],l:[-1,0],r:[1,0]};
-function sides(a,b){
-  const dx=b.x+b.w/2-a.x-a.w/2,dy=b.y+b.h/2-a.y-a.h/2;
-  return Math.abs(dy)-(a.h+b.h)/2>=Math.abs(dx)-(a.w+b.w)/2?(dy>=0?['b','t']:['t','b']):(dx>=0?['r','l']:['l','r']);
-}
-function layoutEdges(c){
-  const rects=new Map(c.nodes.map(n=>[n.id,rect(n)])),slots=new Map(),out=new Map();
-  for(const e of c.edges){
-    const a=rects.get(e.from),b=rects.get(e.to);if(!a||!b)continue;
-    const [sa,sb]=sides(a,b);
-    for(const [id,side,other] of [[e.from,sa,b],[e.to,sb,a]]){
-      const key=id+':'+side,along='tb'.includes(side)?other.x+other.w/2:other.y+other.h/2;
-      if(!slots.has(key))slots.set(key,[]);slots.get(key).push({e:e.id,end:id===e.from?0:1,along});
-    }
-    out.set(e.id,{a,b,sa,sb,t:[.5,.5]});
-  }
-  for(const list of slots.values()){
-    if(list.length<2)continue;
-    list.sort((p,q)=>p.along-q.along);
-    list.forEach((p,i)=>out.get(p.e).t[p.end]=.15+.7*(i+.5)/list.length);
-  }
-  for(const [id,g] of out){
-    const pt=(r,side,t)=>side==='t'?{x:r.x+r.w*t,y:r.y}:side==='b'?{x:r.x+r.w*t,y:r.y+r.h}:side==='l'?{x:r.x,y:r.y+r.h*t}:{x:r.x+r.w,y:r.y+r.h*t};
-    const p0=pt(g.a,g.sa,g.t[0]),p3=pt(g.b,g.sb,g.t[1]),n0=NORMAL[g.sa],n3=NORMAL[g.sb];
-    const k=Math.max(20,Math.min(120,Math.hypot(p3.x-p0.x,p3.y-p0.y)/2.5));
-    const p1={x:p0.x+n0[0]*k,y:p0.y+n0[1]*k},p2={x:p3.x+n3[0]*k,y:p3.y+n3[1]*k};
-    out.set(id,{d:`M${p0.x} ${p0.y}C${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`,mx:(p0.x+3*p1.x+3*p2.x+p3.x)/8,my:(p0.y+3*p1.y+3*p2.y+p3.y)/8});
-  }
-  return out;
-}
 function edgeHtml(e,geo){
   const a=node(e.from),b=node(e.to),g=geo.get(e.id);if(!a||!b||!g)return '';
   const group=e.type==='group',sel=selected===e.id;
@@ -358,7 +327,7 @@ function renderCanvas(){
   $('#areas').innerHTML=c.nodes.filter(n=>n.type==='area').map(nodeHtml).join('');
   $('#nodes').innerHTML=c.nodes.filter(n=>n.type!=='area').map(nodeHtml).join('');
   const ghost=drag?.mode==='link'?(()=>{const a=rect(node(drag.id));return `<path class="ghost" d="M${a.x+a.w} ${a.y+a.h/2}L${drag.px??a.x+a.w} ${drag.py??a.y+a.h/2}"/>`})():'';
-  const geo=layoutEdges(c);$('#edges').innerHTML=DEFS+c.edges.map(e=>edgeHtml(e,geo)).join('')+ghost;
+  const geo=edgeGeometry(c,rect);$('#edges').innerHTML=DEFS+c.edges.map(e=>edgeHtml(e,geo)).join('')+ghost;
   const hint=$('#modeHint');hint.hidden=!connecting;
   if(connecting)hint.innerHTML=`${icon('connect',13)}${source?'Pick the destination card':'Pick the source card'}<kbd>Esc</kbd>`;
 }
@@ -412,6 +381,14 @@ function fit(){
   view.z=Math.max(.2,Math.min(1,(cv.clientWidth-pad*2)/w,(cv.clientHeight-pad*2)/h));
   view.x=(cv.clientWidth-w*view.z)/2-x0*view.z;view.y=(cv.clientHeight-h*view.z)/2-y0*view.z;
   renderCanvas();
+}
+// Tidy up: lay the whole mind map out again (mindmap-layout.js), one undo step, then fit it in view.
+function tidy(){
+  const c=chart(),pos=tidyLayout(c,size);
+  const moved=c.nodes.some(n=>{const p=pos.get(n.id);return p&&(p.x!==n.x||p.y!==n.y||(p.w&&(p.w!==size(n)[0]||p.h!==size(n)[1])))});
+  if(!moved){toast('Already tidy');return}
+  change(()=>{for(const n of chart().nodes){const p=pos.get(n.id);if(!p)continue;n.x=p.x;n.y=p.y;if(p.w){n.w=p.w;n.h=p.h}}});
+  requestAnimationFrame(fit);toast('Tidied up · Ctrl Z to undo');
 }
 function zoom(f,x=$('#canvas').clientWidth/2,y=$('#canvas').clientHeight/2){
   const z=Math.max(.2,Math.min(2.5,view.z*f));
@@ -499,7 +476,8 @@ function canvasMenu(p){
   // Cards land centred on the pointer, like a double-click; a keyboard-opened menu adds at the centre.
   return [...Object.entries(KINDS).map(([t,k])=>({label:`Add ${k.label.toLowerCase()} here`,icon:k.icon,key:keyLabel(k.sc),run:()=>addNode(t,p&&{x:p.x-k.size[0]/2,y:p.y-k.size[1]/2})})),'-',
     {label:'Connect two cards',icon:'connect',checked:connecting,key:keyLabel('chart.connect'),run:toggleConnect},
-    {label:'Fit to window',icon:'fit',key:keyLabel('chart.fit'),run:fit},{label:'Zoom to 100%',run:()=>zoom(1/view.z)},'-',
+    {label:'Fit to window',icon:'fit',key:keyLabel('chart.fit'),run:fit},{label:'Zoom to 100%',run:()=>zoom(1/view.z)},
+    {label:'Tidy up',icon:'network',disabled:chart().nodes.length<2,run:tidy},'-',
     {label:'Undo',icon:'undo',key:keyLabel('global.undo'),disabled:!store.undo.length,run:()=>step(-1)},
     {label:'Redo',icon:'redo',key:keyLabel('global.redo'),disabled:!store.redo.length,run:()=>step(1)}];
 }

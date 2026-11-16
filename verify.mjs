@@ -192,7 +192,15 @@ try{
     // A keyboard-opened menu (menu key / Shift+F10: no pointer position) opens under the focused card.
     const below=await js(`(()=>{const el=document.querySelector('[data-node=flygon]');el.focus();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));const a=document.querySelector('[data-node=flygon]').getBoundingClientRect(),m=document.querySelector('.cm')?.getBoundingClientRect();return !!m&&Math.abs(m.top-a.bottom)<8})()`);
     assert(below,'a keyboard-opened card menu opens under the card');
-    await key('Escape',27);await key('Escape',27);}
+    await key('Escape',27);await key('Escape',27);
+    // Tidy up (empty canvas menu) lays the map out again with no card on another, in one undo step.
+    const pos=()=>js(`JSON.stringify(window.orgChartStudio.getChart().nodes.map(n=>[n.id,n.x,n.y,n.w,n.h]))`),p0=await pos();
+    const [tx,ty]=await js(`(()=>{const r=document.querySelector('#canvas').getBoundingClientRect();for(let y=r.top+60;y<r.bottom-60;y+=24)for(let x=r.left+80;x<r.right-80;x+=24){const el=document.elementFromPoint(x,y);if(el&&el.closest('#canvas')&&!el.closest('[data-node],[data-edge]'))return [x,y]}})()`);
+    await rclick(tx,ty);await pick('Tidy up');await sleep(120);
+    const tidy=await js(`(()=>{const rs=[...document.querySelectorAll('#nodes [data-node]')].map(e=>e.getBoundingClientRect());let hit=0;for(let i=0;i<rs.length;i++)for(let j=i+1;j<rs.length;j++){const a=rs[i],b=rs[j];if(a.left<b.right-1&&b.left<a.right-1&&a.top<b.bottom-1&&b.top<a.bottom-1)hit++}return hit})()`);
+    assert(await pos()!==p0&&tidy===0,'Tidy up rearranges the mind map with no overlapping cards');
+    await key('z',90,2);await sleep(80);
+    assert(await pos()===p0,'one Ctrl Z undoes Tidy up');}
 
   // Timeline
   await js(`document.querySelector('[data-tab=timeline]').click()`);await sleep(150);
