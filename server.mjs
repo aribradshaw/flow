@@ -523,6 +523,9 @@ async function opidApi(req,res){
         if(b.link){
           if(cur===me)return json(res,200,{linked:true});
           if(cur)return json(res,409,{error:'This card is linked to someone else. Unlink it first.'});
+          // Only the person the card names may claim it: its email must be their verified sign-in email.
+          // The explicit request plus that match is the claim; neither alone links anything.
+          if(!n.email||!sameEmail(n.email,user.email))return json(res,403,{error:'Add your email to this card before linking it to your OneProfileID.'});
           n.opidUser=me;
         }else{
           if(!cur)return json(res,200,{linked:false});

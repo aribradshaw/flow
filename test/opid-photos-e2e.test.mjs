@@ -48,7 +48,7 @@ function agent(){
 }
 const N=(id,name,type='entity',extra={})=>({id,name,type,x:0,y:0,...extra});
 const fixture=()=>({active:'c1',environment:{id:'default-workspace',name:'Default workspace',ownerEmail:OWNER,visibility:'private',members:[]},
-  charts:[{id:'c1',name:'Team',nodes:[N('me','Example Owner','person'),N('bo','Bo Marsh','person'),N('co','Marsh Holdings LLC'),N('kim','Kim','person')],
+  charts:[{id:'c1',name:'Team',nodes:[{...N('me','Example Owner','person'),email:OWNER},{...N('bo','Bo Marsh','person'),email:BO},N('co','Marsh Holdings LLC'),{...N('kim','Kim','person'),email:KIM},N('pat','Pat','person')],
     edges:[{id:'e1',from:'bo',to:'co',type:'ownership',percent:''}]}],projects:[],timeline:[]});
 const node=(d,id)=>d.charts.flatMap(c=>c.nodes).find(n=>n.id===id);
 const ENV='default-workspace';
@@ -82,6 +82,13 @@ test("a save cannot link a card to someone else's account; the owner token canno
   assert.equal(tok.status,200);assert.deepEqual((await tok.json()).opidRefused,['me']);
   after=(await owner('GET','/api/workspace?env='+ENV)).data;
   assert.equal(node(after.data,'me').opidUser,undefined);
+});
+
+test("nobody can claim a card that doesn't carry their email",async()=>{
+  assert.equal((await owner('POST','/api/opid/link',{env:ENV,nodeId:'kim',link:true})).status,403,'another person\'s email');
+  assert.equal((await owner('POST','/api/opid/link',{env:ENV,nodeId:'pat',link:true})).status,403,'no email on the card');
+  const w=(await owner('GET','/api/workspace?env='+ENV)).data;
+  assert.equal(node(w.data,'kim').opidUser,undefined);assert.equal(node(w.data,'pat').opidUser,undefined);
 });
 
 test('the owner links their own card; a save keeps it; photos come only for linked members',async()=>{

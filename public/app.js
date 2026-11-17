@@ -512,7 +512,7 @@ function opidHtml(n,l){
   const link=opidLink(n);
   if(link==='me')return `<p class="pp-note opid-note">Linked to your OneProfileID. This card shows your current account photo from OneProfileID.</p>${reach?`<div class="opid-acts">${btn('opidUnlink','Unlink from my OneProfileID')}</div>`:''}`;
   if(link==='other')return `<p class="pp-note opid-note">Linked to this person's OneProfileID. The photo comes from their account and updates when they change it.</p>${edit?`<div class="opid-acts">${btn('opidUnlink','Unlink')}</div>`:''}`;
-  return reach&&isMe(n)&&!l?.stub?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
+  return reach&&isMe(n)&&n.email&&!l?.stub?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
 }
 async function setOpidLink(id,link){
   if(linking)return;linking=true;renderInspector();
