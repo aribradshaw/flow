@@ -66,7 +66,7 @@ The free-form canvas of cards and connections (the API calls each mind map a *ch
 - The inspector opens only for a selection and autosaves as you type. It lists a card's connections; click one to jump to it.
 - Selecting an entity or area opens its project timeline along the bottom: items from the Timeline project with the same name, fitted to the width. Click an item to open it in the Timeline; + adds an item tagged with that project (creating it if needed); → opens the Timeline filtered to it. Toggle the strip from the inspector's timeline icon.
 - Right-click a card, a connection or empty canvas for a menu: rename, kind, connect, duplicate, share, DevOps cards, reverse or retype a connection, add a card right where you clicked, fit, zoom, undo. The menu key or Shift+F10 opens it from the keyboard.
-- **Tidy up** (right-click empty canvas) lays the whole mind map out again: owners above what they own in rows, a co-owner next to what it co-owns, cards in a project area kept together with the area resized around them, and lines that never pass through a card. Cards with no connections go in a row underneath. One undo step (Ctrl Z) puts everything back.
+- **Tidy up** (right-click empty canvas) lays the whole mind map out again: owners above what they own in rows, a co-owner next to what it co-owns, simple children (one owner, nothing under them) stacked in a column under their owner to save width, cards in a project area kept together with the area resized around them, and lines that never pass through a card. Cards with no connections go in a row underneath. One undo step (Ctrl Z) puts everything back.
 - Top bar: switch / rename / create / delete mind maps, plus Save and Load (below).
 
 ### Timeline

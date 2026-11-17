@@ -16,7 +16,7 @@ const group=(from,to)=>({id:'e'+k++,from,to,type:'group',percent:''});
 function sample(){
   const nodes=[
     card('root','person',600,0),card('a',undefined,200,150),card('b',undefined,1000,150),card('partner','person',700,120),
-    card('a1',undefined,0,300),card('a2',undefined,200,300),card('a3',undefined,400,300),card('a4',undefined,600,300),card('a5',undefined,800,300),
+    card('a1',undefined,0,300),card('a2',undefined,200,300),card('a3',undefined,640,360),card('a4',undefined,600,300),card('a5',undefined,800,300),
     card('ab',undefined,700,300),card('cross',undefined,500,450),card('cross2',undefined,500,550),
     card('b1',undefined,900,300),card('b2',undefined,1100,300),card('b2x',undefined,1100,400),
     card('m1',undefined,40,440),card('m2',undefined,240,440),card('note','note',1300,300),card('loose',undefined,1500,0),
@@ -58,15 +58,24 @@ test('owners sit above what they own, cards never overlap and areas keep (only) 
     if(ids.length)for(const n of cards.filter(n=>!ids.includes(n.id)))assert.ok(!overlap(rect(n),r),`${n.id} clear of ${a}`);
   }
   for(const n of c.nodes)assert.ok(n.x%16===0&&n.y%16===0,n.id);
+  // Three simple children of one owner (a3–a5: no other lines) stack in a column under it.
+  const st=['a3','a4','a5'].map(id=>byId.get(id));
+  assert.equal(new Set(st.map(n=>n.x)).size,1);assert.equal(new Set(st.map(n=>n.y)).size,3);
+  assert.ok(byId.get('a').x<st[0].x&&byId.get('a').x+size(byId.get('a'))[0]>st[0].x,'the owner sits over the stack');
 });
 
-test('no line is drawn through a card, and lines between rows run bottom to top', ()=>{
+// Every cubic piece of an SVG path (M x y C … C …).
+const pieces=d=>{const out=[];let cur=null;for(const m of d.matchAll(/([MC])([^MC]+)/g)){const v=m[2].trim().split(/[ ,]+/).map(Number);if(m[1]==='M')cur=[v[0],v[1]];else{out.push([...cur,...v]);cur=[v[4],v[5]]}}return out};
+test('no line is drawn through a card; lines between rows leave the bottom and enter the top or, in a stack, the side', ()=>{
   const c=apply(sample()),geo=edgeGeometry(c,rect),cards=c.nodes.filter(n=>n.type!=='area');
   for(const e of c.edges){
-    const d=geo.get(e.id).d,nums=d.match(/-?[\d.]+/g).map(Number),[x0,y0,x1,y1,x2,y2,x3,y3]=nums;
-    const a=rect(c.nodes.find(n=>n.id===e.from)),b=rect(c.nodes.find(n=>n.id===e.to));
-    if(b.y>=a.y+a.h+32){assert.equal(y0,a.y+a.h);assert.equal(y3,b.y)}
-    for(let i=1;i<40;i++){
+    const segs=pieces(geo.get(e.id).d),a=rect(c.nodes.find(n=>n.id===e.from)),b=rect(c.nodes.find(n=>n.id===e.to));
+    if(b.y>=a.y+a.h+32){
+      const [x0,y0]=segs[0],end=segs.at(-1),x3=end[6],y3=end[7];
+      assert.equal(y0,a.y+a.h,`${e.from}→${e.to} leaves the bottom`);
+      assert.ok(y3===b.y||((x3===b.x||x3===b.x+b.w)&&y3>b.y&&y3<b.y+b.h),`${e.from}→${e.to} enters the top or a side`);
+    }
+    for(const [x0,y0,x1,y1,x2,y2,x3,y3] of segs)for(let i=1;i<40;i++){
       const t=i/40,u=1-t,x=u*u*u*x0+3*u*u*t*x1+3*u*t*t*x2+t*t*t*x3,y=u*u*u*y0+3*u*u*t*y1+3*u*t*t*y2+t*t*t*y3;
       for(const n of cards)if(n.id!==e.from&&n.id!==e.to){const r=rect(n);assert.ok(!(x>r.x+2&&x<r.x+r.w-2&&y>r.y+2&&y<r.y+r.h-2),`${e.from}→${e.to} crosses ${n.id}`)}
     }
