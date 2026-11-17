@@ -784,8 +784,10 @@ const keysApi=apiKeyRoutes({userFor:auth.userFor,store:apiKeys,readJson,trusted,
 const apiLimit=memoryRateLimit({perMinute:120}),baseEnvCheck=envCheckFor(workspaces);
 // The store the API works on: each environment's own data (no linked copies; edges to them left out),
 // and for a key, only the environments it is for.
-const apiStore=key=>({...workspaces,
-  async get(id){const w=await workspaces.get(id);return w?.data?{...w,data:dropDangling(structuredClone(stripLinked(w.data)))}:w},
+// Readers other than the owner (members, public environments) see only that a card is linked, as in the app.
+const apiStore=(key,user)=>({...workspaces,
+  async get(id){const w=await workspaces.get(id);if(!w?.data)return w;const data=dropDangling(structuredClone(stripLinked(w.data)));
+    if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
   async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
 });
 const keyEnvCheck=async(envId,user,mode)=>(!user?.key||keyAllows(user.key,mode==='write'?'write':'read',envId))&&baseEnvCheck(envId,user,mode);
@@ -799,13 +801,13 @@ async function apiV1Route(req,res){
   // One authentication per request (it also counts towards the key's rate limit).
   let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
   if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key),envCheck:keyEnvCheck,rateLimit:apiLimit});
+  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiLimit});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key),envCheck:keyEnvCheck,via:'mcp'}),
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp'}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 

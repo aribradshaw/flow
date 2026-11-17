@@ -11,7 +11,7 @@ import {workspaceStore} from '../lib/workspaces.mjs';
 import {cleanNode,normalize} from '../lib/cleaners.mjs';
 import {projectForRecipient,applyRecipientEdit,extractRecipientChanges,linkedId} from '../lib/sharing-core.mjs';
 
-const P=(id,name,extra={})=>({id,name,type:'person',x:0,y:0,...extra});
+const P=(id,name,extra={})=>({id,name,type:'person',x:0,y:0,email:`${id}@example.test`,...extra});
 const E=(id,name)=>({id,name,type:'entity',x:0,y:0});
 const db=(nodes,edges=[])=>({active:'c1',charts:[{id:'c1',name:'C',nodes,edges}],projects:[],timeline:[]});
 const node=(d,id)=>d.charts.flatMap(c=>c.nodes).find(n=>n.id===id);
@@ -20,15 +20,26 @@ const tmp=()=>mkdtempSync(join(tmpdir(),'ff-opid-'));
 test('claim guard: only the saving person can add their own link; anyone can remove one',()=>{
   const before=db([P('ana','Ana',{opidUser:'u-ana'}),P('bo','Bo'),P('cy','Cy',{opidUser:'u-cy'})]);
   // Bo links his own card: kept.
-  let r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('bo','Bo',{opidUser:'u-bo'}),P('cy','Cy',{opidUser:'u-cy'})]),{as:'u-bo'});
+  let r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('bo','Bo',{opidUser:'u-bo'}),P('cy','Cy',{opidUser:'u-cy'})]),{as:'u-bo',email:'bo@example.test'});
   assert.equal(node(r.data,'bo').opidUser,'u-bo');assert.deepEqual(r.refused,[]);
   // Someone else's id on a new link is refused, even when the saver has an account of their own.
-  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('bo','Bo',{opidUser:'u-bo'})]),{as:'u-ana'});
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('bo','Bo',{opidUser:'u-bo'})]),{as:'u-ana',email:'ana@example.test'});
   assert.equal('opidUser' in node(r.data,'bo'),false);assert.deepEqual(r.refused,['bo']);
   // Changing an existing link to another account is refused: the stored link stays.
-  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-bo'})]),{as:'u-bo'});
-  assert.equal(node(r.data,'ana').opidUser,'u-bo','the saver may move a link to themselves');
-  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-cy'})]),{as:'u-bo'});
+  // Nobody can move a link to themselves on a card that carries someone else's email.
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-bo'})]),{as:'u-bo',email:'bo@example.test'});
+  assert.equal(node(r.data,'ana').opidUser,'u-ana');assert.deepEqual(r.refused,['ana']);
+  // Nor link a card without their email, even their own id with no account email given.
+  r=keepOpidLinks(before,db([P('bo','Bo',{opidUser:'u-bo',email:''})]),{as:'u-bo',email:'bo@example.test'});
+  assert.equal('opidUser' in node(r.data,'bo'),false);
+  r=keepOpidLinks(before,db([P('bo','Bo',{opidUser:'u-bo'})]),{as:'u-bo'});
+  assert.equal('opidUser' in node(r.data,'bo'),false);
+  // Changing or removing a linked card's email drops its link, from any writer.
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana',email:'someone@example.test'})]),{as:null});
+  assert.equal('opidUser' in node(r.data,'ana'),false);assert.deepEqual(r.refused,[]);
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana',email:''})]),{as:'u-ana',email:'ana@example.test'});
+  assert.equal('opidUser' in node(r.data,'ana'),false);
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-cy'})]),{as:'u-bo',email:'bo@example.test'});
   assert.equal(node(r.data,'ana').opidUser,'u-ana');assert.deepEqual(r.refused,['ana']);
   // Unchanged links survive any writer, including ones without an account (API keys, MCP, the owner token).
   r=keepOpidLinks(before,structuredClone(before),{as:null});
@@ -46,8 +57,8 @@ test('claim guard: copies, other card kinds, bad ids and display-only flags',()=
   // A duplicated card is a new card: it cannot carry Ana's link unless Ana saves it.
   let r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('copy','Ana',{opidUser:'u-ana'})]),{as:'u-bo'});
   assert.equal('opidUser' in node(r.data,'copy'),false);assert.deepEqual(r.refused,['copy']);
-  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('copy','Ana',{opidUser:'u-ana'})]),{as:'u-ana'});
-  assert.equal(node(r.data,'copy').opidUser,'u-ana');
+  r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana'}),P('copy','Ana',{opidUser:'u-ana',email:'ana@example.test'})]),{as:'u-ana',email:'ana@example.test'});
+  assert.equal(node(r.data,'copy').opidUser,'u-ana','Ana may link a copy that carries her email');
   // A card that stops being a person loses its link.
   r=keepOpidLinks(before,db([{...E('ana','Ana'),opidUser:'u-ana'}]),{as:'u-ana'});
   assert.equal('opidUser' in node(r.data,'ana'),false);
@@ -56,6 +67,9 @@ test('claim guard: copies, other card kinds, bad ids and display-only flags',()=
   // opidLinked only describes someone else's link to a viewer; it is never stored.
   r=keepOpidLinks(before,db([P('ana','Ana',{opidUser:'u-ana',opidLinked:true}),P('bo','Bo',{opidLinked:true})]),{as:null});
   assert.equal('opidLinked' in node(r.data,'ana'),false);assert.equal('opidLinked' in node(r.data,'bo'),false);
+  // Masked data written back (opidLinked, no id) keeps the stored link; it is not an unlink.
+  r=keepOpidLinks(before,db([P('ana','Ana R',{opidLinked:true})]),{as:null});
+  assert.equal(node(r.data,'ana').opidUser,'u-ana');assert.equal('opidLinked' in node(r.data,'ana'),false);
   // A relay mirror (a copy of the authoritative server's data) keeps links as they are.
   r=keepOpidLinks(null,db([P('bo','Bo',{opidUser:'u-bo'})]),{mirror:true});
   assert.equal(node(r.data,'bo').opidUser,'u-bo');

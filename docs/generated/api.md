@@ -209,6 +209,7 @@ Cards on a chart (entities, people, areas, notes). Filter by `type`, or by `q` (
 | `items[].notes` | string |  |  |
 | `items[].image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `items[].email` | string |  | Person email, matching them to an account. |
+| `items[].opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -268,6 +269,7 @@ One chart card by id.
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Kestrel Group**
 
@@ -310,7 +312,7 @@ Add a card to a chart. Without x/y it is placed at the origin, stepping 32px dia
 | `w` | number |  |  |
 | `h` | number |  |  |
 | `image` | string |  | Person cards only: a photo as an https URL, or a data:image/(png\|jpeg\|webp);base64 URL up to 61440 characters. "" removes it. |
-| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. "" removes it. |
+| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. Changing or removing it unlinks the card from its OneProfileID account. "" removes it. |
 | `x` | number |  |  |
 | `y` | number |  |  |
 
@@ -330,6 +332,7 @@ Add a card to a chart. Without x/y it is placed at the origin, stepping 32px dia
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Add a person**
 
@@ -375,7 +378,7 @@ Change a chart card's name, type, notes or size, or a person's photo and email. 
 | `w` | number |  |  |
 | `h` | number |  |  |
 | `image` | string |  | Person cards only: a photo as an https URL, or a data:image/(png\|jpeg\|webp);base64 URL up to 61440 characters. "" removes it. |
-| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. "" removes it. |
+| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. Changing or removing it unlinks the card from its OneProfileID account. "" removes it. |
 
 **Output**
 
@@ -393,6 +396,7 @@ Change a chart card's name, type, notes or size, or a person's photo and email. 
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Rename**
 
@@ -451,6 +455,7 @@ Set a chart card's position (canvas pixels; the app snaps to a 16px grid when dr
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Move**
 
