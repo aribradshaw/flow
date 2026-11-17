@@ -102,7 +102,8 @@ test('lib/cleaners.mjs matches the client cleaners in public/store.js',()=>{
     {id:'j',title:'U',start:'',end:'2026-01-01'},{id:'k',title:'V',start:'bad'},{id:'l',title:'W',start:'2026-02-01',end:'2026-03-01',owner:7,notes:null}];
   for(const it of items)assert.deepEqual(cleaners.cleanItem(it,ps),orig.cleanItem(it,ps));
   const nodes=[{id:'a',type:'person',image:'https://example.test/a.png',email:' A@Example.TEST '},{id:'b',type:'entity',image:'https://example.test/b.png',email:'b@example.test'},
-    {id:'c',type:'person',image:'data:image/png;base64,'+'A'.repeat(cleaners.PERSON_IMAGE_MAX),email:'nope'},{id:'d',type:'person',image:'javascript:alert(1)',email:7}];
+    {id:'c',type:'person',image:'data:image/png;base64,'+'A'.repeat(cleaners.PERSON_IMAGE_MAX),email:'nope'},{id:'d',type:'person',image:'javascript:alert(1)',email:7},
+    {id:'e',type:'person',opidUser:'u-e',opidLinked:true},{id:'f',type:'person',opidUser:'bad id',opidLinked:'yes'},{id:'g',type:'entity',opidUser:'u-g',opidLinked:true}];
   for(const n of nodes)assert.deepEqual(cleaners.cleanNode(structuredClone(n)),orig.cleanNode(structuredClone(n)));
 });
 

@@ -286,6 +286,18 @@ The runner only calls out to Flow and never needs to be reachable itself, so it 
 
 The AgentFlow tab has two views: **Org chart** (`1`) and **Workflows** (`2`). **Scheduled** opens the tray of runner jobs (see [Scheduled jobs](#scheduled-jobs)). The org chart is a canvas like the MindMap: drag empty space to pan, scroll to zoom, drag a card to move it (Shift: with its reports), and drag the dot under a card onto another agent to make that agent report to it, or onto empty space to add a new report. Each AI agent's card shows small icons for the makers of its models in the bottom-right corner (the primary first, then up to two fallbacks and "+N"), or one auto symbol with a count when it is on Auto, and its supervisor's face sits on the corner of its avatar. Double-click empty space to add an agent. **Tidy up** returns to the automatic tree. In the tree, a manager's reports that have no reports of their own are stacked in indented columns (up to six per column) once there are three or more, so a large team stays compact and no reporting lines cross. Positions are saved as the agent's optional `x` and `y`. An agent without them, such as one added through the API, is placed under its manager, below the last of its teammates. `N` adds an agent under the selected one, `W` adds a workflow, `/` searches, `F` fits the org, arrow keys nudge the selected agent. Right-click (or the menu key) opens a menu on an agent, a reporting line, a workflow card or empty canvas: change kind, status or manager, add the agent to a workflow, open its work queue on the DevOps board, duplicate a workflow, and so on. **Start from a template** creates a small example org and workflow to edit. A DevOps card's detail shows the agents linked to it, and you can assign agents from there.
 
+## OneProfileID photos
+
+When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card. The person links the card themselves; Flow never links a card to an account because an email address or a name matches.
+
+- **Link a card.** Open a person card whose email is your sign-in email and choose **Link to my OneProfileID** in its side panel. This works on cards in your own environment and on person cards shared with you at any permission. A card without your email can't be linked; add your email to it first (that needs edit access). From then on the card shows your current account photo, and it updates when you change your photo in OneProfileID.
+- **Unlink.** You can always unlink your own account. Anyone who can edit the card (its environment's owner, or a recipient of an **edit** share) can also choose **Unlink** on a card linked to someone else. Changing or removing a linked card's email unlinks it too, from the app, the API or MCP, so a link never follows a card that now names someone else.
+- **API and MCP.** Cards show `opidUser` (read only) to the environment's owner, and only `opidLinked` to anyone else. Linking happens only in the app, by the person themselves: API keys, MCP and the owner token can't add a link.
+- **Which photo shows.** A linked card shows its account photo first. An uploaded photo is the fallback while the account has none, and a card with neither shows initials. Cards that are not linked work as before.
+- **Who is shown.** A linked photo is looked up only for people who have opened that environment with OneProfileID, as its owner or through a share, and who still have access. OneProfileID applies its own rules as well. Photos are fetched when Flow opens and when its window regains focus, cached for a minute, and never saved into the workspace or its history.
+- **Who sees the link.** Only the environment's owner sees which account a card is linked to. Share recipients and other readers see that a card is linked, and see their own link. The link is stored as `opidUser` (the OneProfileID account id) on the person card.
+- **The server enforces it.** On every save (the app, the API, the CLI and MCP) a new or changed `opidUser` is kept only when it is the saving person's own OneProfileID account id; anything else is refused and the previous value stays. A duplicated card is never linked. API keys and the owner token can keep or remove links but never add one. In local single-user mode there is nothing to link.
+
 # Using the API
 
 Every operation is an HTTP call under the base URL of your Flow server:
@@ -494,6 +506,7 @@ Cards on a chart (entities, people, areas, notes). Filter by `type`, or by `q` (
 | `items[].notes` | string |  |  |
 | `items[].image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `items[].email` | string |  | Person email, matching them to an account. |
+| `items[].opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 | `nextCursor` | string | null | yes |  |
 | `rev` | integer | yes | Workspace revision after (or at) this call. |
 
@@ -553,6 +566,7 @@ One chart card by id.
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Kestrel Group**
 
@@ -595,7 +609,7 @@ Add a card to a chart. Without x/y it is placed at the origin, stepping 32px dia
 | `w` | number |  |  |
 | `h` | number |  |  |
 | `image` | string |  | Person cards only: a photo as an https URL, or a data:image/(png\|jpeg\|webp);base64 URL up to 61440 characters. "" removes it. |
-| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. "" removes it. |
+| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. Changing or removing it unlinks the card from its OneProfileID account. "" removes it. |
 | `x` | number |  |  |
 | `y` | number |  |  |
 
@@ -615,6 +629,7 @@ Add a card to a chart. Without x/y it is placed at the origin, stepping 32px dia
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Add a person**
 
@@ -660,7 +675,7 @@ Change a chart card's name, type, notes or size, or a person's photo and email. 
 | `w` | number |  |  |
 | `h` | number |  |  |
 | `image` | string |  | Person cards only: a photo as an https URL, or a data:image/(png\|jpeg\|webp);base64 URL up to 61440 characters. "" removes it. |
-| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. "" removes it. |
+| `email` | string |  | Person cards only: their email, so the app can show the matching account photo. Never shared with share recipients. Changing or removing it unlinks the card from its OneProfileID account. "" removes it. |
 
 **Output**
 
@@ -678,6 +693,7 @@ Change a chart card's name, type, notes or size, or a person's photo and email. 
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Rename**
 
@@ -736,6 +752,7 @@ Set a chart card's position (canvas pixels; the app snaps to a 16px grid when dr
 | `node.notes` | string |  |  |
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
+| `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
 
 **Example: Move**
 
