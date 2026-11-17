@@ -273,9 +273,12 @@ test('discoverJobs reads repo configs from the configured repos only',async()=>{
 });
 
 // report against a stub Flow server: jobs go in the same POST; a server that rejects the field gets
-// the models alone.
+// the models alone. Only the runner's own calls (POST /api/v1/… with its key) are recorded: other
+// local tools may probe any open localhost port with GET /, and those must not count as reports.
 async function reportAgainst(handler,extra=()=>({})){
-  const bodies=[],paths=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{bodies.push(JSON.parse(s||'null'));paths.push(req.url);const [code,body]=handler(bodies.length);res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))})});
+  const bodies=[],paths=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{
+    if(req.method!=='POST'||!req.url.startsWith('/api/v1/')||req.headers.authorization!=='Bearer k'){res.writeHead(404);res.end();return}
+    bodies.push(JSON.parse(s||'null'));paths.push(req.url);const [code,body]=handler(bodies.length);res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))})});
   await new Promise(r=>srv.listen(0,'127.0.0.1',r));
   const home=mkdtempSync(join(tmpdir(),'runner-report-'));
   try{

@@ -30,6 +30,8 @@ ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.id){pending.get(d.id)?.(d);pend
 const call=(method,params={})=>new Promise((res,rej)=>{const id=++seq;pending.set(id,r=>r.error?rej(Error(method+' '+JSON.stringify(r.error))):res(r.result));ws.send(JSON.stringify({id,method,params}))});
 const js=async x=>{const r=await call('Runtime.evaluate',{expression:x,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description);return r.result.value};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Wait until a page expression is true (polled), for conditions that take longer under load.
+const until=async(x,ms=5000)=>{for(const end=Date.now()+ms;;){if(await js(x))return true;if(Date.now()>end)return false;await sleep(25)}};
 // Gates and confirmations are small dialogs (modal.js ask): answer them.
 const answer=async ok=>{await sleep(80);await js(`document.querySelector('dialog.ask-dlg[open] [data-ask=${ok?'ok':'cancel'}]')?.click()`);await sleep(150)};
 const mouse=(type,x,y,o={})=>call('Input.dispatchMouseEvent',{type,x,y,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,...o});
@@ -210,7 +212,9 @@ try{
   db=await saved();
   const item=db.timeline.find(i=>i.title==='QA Release');
   assert(item&&item.kind==='release'&&db.projects.some(p=>p.name==='QA Project'&&item.projects.includes(p.id)),'timeline item created with kind and new project tag');
-  await key('Escape',27);await sleep(100);
+  // The editor closes with an animation and keeps the page inert until it is gone: drag after that.
+  await key('Escape',27);
+  assert(await until(`!document.querySelector('dialog.modal')`),'Escape closes the timeline item editor');
   [x,y]=await center('.ti.k-release .mk');await drag(x,y,x+9*7,y);
   db=await saved();const moved=db.timeline.find(i=>i.title==='QA Release');
   assert(Date.parse(moved.start)-Date.parse(item.start)===7*864e5,'dragging a milestone in month view reschedules it by days');
