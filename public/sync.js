@@ -106,8 +106,8 @@ async function push(){
         // Shared cards: the server re-projects them (refused edits come back), so read the result.
         if(d.shared){st.shared='';setTimeout(pull,400)}
         // The server kept runners as they reported themselves (this copy was missing some), or a higher
-        // next card number than this copy had: read them back.
-        if(d.runnersKept||d.countersKept){st.shared='\u0000';setTimeout(pull,400)}
+        // next card number than this copy had, or refused a OneProfileID link that was not this user's own: read them back.
+        if(d.runnersKept||d.countersKept||d.opidRefused){st.shared='\u0000';setTimeout(pull,400)}
         persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;
         // Cards this save removed other than by Delete (an undo, a restored snapshot): say where to get them back.
         if(Array.isArray(d.removedCards)&&d.removedCards.length)store.onRemoved?.(d.removedCards);

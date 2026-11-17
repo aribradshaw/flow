@@ -33,6 +33,9 @@ const {createMailer,rateLimit,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
+// OneProfileID photos on person cards a person linked to their account (docs/concepts/10-opid-photos.md).
+const opidPhotos=await import('./lib/opid-photos.mjs');
+const {validOpidUser}=await import('./lib/cleaners.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
 auth.useSessionStore(sessionStore({db:()=>cloud(),max:auth.SESSION_MAX}));
 const {shrinks,size,keepCounters}=await import('./public/sync-core.js');
@@ -92,7 +95,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -205,6 +208,12 @@ const workspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().ca
 const invites=inviteStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 auth.useInvites(invites);
 const shares=shareStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+// Who opened which workspace with their OneProfileID account (its owner, or a share's recipient).
+const opidMembers=opidPhotos.memberStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+// The user's OneProfileID account id, for links on person cards; null for the owner token, API keys
+// and local mode, which can never add a link.
+const opidId=u=>auth.mode==='opid'&&u&&!u.token&&!u.key&&!u.local&&validOpidUser(u.id)?u.id:null;
+const seenBy=(envId,user)=>{if(opidId(user))opidMembers.record(envId,user).catch(e=>console.error('opid members failed',e?.message))};
 // ---- sharing in workspaces ----
 // Linked copies (ids sh.<shareId>.<owner id>) are never stored in the recipient's workspace: they are
 // projected from the owner's current data on every read, for the recipient only. What is stored is the
@@ -253,8 +262,8 @@ async function withShares(envId,user,data){
 async function project(envId,user,data){
   const own=stripLinked(data);let d=structuredClone(own);const sig=[],meta=[],conflicts=[],since=new Date(Date.now()-CONFLICT_MS).toISOString();
   for(const {share:s,home} of user.token?[]:await attachedShares(envId,user)){
-    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
-    d=core.applyProjection(d,p);
+    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user)});
+    d=core.applyProjection(d,p);seenBy(s.ownerEnv,user);
     sig.push(`${s.id}:${s.permission}:${home.rev}`);
     meta.push({id:s.id,permission:s.permission,ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members});
     const sc=core.resolveScope(home.data,s);
@@ -371,7 +380,7 @@ async function workspace(req,res){
   if(req.method==='GET'){
     if(local){
       const r=await relay(req);
-      if(r&&r.status===200&&r.data?.env&&r.data.data){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:r.data.data,by:'relay',owner:user.email}).catch(()=>{})}
+      if(r&&r.status===200&&r.data?.env&&r.data.data){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:r.data.data,by:'relay',owner:user.email,mirror:true}).catch(()=>{})}
       if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return true}
       const w=await workspaces.get(u.searchParams.get('env')||DEFAULT_ENV.id);
       json(res,200,{env:w?.envId||u.searchParams.get('env')||DEFAULT_ENV.id,rev:0,data:w?.data||null,offline:true});return true;
@@ -390,6 +399,9 @@ async function workspace(req,res){
     const since=parseInt(u.searchParams.get('since')),mine=sameEmail(ownerOf(w,envId),user.email);
     // Linked copies are added for the environment's owner only; anyone else gets the stored data as is.
     const v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
+    // Only the owner sees whose account a card is linked to; other readers see their own link only.
+    if(!mine&&v.data)opidPhotos.maskOpidLinks(v.data,opidId(user));
+    if(mine&&w)seenBy(envId,user);
     if(w&&since===w.rev&&(u.searchParams.get('shared')||'')===v.shared){json(res,200,{env:envId,rev:w.rev,shared:v.shared,unchanged:true});return true}
     json(res,200,{env:envId,rev:w?.rev||0,data:v.data,shared:v.shared,conflicts:v.conflicts||[],updatedAt:w?.updatedAt||null,owner:ownerOf(w,envId),readOnly:!!w&&!mine});
     return true;
@@ -401,7 +413,7 @@ async function workspace(req,res){
         if(local){
           const r=await relay(req,raw);
           // Keep this computer's copy current too: it is the offline fallback.
-          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email,source:{via:'relay'}})}}catch{}}
+          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email,source:{via:'relay'},mirror:true})}}catch{}}
           if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return}
           json(res,503,{error:'Offline: the server could not be reached',offline:true});return;
         }
@@ -426,7 +438,7 @@ async function workspace(req,res){
         // snapshot (a restored or merged whole workspace). Tabs running older code send no intent: 'save'.
         const it=body.intent&&typeof body.intent==='object'&&!Array.isArray(body.intent)?body.intent:null;
         const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
-        const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source});
+        const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source,opidUser:opidId(user)});
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
         // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
@@ -437,12 +449,96 @@ async function workspace(req,res){
         const v=user.token?{shared:''}:await withShares(envId,user,data);
         // Cards removed other than by Delete: the browser says where to restore them (DevOps › Recently deleted).
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
+        // OneProfileID links this save tried to add for someone else were refused: the browser reads the workspace back.
+        if(out.opidRefused?.length)photoCache.clear();
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;
   }
   res.writeHead(405);res.end();return true;
+}
+
+// ---------- OneProfileID photos on person cards (docs/concepts/10-opid-photos.md) ----------
+// GET  /api/opid/photos?env=<id>              -> {<node id>: image} for linked cards this user sees there
+// POST /api/opid/link {env, nodeId, link}     link:true links the card to the user's own account; false unlinks
+// Photos are looked up live (OneProfileID decides too), cached a minute per viewer, never stored.
+const PHOTO_TTL=60e3,photoCache=new Map();
+// Emails with access to an environment right now: its owner and the recipients of its active shares.
+async function currentPeople(envId){
+  const w=await workspaces.get(envId);if(!w||w.archivedAt)return new Set();
+  return new Set([String(w.owner||'').toLowerCase(),...(await shares.list({ownerEnv:envId})).map(s=>s.recipientEmail.toLowerCase())]);
+}
+async function lookupPhotos(req,targets){
+  const byEnv=new Map();for(const t of targets)(byEnv.get(t.env)||byEnv.set(t.env,new Set()).get(t.env)).add(t.opidUser);
+  const members=new Map();
+  for(const [env,ids] of byEnv){const now=await currentPeople(env);members.set(env,new Set((await opidMembers.list(env,[...ids])).filter(m=>now.has(m.email)).map(m=>m.opidUser)))}
+  const ok=opidPhotos.eligibleTargets(targets,members);if(!ok.length)return {};
+  const images=await auth.memberImages(req,ok.map(t=>t.opidUser)),out={};
+  for(const t of ok)if(images[t.opidUser])out[t.nodeId]=images[t.opidUser];
+  return out;
+}
+const findNode=(d,id)=>(d?.charts||[]).flatMap(c=>c.nodes||[]).find(n=>n.id===id);
+async function opidApi(req,res){
+  const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/opid/'))return false;
+  if(!trusted(req)||req.headers.authorization){res.writeHead(403);res.end();return true}
+  const user=await requireUser(req,res);if(!user)return true;
+  const me=opidId(user);
+  if(u.pathname==='/api/opid/photos'&&req.method==='GET'){
+    const envId=u.searchParams.get('env')||'';
+    if(!me||!ENV_ID.test(envId)){json(res,200,{});return true}
+    const key=me+'\n'+envId,hit=photoCache.get(key);
+    if(hit&&Date.now()-hit.at<PHOTO_TTL){json(res,200,hit.photos);return true}
+    let photos={};
+    try{
+      const w=await workspaces.get(envId);
+      if(w?.data&&!w.archivedAt){
+        const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
+        if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await attachedShares(envId,user):[]}));
+      }
+    }catch(err){console.error('opid photos failed',err?.message);photos={}}
+    photoCache.set(key,{at:Date.now(),photos});
+    if(photoCache.size>500)for(const [k,v] of photoCache)if(Date.now()-v.at>=PHOTO_TTL||photoCache.size>400)photoCache.delete(k);
+    json(res,200,photos);return true;
+  }
+  if(u.pathname==='/api/opid/link'&&req.method==='POST'){readJson(req,res,async b=>{
+    try{
+      if(!me)return json(res,400,{error:'Sign in with OneProfileID to link a card to your account.'});
+      const envId=b?.env,nodeId=b?.nodeId;
+      if(!ENV_ID.test(String(envId||''))||typeof nodeId!=='string'||!nodeId||nodeId.length>300||typeof b.link!=='boolean')return json(res,400,{error:'Expected {env, nodeId, link}'});
+      const w=await workspaces.get(envId);
+      if(!w?.data||w.archivedAt||!sameEmail(w.owner,user.email))return json(res,404,{error:'Not found'});
+      // A shared card (sh.<share>.<id>) is linked in its owner's workspace, if the share is placed here.
+      const p=core.parseLinkedId(nodeId);let share=null,target={env:envId,id:nodeId};
+      if(p){
+        const a=(await attachedShares(envId,user)).find(x=>x.share.id===p.shareId);
+        if(!a||!core.resolveScope(a.home.data,a.share).nodeIds.includes(p.id))return json(res,404,{error:'Not found'});
+        share=a.share;target={env:share.ownerEnv,id:p.id};
+      }
+      for(let attempt=0;attempt<3;attempt++){
+        const home=await workspaces.get(target.env);if(!home?.data||home.archivedAt)return json(res,404,{error:'Not found'});
+        const data=structuredClone(home.data),n=findNode(data,target.id);
+        if(!n||n.type!=='person')return json(res,404,{error:'Not found'});
+        const cur=validOpidUser(n.opidUser)?n.opidUser:'';
+        if(b.link){
+          if(cur===me)return json(res,200,{linked:true});
+          if(cur)return json(res,409,{error:'This card is linked to someone else. Unlink it first.'});
+          n.opidUser=me;
+        }else{
+          if(!cur)return json(res,200,{linked:false});
+          // Anyone may unlink their own account; someone else's link needs edit access to the card.
+          if(cur!==me&&share&&!core.allows(share,'edit'))return json(res,403,{error:'Only people who can edit this card can unlink it.'});
+          delete n.opidUser;
+        }
+        const out=await workspaces.put(target.env,{baseRev:home.rev,data,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'opid-link'},opidUser:me});
+        if(out.conflict)continue;
+        photoCache.clear();if(b.link)seenBy(target.env,user);
+        return json(res,200,{linked:b.link,rev:out.rev});
+      }
+      json(res,409,{error:'The workspace changed. Try again.'});
+    }catch(err){console.error('opid link failed',err?.message);json(res,500,{error:'Could not change the link. Try again.'})}
+  });return true}
+  json(res,404,{error:'Not found'});return true;
 }
 
 // ---------- environments: a user's own workspaces (list, create, rename, archive) ----------
@@ -626,7 +722,7 @@ async function sharesApi(req,res){
       if(s.revokedAt)return fail({error:'revoked'});
       json(res,200,{share:await view(await shares.setPermission(s.id,b.permission))});
     });return true}
-    if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;json(res,200,{share:await view(await shares.revoke(s.id)),revoked:true});return true}
+    if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;const gone=await shares.revoke(s.id);photoCache.clear();json(res,200,{share:await view(gone),revoked:true});return true}
     if(sub==='preview'&&req.method==='GET'){
       if(s.revokedAt)return fail({error:'revoked'}),true;
       const home=await workspaces.get(s.ownerEnv);if(!home?.data)return nf(),true;
@@ -791,7 +887,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}

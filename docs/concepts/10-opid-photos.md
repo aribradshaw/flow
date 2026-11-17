@@ -1,0 +1,10 @@
+# OneProfileID photos
+
+When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card. The person links the card themselves; Flow never links a card to an account because an email address or a name matches.
+
+- **Link a card.** Open a person card that is yours (its email is yours or, with no email, it is the only person with your name) and choose **Link to my OneProfileID** in its side panel. This works on cards in your own environment and on person cards shared with you at any permission. From then on the card shows your current account photo, and it updates when you change your photo in OneProfileID.
+- **Unlink.** You can always unlink your own account. Anyone who can edit the card (its environment's owner, or a recipient of an **edit** share) can also choose **Unlink** on a card linked to someone else.
+- **Which photo shows.** A linked card shows its account photo first. An uploaded photo is the fallback while the account has none, and a card with neither shows initials. Cards that are not linked work as before.
+- **Who is shown.** A linked photo is looked up only for people who have opened that environment with OneProfileID, as its owner or through a share, and who still have access. OneProfileID applies its own rules as well. Photos are fetched when Flow opens and when its window regains focus, cached for a minute, and never saved into the workspace or its history.
+- **Who sees the link.** Only the environment's owner sees which account a card is linked to. Share recipients and other readers see that a card is linked, and see their own link. The link is stored as `opidUser` (the OneProfileID account id) on the person card.
+- **The server enforces it.** On every save (the app, the API, the CLI and MCP) a new or changed `opidUser` is kept only when it is the saving person's own OneProfileID account id; anything else is refused and the previous value stays. A duplicated card is never linked. API keys and the owner token can keep or remove links but never add one. In local single-user mode there is nothing to link.

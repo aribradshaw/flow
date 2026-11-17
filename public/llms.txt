@@ -15,6 +15,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [Sharing](/docs/index.html#sharing): The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment.
 - [Versioning](/docs/index.html#versioning): Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers.
 - [AgentFlow](/docs/index.html#agentflow): AgentFlow is an org chart for agentic work.
+- [OneProfileID photos](/docs/index.html#oneprofileid-photos): When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card.
 
 ## API: Environments
 

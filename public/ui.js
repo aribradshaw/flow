@@ -114,8 +114,35 @@ export const setSessionUser=u=>{
   const image=typeof u?.image==='string'?u.image.trim():'';
   if(meUrl.startsWith('blob:')&&image!==me?.raw)URL.revokeObjectURL(meUrl);
   if(image!==me?.raw)meUrl=image?photoUrl(image):'';
-  me=u?{email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:meUrl,raw:image}:null;
+  me=u?{id:typeof u.id==='string'?u.id:'',email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:meUrl,raw:image}:null;
 };
+// OneProfileID links (docs/concepts/10-opid-photos.md): a person links a card to their own account
+// (node.opidUser; viewers who are not the workspace owner see only node.opidLinked for others' links).
+// opidLink(n): 'me' when the card is linked to the signed-in account, 'other' for anyone else, '' when not linked.
+export function opidLink(n){
+  if(!n)return '';
+  if(typeof n.opidUser==='string'&&n.opidUser)return me?.id&&n.opidUser===me.id?'me':'other';
+  return n.opidLinked===true?'other':'';
+}
+// Linked cards' current OneProfileID photos, by node id (opid-photos.js loads them; display only,
+// never saved). Each is decoded once into an object URL like the session photo.
+let memberPhotos=new Map(),memberRaw=new Map();
+const memberUrls=new Set();
+// -> object URLs that are new or changed (for their entrance)
+export function setMemberPhotos(map){
+  const next=new Map(),raw=new Map(),fresh=[];
+  for(const [id,src] of Object.entries(map||{})){
+    if(typeof src!=='string'||!src)continue;
+    const url=memberRaw.get(id)===src?memberPhotos.get(id):photoUrl(src);
+    if(memberRaw.get(id)!==src)fresh.push(url);
+    next.set(id,url);raw.set(id,src);
+  }
+  for(const [id,url] of memberPhotos)if(next.get(id)!==url&&url.startsWith('blob:')){URL.revokeObjectURL(url);memberUrls.delete(url)}
+  for(const url of next.values())if(url.startsWith('blob:'))memberUrls.add(url);
+  const changed=fresh.length||[...memberPhotos.keys()].some(id=>!next.has(id));
+  memberPhotos=next;memberRaw=raw;
+  return changed?fresh:null;
+}
 // The signed-in user's photo URL as every avatar uses it ('' when signed out or without one).
 export const sessionPhoto=()=>me?.image||'';
 // The signed-in user's photo when `name` is their name (an AgentFlow human agent with no person card).
@@ -124,9 +151,14 @@ export const setPeopleSource=fn=>{peopleSrc=fn};
 // The workspace's people, read once per synchronous render.
 export function people(){if(!peopleCache){peopleCache=peopleSrc()||[];queueMicrotask(()=>{peopleCache=null})}return peopleCache}
 export const isMe=n=>isSessionPerson(n,people(),me);
+// A linked card shows its account's current photo first (the signed-in user's own right away), then
+// any uploaded photo. An unlinked card shows its uploaded photo, or the signed-in user's when it is theirs.
 export function personPhoto(n){
-  if(!n)return '';if(typeof n.image==='string'&&n.image)return n.image;
-  return me?.image&&isMe(n)?me.image:'';
+  if(!n)return '';
+  const link=opidLink(n);
+  if(link){const p=memberPhotos.get(n.id)||(link==='me'?me?.image:'');if(p)return p}
+  if(typeof n.image==='string'&&n.image)return n.image;
+  return !link&&me?.image&&isMe(n)?me.image:'';
 }
 export const photoImg=src=>`<img class="pa-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`;
 export function personAvatar(n,{size=0,cls='',tip=''}={}){
@@ -146,8 +178,8 @@ document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains
 // re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
 // Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-// The session photo's object URL (blob:) is the one non-http(s), non-data URL allowed.
-export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl))?u.trim():'';
+// The session photo's and linked cards' object URLs (blob:) are the only non-http(s), non-data URLs allowed.
+export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl)||memberUrls.has(u))?u.trim():'';
 const av=(a,cls)=>{const img=safeImg(a.img);return `<span class="bub ${cls}${img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${img?photoImg(img):''}</span>`};
 const swatch=it=>it.avatar?av(it.avatar,'pk-av')
   :it.icon?`<span class="pk-ic">${icon(it.icon,13)}</span>`

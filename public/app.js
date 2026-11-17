@@ -1,15 +1,16 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice} from './ui.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice,isMe,opidLink} from './ui.js';
 import {store,chart,change,checkpoint,commit,snapshot,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
 import * as af from './agentflow.js';
 import {openCardsFor} from './devops-core.js';
 import {peopleOf} from './agentflow-core.js';
-import {swap,busy,unskeletonize,panel,panelReset,popOut} from './motion.js';
+import {swap,busy,unskeletonize,panel,panelReset,popOut,fadeIn} from './motion.js';
 import {TABS,parseHash,hashFor,clampRatio,openSplit,closePane,clickTab,revealTab,cleanSplit,NARROW,DIVIDER} from './split-core.js';
 import {logoMark} from './logo-mark.js';
-import {accountHtml,sessionUser} from './account.js';
+import {accountHtml,sessionUser,signInMode} from './account.js';
+import {startOpidPhotos,photosMaybe,linkCard} from './opid-photos.js';
 import {startInbox} from './inbox.js';
 import {startSync} from './sync.js';
 import {loadDevlog} from './devlog.js';
@@ -351,7 +352,8 @@ function addNode(type='entity',at){
 }
 function duplicate(){
   const n=node(selected);if(!n||linkOf(n))return;
-  change(()=>{const c={...clone(n),id:uid(),x:n.x+GRID*2,y:n.y+GRID*2};chart().nodes.push(c);selected=c.id});
+  // A copy is not linked to anyone's OneProfileID: only that person can link a card (docs/concepts/10-opid-photos.md).
+  change(()=>{const c={...clone(n),id:uid(),x:n.x+GRID*2,y:n.y+GRID*2};delete c.opidUser;delete c.opidLinked;chart().nodes.push(c);selected=c.id});
 }
 function deleteSelection(){
   if(!node(selected)&&!edge(selected))return;
@@ -498,15 +500,37 @@ canvas.addEventListener('contextmenu',e=>{
 // With no photo of its own, a card that is the signed-in user's (their email or, with no email, the only
 // person with their name) shows their account photo. "This is me" links a card with no email to the
 // account by setting the email only, so the live account photo keeps showing.
+// OneProfileID link (docs/concepts/10-opid-photos.md): on a card that is theirs, the signed-in person can
+// link it to their own account so it always shows their current account photo. Only they can link it;
+// anyone who can edit the card can unlink it. The linked photo is shown first, then any uploaded one.
+let linking=false;
+function opidHtml(n,l){
+  if(signInMode()!=='opid'||!sessionUser()?.id)return '';
+  // Your own link can be made or removed on your cards and on cards shared with you; someone else's needs edit access.
+  const reach=!!l||canEdit(n),edit=canEdit(n)&&(!l||(l.permission==='edit'&&!l.stub));
+  const btn=(i,t)=>`<button type="button" class="txt opid-btn" data-i="${i}"${linking?' disabled aria-busy="true"':''}>${linking?'<span class="opid-spin" aria-hidden="true"></span>':''}${t}</button>`;
+  const link=opidLink(n);
+  if(link==='me')return `<p class="pp-note opid-note">Linked to your OneProfileID. This card shows your current account photo from OneProfileID.</p>${reach?`<div class="opid-acts">${btn('opidUnlink','Unlink from my OneProfileID')}</div>`:''}`;
+  if(link==='other')return `<p class="pp-note opid-note">Linked to this person's OneProfileID. The photo comes from their account and updates when they change it.</p>${edit?`<div class="opid-acts">${btn('opidUnlink','Unlink')}</div>`:''}`;
+  return reach&&isMe(n)&&!l?.stub?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
+}
+async function setOpidLink(id,link){
+  if(linking)return;linking=true;renderInspector();
+  const r=await linkCard(id,link);
+  linking=false;renderInspector();
+  if(!r.ok){toast(r.error,true);return}
+  fadeIn([...$('#inspector').querySelectorAll('.opid-note,.opid-acts')]);
+  toast(link?'Linked to your OneProfileID':'Unlinked from OneProfileID');
+}
 function photoHtml(n,shared){
-  const src=personPhoto(n),mine=!n.image&&!!src,me=sessionUser();
-  if(shared)return src?prop('Photo',`<div class="pp-row">${personAvatar(n,{size:32,cls:'pp-av'})}</div>`,{cls:'pp-prop'}):'';
+  const src=personPhoto(n),link=opidLink(n),mine=!link&&!n.image&&!!src,me=sessionUser();
+  if(shared){const o=opidHtml(n,linkOf(n));return src||o?prop('Photo',`<div class="pp-row">${personAvatar(n,{size:32,cls:'pp-av'})}</div>`,{cls:'pp-prop'})+o:''}
   return prop('Photo',`<div class="pp-row">${personAvatar(n,{size:32,cls:'pp-av'})}<div class="pp-acts">
       ${ib('upload','Upload photo\nPNG, JPEG or WebP · cropped to a 128 px square',{attrs:'id="photoUploadBtn" data-i="photoUpload"'})}<input type="file" id="photoFile" accept="image/png,image/jpeg,image/webp" hidden>
       ${me?.image&&n.image!==me.image?ib('user',`Use my photo\nYour account photo and email (${me.email})`,{attrs:'id="photoMineBtn" data-i="photoMine"'}):''}
       ${me?.email&&!n.email?ib('idCard',`This is me\nLink this card to your account (${me.email}) so it shows your account photo`,{attrs:'id="thisIsMeBtn" data-i="thisIsMe"'}):''}
       ${n.image?ib('trash','Remove photo',{cls:'danger',attrs:'id="photoRemoveBtn" data-i="photoRemove"'}):''}</div></div>`,{cls:'pp-prop'})
-    +`${mine?`<p class="pp-note">Showing your account photo: ${n.email?'this email is yours':'this card has your name'}.</p>`:''}`
+    +`${mine?`<p class="pp-note">Showing your account photo: ${n.email?'this email is yours':'this card has your name'}.</p>`:''}${opidHtml(n,null)}${link&&n.image?'<p class="pp-note">The uploaded photo shows only while the account has none.</p>':''}`
     +prop('Email',`<input id="pemail" type="email" maxlength="200" placeholder="name@example.com" value="${esc(n.email||'')}">`,{for:'pemail',hint:'Matches this person to an account'});
 }
 // Any picked image becomes a 128x128 centre-cropped WebP (JPEG where WebP encoding is missing) data URL.
@@ -631,7 +655,7 @@ pane.addEventListener('click',e=>{
   else if(b.dataset.i==='shComment')postComment(pane,n||ed).catch(err=>toast(err.message,true));
   else if(b.dataset.goto){selected=b.dataset.goto;render()}
   else ({from(){connecting=true;source=n.id;renderCanvas();renderTools()},dup:duplicate,delete:deleteSelection,close(){selected=null;render()},
-    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,thisIsMe(){const em=cleanPersonEmail(sessionUser()?.email);if(em)setPhoto(n.id,{email:em})},devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
+    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,thisIsMe(){const em=cleanPersonEmail(sessionUser()?.email);if(em)setPhoto(n.id,{email:em})},opidLink:()=>setOpidLink(n.id,true),opidUnlink:()=>setOpidLink(n.id,false),devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
 });
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
@@ -689,7 +713,7 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
-  renderInspector();
+  renderInspector();photosMaybe();
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
   if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
@@ -697,6 +721,7 @@ store.onChange=render;
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 setPeopleSource(()=>peopleOf(store.db||{}));
+startOpidPhotos({db:()=>store.db,render:()=>render()});
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.

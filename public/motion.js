@@ -6,6 +6,7 @@
 //                             incoming view staggers in. Uses the View Transitions API when present,
 //                             a Web Animations fallback otherwise.
 //   popIn(el)                 Subtle entrance for popovers and menus.
+//   fadeIn(els)               Opacity-only entrance for content that arrives late (linked photos).
 //   enter(root, groups)       Stagger-in only. groups are selectors animated in order, e.g.
 //                             ['.tl-bar', '.panel', '.dcol']: toolbar, then panels, then cards.
 //   Only opacity and transform move (no layout shift). prefers-reduced-motion disables all motion.
@@ -55,6 +56,8 @@ export function swap({from,update,to}){
 }
 
 // A small pop-in for menus and popovers.
+// A photo that just arrived (a linked card's OneProfileID photo) fades in over the initials.
+export function fadeIn(els){if(reduced())return;for(const el of els||[])if(el?.animate)el.animate([{opacity:0},{opacity:1}],{duration:180,easing:EASE})}
 export function popIn(el){if(el?.animate&&!reduced())el.animate([{opacity:0,transform:'translateY(-4px) scale(.98)'},{opacity:1,transform:'none'}],{duration:120,easing:EASE})}
 
 // ---------- show / hide without snapping ----------

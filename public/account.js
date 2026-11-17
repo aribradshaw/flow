@@ -62,6 +62,8 @@ if(!document.querySelector('link[data-account]')){
 const user=()=>session.user;
 // The signed-in user ({id,email,name,image}) or null; 'flow:session' fires on window when it changes.
 export const sessionUser=()=>session.user||null;
+// 'opid' when signed in with OneProfileID, 'local' in local single-user mode.
+export const signInMode=()=>session.mode;
 let sessionKey='';
 function sessionChanged(){
   const u=session.user,key=u?`${u.email}\n${u.name||''}\n${u.image||''}`:'';if(key===sessionKey)return;
