@@ -843,5 +843,8 @@ try{
   assert((await (await fetch(BASE+'api/auth/session')).json()).mode==='local','without OPID_* the app stays in local single-user mode');
   assert(!errors.length,'no uncaught page errors'+(errors.length?': '+errors.join(' | '):''));
 }catch(e){failed++;console.log('FAIL '+e.message)}
-finally{ws.close();edge.kill();server.kill();setTimeout(()=>{for(const d of [profile,savesDir])try{rmSync(d,{recursive:true,force:true})}catch{}},500)}
-process.exitCode=failed?1:0;
+finally{ws.close();edge.kill();server.kill()}
+// Exit explicitly: embedded-postgres registers async-exit-hook, whose beforeExit handler calls
+// process.exit(0) and would otherwise turn a failed run into exit code 0.
+console.log(failed?`${failed} check${failed===1?'':'s'} failed`:'All checks passed');
+setTimeout(()=>{for(const d of [profile,savesDir])try{rmSync(d,{recursive:true,force:true})}catch{}process.exit(failed?1:0)},500);

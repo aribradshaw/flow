@@ -34,7 +34,7 @@
       ],
       "summary": "Author DevLog registry commits as the owner so Railway deploys them.",
       "sourceSubject": "Author DevLog registry commits as the owner so Railway deploys them",
-      "commit": "689f9700714302b8d2eab1d3335ce3cad7fbcd82",
+      "commit": "b74ffa2bdf8d6013d72877f04e5b6e2e174a384c",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -55,7 +55,7 @@
       ],
       "summary": "DevLog: 0.11.22-0.11.23.",
       "sourceSubject": "DevLog: 0.11.22-0.11.23",
-      "commit": "10dfad26b24409fe6042ac72b954b66347418597",
+      "commit": "e1783cce3d835df93035d120d3c5a41eeaba9591",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -76,7 +76,7 @@
       ],
       "summary": "Record every push to main in the DevLog automatically.",
       "sourceSubject": "Record every push to main in the DevLog automatically",
-      "commit": "be75567f0f367ca6b624bf0a184e646b90def9fc",
+      "commit": "d9578c366dd635b705390f71c5b19b77bd201a5e",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -97,7 +97,7 @@
       ],
       "summary": "DevLog: 0.11.19-0.11.21.",
       "sourceSubject": "DevLog: 0.11.19-0.11.21",
-      "commit": "bfa731eb49fce3c018c3db1f3deeacab017ca927",
+      "commit": "2fa132ebe29036c7117096c10c1aa8f5cb4a6aca",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -118,7 +118,7 @@
       ],
       "summary": "AgentFlow's toolbar shows Org chart, Workflows and Scheduled as icons with their names on hover, and the search field fills the rest of the bar.",
       "sourceSubject": "Make AgentFlow's view and Scheduled buttons icon-only; stretch the search field",
-      "commit": "f8b4f34f60b57e47bc28eef8268561c266a90543",
+      "commit": "43e99d9d7a09af70401a702a6e9d6a1aefcee275",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -139,7 +139,7 @@
       ],
       "summary": "The Backed by OneProfileID badge in the account menu spans the menu's full width.",
       "sourceSubject": "Stretch the account menu's OneProfileID badge to the menu's full width",
-      "commit": "eab63e6b7fe76505f1ad534433b6d79178d13658",
+      "commit": "82486271dad32e28884fe0829f53383f7e9bc957",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -160,7 +160,7 @@
       ],
       "summary": "DevLog: versions 0.10.39 to 0.11.18 recorded; public releases are tagged with their Bradshaw version, starting with v0.11.19.",
       "sourceSubject": "Record public commits in the DevLog and tag releases with Bradshaw Versioning",
-      "commit": "6e875559d55fe64e6dd6e11d22a044d9c8d1c0b9",
+      "commit": "28d63c024090ebfa6b362304ea05fd2b0defe7b0",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -181,7 +181,7 @@
       ],
       "summary": "Update CI to actions/checkout v7 and actions/setup-node v7.",
       "sourceSubject": "Update CI to actions/checkout v7 and actions/setup-node v7",
-      "commit": "c711942b11230e00575ba07b9ec78124139009b1",
+      "commit": "014f3da20675078cf4ef7eceb25ad8f55d320864",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -202,7 +202,7 @@
       ],
       "summary": "Show each scheduled job's full schedule rules and where they come from.",
       "sourceSubject": "Show each scheduled job's full schedule rules and where they come from",
-      "commit": "ab07f868af7de3799972e2c1d18ea84cec46a5a7",
+      "commit": "b2cef9c82569c566e5507668be1571dee3a7f78d",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -223,7 +223,7 @@
       ],
       "summary": "Raise the runner model cap and list included models first.",
       "sourceSubject": "Raise the runner model cap and list included models first",
-      "commit": "76474d4d4c1a390041b79364a281c945f78a6f6d",
+      "commit": "a055ffbbedd60fd249da28390e8058b5d325c4eb",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -244,7 +244,7 @@
       ],
       "summary": "Report remote machines' scheduled jobs from the AgentFlow runner over SSH.",
       "sourceSubject": "Report remote machines' scheduled jobs from the AgentFlow runner over SSH",
-      "commit": "714633ed8741390f9e28a56832bbaf6524820015",
+      "commit": "b71739148e8044c1e2693f0686c3d8933639719b",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -265,7 +265,7 @@
       ],
       "summary": "Keep runner reports on whole-workspace saves; fix the runner's error parsing.",
       "sourceSubject": "Keep runner reports on whole-workspace saves; fix the runner's error parsing",
-      "commit": "1969b4b10138ddb3bd0dd397554acc740d163294",
+      "commit": "79432cdae51b8497bb423636370b1c18ff0a0e1d",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -286,7 +286,7 @@
       ],
       "summary": "Document runner job discovery and note scheduled jobs and split view.",
       "sourceSubject": "Document runner job discovery and note scheduled jobs and split view",
-      "commit": "09d4c619c7036290ae7ce19ea898708dc99bf21d",
+      "commit": "9b5267989d8b52d14bf9c9e794279e2105e2ffc5",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -307,7 +307,7 @@
       ],
       "summary": "Report this machine's scheduled jobs from the AgentFlow runner.",
       "sourceSubject": "Report this machine's scheduled jobs from the AgentFlow runner",
-      "commit": "f640dcd41a5b6970429406ba39360f0b4681612a",
+      "commit": "f48afc0f99504a1d22af2929cf5de0f81d9e5f8d",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -328,7 +328,7 @@
       ],
       "summary": "Show runners' scheduled jobs in AgentFlow and promote them into the org.",
       "sourceSubject": "Show runners' scheduled jobs in AgentFlow and promote them into the org",
-      "commit": "f9584aa8cbfaeeaa01fadc980269f8f43a9e4a7e",
+      "commit": "683bf3f8acf458fd6d8e4b499860de85cb230341",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -349,7 +349,7 @@
       ],
       "summary": "Add split view: two tabs side by side with a draggable divider.",
       "sourceSubject": "Add split view: two tabs side by side with a draggable divider",
-      "commit": "8e375d270a6f1f86172d63c25193e7daa3c587c0",
+      "commit": "5325a0f72ff93b4fa63dd176217ba6f65ad67fb0",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -370,7 +370,7 @@
       ],
       "summary": "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people.",
       "sourceSubject": "Fix clipped AgentFlow avatar badge and show the account photo on name-matched people",
-      "commit": "4a884a2065d738f763c2338c1d7534efd419b5bd",
+      "commit": "42e1e4578582a101f32802e7820335ddcb306907",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -391,7 +391,7 @@
       ],
       "summary": "Show model maker icons on AgentFlow cards.",
       "sourceSubject": "Show model maker icons on AgentFlow cards",
-      "commit": "a5f6cc8528c0c45faca9a8a29764ae660755a324",
+      "commit": "86c1aa8c51edfa8cd7849dede28ddaff50a4e15e",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -412,7 +412,7 @@
       ],
       "summary": "Wire person photos into AgentFlow and document the redesign.",
       "sourceSubject": "Wire person photos into AgentFlow and document the redesign",
-      "commit": "186e82719ff264b89c1b64c4c6a41c21866ca542",
+      "commit": "15fe52d39cf430bdf0d8f877dd155a82f7a6f496",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -433,7 +433,7 @@
       ],
       "summary": "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker.",
       "sourceSubject": "Redesign the AgentFlow side panel: header, sections, pills, chips and a model picker",
-      "commit": "12794de7da847571caa264156e48cc12fd0c1cd1",
+      "commit": "a3586521fbfa1eb29659277d14da7b2e3bd78934",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -454,7 +454,7 @@
       ],
       "summary": "Redesign AgentFlow org cards and consolidate reporting lines.",
       "sourceSubject": "Redesign AgentFlow org cards and consolidate reporting lines",
-      "commit": "ee51288df6a8a21e7186c26e88f6d6145e07d070",
+      "commit": "625a1012477d81e622140665e3bd744fda965b94",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -475,7 +475,7 @@
       ],
       "summary": "Show person photos wherever a person appears.",
       "sourceSubject": "Show person photos wherever a person appears",
-      "commit": "d76baf611df56e6009e857808cc9038e57c097b8",
+      "commit": "1909d1787f51de3b0c2ac083273638a79bb16898",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -496,7 +496,7 @@
       ],
       "summary": "Give AgentFlow agents ordered models with fallbacks and an auto pool.",
       "sourceSubject": "Give AgentFlow agents ordered models with fallbacks and an auto pool",
-      "commit": "30947f87b01c464732ecb69f19627b620e96181a",
+      "commit": "70904e2c4e284f4edff461367896417c9623da1b",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -517,7 +517,7 @@
       ],
       "summary": "Add a Live switch to AgentFlow agents and a runner registry.",
       "sourceSubject": "Add a Live switch to AgentFlow agents and a runner registry",
-      "commit": "3801523e63a96a8b968ed2e902ec3fc0d8127b10",
+      "commit": "455428f2803fb0029510349e5435796938677c89",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -538,7 +538,7 @@
       ],
       "summary": "Stack larger AgentFlow teams in compact columns so reporting lines never cross.",
       "sourceSubject": "Stack larger AgentFlow teams in compact columns so reporting lines never cross",
-      "commit": "be4b38fcbb3fff68fc3c18b8a50142df2b86930c",
+      "commit": "26e1871bf019a17ed433a7f44881b0a544ddccbc",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -559,7 +559,7 @@
       ],
       "summary": "Document right-click menus; drop the empty icon column in text-only menus.",
       "sourceSubject": "Document right-click menus; drop the empty icon column in text-only menus",
-      "commit": "e730716951f4e328f6ddcfc251c3b550d3bf0ca0",
+      "commit": "8925318e4e2e601f19d899cb37f04303e7b8f13f",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -580,7 +580,7 @@
       ],
       "summary": "Add right-click menus to AgentFlow.",
       "sourceSubject": "Add right-click menus to AgentFlow",
-      "commit": "365dce95a469d78fab5ab5a8ac430f1d8605b619",
+      "commit": "f89529288fdc01fba84287a620f830c4d54f5ac8",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -601,7 +601,7 @@
       ],
       "summary": "Add right-click menus to the MindMap canvas.",
       "sourceSubject": "Add right-click menus to the MindMap canvas",
-      "commit": "baf4f8f0415cbc7124213daf86951294d7e624e1",
+      "commit": "096339cf0279a277ced615dede0dffa1cfb66628",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -622,7 +622,7 @@
       ],
       "summary": "Send and read query arrays the same way everywhere.",
       "sourceSubject": "Send and read query arrays the same way everywhere",
-      "commit": "6ef423083e570653f0228d61cd5c8874912c0a24",
+      "commit": "a373f46e4a025ba452d0525b5197fff4c06ca900",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -643,7 +643,7 @@
       ],
       "summary": "Add a shared right-click menu component.",
       "sourceSubject": "Add a shared right-click menu component",
-      "commit": "8cc63cd62a40f500394d9e053241e1b551939c66",
+      "commit": "e2dcbaf61c6954abad76cc7efa04e53a23634edd",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -664,7 +664,7 @@
       ],
       "summary": "Delegate DevOps cards to agents and give runners a work queue.",
       "sourceSubject": "Delegate DevOps cards to agents and give runners a work queue",
-      "commit": "85cbe3f37f0357d2c020254c06e6f57e7b888e84",
+      "commit": "c54880e3bf5527225fcb18d129b5f9e0bb19ca2b",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -685,7 +685,7 @@
       ],
       "summary": "Make AgentFlow's org a canvas and rename Chart to MindMap.",
       "sourceSubject": "Make AgentFlow's org a canvas and rename Chart to MindMap",
-      "commit": "2a4bdacf66fcf33f27580b8c57624d564c59c0e6",
+      "commit": "9f2184f4091a5f0ad24dd97603313a2514018d6f",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
@@ -706,7 +706,7 @@
       ],
       "summary": "Add AgentFlow: an org chart of agents and workflows.",
       "sourceSubject": "Merge pull request #3 from aribradshaw/agentflow",
-      "commit": "d842df18531c9d88a656e800481c4b7f1a2065c6",
+      "commit": "19f3bb784daffa9de7bae8770b004ca5bef4d7fd",
       "author": {
         "name": "Flow Contributors",
         "githubLogin": null,
