@@ -25,13 +25,16 @@ const take=(data,rev,env,shared='',conflicts)=>{keepConflicts(conflicts);adoptRe
 // Remember fields both sides changed before a merge keeps this copy's value.
 const hold=(base,local,remote)=>{const c=clashes(base,local,remote);if(Object.keys(c).length)st.held=withHeld(st.held,c)};
 
+// Resolves when the first read of the server's workspace after start has finished (or failed).
+let first=null;
+export const synced=()=>first||Promise.resolve();
 export function startSync(){
   store.onSaved=({replace,undo,deletedCards}={})=>{st.dirty=true;edits++;if(replace)allowShrink=true;
     const i=st.intent||{deleted:[],undo:false};if(undo)i.undo=true;if(Array.isArray(deletedCards))i.deleted=[...new Set([...i.deleted,...deletedCards])].slice(-500);st.intent=i;
     persist();schedule(DEBOUNCE)};
   // Local edits made while the page was closed (or by another tool) count as unsynced.
   if(st.base&&!same(store.db,st.base))st.dirty=true;
-  pull();
+  first=pull();
   setInterval(()=>{if(document.visibilityState==='visible')pull()},POLL);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pull()});
   addEventListener('online',()=>pull());

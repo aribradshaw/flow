@@ -298,6 +298,19 @@ When Flow runs with OneProfileID sign-in, a person card can show that person's c
 - **Who sees the link.** Only the environment's owner sees which account a card is linked to. Share recipients and other readers see that a card is linked, and see their own link. The link is stored as `opidUser` (the OneProfileID account id) on the person card.
 - **The server enforces it.** On every save (the app, the API, the CLI and MCP) a new or changed `opidUser` is kept only when it is the saving person's own OneProfileID account id; anything else is refused and the previous value stays. A duplicated card is never linked. API keys and the owner token can keep or remove links but never add one. In local single-user mode there is nothing to link.
 
+## Chat
+
+With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards. It is the same conversation as the Messages bubble on the OneProfileID website: what you send here shows there, and the other way round.
+
+- **Who you can message.** Your friends: people you follow on OneProfileID who follow you back. **New message** (the pencil) lists them, with people you already talk to first. OneProfileID checks the friendship on every request.
+- **When it shows.** Only with OneProfileID sign-in, and only once OneProfileID has turned messages on for this Flow. In local single-user mode, or before then, there is no chat bubble at all.
+- **Send a card.** On a DevOps card, choose **Send in chat** in its detail view, or right-click the card. On the MindMap, right-click a card (or use its side panel) and choose **Send in chat**. You can also drag a DevOps card onto the open chat or onto the bubble. Pick a friend if no conversation is open, add a note if you like, and send.
+- **What is sent.** Messages are plain text. A card goes as a readable title line and a link to the card on this Flow, for example `Flow card #12: Fix the sign-in loop` followed by `https://flow.example.com/?env=<environment id>&card=<card id>` (MindMap cards use `node=<id>`). On the OneProfileID website it stays readable as that text and link. A card shared with you links to its owner's card, so everyone who gets the link opens it with their own access.
+- **How a card shows.** In Flow, a message that links to a card on this Flow shows as a card: its title, number, column, labels, project colour and assignees, or a person's photo for a person card. The details are looked up for the person reading, with their own access: from the environment they have open when the card is there, otherwise through the server, with the same rules as opening the environment or a share. Someone who can't see the card sees only the title the message carries, with "You don't have access to this card". Nothing else about the card reaches them, not even whether it still exists.
+- **Open a card.** Click a card in a conversation, or open its link. Flow opens the environment it belongs to for you (your own, one you may read, or the environment where you placed its share) and shows the card. A card from a share you haven't placed in one of your environments asks you to add the share first (Settings › Sharing).
+- **Polling.** The conversation list refreshes every 15 seconds while it shows, an open conversation every 5 seconds, and the unread badge every minute, only while the Flow tab is visible.
+- **Privacy.** Flow sends OneProfileID only your own OneProfileID session from this browser, so messages always go out as you. The chat routes take no user, email or account id, and the only other person they ever name is a friend's handle. Messages are not stored in Flow.
+
 # Using the API
 
 Every operation is an HTTP call under the base URL of your Flow server:

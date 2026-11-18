@@ -52,6 +52,8 @@ function fullWidthBadge(el){
 }
 
 let session={mode:'local',user:null},ready=false,menu=null,signingIn=false;
+// Resolves once the first GET /api/auth/session has answered (signed in or not).
+let markKnown;export const sessionKnown=new Promise(r=>{markKnown=r});
 
 if(!document.querySelector('link[data-account]')){
   const l=document.createElement('link');
@@ -620,6 +622,6 @@ window.fetch=async(...args)=>{
     const r=await nativeFetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
     if(r.ok)session=await r.json();
   }catch{}
-  ready=true;sessionChanged();refreshButton();
+  ready=true;sessionChanged();refreshButton();markKnown();
   if(opid()){loadOpidUi();if(!user())showSignIn()}
 })();

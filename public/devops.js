@@ -28,6 +28,8 @@ for(const k of ['projects','assignees','agents','labels'])if(!Array.isArray(ui[k
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
 let selected=null,sortable=null,pop=null,pending=null,reveal=false,painted=false,rerender=()=>{},openItem=()=>{},openAgent=()=>{},toast=()=>{};
+// Chat (chat.js): chat.on() while it is available; chat.send(card id) attaches a card to a message.
+let chat={on:()=>false,send:()=>{}};
 const edited=new WeakSet();
 
 const db=()=>store.db,dv=()=>store.db.devops,card=id=>dv().cards.find(c=>c.id===id);
@@ -84,7 +86,7 @@ function sortItems(col){
 }
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
-export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;
+export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;chat=opts.chat||chat;
   const el=$('#devopsView');
   el.addEventListener('click',e=>{
     const pick=e.target.closest('[data-pick]');if(pick){finishPick(pick.dataset.pick);return}
@@ -103,12 +105,19 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
   });
   el.addEventListener('contextmenu',contextMenu);
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
+  // Right-click a card: open it, or send it in chat.
+  el.addEventListener('contextmenu',e=>{
+    const c=e.target.closest('[data-card]');if(!c||sortable?.active())return;
+    e.preventDefault();const id=c.dataset.card,x=card(id);if(!x)return;
+    const kb=e.clientX===0&&e.clientY===0;
+    openMenu(kb?c:e,[{label:'Open card',icon:'external',run:()=>select(id)},chat.on()&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)}].filter(Boolean),{label:`#${x.number} ${x.title}`});
+  });
   // Enter opens a card; Space picks it up (drag.js).
   el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
     // A menu button: ↓ / ↑ open the sort menu too.
     const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}});
   sortable=createSortable(el,{
-    item:'[data-card]',list:'.dcol-b',listOf:x=>x.closest('[data-dcol]'),keyOf:z=>z.dataset.dcol,idOf:x=>x.dataset.card,
+    item:'[data-card]',list:'.dcol-b',kind:'devops-card',listOf:x=>x.closest('[data-dcol]'),keyOf:z=>z.dataset.dcol,idOf:x=>x.dataset.card,
     ignore:'button,a,input,select,.dv-more',scroller:()=>el.querySelector('.dv-scroll'),
     describe(id,col,pos,total){const c=card(id);return `#${c?.number} ${c?.title||''}, ${colName(col)}, position ${pos} of ${total}`},
     onTap:select,
@@ -485,7 +494,7 @@ function cardDetailHtml(c){
   const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
   return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
     ${c.column==='uat'&&ed?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
-    ${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
+    ${chat.on()?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'data-dc="chat"'}):''}${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
     <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">${sharedNote(c)}
     <label for="dc-title">Title</label>${clash(c,'title')}<input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}"${ro}>
     <label for="dc-desc">Description</label>${clash(c,'description')}<textarea id="dc-desc" rows="9" maxlength="8000" placeholder="${ed?'Why this card exists, what should be delivered':''}"${ro}>${esc(c.description)}</textarea>
@@ -560,7 +569,8 @@ export function inspectorClick(e){
   if(b.dataset.dc==='labelNew'){labelForm=!labelForm;$('#dc-newrow').hidden=!labelForm;b.setAttribute('aria-expanded',labelForm);if(labelForm)$('#dc-newlabel')?.focus();return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
   if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
-  ({approve:()=>approve(c.id),delete:()=>remove(c.id),close:()=>select(null),labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>openItem(c.item),
+  // The card closes first: the chat sits behind its modal otherwise.
+  ({approve:()=>approve(c.id),delete:()=>remove(c.id),close:()=>select(null),chat:()=>{const id=c.id,m=modal;if(m)m.quiet=true;select(null);(m?m.close():Promise.resolve()).then(()=>chat.send(id))},labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>openItem(c.item),
   })[b.dataset.dc]?.();
 }
 // Text fields autosave as you type: one undo step per open form.

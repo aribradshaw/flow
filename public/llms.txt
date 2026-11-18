@@ -16,6 +16,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [Versioning](/docs/index.html#versioning): Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers.
 - [AgentFlow](/docs/index.html#agentflow): AgentFlow is an org chart for agentic work.
 - [OneProfileID photos](/docs/index.html#oneprofileid-photos): When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card.
+- [Chat](/docs/index.html#chat): With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards.
 
 ## API: Environments
 

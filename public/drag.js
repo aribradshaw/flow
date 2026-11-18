@@ -21,7 +21,19 @@
 // with hysteresis at midpoints. Drop: the clone flies into the gap, then the host commits. Esc,
 // dropping outside or a declined gate fly it home. Keyboard: Space picks up, arrows move,
 // Space drops, Esc cancels. Reduced motion: no tilt or springs.
+//
+// Drop targets outside any list (the chat panel, chat.js): addDropTarget(el,{accept(kind,id), over(on),
+// drop(kind,id)}) -> remove(). A card released over one flies home and the target gets it; o.kind names
+// what this sortable's cards are (for example 'devops-card'). Pointer drags only.
 const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const outside=new Set();
+export function addDropTarget(el,t){const x={el,...t};outside.add(x);return ()=>outside.delete(x)}
+function outsideAt(x,y,kind,id){
+  if(!kind)return null;
+  const hit=document.elementFromPoint(x,y);if(!hit)return null;
+  for(const t of outside)if(t.el.isConnected&&!t.el.hidden&&t.el.contains(hit)&&t.accept?.(kind,id)!==false)return t;
+  return null;
+}
 const SPRING='cubic-bezier(.2,.9,.3,1.15)',OUT='cubic-bezier(.2,.7,.2,1)';
 export function createSortable(root,o){
   // Cards actually shown in a list (the lifted original and skeleton copies do not count).
@@ -73,6 +85,7 @@ export function createSortable(root,o){
     if(d.flying)return;
     // Settle the gap at the release point before deciding (the last move may not have had a frame yet).
     if(e.type==='pointerup'){d.x=e.clientX;d.y=e.clientY;track()}
+    if(d.ext){const t=d.ext,id=d.id;d.ext=null;t.over?.(false);if(e.type==='pointerup'){cancel();t.drop?.(o.kind,id);return}}
     if(e.type==='pointercancel'||!d.zone)cancel();else drop();
   };
   root.addEventListener('pointerup',up);root.addEventListener('pointercancel',up);
@@ -112,6 +125,10 @@ export function createSortable(root,o){
     d.raf=requestAnimationFrame(frame);
   }
   function track(){
+    // Over a drop target outside the board: no gap on the board while it is there.
+    const ext=d.mode==='pointer'?outsideAt(d.x,d.y,o.kind,d.id):null;
+    if(ext!==d.ext){d.ext?.over?.(false);d.ext=ext;ext?.over?.(true)}
+    if(ext){if(d.zone)moveGap(null,0);return}
     const zs=new Set(zones());let realZone=document.elementFromPoint(d.x,d.y);
     while(realZone&&!zs.has(realZone))realZone=realZone.parentElement;
     if(!realZone){if(d.zone)moveGap(null,0);return}
@@ -171,7 +188,7 @@ export function createSortable(root,o){
     if(d!==cur)return;
     cleanup(false);
   }
-  function cancel(){if(!d)return;if(d.mode==='key')return keyCancel();goHome();say('Move cancelled')}
+  function cancel(){if(!d)return;if(d.mode==='key')return keyCancel();d.ext?.over?.(false);d.ext=null;goHome();say('Move cancelled')}
   function cleanup(moved){
     const cur=d;d=null;
     cur.clone?.remove();cur.gap.remove();cur.el.classList.remove('drag-src','kb-lifted');

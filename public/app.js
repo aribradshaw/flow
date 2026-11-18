@@ -9,10 +9,12 @@ import {peopleOf} from './agentflow-core.js';
 import {swap,busy,unskeletonize,panel,panelReset,popOut,fadeIn} from './motion.js';
 import {TABS,parseHash,hashFor,clampRatio,openSplit,closePane,clickTab,revealTab,cleanSplit,NARROW,DIVIDER} from './split-core.js';
 import {logoMark} from './logo-mark.js';
-import {accountHtml,sessionUser,signInMode} from './account.js';
+import {accountHtml,sessionUser,signInMode,sessionKnown} from './account.js';
 import {startOpidPhotos,photosMaybe,linkCard} from './opid-photos.js';
 import {startInbox} from './inbox.js';
-import {startSync} from './sync.js';
+import {startSync,synced,currentEnv,switchEnvironment} from './sync.js';
+import {startChat,sendRecord,chatAvailable,chatRendered} from './chat.js';
+import {localTarget,refFromSearch,validRef} from './chat-core.js';
 import {loadDevlog} from './devlog.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {onPrefs,syncPrefs} from './prefs.js';
@@ -460,6 +462,7 @@ function nodeMenu(n){
     {label:'Connect from here',icon:'connect',run(){connecting=true;source=id;renderCanvas();renderTools()}},
     !l&&{label:'Duplicate',icon:'copy',key:keyLabel('chart.duplicate'),run(){selected=id;duplicate()}},
     !l&&{label:'Share…',icon:'link',run:()=>openShareDialog({nodeId:id,from:cardEl(id)})},
+    chatAvailable()&&!l?.stub&&{label:'Send in chat',icon:'send',run:()=>sendRecord('node',id)},
     !l&&n.type!=='note'&&{label:'Open DevOps cards',icon:'branch',run:()=>toDevops(()=>dv.focus(n.type==='person'?{person:id}:{entity:id}))},
     !l&&org&&{label:stripOff?'Show project timeline':'Hide project timeline',icon:'gantt',run:()=>setStripOff(!stripOff)},
     (n.w||n.h)&&{label:'Reset size',icon:'shrink',run:()=>change(()=>{const m=node(id);if(m){delete m.w;delete m.h}})},
@@ -575,7 +578,7 @@ function renderInspector(strip=true){
   if(n){
     const k=KINDS[n.type],links=chart().edges.filter(x=>x.from===n.id||x.to===n.id),l=linkOf(n),ro=!canEdit(n)?' disabled':'';
     pane.innerHTML=`<div class="ihead"><span class="k ${n.type}">${icon(k.icon)}</span><strong>${k.label}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(sharedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''}<span class="sp"></span>
-      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
+      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${chatAvailable()&&!l?.stub?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'id="i-chat" data-i="chat"'}):''}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
       ${l?'':ib('trash','Delete card',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label>${clashHtml(n,'name')}<input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
       ${l?'':prop('Kind',choice('kind',Object.entries(KINDS).map(([t,x])=>({value:t,label:x.label,icon:x.icon})),n.type,{label:'Kind',idp:'kind'}),{cls:'kind-prop'})}
@@ -655,7 +658,7 @@ pane.addEventListener('click',e=>{
   else if(b.dataset.i==='shComment')postComment(pane,n||ed).catch(err=>toast(err.message,true));
   else if(b.dataset.goto){selected=b.dataset.goto;render()}
   else ({from(){connecting=true;source=n.id;renderCanvas();renderTools()},dup:duplicate,delete:deleteSelection,close(){selected=null;render()},
-    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,thisIsMe(){const em=cleanPersonEmail(sessionUser()?.email);if(em)setPhoto(n.id,{email:em})},opidLink:()=>setOpidLink(n.id,true),opidUnlink:()=>setOpidLink(n.id,false),devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
+    resetSize(){change(()=>{delete n.w;delete n.h})},photoUpload:()=>$('#photoFile')?.click(),photoRemove:()=>setPhoto(n.id,{image:''}),photoMine:useMyPhoto,thisIsMe(){const em=cleanPersonEmail(sessionUser()?.email);if(em)setPhoto(n.id,{email:em})},opidLink:()=>setOpidLink(n.id,true),chat:()=>sendRecord('node',n.id),opidUnlink:()=>setOpidLink(n.id,false),devops:()=>toDevops(()=>dv.focus(n.type==='person'?{person:n.id}:{entity:n.id})),strip:()=>setStripOff(!stripOff),reverse(){if(!linkOf(ed))change(()=>[ed.from,ed.to]=[ed.to,ed.from])}})[b.dataset.i]?.();
 });
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
@@ -713,7 +716,7 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
-  renderInspector();photosMaybe();
+  renderInspector();photosMaybe();chatRendered();
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
   if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
@@ -726,7 +729,7 @@ startOpidPhotos({db:()=>store.db,render:()=>render()});
 window.addEventListener('flow:session',()=>render());
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
 tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
-dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast});
+dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
 // AgentFlow agents and workflows link to cards and timeline items.
 af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
@@ -734,7 +737,57 @@ af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.
 window.flygonFlow=window.orgChartStudio={registerTool({id,label,icon:ic,run}){tools.push({id,label,icon:ic,run});renderTools()},getChart:()=>clone(chart())};
 
-initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());
+// ---------- links to cards (chat-core.js): ?env=<id>&card=<id> (DevOps) or &node=<id> (mind map) ----------
+// Opened with the viewer's own access: from the workspace this browser holds (its own record, or the
+// linked copy of a share placed here), otherwise wherever the server says it opens for them (one of
+// their environments, a share placement, or an environment they may read), switching to it.
+const OPEN_KEY='flygon-flow-open';
+const NOT_HERE="This card isn't available to you. It may have been removed, or it isn't shared with you.";
+async function openRef(ref,open=null){
+  let id=localTarget(store.db,currentEnv(),ref);
+  if(!id&&!open){
+    try{
+      const r=await fetch('/api/chat/cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:[ref]})});
+      const v=(await r.json().catch(()=>({}))).cards?.[0];
+      if(v?.access&&!v.open){toast('This card is shared with you. Add its share to one of your environments (Settings › Sharing) to open it.',true);return}
+      open=v?.access?v.open:null;
+    }catch{toast('Could not reach the server to open that card.',true);return}
+  }
+  if(!id&&open){
+    if(open.env!==currentEnv()){try{await switchEnvironment(open.env);toast('Opened '+(store.db.environment?.name||'that environment'))}catch(err){toast(err.message,true);return}}
+    id=localTarget(store.db,currentEnv(),{kind:ref.kind,env:currentEnv(),id:open.id});
+  }
+  if(!id){toast(NOT_HERE,true);return}
+  if(ref.kind==='card'){toDevops(()=>dv.focus({cardId:id}));return}
+  const c=store.db.charts.find(x=>x.nodes.some(n=>n.id===id));if(!c){toast(NOT_HERE,true);return}
+  if(isSplit()&&!isOpen('chart'))reveal('chart');else if(!isOpen('chart')){history.pushState(null,'',location.pathname);setTab('chart')}
+  if(store.db.active!==c.id){store.db.active=c.id;save()}
+  selected=id;connecting=false;source=null;render();
+  // Centre the card once the MindMap is laid out (a tab change may still be animating).
+  const centre=()=>{const n=node(id),cv=$('#canvas');if(!n||!cv.clientWidth)return;fitted=true;const r=rect(n);view.x=cv.clientWidth/2-(r.x+r.w/2)*view.z;view.y=cv.clientHeight/2-(r.y+r.h/2)*view.z;renderCanvas();cardEl(id)?.focus({preventScroll:true})};
+  requestAnimationFrame(()=>requestAnimationFrame(centre));setTimeout(centre,260);
+}
+// A pasted link: kept for this tab (so a sign-in redirect does not lose it) and taken off the address,
+// then opened once the workspace has loaded for a signed-in person.
+{const ref=refFromSearch(location.search);if(ref){try{sessionStorage.setItem(OPEN_KEY,JSON.stringify(ref))}catch{}history.replaceState(null,'',location.pathname+location.hash)}}
+let opening=false;
+async function openPending(){
+  if(opening)return;opening=true;
+  try{
+    await sessionKnown;
+    if(signInMode()==='opid'&&!sessionUser())return;
+    let ref=null;try{ref=JSON.parse(sessionStorage.getItem(OPEN_KEY)||'null')}catch{}
+    if(!validRef(ref))return;
+    try{sessionStorage.removeItem(OPEN_KEY)}catch{}
+    await synced();await openRef(ref);
+  }finally{opening=false}
+}
+window.addEventListener('flow:session',()=>openPending());
+// Chat with OneProfileID friends (chat.js): the launcher shows only when it is available.
+window.addEventListener('flow:chat',()=>render());
+startChat({openLink:openRef,toast});
+
+initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();
 // Rebinding a shortcut re-renders, so tooltips show the new keys.
 onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}});syncPrefs();
 document.body.removeAttribute('aria-busy');

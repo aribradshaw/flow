@@ -544,6 +544,46 @@ async function opidApi(req,res){
   json(res,404,{error:'Not found'});return true;
 }
 
+// ---------- chat with OneProfileID friends (lib/chat.mjs, docs/concepts/11-chat.md) ----------
+// A Flow card in a message is a link to its environment and id. resolveCards looks each one up with the
+// viewer's own access, the same rules as reading the workspace: its owner and readers of the environment
+// see it; a share recipient sees it as the share shows it (and opens their linked copy); anyone else
+// gets {access:false} with nothing about the card, not even whether it exists.
+const {chatRoutes}=await import('./lib/chat.mjs');
+const chatCore=await import('./public/chat-core.js');
+async function resolveCards(req,user,refs){
+  const homes=new Map(),home=env=>homes.get(env)||homes.set(env,workspaces.get(env).catch(()=>null)).get(env);
+  let incoming=null;const mineShares=async()=>incoming??=(user.token||user.key?[]:(await shares.list({recipientEmail:user.email})).filter(s=>!s.revokedAt));
+  const out=[];
+  for(const ref of refs){
+    try{
+      const w=await home(ref.env);
+      if(!w?.data||w.archivedAt){out.push({access:false});continue}
+      const e={...(envs.get(ref.env)||{id:ref.env,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
+      if(sameEmail(w.owner,user.email)||canRead(e,user)){
+        const card=chatCore.summarize(stripLinked(w.data),ref);
+        out.push(card?{access:true,card,open:{env:ref.env,id:ref.id}}:{access:false});continue;
+      }
+      let found=null;
+      for(const s of (await mineShares()).filter(x=>x.ownerEnv===ref.env)){
+        const sc=core.resolveScope(w.data,s);
+        if(!(ref.kind==='card'?sc.cardIds:sc.nodeIds).includes(ref.id))continue;
+        // Exactly what the share shows its recipient (assignees, labels and projects limited to its scope).
+        const p=core.projectForRecipient(w.data,s,[],{members:await membersOf(s),viewer:opidId(user)});if(!p)continue;
+        const id=core.linkedId(s.id,ref.id);
+        const card=chatCore.summarize({charts:[{nodes:p.nodes}],projects:p.projects,devops:{cards:p.cards,labels:p.labels},shares:[{members:p.share.members}]},{kind:ref.kind,id});
+        if(!card)continue;
+        // It opens where the recipient placed the share (one of their own environments), if anywhere.
+        let at=null;for(const envId of await shares.envsFor(s.id)){const mine=await workspaces.get(envId);if(mine&&!mine.archivedAt&&sameEmail(mine.owner,user.email)){at=envId;break}}
+        found={access:true,card,open:at?{env:at,id}:null};break;
+      }
+      out.push(found||{access:false});
+    }catch(err){console.error('chat card lookup failed',err?.message);out.push({access:false})}
+  }
+  return out;
+}
+const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards});
+
 // ---------- environments: a user's own workspaces (list, create, rename, archive) ----------
 //   GET /api/environments            -> [{id, name, visibility, rev, updatedAt}] the user owns
 //   POST /api/environments {name}    -> {id}
@@ -892,7 +932,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
