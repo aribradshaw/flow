@@ -105,13 +105,6 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
   });
   el.addEventListener('contextmenu',contextMenu);
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
-  // Right-click a card: open it, or send it in chat.
-  el.addEventListener('contextmenu',e=>{
-    const c=e.target.closest('[data-card]');if(!c||sortable?.active())return;
-    e.preventDefault();const id=c.dataset.card,x=card(id);if(!x)return;
-    const kb=e.clientX===0&&e.clientY===0;
-    openMenu(kb?c:e,[{label:'Open card',icon:'external',run:()=>select(id)},chat.on()&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)}].filter(Boolean),{label:`#${x.number} ${x.title}`});
-  });
   // Enter opens a card; Space picks it up (drag.js).
   el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
     // A menu button: ↓ / ↑ open the sort menu too.
@@ -360,6 +353,7 @@ function cardMenu(e,id){
     // Delegating is one's own data (AgentFlow), so it works on shared cards too, as in the card.
     ac&&{label:'Delegate to agent',icon:'bot',items:[...ac.shown.map(a=>({label:a.name,checked:on.has(a.id),run(){const x=card(id);if(x)setAgents(x,on.has(a.id)?[...on].filter(v=>v!==a.id):[...on,a.id])}})),...(ac.more?more('More agents in the card…'):[])]},
     '-',
+    chat.on()&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)},
     {label:'Copy link',icon:'link',run:()=>copyText(location.href.split('#')[0]+cardHash(c),`Link to #${c.number} copied`)},
     {label:'Copy card number',icon:'copy',run:()=>copyText(`#${c.number}`,`#${c.number} copied`)},
     '-',
