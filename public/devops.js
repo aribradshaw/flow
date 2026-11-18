@@ -1,14 +1,14 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto,prop,hint} from './ui.js';
+import {$,esc,ib,uid,pickerButton,openPicker,personAvatar,personPhoto,prop,hint,hideTip} from './ui.js';
 import {busy,skeletonAppend,panel,flipList} from './motion.js';
 import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {openMenu} from './menu.js';
 import {getPref,setPref} from './prefs.js';
 import {detailModal,ask} from './modal.js';
-import {store,change,checkpoint,commit,save} from './store.js';
+import {store,change,checkpoint,commit,save,step} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
-import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,sortCards} from './devops-core.js';
+import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,sortCards,priorityLabels,withPriority,moveTargets,capList} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
@@ -72,10 +72,15 @@ function setSort(col,k){
 function sortMenu(b){
   // A press on the button while its menu is open closes the menu (outside pointerdown) and should not reopen it.
   if(Date.now()-(+b.dataset.closed||0)<400)return;
-  const col=b.closest('[data-dcol]').dataset.dcol,cur=sortOf(col),groups=[['manual'],['newest','oldest','updated'],['due','due-late'],['points-high','points-low'],['priority','number','title']];
+  const col=b.closest('[data-dcol]').dataset.dcol;
   b.setAttribute('aria-expanded','true');
-  openMenu(b,groups.flatMap((g,i)=>[...(i?['-']:[]),...g.map(k=>({label:k==='manual'&&col==='done'?'Manual (recently moved first)':sortName(k),checked:cur===k,run:()=>setSort(col,k)}))]),
+  openMenu(b,sortItems(col),
     {label:`Sort ${colName(col)}`,align:'end',onClose(){b.setAttribute('aria-expanded','false');b.dataset.closed=Date.now()}});
+}
+// The sort menu's items, also the Sort submenu of a column's right-click menu.
+function sortItems(col){
+  const cur=sortOf(col),groups=[['manual'],['newest','oldest','updated'],['due','due-late'],['points-high','points-low'],['priority','number','title']];
+  return groups.flatMap((g,i)=>[...(i?['-']:[]),...g.map(k=>({label:k==='manual'&&col==='done'?'Manual (recently moved first)':sortName(k),checked:cur===k,run:()=>setSort(col,k)}))]);
 }
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
@@ -96,6 +101,7 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
     if(e.target.id!=='dv-q')return;
     ui.q=e.target.value;keepUi();const pos=e.target.selectionStart;render();const q=$('#dv-q');q.focus();q.setSelectionRange(pos,pos);
   });
+  el.addEventListener('contextmenu',contextMenu);
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
   // Enter opens a card; Space picks it up (drag.js).
   el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
@@ -193,8 +199,9 @@ function openFilter(b){
   const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
   openPicker(b,{items:items(),selected:ui[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){ui[k]=v;keepUi();render()}});
 }
+const filtersOn=()=>!!(ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone);
 function toolbar(n){
-  const active=ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone;
+  const active=filtersOn();
   const ents=nodesOf(['entity','area']).filter(e=>e.id===ui.entity||entityProjects(db(),e.id).length);
   return `<div class="tl-bar dv-bar">
     ${pickerButton('dv-projects','Projects',projectItems(),ui.projects,{tip:'Filter by project'})}
@@ -274,7 +281,7 @@ function action(name,b){
   ({
     add:()=>addCard(NEW_COLUMN),
     colAdd:()=>addCard(b.dataset.col),
-    hideDone(){ui.hideDone=!ui.hideDone;keepUi();render()},
+    hideDone:toggleDone,
     more(){const col=b.dataset.col,list=b.closest('.dcol-b');b.disabled=true;skeletonAppend(list,3);setTimeout(()=>{shown.set(col,(shown.get(col)||PAGE)+PAGE);render()},180)},
     clear(){ui=FILTERS();keepUi();render()},
     deleted:()=>openDeleted(b),
@@ -296,6 +303,84 @@ function remove(id){
   if(linkOf(card(id))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
   change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null},{deletedCards:[id]});
 }
+
+// ---------- right-click menus ----------
+// On a card, a column (header or empty space) or the board background. The menu key and Shift+F10 open
+// the same menu under the focused card or column control (menu.js). Text fields, the toolbar and the
+// developer picker keep the browser's own menu. Every change goes through the board's own paths
+// (requestMove and its gates, remove, the pickers' rules), so each is one undo step.
+function contextMenu(e){
+  const t=e.target;
+  if(t.closest('input,textarea,select,[contenteditable],.dv-bar,.dv-modal'))return;
+  const cd=t.closest('[data-card]'),col=t.closest('[data-dcol]'),bg=t.closest('.dv-scroll');
+  if(!cd&&!col&&!bg)return;
+  e.preventDefault();
+  if(sortable?.active())return; // a right-click mid-drag must not interrupt it
+  hideTip();
+  if(cd&&card(cd.dataset.card)){if(document.activeElement!==cd)cd.focus({preventScroll:true});cardMenu(e,cd.dataset.card)}
+  else if(col)colMenu(e,col.dataset.dcol);
+  else boardMenu(e);
+}
+const MENU_CAP=15;
+async function copyText(text,done){try{await navigator.clipboard.writeText(text);toast(done)}catch{toast('Could not copy: the browser blocked clipboard access',true)}}
+// A change to one field of a card from a menu (the card may be gone by the time the menu is used).
+const edit=(id,fn)=>()=>{const c=card(id);if(!c)return;if(locked(c)){toast(lockedMsg(c),true);return}change(()=>{fn(c);touch(c)})};
+function cardMenu(e,id){
+  const c=card(id),l=linkOf(c),ro=locked(c),A=db().agentflow;
+  // Assign: the developer role, as Doing asks for one; testers and requesters are set in the card.
+  const ppl=peopleFor(c),devs=new Set(c.assignees.filter(a=>a.role==='developer').map(a=>a.node));
+  const pc=capList(ppl,p=>devs.has(p.id),MENU_CAP);
+  const allowed=new Set(labelItems(c).map(x=>x.value)),lc=capList(dv().labels.filter(x=>allowed.has(x.id)),x=>c.labels.includes(x.id),MENU_CAP);
+  const pri=priorityLabels(dv().labels).filter(x=>allowed.has(x.id)),prc=capList(db().projects,p=>p.id===c.project,MENU_CAP);
+  const on=A?.agents.length?new Set(agentsForCard(A,id).map(a=>a.id)):null;
+  const ac=on&&capList([...A.agents].sort((a,b)=>a.name.localeCompare(b.name)),a=>on.has(a.id),MENU_CAP);
+  const more=label=>['-',{label,run:()=>select(id)}];
+  openMenu(e,[
+    {label:'Open',icon:'pencil',key:'Enter',run:()=>select(id)},
+    c.column==='uat'&&!ro&&{label:'Approve (move to Done)',icon:'check',run:()=>approve(id)},
+    '-',
+    {label:'Move to',icon:'board',disabled:ro,items:moveTargets(dv().columns,c).map(t=>({label:t.name,checked:t.current,run:()=>{if(!t.current)requestMove(id,t.id)}}))},
+    {label:'Assign developer',icon:'terminal',disabled:ro||!ppl.length,items:[...pc.shown.map(p=>({label:p.name,checked:devs.has(p.id),run:edit(id,x=>{
+      const has=x.assignees.some(a=>a.node===p.id&&a.role==='developer');
+      x.assignees=has?x.assignees.filter(a=>!(a.node===p.id&&a.role==='developer')):[...x.assignees,{node:p.id,role:'developer'}]})})),...(pc.more?more('More people in the card…'):[])]},
+    {label:'Labels',icon:'list',disabled:ro||!lc.shown.length,items:[...lc.shown.map(x=>({label:x.name,checked:c.labels.includes(x.id),run:edit(id,y=>{y.labels=y.labels.includes(x.id)?y.labels.filter(v=>v!==x.id):[...y.labels,x.id]})})),...(lc.more?more('More labels in the card…'):[])]},
+    pri.length&&{label:'Priority',icon:'pHigh',disabled:ro,items:[{label:'None',checked:!c.labels.some(v=>pri.some(x=>x.id===v)),run:edit(id,y=>{y.labels=withPriority(y.labels,dv().labels,'')})},
+      ...pri.map(x=>({label:x.name,checked:c.labels.includes(x.id),run:edit(id,y=>{y.labels=withPriority(y.labels,dv().labels,x.id)})}))]},
+    db().projects.length&&{label:'Project',icon:'tag',disabled:!!l,items:[{label:'No project',checked:!c.project,run:edit(id,y=>{y.project=''})},
+      ...prc.shown.map(p=>({label:p.name,checked:c.project===p.id,run:edit(id,y=>{y.project=p.id})})),...(prc.more?more('More projects in the card…'):[])]},
+    // Delegating is one's own data (AgentFlow), so it works on shared cards too, as in the card.
+    ac&&{label:'Delegate to agent',icon:'bot',items:[...ac.shown.map(a=>({label:a.name,checked:on.has(a.id),run(){const x=card(id);if(x)setAgents(x,on.has(a.id)?[...on].filter(v=>v!==a.id):[...on,a.id])}})),...(ac.more?more('More agents in the card…'):[])]},
+    '-',
+    {label:'Copy link',icon:'link',run:()=>copyText(location.href.split('#')[0]+cardHash(c),`Link to #${c.number} copied`)},
+    {label:'Copy card number',icon:'copy',run:()=>copyText(`#${c.number}`,`#${c.number} copied`)},
+    '-',
+    !l&&{label:'Delete card',icon:'trash',danger:true,key:keyLabel('devops.delete'),run:()=>remove(id)},
+  ].filter(Boolean),{label:`Card #${c.number}: ${c.title}`});
+}
+function colMenu(e,col){
+  const name=colName(col);
+  openMenu(e,[
+    {label:`New card in ${name}`,icon:'plus',key:col===NEW_COLUMN?keyLabel('devops.add'):'',run:()=>addCard(col)},
+    '-',
+    {label:'Sort',icon:'sort',items:sortItems(col)},
+    {label:'Rename column…',icon:'pencil',run:()=>rename(col)},
+    col==='done'&&{label:'Hide Done',icon:'check',checked:ui.hideDone,run:toggleDone},
+  ].filter(Boolean),{label:`Column: ${name}`});
+}
+function boardMenu(e){
+  openMenu(e,[
+    {label:`New card in ${colName(NEW_COLUMN)}`,icon:'plus',key:keyLabel('devops.add'),run:()=>addCard(NEW_COLUMN)},
+    {label:'Search cards',icon:'filter',key:keyLabel('devops.search'),run:()=>$('#dv-q')?.focus()},
+    '-',
+    {label:'Hide Done',icon:'check',checked:ui.hideDone,run:toggleDone},
+    {label:'Clear filters',icon:'x',disabled:!filtersOn(),run:()=>action('clear')},
+    {label:'Recently deleted…',icon:'undo',run:()=>openDeleted($('#devopsView [data-dv=deleted]'))},
+    '-',
+    {label:'Undo',icon:'undo',key:keyLabel('global.undo'),disabled:!store.undo.length,run:()=>step(-1)},
+    {label:'Redo',icon:'redo',key:keyLabel('global.redo'),disabled:!store.redo.length,run:()=>step(1)},
+  ],{label:'DevOps board'});
+}
+function toggleDone(){ui.hideDone=!ui.hideDone;keepUi();render()}
 
 // Recently deleted: every card removed from this environment (on the board, by undo, by a snapshot
 // restore, or through the API and MCP), kept on the server (GET .../deleted-cards, cards.restore).
@@ -438,6 +523,13 @@ function agentRow(c){
   return prop('Delegated to',named(`Delegated to: ${names||'None'}`,pickerButton('dc-agents',names||'None',agentItems(),on.map(a=>a.id),{cls:'mini wide',count:false}))+hint('AgentFlow agents working this card. It joins their work queue.','Delegated to'),{ic:'bot'})
     +(on.length?`<div class="dc-agchips">${on.map(a=>`<button type="button" class="dc-agchip" id="dc-ag-${esc(a.id)}" data-dc-agent="${esc(a.id)}" data-tip="${esc(a.title?`Open in AgentFlow\n${a.title}`:'Open in AgentFlow')}" aria-label="Open ${esc(a.name)} in AgentFlow${a.title?`, ${esc(a.title)}`:''}">${icon('bot',12)}<span>${esc(a.name)}</span></button>`).join('')}</div>`:'');
 }
+// Delegate a card to exactly these agents (ids). One undo step; nothing changes when an agent's queue is full.
+function setAgents(c,ids){
+  // Check room before recording an undo step: delegate() changes nothing when an agent is full.
+  const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,ids);
+  if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}
+  touch(c);commit(before);rerender();
+}
 function addLabel(){
   const i=$('#dc-newlabel'),name=i?.value.trim(),c=card(selected);if(!name||!c)return;
   const keys=['blue','green','purple','orange','teal','pink','indigo','amber','sky','rose','lime','brown'];
@@ -463,11 +555,7 @@ export function inspectorClick(e){
     openPicker(b,{items:personItems(c),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
       onChange(v){change(()=>{c.assignees=[...c.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(c)})}});return}
   if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
-    onChange(v){
-      // Check room before recording an undo step: delegate() changes nothing when an agent is full.
-      const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,v);
-      if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}
-      touch(c);commit(before);rerender()}});return}
+    onChange(v){setAgents(c,v)}});return}
   if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
   if(b.dataset.dc==='labelNew'){labelForm=!labelForm;$('#dc-newrow').hidden=!labelForm;b.setAttribute('aria-expanded',labelForm);if(labelForm)$('#dc-newlabel')?.focus();return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}

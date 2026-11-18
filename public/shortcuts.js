@@ -46,6 +46,7 @@ export const SHORTCUTS=[
   {id:'agentflow.delete',scope:'agentflow',keys:['Delete','Backspace'],desc:'Delete the selected agent or workflow'},
   {id:'agentflow.nextAgent',scope:'agentflow',keys:['Alt+J'],desc:'Next agent or workflow (side panel open; works inside fields)'},
   {id:'agentflow.prevAgent',scope:'agentflow',keys:['Alt+K'],desc:'Previous agent or workflow (side panel open; works inside fields)'},
+  {id:'devops.menu',scope:'devops',keys:['Shift+F10'],desc:'Open the menu of a focused card or column (or the menu key)',fixed:true},
   {id:'devops.drag',scope:'devops',keys:['Space'],desc:'Pick up a focused card; arrows move it, Space drops',fixed:true},
 ];
 const byId=new Map(SHORTCUTS.map(s=>[s.id,s]));

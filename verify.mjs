@@ -33,7 +33,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // Wait until a page expression is true (polled), for conditions that take longer under load.
 const until=async(x,ms=5000)=>{for(const end=Date.now()+ms;;){if(await js(x))return true;if(Date.now()>end)return false;await sleep(25)}};
 // Gates and confirmations are small dialogs (modal.js ask): answer them.
-const answer=async ok=>{await sleep(80);await js(`document.querySelector('dialog.ask-dlg[open] [data-ask=${ok?'ok':'cancel'}]')?.click()`);await sleep(150)};
+const answer=async ok=>{await until(`!!document.querySelector('dialog.ask-dlg[open] [data-ask]')`,3000);await js(`document.querySelector('dialog.ask-dlg[open] [data-ask=${ok?'ok':'cancel'}]')?.click()`);await sleep(150)};
 const mouse=(type,x,y,o={})=>call('Input.dispatchMouseEvent',{type,x,y,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,...o});
 const drag=async(x,y,X,Y)=>{await mouse('mousePressed',x,y);for(let i=1;i<=8;i++)await mouse('mouseMoved',x+(X-x)*i/8,y+(Y-y)*i/8);await mouse('mouseReleased',X,Y)};
 const key=async(k,vk,mods=0,text)=>{await call('Input.dispatchKeyEvent',{type:text?'keyDown':'rawKeyDown',key:k,modifiers:mods,windowsVirtualKeyCode:vk,text});await call('Input.dispatchKeyEvent',{type:'keyUp',key:k,modifiers:mods,windowsVirtualKeyCode:vk})};
@@ -527,6 +527,48 @@ try{
     await call('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});await sleep(500);
     await js(`document.querySelector('${sortBtn}').click()`);await sleep(150);await js(`document.querySelector('.cm [role=menuitemcheckbox]').click()`);await sleep(350);
     assert(await shownOrder()==='QA Card B,QA Card C'&&await sortPref()===''&&await js(`!document.querySelector('${sortBtn}').classList.contains('on')`),'sort: Manual restores the board order');}
+  // Right-click menus: a card (move through the gates, undo), the keyboard path, a column, the board, text fields.
+  {const rc=(sel,kb=false)=>js(`(()=>{const el=document.querySelector(${JSON.stringify(sel)}),r=el.getBoundingClientRect(),kb=${kb};if(kb)el.focus();const e=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:kb?0:r.x+r.width/2,clientY:kb?0:r.y+Math.min(20,r.height/2)});el.dispatchEvent(e);return e.defaultPrevented})()`);
+    const menuLabel=()=>js(`document.querySelector('.cm [role=menu]')?.getAttribute('aria-label')||''`);
+    const labels=(q='.cm:not(.cm-child)')=>js(`[...document.querySelectorAll('${q} .cm-item .cm-l')].map(l=>l.textContent).join('|')`);
+    const pick=t=>js(`(()=>{const r=[...document.querySelectorAll('.cm .cm-item')].reverse().find(r=>r.querySelector('.cm-l').textContent===${JSON.stringify(t)});r?.click();return !!r})()`);
+    const colOf=async id=>(await saved()).devops.cards.find(c=>c.id===id)?.column;
+    const bSel=`[data-card="${B.id}"]`;
+    await rc(bSel);
+    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()===`Card #${B.number}: QA Card B`&&/^Open\|Move to\|Assign developer\|Labels\|Priority\|.*Copy link\|Copy card number\|Delete card$/.test(await labels()),'right-click a card: Open, Move to, Assign, Labels, Priority, Copy link and number, Delete');
+    await pick('Move to');
+    assert(await until(`!!document.querySelector('.cm-child')`)&&await js(`[...document.querySelectorAll('.cm-child [aria-checked=true] .cm-l')].map(l=>l.textContent).join()`)==='Requests / Sprinted','Move to lists the columns with the current one checked');
+    await pick('Blocked');
+    assert(await until(`!document.querySelector('.cm')&&!!document.querySelector('[data-dcol=blocked] ${bSel}')`)&&await colOf(B.id)==='blocked','Move to moves the card');
+    await key('z',90,2);
+    assert(await until(`!!document.querySelector('[data-dcol=requests] ${bSel}')`)&&await colOf(B.id)==='requests','one Ctrl+Z undoes a menu move');
+    await rc(bSel);await until(`!!document.querySelector('.cm')`);await pick('Move to');await until(`!!document.querySelector('.cm-child')`);await pick('Done');
+    assert(await until(`!!document.querySelector('dialog.ask-dlg[open]')`),'Move to Done asks first, like dragging');
+    await answer(false);
+    assert(await until(`!document.querySelector('dialog.ask-dlg[open]')`)&&await colOf(B.id)==='requests','declining the Done gate leaves the card where it was');
+    // Keyboard (menu key, Shift+F10: a contextmenu at 0,0): the menu opens under the focused card; Esc returns focus.
+    const cSel=`[data-card="${C.id}"]`;
+    await rc(cSel,true);
+    assert(await until(`!!document.querySelector('.cm')`)&&await js(`(()=>{const m=document.querySelector('.cm').getBoundingClientRect(),c=document.querySelector('${cSel}').getBoundingClientRect();return m.top>=c.bottom-1&&document.activeElement?.closest('.cm')!=null})()`)&&await menuLabel()===`Card #${C.number}: QA Card C`,'the keyboard opens the card menu under the focused card, focus in the menu');
+    await key('Escape',27);
+    assert(await until(`!document.querySelector('.cm')&&document.activeElement?.dataset.card===${JSON.stringify(C.id)}`),'Esc closes the card menu and focus returns to the card');
+    // A column: new card there, then delete it from its own menu.
+    await rc('[data-dcol=uat] .dcol-b');
+    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()==='Column: UAT'&&/^New card in UAT\|Sort\|Rename column…$/.test(await labels()),'right-click a column: new card there, sort, rename');
+    const before=(await saved()).devops.cards.length;
+    await pick('New card in UAT');
+    assert(await until(`!!document.querySelector('dialog.card-modal[open]')&&document.querySelector('[data-dcol=uat] .dcard')!=null`),'New card in UAT adds a card to that column and opens it');
+    await key('Escape',27);await until(`!document.querySelector('dialog.card-modal[open]')`);
+    const U=(await saved()).devops.cards.find(c=>c.column==='uat');
+    await rc(`[data-card="${U.id}"]`);await until(`!!document.querySelector('.cm')`);
+    assert(/Approve \(move to Done\)/.test(await labels()),'a UAT card menu offers Approve');
+    await pick('Delete card');
+    assert(await until(`!document.querySelector('[data-card="${U.id}"]')`)&&(await saved()).devops.cards.length===before,'Delete card removes the card');
+    // The board background, and text fields keep the browser's menu.
+    await rc('.dv-scroll');
+    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()==='DevOps board'&&/^New card in Requests \/ Sprinted\|Search cards\|Hide Done\|Clear filters\|Recently deleted…\|Undo\|Redo$/.test(await labels()),'right-click the board: new card, search, hide Done, filters, recently deleted, undo, redo');
+    await key('Escape',27);await until(`!document.querySelector('.cm')`);
+    assert(await rc('#dv-q')===false&&!await js(`!!document.querySelector('.cm')`),'the search field keeps the browser\'s own menu');}
   // Paging: a column renders 20 cards, then "Load more".
   await js(`document.querySelector('[data-tab=devops]').click()`);await sleep(100);
   for(let i=0;i<21;i++)await js(`document.querySelector('[data-dv=colAdd][data-col=nice]').click()`);

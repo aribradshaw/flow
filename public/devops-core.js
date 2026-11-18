@@ -167,3 +167,22 @@ export function sortCards(cards,sort,labels=[]){
     return cmp(a,b)*x[3]||x[1]-y[1];
   }).map(x=>x[0]);
 }
+
+// Right-click menus (devops.js). Priority is the one Urgency or Priority label a card carries: the
+// labels of those two sections, Urgency first, in the order they are listed.
+export const priorityLabels=(labels=[])=>['urgency','priority'].flatMap(s=>labels.filter(l=>l.section===s));
+// A card's labels with its priority set to `id` (or cleared with ''): every other Urgency and Priority
+// label comes off, the rest stay in place. Returns a new array.
+export function withPriority(cardLabels=[],labels=[],id=''){
+  const pri=new Set(priorityLabels(labels).map(l=>l.id));
+  const rest=cardLabels.filter(l=>!pri.has(l));
+  return id&&pri.has(id)?[...rest,id]:rest;
+}
+// "Move to" targets: every column in board order, the card's own one checked (choosing it does nothing).
+export const moveTargets=(columns,card)=>columns.map(c=>({id:c.id,name:c.name,current:c.id===card?.column}));
+// A list too long for a submenu: the first `cap`, with the checked ones always included (in list order).
+export function capList(list,isOn,cap=15){
+  if(list.length<=cap)return {shown:list,more:false};
+  const on=list.filter(isOn),room=Math.max(0,cap-on.length),keep=new Set([...on,...list.filter(x=>!isOn(x)).slice(0,room)]);
+  return {shown:list.filter(x=>keep.has(x)),more:true};
+}
