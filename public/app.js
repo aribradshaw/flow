@@ -330,7 +330,8 @@ function renderCanvas(){
   $('#areas').innerHTML=c.nodes.filter(n=>n.type==='area').map(nodeHtml).join('');
   $('#nodes').innerHTML=c.nodes.filter(n=>n.type!=='area').map(nodeHtml).join('');
   const ghost=drag?.mode==='link'?(()=>{const a=rect(node(drag.id));return `<path class="ghost" d="M${a.x+a.w} ${a.y+a.h/2}L${drag.px??a.x+a.w} ${drag.py??a.y+a.h/2}"/>`})():'';
-  const geo=edgeGeometry(c,rect);$('#edges').innerHTML=DEFS+c.edges.map(e=>edgeHtml(e,geo)).join('')+ghost;
+  // While a card moves, line routing gets a time budget per frame (the drop renders it in full).
+  const geo=edgeGeometry(c,rect,drag?.moved?{budget:2}:{});$('#edges').innerHTML=DEFS+c.edges.map(e=>edgeHtml(e,geo)).join('')+ghost;
   const hint=$('#modeHint');hint.hidden=!connecting;
   if(connecting)hint.innerHTML=`${icon('connect',13)}${source?'Pick the destination card':'Pick the source card'}<kbd>Esc</kbd>`;
 }
@@ -342,7 +343,7 @@ function renderTools(){
     +(tools.length?'<i class="sep"></i>'+tools.map((t,i)=>t.icon?ib(t.icon,t.label,{attrs:`data-tool="${i}" ${r}`}):`<button type="button" class="ib txt-tool" data-tool="${i}" data-tip="${esc(t.label)}" ${r}>${esc(t.label.slice(0,2))}</button>`).join(''):'');
 }
 const renderZoom=()=>{$('#zoom').innerHTML=ib('minus','Zoom out',{key:keyLabel('chart.zoomOut'),attrs:'data-z="out" data-tip-pos="top"'})+`<button type="button" id="scale" data-z="reset" data-tip="Reset to 100%" data-tip-pos="top">100%</button>`+ib('plus','Zoom in',{key:keyLabel('chart.zoomIn'),attrs:'data-z="in" data-tip-pos="top"'})+ib('fit','Fit mind map',{key:keyLabel('chart.fit'),attrs:'data-z="fit" data-tip-pos="top"'})
-  +'<i class="sep"></i>'+ib('info','Solid arrow: ownership, labelled with %\n? = percentage not specified\nDashed line: grouping only, no ownership\nA brainstorm, not a verified legal structure',{label:'Legend',attrs:'data-tip-pos="top"'});};renderZoom();
+  +'<i class="sep"></i>'+ib('info','Solid arrow: ownership, labelled with %\n? = percentage not specified\nDotted line: grouping only, no ownership\nA brainstorm, not a verified legal structure',{label:'Legend',attrs:'data-tip-pos="top"'});};renderZoom();
 $('#zoom').addEventListener('click',e=>{const z=e.target.closest('[data-z]')?.dataset.z;if(z==='out')zoom(1/1.2);if(z==='in')zoom(1.2);if(z==='fit')fit();if(z==='reset')zoom(1/view.z)});
 
 function addNode(type='entity',at){
@@ -593,7 +594,7 @@ function renderInspector(strip=true){
     pane.innerHTML=`<div class="ihead"><span class="k">${icon(own?'connect':'dashed')}</span><strong>${own?'Ownership':'Grouping'}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}">${icon('link',11)}Shared</span>`:''}<span class="sp"></span>
       ${l?'':ib('swap','Reverse direction',{attrs:'id="i-reverse" data-i="reverse"'})+ib('trash','Delete connection',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}${prop('From',`<select id="fromNode"${l?' disabled':''}>${options(e.from)}</select>`,{for:'fromNode'})}${prop('To',`<select id="toNode"${l?' disabled':''}>${options(e.to)}</select>`,{for:'toNode'})}
-      ${l?'':`<label>Type</label><div class="seg wide"><button type="button" id="etype-ownership" class="${own?'on':''}" data-etype="ownership" data-tip="Solid arrow with an ownership percentage">${icon('arrowR',14)}Ownership</button><button type="button" id="etype-group" class="${own?'':'on'}" data-etype="group" data-tip="Dashed line that implies no ownership">${icon('dashed',14)}Grouping</button></div>`}
+      ${l?'':`<label>Type</label><div class="seg wide"><button type="button" id="etype-ownership" class="${own?'on':''}" data-etype="ownership" data-tip="Solid arrow with an ownership percentage">${icon('arrowR',14)}Ownership</button><button type="button" id="etype-group" class="${own?'':'on'}" data-etype="group" data-tip="Dotted line that implies no ownership">${icon('dashed',14)}Grouping</button></div>`}
       ${own?prop('Share',`<div class="pct"><input id="percent" type="number" min="0" max="100" step="any" placeholder="unspecified" value="${esc(e.percent)}"${ro}><span>%</span></div>${clashHtml(e,'percent')}`,{for:'percent'}):''}${l?historyHtml(e,'edge'):''}</form>`;
   }
   if(linkOf(n||e))loadHistory(pane);

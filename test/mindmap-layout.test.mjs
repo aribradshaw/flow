@@ -64,22 +64,98 @@ test('owners sit above what they own, cards never overlap and areas keep (only) 
   assert.ok(byId.get('a').x<st[0].x&&byId.get('a').x+size(byId.get('a'))[0]>st[0].x,'the owner sits over the stack');
 });
 
-// Every cubic piece of an SVG path (M x y C … C …).
-const pieces=d=>{const out=[];let cur=null;for(const m of d.matchAll(/([MC])([^MC]+)/g)){const v=m[2].trim().split(/[ ,]+/).map(Number);if(m[1]==='M')cur=[v[0],v[1]];else{out.push([...cur,...v]);cur=[v[4],v[5]]}}return out};
-test('no line is drawn through a card; lines between rows leave the bottom and enter the top or, in a stack, the side', ()=>{
-  const c=apply(sample()),geo=edgeGeometry(c,rect),cards=c.nodes.filter(n=>n.type!=='area');
+// Smart lines: orthogonal, square to the cards at both ends, never through a card.
+const segsOf=pts=>pts.slice(1).map((q,i)=>[pts[i],q]);
+const through=(p,q,r)=>Math.max(p.x,q.x)>r.x+1&&Math.min(p.x,q.x)<r.x+r.w-1&&Math.max(p.y,q.y)>r.y+1&&Math.min(p.y,q.y)<r.y+r.h-1;
+const onSide=(p,r)=>(Math.abs(p.y-r.y)<.01||Math.abs(p.y-r.y-r.h)<.01)&&p.x>=r.x-.01&&p.x<=r.x+r.w+.01||(Math.abs(p.x-r.x)<.01||Math.abs(p.x-r.x-r.w)<.01)&&p.y>=r.y-.01&&p.y<=r.y+r.h+.01;
+function checkLines(c,tidy=true){
+  const geo=edgeGeometry(c,rect),cards=c.nodes.filter(n=>n.type!=='area'),byId=new Map(c.nodes.map(n=>[n.id,n]));
   for(const e of c.edges){
-    const segs=pieces(geo.get(e.id).d),a=rect(c.nodes.find(n=>n.id===e.from)),b=rect(c.nodes.find(n=>n.id===e.to));
-    if(b.y>=a.y+a.h+32){
-      const [x0,y0]=segs[0],end=segs.at(-1),x3=end[6],y3=end[7];
-      assert.equal(y0,a.y+a.h,`${e.from}→${e.to} leaves the bottom`);
-      assert.ok(y3===b.y||((x3===b.x||x3===b.x+b.w)&&y3>b.y&&y3<b.y+b.h),`${e.from}→${e.to} enters the top or a side`);
+    const g=geo.get(e.id),pts=g.pts,a=rect(byId.get(e.from)),b=rect(byId.get(e.to)),name=`${e.from}→${e.to}`;
+    assert.match(g.d,/^M[\d.\- ]+(L[\d.\- ]+(Q[\d.\- ]+)?)+$/,name);
+    for(const [p,q] of segsOf(pts))assert.ok(Math.abs(p.x-q.x)<.01||Math.abs(p.y-q.y)<.01,`${name} is orthogonal`);
+    // A grouping line to several cards of an area ends on the area's border instead.
+    const box=r=>c.nodes.find(n=>n.type==='area'&&inside(r,rect(n))&&onSide(pts.at(-1),rect(n)));
+    assert.ok(onSide(pts[0],a)&&(onSide(pts.at(-1),b)||e.type==='group'&&box(b)),`${name} starts and ends on its cards`);
+    const end=onSide(pts.at(-1),b)?b:rect(box(b));
+    // Square to the side it leaves and enters: the first and last segments point out of the card.
+    for(const [p,q,r] of [[pts[0],pts[1],a],[pts.at(-1),pts.at(-2),end]]){
+      const out=Math.abs(p.y-r.y)<.01?q.y<p.y:Math.abs(p.y-r.y-r.h)<.01?q.y>p.y:Math.abs(p.x-r.x)<.01?q.x<p.x:q.x>p.x;
+      assert.ok(out&&(Math.abs(p.x-q.x)<.01||Math.abs(p.y-q.y)<.01),`${name} meets its card square`);
     }
-    for(const [x0,y0,x1,y1,x2,y2,x3,y3] of segs)for(let i=1;i<40;i++){
-      const t=i/40,u=1-t,x=u*u*u*x0+3*u*u*t*x1+3*u*t*t*x2+t*t*t*x3,y=u*u*u*y0+3*u*u*t*y1+3*u*t*t*y2+t*t*t*y3;
-      for(const n of cards)if(n.id!==e.from&&n.id!==e.to){const r=rect(n);assert.ok(!(x>r.x+2&&x<r.x+r.w-2&&y>r.y+2&&y<r.y+r.h-2),`${e.from}→${e.to} crosses ${n.id}`)}
-    }
+    if(tidy&&b.y>=a.y+a.h+32)assert.equal(pts[0].y,a.y+a.h,`${name} leaves the bottom`);
+    for(const n of cards)if(n.id!==e.from&&n.id!==e.to)for(const [p,q] of segsOf(pts))assert.ok(!through(p,q,rect(n)),`${name} crosses ${n.id}`);
   }
+  return geo;
+}
+test('smart lines: orthogonal, square to their cards, never through a card, before and after tidying', ()=>{
+  // Untidied, a card jammed right under another may send a line out of another side.
+  checkLines(sample(),false);checkLines(apply(sample()));
+});
+
+test('a fan of owned cards shares one trunk; labels sit just above the arrow, clear of cards and each other', ()=>{
+  const c={nodes:[card('p',undefined,400,0),...[0,1,2,3].map(i=>card('k'+i,undefined,i*224,160)),card('q',undefined,720,0),card('j',undefined,680,320)],
+    edges:[...[0,1,2,3].map(i=>own('p','k'+i,'25')),own('q','j','50'),own('k3','j','50')]};
+  const geo=checkLines(c),fan=[0,1,2,3].map(i=>geo.get(c.edges[i].id));
+  assert.equal(new Set(fan.map(g=>`${g.pts[0].x},${g.pts[0].y}`)).size,1,'one port');
+  assert.equal(new Set(fan.map(g=>g.pts.length>2?g.pts[1].y:0).filter(Boolean)).size,1,'one bus');
+  for(const g of fan)assert.ok(g.pts.length<=4,'at most two corners');
+  const boxes=[...geo.values()].map(g=>({x:g.mx-17,y:g.my-8,w:34,h:16}));
+  for(let i=0;i<boxes.length;i++){
+    for(let j=i+1;j<boxes.length;j++)assert.ok(!overlap(boxes[i],boxes[j]),'labels apart');
+    for(const n of c.nodes)assert.ok(!overlap(boxes[i],rect(n)),'label clear of '+n.id);
+  }
+  // Two owners' buses through the same gap don't run on top of each other.
+  const two={nodes:[card('x',undefined,0,0),card('y',undefined,600,0),card('x1',undefined,480,200),card('y1',undefined,120,200)],edges:[own('x','x1'),own('y','y1')]};
+  const g2=checkLines(two),[h1,h2]=two.edges.map(e=>g2.get(e.id).pts[1].y);
+  assert.ok(Math.abs(h1-h2)>=8,'buses offset');
+});
+
+test('routing stays fast on a chart of ~80 cards and lines', ()=>{
+  const nodes=[],edges=[];
+  for(let i=0;i<80;i++)nodes.push(card('n'+i,undefined,(i%16)*208,Math.floor(i/16)*160));
+  for(let i=16;i<80;i++){edges.push(own('n'+Math.max(0,i-16-(i%3?1:0)),'n'+i));if(i%5===0)edges.push(group('n'+(i-15),'n'+i))}
+  const c={nodes,edges};checkLines(c);
+  const t=performance.now();for(let i=0;i<20;i++)edgeGeometry(c,rect);
+  assert.ok((performance.now()-t)/20<40,'routes in well under a frame budget');
+  // Cards scattered by hand, nothing cached: still well under a second, and a drag frame keeps to
+  // its budget (give or take one search).
+  let s=7;const r=()=>{s=(s*1103515245+12345)%2147483648;return s/2147483648};
+  const ov=(a,b)=>a.x-30<b.x+176&&b.x-30<a.x+176&&a.y-30<b.y+48&&b.y-30<a.y+48,sc=[];
+  while(sc.length<75){const n=card('s'+sc.length,undefined,Math.round(r()*3000)+5,Math.round(r()*1400)+3);if(!sc.some(o=>ov(o,n)))sc.push(n)}
+  const se=[];for(let i=15;i<75;i++)se.push(own('s'+(i-15),'s'+i,'50'));for(let i=0;i<20;i++)se.push(group('s'+(i*3%75),'s'+((i*7+31)%75)));
+  const t1=performance.now();edgeGeometry({nodes:sc,edges:se},rect);
+  assert.ok(performance.now()-t1<600,'scattered chart routes in well under a second');
+  const moved=sc.map(n=>n.id==='s37'?{...n,x:n.x+40,y:n.y+20}:n),t2=performance.now();
+  edgeGeometry({nodes:moved,edges:se},rect,{budget:2});
+  assert.ok(performance.now()-t2<60,'a drag frame stays near its budget');
+});
+
+// Tidy up with a grouping box: a venture co-owned by two studios groups five games, three of them
+// owned by one of the studios.
+function games(){
+  const nodes=[card('hold','person',600,0),card('studio',undefined,200,150),card('labs',undefined,1000,150),card('venture',undefined,700,320),
+    ...['g1','g2','g3','g4','g5'].map((id,i)=>card(id,undefined,1200+i*200,600)),card('box','area',1180,560,{w:1040,h:200})];
+  const edges=[own('hold','studio'),own('hold','labs'),own('studio','venture','50'),own('labs','venture','50'),
+    own('labs','g1'),own('labs','g2'),own('labs','g3'),group('venture','g1'),group('venture','g2'),group('venture','g3'),own('venture','g4'),own('venture','g5')];
+  return {nodes,edges};
+}
+test('a grouping box sits right under the card it groups to, hugs its cards, and a co-owned card sits between its owners', ()=>{
+  const once=apply(games()),twice=tidyLayout(once,size);
+  for(const n of once.nodes){const p=twice.get(n.id);assert.equal(p.x,n.x,n.id);assert.equal(p.y,n.y,n.id)}
+  const c=apply(games()),by=new Map(c.nodes.map(n=>[n.id,rect(n)])),box=by.get('box'),v=by.get('venture');
+  const mem=['g1','g2','g3','g4','g5'].map(id=>by.get(id));
+  for(const m of mem)assert.ok(inside(m,box),'member inside');
+  assert.ok(!overlap(v,box),'the venture is not inside its games box');
+  assert.equal(new Set(mem.map(m=>m.y)).size,1,'members in one row');
+  assert.ok(box.y>=v.y+v.h&&box.y-(v.y+v.h)<=96,'box right under the venture');
+  const mid=r=>r.x+r.w/2;
+  assert.ok(mid(v)>=box.x&&mid(v)<=box.x+box.w,'box under the venture');
+  const lo=Math.min(...mem.map(m=>m.x)),hi=Math.max(...mem.map(m=>m.x+m.w)),bot=Math.max(...mem.map(m=>m.y+m.h));
+  assert.ok(box.w<=hi-lo+2*16+16&&box.h<=bot-box.y+24+16,'box hugs its cards');
+  const [s,l]=[by.get('studio'),by.get('labs')];
+  assert.ok(mid(v)>=Math.min(mid(s),mid(l))-1&&mid(v)<=Math.max(mid(s),mid(l))+1,'venture between its owners');
+  checkLines(c);
 });
 
 test('tidying a tidy chart changes nothing; loose cards and empty areas go in a row underneath', ()=>{
@@ -87,6 +163,18 @@ test('tidying a tidy chart changes nothing; loose cards and empty areas go in a 
   for(const n of c.nodes){const p=again.get(n.id);assert.equal(p.x,n.x,n.id);assert.equal(p.y,n.y,n.id)}
   const linked=c.nodes.filter(n=>!['loose','empty'].includes(n.id)).map(rect),bottom=Math.max(...linked.map(r=>r.y+r.h));
   for(const id of ['loose','empty'])assert.ok(c.nodes.find(n=>n.id===id).y>bottom);
+});
+
+test('Tidy up settles in one press on random charts with an area', ()=>{
+  for(let seed=1;seed<=12;seed++){
+    let s=seed;const r=()=>{s=(s*1103515245+12345)%2147483648;return s/2147483648},ri=n=>Math.floor(r()*n);
+    const nodes=Array.from({length:22},(_,i)=>card('n'+i,undefined,ri(1600),ri(900)));
+    const edges=[];for(let i=1;i<22;i++)edges.push(own('n'+ri(i),'n'+i));for(let i=0;i<5;i++){const a=ri(22),b=ri(22);if(a!==b)edges.push(group('n'+a,'n'+b))}
+    const m=nodes.slice(14,19);for(const [i,n] of m.entries()){n.x=900+i*200;n.y=1000}
+    nodes.push(card('box','area',880,960,{w:1040,h:120}));
+    const c=apply({nodes,edges}),again=tidyLayout(c,size);
+    for(const n of c.nodes){const p=again.get(n.id);assert.ok(p.x===n.x&&p.y===n.y,`seed ${seed}: ${n.id} moved`)}
+  }
 });
 
 test('a loop of ownership, an empty chart and a single card still lay out', ()=>{

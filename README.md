@@ -62,7 +62,7 @@ The free-form canvas of cards and connections (the API calls each mind map a *ch
 - Floating palette (left): add entity / person / project area / note (E · P · A · N), connect (C), undo / redo. Double-click empty canvas to add an entity there.
 - Cards snap to a 16px grid (hold Alt to place freely) and resize from the bottom-right corner. Moving an area carries every card fully inside it.
 - Connect by dragging the dot on a card's right edge onto another card, or with connect mode. Edges sharing a card side spread out along it.
-- Solid arrows are ownership (labelled with the %); dashed lines are grouping only. Unspecified percentages show "?" only when selected.
+- Solid arrows are ownership (labelled with the %); dotted lines are grouping only. Lines are drawn as smart lines: square elbows with rounded corners that go around cards, with one shared trunk for the lines out of an owner. Unspecified percentages show "?" only when selected.
 - The inspector opens only for a selection and autosaves as you type. It lists a card's connections; click one to jump to it.
 - Selecting an entity or area opens its project timeline along the bottom: items from the Timeline project with the same name, fitted to the width. Click an item to open it in the Timeline; + adds an item tagged with that project (creating it if needed); → opens the Timeline filtered to it. Toggle the strip from the inspector's timeline icon.
 - Right-click a card, a connection or empty canvas for a menu: rename, kind, connect, duplicate, share, DevOps cards, reverse or retype a connection, add a card right where you clicked, fit, zoom, undo. The menu key or Shift+F10 opens it from the keyboard.
