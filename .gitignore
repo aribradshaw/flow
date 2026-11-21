@@ -16,3 +16,6 @@ __pycache__/
 
 # Local scratch (OneMail previews and the like)
 .scratch/
+
+# Onboarding eval rows (tools/onboarding-eval.mjs)
+onboarding-evals/
