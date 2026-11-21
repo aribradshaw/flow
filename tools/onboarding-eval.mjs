@@ -6,7 +6,8 @@
 // headless Chromium (as verify.mjs finds it) walks each persona through the real Flow UI. Synthetic
 // users and temp folders only; nothing talks to the real OneProfileID or any database.
 //
-//   node tools/onboarding-eval.mjs [--label <name>] [--out <dir>] [--opid-invites on|off] [--opid-self-enroll on|off]
+//   node tools/onboarding-eval.mjs [--label <name>] [--out <dir>] [--opid-invites on|off] [--opid-self-enroll on|off] [--shots <dir>]
+//   --shots saves a PNG of each persona's first sign-in screen, first error and first run in <dir>.
 //   npm run eval:onboarding -- --label baseline
 //
 // Each run appends one JSON row ({at, label, commit, flags, personas:[...], total}) to <out>/runs.jsonl
@@ -27,7 +28,7 @@
 // A persona that fails the guard is rejected (score null) and the run is marked rejected.
 import {spawn,execFileSync} from 'node:child_process';
 import http from 'node:http';
-import {mkdtempSync,mkdirSync,readFileSync,appendFileSync,rmSync,existsSync,readdirSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,appendFileSync,rmSync,existsSync,readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -36,6 +37,7 @@ import {randomUUID,generateKeyPairSync,createSign} from 'node:crypto';
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
 const args=process.argv.slice(2),arg=(k,d)=>{const i=args.indexOf('--'+k);return i>=0?args[i+1]:d};
 const LABEL=arg('label','run'),OUT=resolve(arg('out',process.env.FLOW_EVAL_OUT||join(ROOT,'onboarding-evals')));
+const SHOTS=arg('shots','');
 const FLAGS={selfEnroll:arg('opid-self-enroll','on')==='on',invites:arg('opid-invites','on')==='on'};
 const MOCK=Number(process.env.FLOW_EVAL_MOCK_PORT||4486),APP=MOCK+1,CDP=MOCK+2;
 const BASE=`http://127.0.0.1:${APP}`,ISSUER=`http://localhost:${MOCK}/api/auth`,HOSTED=`http://localhost:${MOCK}`;
@@ -183,13 +185,16 @@ async function newPage(b){
   // built-in button (the same action) and the eval stays offline and repeatable.
   await call('Network.setBlockedURLs',{urls:['*oneprofileid.flygonlc.com*']});
   const js=async x=>{try{const r=await call('Runtime.evaluate',{expression:x,returnByValue:true,awaitPromise:true});return r.exceptionDetails?undefined:r.result.value}catch{return undefined}};
-  return {js,goto:url=>call('Page.navigate',{url}),close:()=>b.call('Target.closeTarget',{targetId}).catch(()=>{}).then(()=>b.call('Target.disposeBrowserContext',{browserContextId}).catch(()=>{}))};
+  await call('Emulation.setDeviceMetricsOverride',{width:1200,height:800,deviceScaleFactor:1,mobile:false});
+  const shot=async name=>{if(!SHOTS)return;await sleep(1800);try{const {data}=await call('Page.captureScreenshot',{format:'png'});mkdirSync(SHOTS,{recursive:true});writeFileSync(join(SHOTS,name+'.png'),Buffer.from(data,'base64'))}catch{}};
+  return {js,shot,goto:url=>call('Page.navigate',{url}),close:()=>b.call('Target.closeTarget',{targetId}).catch(()=>{}).then(()=>b.call('Target.disposeBrowserContext',{browserContextId}).catch(()=>{}))};
 }
 
 // ---------- the walk ----------
 // What is on screen, read the same way for every version of the UI.
 const SNAPSHOT=`(()=>{
-  const vis=el=>!!el&&!el.closest('[hidden]')&&el.getClientRects().length>0;
+  // Visible: rendered, and not folded away in a closed <details> (its summary excepted).
+  const vis=el=>!!el&&!el.closest('[hidden]')&&!(el.closest('details:not([open])')&&!el.closest('summary'))&&el.getClientRects().length>0;
   const txt=el=>(el?.innerText||'').trim();
   const loc={host:location.host,path:location.pathname,href:location.href};
   if(location.host===${JSON.stringify(`localhost:${MOCK}`)}){
@@ -232,11 +237,11 @@ async function walk(page,persona,ctx){
     lastHref=sig;
     if(snap.where==='loading')continue;
     if(snap.where==='gate'){
-      if(firstGate){firstGate=false;out.firstScreenText=snap.text;out.copy.firstScreen=firstScreenOk(snap.text);
+      if(firstGate){firstGate=false;await page.shot(persona.key+'-1-signin');out.firstScreenText=snap.text;out.copy.firstScreen=firstScreenOk(snap.text);
         out.falseDoors=(snap.phone&&!persona.passkey?1:0)+(snap.password&&!persona.password?1:0)}
       if(snap.errors.length){
         const e=snap.errors.join(' ');
-        if(e!==lastError||lastWhere!=='gate-error')out.errors.push(e);
+        if(e!==lastError||lastWhere!=='gate-error'){out.errors.push(e);if(out.errors.length===1)await page.shot(persona.key+'-2-error')}
         if(!errorOk(snap.text,persona.loginEmail||persona.email||''))out.copy.errors=false;
         if(e===lastError){out.deadEnds++;out.trail.push('same error again');if(out.deadEnds>=2)break}
         lastError=e;lastWhere='gate-error';
@@ -270,7 +275,7 @@ async function walk(page,persona,ctx){
       out.trail.push('opid page: '+snap.page);break;
     }
     if(snap.where==='firstrun'){
-      out.copy.firstRun=true;
+      out.copy.firstRun=true;await page.shot(persona.key+'-3-firstrun');
       if(!(await click('[data-firstrun] [data-firstrun-choice="blank"]'))){out.trail.push('first run without a blank choice');break}
       continue;
     }
@@ -297,6 +302,7 @@ async function walk(page,persona,ctx){
         out.copy={firstScreen:f.copy.firstScreen,errors:f.copy.errors,firstRun:f.copy.firstRun,distinct:ctx.distinct};out.guard=f.guard;
         return out;
       }
+      await page.shot(persona.key+'-4-app');
       // The first card: Add entity on the toolbar.
       if(!(await click('#tools [data-add="entity"]')))break;
       let saved=false;
@@ -327,7 +333,9 @@ async function main(){
     SAVES_DIR:join(scratch,'saves'),BACKUP_DIR:join(scratch,'backups'),INBOX_DIR:join(scratch,'inbox'),OWNER_EMAIL:OWNER,
     FLOW_EMAIL_TRANSPORT:'file:'+mailLog,FLOW_EMAIL_FROM:'Flow <noreply@example.test>',
     OPID_BASE_URL:`http://127.0.0.1:${MOCK}`,OPID_APP_ID:APP_ID,OPID_APP_SECRET:SECRET,OPID_APP_ORIGIN:BASE,
-    OPID_SSO_CLIENT_ID:SSO_ID,OPID_SSO_CLIENT_SECRET:SSO_SECRET,OPID_SSO_ISSUER:ISSUER,OPID_ACCOUNT_URL:HOSTED+'/dashboard'};
+    OPID_SSO_CLIENT_ID:SSO_ID,OPID_SSO_CLIENT_SECRET:SSO_SECRET,OPID_SSO_ISSUER:ISSUER,OPID_ACCOUNT_URL:HOSTED+'/dashboard',
+    // Every persona comes from this one machine: per-address sign-in limits would only measure the eval.
+    FLOW_AUTH_RATE_IP:'1000'};
   const app=spawn(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(clock),'server.mjs'],{cwd:ROOT,env,stdio:['ignore','pipe','pipe']});
   let log='';app.stdout.on('data',d=>log+=d);app.stderr.on('data',d=>log+=d);
   let b=null;
@@ -353,8 +361,9 @@ async function main(){
     for(const p of Object.values(P))if(p.invite){const r=await owner('POST','/api/invites',{email:p.invite});p.start=mailLink(p.invite)||BASE+'/';p.inviteStatus=r.status}
     b=await browser(join(scratch,'profile'));
     const ctx={app,mailLink,newPage:()=>newPage(b)};
-    // Denied, expired and failed must read differently.
-    {const pg=await newPage(b),seen=[];for(const why of ['denied','expired','failed']){await pg.goto(BASE+'/?signin='+why);let t='';for(let k=0;k<30&&!t;k++){await sleep(200);t=(await pg.js(SNAPSHOT))?.errors?.join(' ')||''}seen.push(t)}await pg.close();ctx.distinct=seen.every(Boolean)&&new Set(seen).size===3}
+    // Denied, expired and failed must read differently (a page that starts a sign-in again by itself is
+    // loaded once more: the second time it shows its message).
+    {const pg=await newPage(b),seen=[];for(const why of ['denied','expired','failed']){let t='';for(let load=0;load<2&&!t;load++){await pg.goto(BASE+'/?signin='+why);for(let k=0;k<30&&!t;k++){await sleep(200);const x=await pg.js(SNAPSHOT);if(x?.where==='opid')break;t=x?.errors?.join(' ')||''}}seen.push(t)}await pg.close();ctx.distinct=seen.every(Boolean)&&new Set(seen).size===3}
     const rows=[];
     for(const p of Object.values(P)){
       const pg=await newPage(b);let r;
