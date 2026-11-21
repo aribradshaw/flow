@@ -225,22 +225,25 @@ async function savePhoto(panel,file){
   }catch(e){status.textContent=e.message||'Could not save your account photo.';}
   finally{photoSaving=false;controls.forEach(x=>x.disabled=false);status.removeAttribute('aria-busy');const input=panel.querySelector('[data-photo-file]');if(input)input.value='';}
 }
-// Owner only (the server answers 403 to anyone else): invite an email to Flow itself.
+// Any member may invite a friend to Flow (the owner without limit, others a few a week).
 // What happened to the invite email (shown under the invite form).
 function inviteMsg(panel,j){
   const p=panel.querySelector('[data-invite-msg]');if(!p||!j?.invite)return;
-  p.textContent=j.sent?`Invite email sent to ${j.invite.email}.`:j.notConfigured?`Invited ${j.invite.email} · email not configured, so tell them to sign in at ${location.origin}.`:j.emailError?`Invited ${j.invite.email}, but the email was not sent: ${j.emailError}`:`Invited ${j.invite.email}.`;
+  p.textContent=j.sent?`Invite email sent to ${j.invite.email}.`:j.notConfigured?`Invited ${j.invite.email} · email is not set up here, so send them this link: ${j.link||location.origin+'/join'}`:j.emailError?`Invited ${j.invite.email}, but the email was not sent: ${j.emailError}`:`Invited ${j.invite.email}.`;
   p.hidden=false;
 }
 async function fillInvites(panel){
   const box=panel.querySelector('[data-invites]');if(!box)return;
   let r;try{r=await fetch('/api/invites',{cache:'no-store'})}catch{return}
-  if(!r.ok)return;const {invites=[]}=await r.json();
+  if(!r.ok)return;const {invites=[],quota=null,requests=null}=await r.json();
+  const left=quota?Math.max(0,quota.limit-quota.used):null;
   await keepFocus(panel,()=>{box.innerHTML=`${sec('Invite to Flow')}
-    <p class="acct-muted">Invited people get an email with a link to sign in at ${esc(location.origin)} with OneProfileID using that address, and start in their own private workspace. They see nothing of yours unless you share it.</p>
-    <form class="env-row" data-invite-form><input id="inviteEmail" type="email" placeholder="name@example.com" aria-label="Email to invite" required><button type="submit" class="txt primary">Invite</button></form>
+    <p class="acct-muted">Invite a friend: they get an email to join with OneProfileID (or make an account) and start in their own private workspace. They see nothing of yours unless you share it.${quota?` You can send ${left} more this week.`:''}</p>
+    <form class="env-row" data-invite-form><input id="inviteEmail" type="email" placeholder="name@example.com" aria-label="Email to invite" required${left===0?' disabled':''}><button type="submit" class="txt primary"${left===0?' disabled':''}>Invite</button></form>
     <p class="acct-err" data-invite-err hidden></p><p class="acct-muted" data-invite-msg hidden></p>
-    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited'}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" id="inviteResend-${esc(i.email)}" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>`});
+    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited'}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" id="inviteResend-${esc(i.email)}" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>
+    ${requests?.length?`${sec('Asked to join')}<p class="acct-muted">These people signed in while Flow was full or invite-only. Inviting one lets them in.</p>
+    <ul class="env-list">${requests.map(q=>`<li><span class="env-n">${esc(q.name?`${q.name} · ${q.email}`:q.email)}</span><button type="button" class="txt" data-invite-request="${esc(q.email)}">Invite</button></li>`).join('')}</ul>`:''}`});
 }
 const STATUS_ICONS={planned:'planned',active:'active',risk:'alert',blocked:'blocked',done:'check',cancelled:'ban'};
 const COLUMN_ICONS={requests:'inbox',doing:'active',blocked:'blocked',uat:'target',done:'check',must:'flag',nice:'star'};
@@ -365,6 +368,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
       closeDlg(d);const c=store.db.charts.find(x=>x.id===`sh.${id}.chart`)||store.db.charts.find(x=>x.nodes.some(n=>n.id.startsWith(`sh.${id}.`)));
       if(c&&store.db.active!==c.id){store.db.active=c.id;store.onChange()}alertBox('Added. Shared boxes show a link badge; co-owners are read-only stubs.')}).catch(e=>shErr(e.message));return}
     const sdt=t.closest?.('[data-sh-detach]');if(sdt){ask('Remove these shared cards from this environment?\nYou can add them again any time.',{ok:'Remove'}).then(ok=>{if(ok)shDo(()=>shareApi.detach(sdt.dataset.shDetach,currentEnv()),true)});return}
+    const iq=t.closest?.('[data-invite-request]');if(iq){fetch('/api/invites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:iq.dataset.inviteRequest})}).then(r=>r.json()).then(j=>{fillInvites(panel).then(()=>inviteMsg(panel,j))});return}
     const ir=t.closest?.('[data-invite-revoke]');if(ir){fetch('/api/invites?email='+encodeURIComponent(ir.dataset.inviteRevoke),{method:'DELETE'}).then(()=>fillInvites(panel));return}
     const sc=t.closest?.('[data-sc]');if(sc){recording=sc.dataset.sc;scMsg=null;drawTab('shortcuts').then(()=>d.querySelector(`[data-sc="${recording}"]`)?.focus());return}
     const rs=t.closest?.('[data-sc-reset]');if(rs){resetShortcut(rs.dataset.scReset);scMsg=null;drawTab('shortcuts');return}
@@ -464,10 +468,16 @@ function showSignIn(){
   if(signingIn)return;signingIn=true;closeMenu();
   const o=document.createElement('div');
   o.className='acct-gate';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-labelledby','acctGateT');
+  // An invite link (/join?invite=…&email=…): the server kept the token; the screen names the address.
+  const joinEmail=location.pathname==='/join'?(new URLSearchParams(location.search).get('email')||'').trim().toLowerCase():null;
+  if(joinEmail!==null)history.replaceState(null,'','/join'+(joinEmail?'?email='+encodeURIComponent(joinEmail):''));
   o.innerHTML=`<div class="acct-gate-card">
     <span class="logo acct-gate-logo">${logoMark(40)}</span>
-    <h1 id="acctGateT">Sign in to Flygon Flow</h1>
-    <p class="acct-muted">Use your OneProfileID account.</p>
+    ${joinEmail!==null?`<div data-join><h1 id="acctGateT">You're invited to Flygon Flow</h1>
+    <p class="acct-muted">Mind maps, timelines and task boards. Free; your charts are private.</p>
+    <p class="acct-muted">${joinEmail?`Continue with OneProfileID as <strong>${esc(joinEmail)}</strong>.`:'Continue with OneProfileID.'} New to OneProfileID? Choose Continue, then <strong>Make an account</strong>${joinEmail?' with that address':''}: your date of birth, your name and a 6-digit code we email you.</p></div>`
+    :`<h1 id="acctGateT">Sign in to Flygon Flow</h1>
+    <p class="acct-muted">Use your OneProfileID account.</p>`}
     ${session.sso?`<div class="acct-form acct-sso" id="flow-sso">
       <opid-sign-in id="acctSso" type="button" mode="light" variant="solid"></opid-sign-in>
       <button type="button" class="acct-submit fallback" data-sso hidden>Continue with OneProfileID</button>
@@ -488,7 +498,7 @@ function showSignIn(){
       <button type="button" class="acct-link" data-device-back>Sign in on this screen instead</button>
     </div>`:''}
     <form id="flow-login" class="acct-form" novalidate${session.sso?' hidden':''}>
-      <label for="acctEmail">Email</label><input id="acctEmail" name="email" type="email" autocomplete="username" required>
+      <label for="acctEmail">Email</label><input id="acctEmail" name="email" type="email" autocomplete="username" value="${esc(joinEmail||'')}" required>
       <label for="acctPass">Password</label><input id="acctPass" name="password" type="password" autocomplete="current-password" required>
       <p class="acct-err" role="alert" hidden></p>
       ${session.sso?`<button type="submit" class="acct-submit">Sign in</button>
@@ -624,4 +634,6 @@ window.fetch=async(...args)=>{
   }catch{}
   ready=true;sessionChanged();refreshButton();markKnown();
   if(opid()){loadOpidUi();if(!user())showSignIn()}
+  // Signed in already when an invite link opens: the app itself.
+  if(user()&&location.pathname==='/join')history.replaceState(null,'','/');
 })();

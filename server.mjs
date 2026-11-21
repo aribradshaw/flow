@@ -658,7 +658,7 @@ async function environments(req,res){
   }
   res.writeHead(405);res.end();return true;
 }
-// ---------- app invites (owner only): invite an email to Flow itself; no email is sent ----------
+// ---------- app invites: members invite an email to Flow itself, and the invite email is sent ----------
 const mailer=createMailer();
 const APP_URL=(auth.appOrigin||process.env.FLOW_PUBLIC_URL||'http://127.0.0.1:4317').replace(/\/+$/,'');
 // Invite emails are limited per sender and per recipient in persistent windows (they survive deploys).
@@ -678,6 +678,14 @@ async function sendInvite(email,user,{link=APP_URL}={}){
   const why=await mailLimit(user.email,email);if(why)return {ok:false,error:why};
   return mailer.send({to:email,...inviteEmail({to:email,appUrl:APP_URL,link,inviter:await inviterName(user)})});
 }
+// The invite link: a OneProfileID invitation token when the registration allows invitations (one use,
+// 72 hours, bound to the address), else the join page with the address only (matched at sign-in).
+async function inviteLink(req,invite){
+  const t=await auth.opidInvite(req,{localId:invite.localId,email:invite.email}).catch(()=>null);
+  const q=new URLSearchParams(t?{invite:t.token,email:invite.email}:{email:invite.email});
+  return {link:`${APP_URL}/join?${q}`,token:!!t};
+}
+const WEEK=7*864e5;
 async function invitesApi(req,res){
   const u=new URL(req.url,'http://x');if(u.pathname!=='/api/invites')return false;
   // The owner token works here too (tools/env.mjs invite|invites|revoke); a wrong token is refused.
@@ -685,21 +693,34 @@ async function invitesApi(req,res){
   if(!tok&&req.headers.authorization){json(res,401,{error:'Invalid token'});return true}
   if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
   const user=tok||await requireUser(req,res);if(!user)return true;
-  if(!sameEmail(user.email,auth.OWNER_EMAIL)){json(res,403,{error:'Only the owner can invite people'});return true}
-  if(req.method==='GET'){json(res,200,{invites:await invites.list(),requests:await accessRequests.list()});return true}
+  // Any member may invite friends: the owner without limit, others FLOW_MEMBER_INVITES_PER_WEEK in a
+  // rolling week. Members see and manage only the invites they sent.
+  const isOwner=isOwnerEmail(user.email),L=limitsOf(user.email),quotaKey='invite:m:'+user.email.toLowerCase();
+  const quota=async()=>isOwner?null:{limit:L.invitesPerWeek,used:await rates.count(quotaKey,WEEK)};
+  const mine=async()=>(await invites.list()).filter(i=>isOwner||sameEmail(i.invitedBy,user.email));
+  if(req.method==='GET'){json(res,200,{invites:await mine(),quota:await quota(),...(isOwner?{requests:await accessRequests.list()}:{})});return true}
   // POST {email[, resend:true][, send:false]}: record (or re-open) the invite, then email it unless
   // send:false. resend:true only emails an existing, not revoked invite.
   if(req.method==='POST'){readJson(req,res,async b=>{
     if(!validEmail(b?.email)){json(res,400,{error:'Enter a valid email address'});return}
-    if(sameEmail(b.email,auth.OWNER_EMAIL)){json(res,400,{error:'That is the owner'});return}
-    let invite;
-    if(b.resend){invite=await invites.find(b.email);if(!invite||invite.revokedAt){json(res,404,{error:'No open invite for that email'});return}}
-    else{invite=await invites.add(b.email,user.email);await accessRequests.remove(b.email).catch(()=>{})}
+    if(sameEmail(b.email,auth.OWNER_EMAIL)||sameEmail(b.email,user.email)){json(res,400,{error:isOwner||sameEmail(b.email,user.email)?'That is you':'That person is already in Flow'});return}
+    if(!isOwner&&await users.get(b.email)){json(res,409,{error:`${b.email.trim().toLowerCase()} already uses Flow. Share with them from the Share button instead.`});return}
+    let invite=await invites.find(b.email);
+    if(b.resend){if(!invite||invite.revokedAt||(!isOwner&&!sameEmail(invite.invitedBy,user.email))){json(res,404,{error:'No open invite for that email'});return}}
+    else if(invite&&!invite.revokedAt&&!isOwner&&!sameEmail(invite.invitedBy,user.email)){json(res,409,{error:'Someone already invited that person.'});return}
+    if(!isOwner&&b.send!==false&&!await rates.take(quotaKey,L.invitesPerWeek,WEEK)){
+      json(res,429,{error:`You can send ${L.invitesPerWeek} invites a week. Try again in a few days.`,code:'invite_quota',quota:await quota()});return}
+    if(!b.resend){invite=await invites.add(b.email,isOwner?auth.OWNER_EMAIL:user.email);await accessRequests.remove(b.email).catch(()=>{})}
     if(b.send===false){json(res,200,{invite,sent:false});return}
-    const mail=await sendInvite(invite.email,user);
-    json(res,200,{invite,sent:mail.ok,...(mail.ok?{}:{emailError:mail.error,notConfigured:!!mail.notConfigured})});
+    const {link,token}=await inviteLink(req,invite);
+    const mail=await sendInvite(invite.email,user,{link});
+    json(res,200,{invite,sent:mail.ok,token,quota:await quota(),...(mail.ok?{}:{emailError:mail.error,notConfigured:!!mail.notConfigured,link})});
   });return true}
-  if(req.method==='DELETE'){await invites.revoke(u.searchParams.get('email'));json(res,200,{revoked:true});return true}
+  if(req.method==='DELETE'){
+    const i=await invites.find(u.searchParams.get('email'));
+    if(i&&(isOwner||sameEmail(i.invitedBy,user.email)))await invites.revoke(i.email);
+    json(res,200,{revoked:true});return true;
+  }
   res.writeHead(405);res.end();return true;
 }
 
@@ -996,6 +1017,14 @@ const server=http.createServer(async(req,res)=>{
   // Flygon brand colors and themes from the @flygon/styles package, served as installed (not copied into public/).
   if(bare===FLYGON_STYLES_PATH&&(req.method==='GET'||req.method==='HEAD')){try{const b=readFileSync(flygonStylesFile);res.writeHead(200,{'Content-Type':'text/css; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(req.method==='HEAD'?undefined:b)}catch{res.writeHead(500);res.end('Unable to load file')}return}
   if(bare==='/skill.md'&&req.method==='GET'){try{const b=readFileSync(new URL('./skills/flygon-flow/SKILL.md',import.meta.url));res.writeHead(200,{'Content-Type':'text/markdown; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(b)}catch{res.writeHead(404);res.end()}return}
+  // /join?invite=<token>&email=<address> (an invite link): the token goes in an httpOnly cookie for the
+  // sign-in that follows, and the page opens on the join screen (public/account.js).
+  if(bare==='/join'&&(req.method==='GET'||req.method==='HEAD')){
+    const q=new URL(req.url,'http://x').searchParams,t=q.get('invite')||'',e=q.get('email')||'';
+    if(/^[A-Za-z0-9_-]{16,200}$/.test(t)&&validEmail(e))res.setHeader('Set-Cookie',auth.outCookies([auth.inviteCookie(t,e.trim().toLowerCase())],res));
+    try{const b=readFileSync(join(root,'index.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(req.method==='HEAD'?undefined:b)}catch{res.writeHead(500);res.end('Unable to load file')}
+    return;
+  }
   let file;try{file=resolveStatic(decodeURIComponent(req.url?.split('?')[0]||'/'))}catch{file=null}
   if(!file||(req.method!=='GET'&&req.method!=='HEAD')){res.writeHead(404);res.end('Not found');return;}
   try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}

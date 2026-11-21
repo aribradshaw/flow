@@ -12,7 +12,7 @@ const dir=fileURLToPath(new URL('./snapshots/',import.meta.url));
 const pub=fileURLToPath(new URL('../public/',import.meta.url));
 const update=process.env.UPDATE_SNAPSHOTS==='1';
 const samples={
-  'invite-https':{to:'casey@example.test',appUrl:'https://flow.example.test',inviter:'Pat Example'},
+  'invite-https':{to:'casey@example.test',appUrl:'https://flow.example.test',link:'https://flow.example.test/join?invite=tok_example_0123456789&email=casey%40example.test',inviter:'Pat Example'},
   'invite-local':{to:'casey@example.test',appUrl:'http://127.0.0.1:4317',inviter:''},
 };
 
@@ -33,16 +33,18 @@ test('the invite renders with logo, preheader, button and footer, and keeps its 
   assert.ok(m.html.includes('class="om-card'));
   assert.ok(m.html.includes('https://flow.example.test'+LOGO_PATH));
   assert.match(m.html,/<div style="display:none;[^"]*">Pat Example invited you/);
-  assert.match(m.html,/<a href="https:\/\/flow\.example\.test"[^>]*>Sign in to Flow<\/a>/);
+  assert.match(m.html,/<a href="https:\/\/flow\.example\.test\/join\?invite=tok_example_0123456789&amp;email=casey%40example\.test"[^>]*>Accept the invite<\/a>/);
   assert.ok(m.html.includes('13236 N 7th St, Unit 4, PMB 811<br>Phoenix, AZ 85022'));
   assert.doesNotMatch(m.html,/undefined|null|List-Unsubscribe/);
-  assert.equal(m.text,`Pat Example invited you to Flygon Flow: org charts, timelines and a DevOps board in one place.
+  assert.equal(m.text,`Pat Example invited you to Flygon Flow: mind maps, timelines and task boards. It is free, and your charts are private to you.
 
-Sign in to Flow: https://flow.example.test
+Accept the invite: https://flow.example.test/join?invite=tok_example_0123456789&email=casey%40example.test
 
-Use "Continue with OneProfileID" with this email address (casey@example.test). If you already have a OneProfileID account, sign in as usual; you will start in your own private workspace.
+Sign in with OneProfileID using this email address (casey@example.test).
+New to OneProfileID? Choose Continue, then "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
 
 If you were not expecting this, you can ignore this email.`);
+  assert.match(inviteEmail(samples['invite-local']).text,/Accept the invite: http:\/\/127\.0\.0\.1:4317\n/,'without a link: the instance URL');
   assert.match(inviteEmail(samples['invite-local']).text,/^A Flygon Flow member invited you/);
 });
 

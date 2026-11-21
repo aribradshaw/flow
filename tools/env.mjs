@@ -49,7 +49,7 @@ if(['invite','invites','revoke'].includes(cmd)){
   const r=await fetch(`${base}/api/invites${q}`,{method:cmd==='invite'?'POST':cmd==='revoke'?'DELETE':'GET',headers:{authorization:'Bearer '+token,...(cmd==='invite'?{'content-type':'application/json'}:{})},body:cmd==='invite'?JSON.stringify({email,...(flag('resend')?{resend:true}:{}),...(flag('no-email')?{send:false}:{})}):undefined});
   const d=await r.json().catch(()=>({}));
   if(!r.ok)fail(`The server answered ${r.status}: ${d.error||'no access'}`);
-  if(cmd==='invite')console.log(`${flag('resend')?'Re-sent the invite to':'Invited'} ${d.invite.email}: ${d.sent?'email sent':d.notConfigured?'email not configured on the server, nothing sent':flag('no-email')?'no email sent':'email NOT sent ('+d.emailError+')'}. They sign in at ${base} with OneProfileID using that address.`);
+  if(cmd==='invite')console.log(`${flag('resend')?'Re-sent the invite to':'Invited'} ${d.invite.email}: ${d.sent?'email sent':d.notConfigured?'email not configured on the server, nothing sent':flag('no-email')?'no email sent':'email NOT sent ('+d.emailError+')'}. ${d.link?` Send them this link: ${d.link}`:` They join at ${base}/join with OneProfileID using that address.`}`);
   else if(cmd==='revoke')console.log(`Revoked the invite for ${email}.`);
   else for(const i of d.invites)console.log(`${i.email}  ${i.revokedAt?'revoked':i.claimedAt?'joined '+i.claimedAt:'invited '+i.createdAt}`);
   process.exit(0);

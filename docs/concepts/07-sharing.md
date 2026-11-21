@@ -6,4 +6,4 @@ The recipient finds it under Settings › Sharing › *Shared with you* and adds
 
 The server enforces all of this: linked copies are computed from the owner's data on every read and are never stored in the recipient's environment. The API, the CLI and MCP see each environment's own data only. Details: `docs/sharing.md`.
 
-The owner can also invite people to the app itself (Settings › Account › *Invite to Flow*). The invited person signs in with that email and gets their own empty environment.
+Anyone with a OneProfileID account can join Flow, and members can invite friends to the app itself (Settings › Account › *Invite to Flow*). A new person gets their own empty environment and sees nothing of anyone else's until it is shared with them.

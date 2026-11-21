@@ -1,9 +1,10 @@
 Subject: You're invited to Flygon Flow
 
-Pat Example invited you to Flygon Flow: org charts, timelines and a DevOps board in one place.
+Pat Example invited you to Flygon Flow: mind maps, timelines and task boards. It is free, and your charts are private to you.
 
-Sign in to Flow: https://flow.example.test
+Accept the invite: https://flow.example.test/join?invite=tok_example_0123456789&email=casey%40example.test
 
-Use "Continue with OneProfileID" with this email address (casey@example.test). If you already have a OneProfileID account, sign in as usual; you will start in your own private workspace.
+Sign in with OneProfileID using this email address (casey@example.test).
+New to OneProfileID? Choose Continue, then "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
 
 If you were not expecting this, you can ignore this email.

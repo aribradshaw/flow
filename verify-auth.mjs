@@ -148,11 +148,12 @@ export async function authChecks(assert){
     r=await casey.call('POST','/api/auth/two-factor',{code:'123456'});
     assert(r.status===403,'invites: without an invite an existing OneProfileID user has no access');
     const otherAgent=agent();await otherAgent.call('POST','/api/auth/sign-in',{email:'mfa@example.test',password:'synthetic-pass-mfa'});await otherAgent.call('POST','/api/auth/two-factor',{code:'123456'});
-    assert((await otherAgent.call('POST','/api/invites',{email:'x@example.test'})).status===403,'invites: only the owner can invite');
+    r=await otherAgent.call('POST','/api/invites',{email:'x@example.test'});
+    assert(r.status===200&&r.data.quota?.limit===5&&r.data.quota.used===1&&!(await otherAgent.call('GET','/api/invites')).data.invites.some(i=>i.email==='casey@example.test'),'invites: members may invite too, within a weekly quota, and see only their own invites');
     r=await owner.call('POST','/api/invites',{email:'Casey@Example.test'});
     const mails=()=>{try{return readFileSync(mailLog,'utf8').trim().split(/\r?\n/).filter(Boolean).map(l=>JSON.parse(l))}catch{return []}};
     const m1=mails().at(-1);
-    assert(r.status===200&&r.data.invite.email==='casey@example.test'&&r.data.sent===true&&m1?.to==='casey@example.test'&&m1.subject==="You're invited to Flygon Flow"&&m1.html.includes('Sign in to Flow')&&m1.html.includes(BASE)&&m1.text.includes('OneProfileID')&&m1.from==='Flow <noreply@example.test>','invites: inviting sends a branded email (test transport, nothing leaves the machine)');
+    assert(r.status===200&&r.data.invite.email==='casey@example.test'&&r.data.sent===true&&m1?.to==='casey@example.test'&&m1.subject==="You're invited to Flygon Flow"&&m1.html.includes('Accept the invite')&&m1.html.includes(BASE+'/join?')&&m1.text.includes('OneProfileID')&&m1.from==='Flow <noreply@example.test>','invites: inviting sends a branded email (test transport, nothing leaves the machine)');
     r=await owner.call('POST','/api/invites',{email:'casey@example.test',resend:true});
     const r2=await owner.call('POST','/api/invites',{email:'casey@example.test',resend:true}),r3=await owner.call('POST','/api/invites',{email:'casey@example.test',resend:true});
     assert(r.data.sent===true&&r2.data.sent===true&&r3.data.sent===false&&/several times/.test(r3.data.emailError)&&mails().filter(m=>m.to==='casey@example.test').length===3,'invites: resend works and sends to one person are rate-limited');
