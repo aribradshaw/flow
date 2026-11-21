@@ -1,7 +1,7 @@
 // DevOps column sorts (public/devops-core.js sortCards): a view over board order.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {SORTS,sortKey,sortCards,priorityRank,seedDevops} from '../public/devops-core.js';
+import {SORTS,sortKey,sortCards,priorityRank,seedDevops,cleanDevops,newCard,ptsText} from '../public/devops-core.js';
 
 const labels=seedDevops().labels;   // Urgent (urgency), High, Medium, Low (priority), then areas
 let n=0;
@@ -63,4 +63,21 @@ test('ties keep board order (stable), for every sort',()=>{
   // Missing values tie with each other in board order too.
   const missing=['q','p','r'].map(id=>card(id));
   for(const k of ['due','due-late','points-high','points-low','priority'])assert.equal(ids(sortCards(missing,k,labels)),'q,p,r',k);
+});
+
+test('actual points: kept, defaulted and clamped like points, and independent of them',()=>{
+  const d=cleanDevops({...seedDevops(),cards:[{id:'a',title:'A',points:3,actual:8},{id:'b',title:'B',actual:0},{id:'c',title:'C',points:2,actual:1001},{id:'d',title:'D',actual:-1},{id:'e',title:'E',actual:'5'}]});
+  assert.deepEqual(d.cards.map(c=>[c.points,c.actual]),[[3,8],[null,0],[2,null],[null,null],[null,null]]);
+  assert.equal(newCard(d).actual,null);
+  assert.equal(ptsText({points:3,actual:8}),'3 → 8 pts');
+  assert.equal(ptsText({points:3,actual:3}),'3 pts');
+  assert.equal(ptsText({points:null,actual:8}),'8 pts actual');
+  assert.equal(ptsText({points:3,actual:null}),'3 pts');
+  assert.equal(ptsText({points:null,actual:null}),'');
+});
+
+test('actual sorts: by actual points, cards without them last',()=>{
+  const cards=[card('none',{points:9}),card('a3',{actual:3}),card('a0',{actual:0}),card('a8',{actual:8,points:1})];
+  assert.equal(ids(sortCards(cards,'actual-high',labels)),'a8,a3,a0,none');
+  assert.equal(ids(sortCards(cards,'actual-low',labels)),'a0,a3,a8,none');
 });

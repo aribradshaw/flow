@@ -19,7 +19,7 @@ import {store} from './store.js';
 import {currentEnv} from './sync.js';
 import {sessionUser,signInMode} from './account.js';
 import {addDropTarget} from './drag.js';
-import {memberColor} from './devops-core.js';
+import {memberColor,ptsText} from './devops-core.js';
 import * as core from './chat-core.js';
 
 const API='/api/chat';
@@ -419,7 +419,7 @@ function paintCard(a,r){
     if(c.number!=null)meta.append(h('span','cc-num','#'+c.number));
     if(c.column?.name)meta.append(h('span','cc-col'+(c.column.id==='done'?' done':''),c.column.name));
     if(c.due)meta.append(h('span','cc-due',dueText(c.due)));
-    if(c.points!=null)meta.append(h('span','cc-pts',`${c.points} pts`));
+    if(ptsText(c))meta.append(h('span','cc-pts',ptsText(c)));
     body.append(meta);
     a.append(icon2('branch'),body);
     if(c.assignees.length){const ppl=h('span','cc-ppl');for(const p of c.assignees)ppl.append(avatar({...p,username:p.id},'chat-av xs'));if(c.more)ppl.append(h('span','cc-more','+'+c.more));a.append(ppl)}

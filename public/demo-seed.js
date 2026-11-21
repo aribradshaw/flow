@@ -89,7 +89,7 @@ export function demoWorkspace({today=new Date().toISOString().slice(0,10)}={}){
     ['l-frontend','Frontend','area','blue'],['l-backend','Backend','area','purple'],['l-design','Design','area','pink'],['l-infra','Infra','area','teal'],['l-marketing','Marketing','area','green'],
     ['l-research','Research','topic','indigo'],['l-customer','Customer ask','other','amber']].map(([id,name,section,color])=>({id,name,section,color}));
   let n=0;
-  const card=(id,title,column,o={})=>({id,number:++n,title,description:'',column,project:'',labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',created:T(-14+n),updated:T(-7+n),moved:T(-7+n),...o});
+  const card=(id,title,column,o={})=>({id,number:++n,title,description:'',column,project:'',labels:[],points:null,actual:null,due:'',assignees:[],checklist:[],links:[],item:'',created:T(-14+n),updated:T(-7+n),moved:T(-7+n),...o});
   const dev=node=>({node,role:'developer'}),tester=node=>({node,role:'tester'}),req=node=>({node,role:'requester'});
   const cards=[
     card('c-form','Build the sign-up form','doing',{project:'p-lantern',labels:['l-high','l-frontend'],points:3,due:D(1),item:'i-signup',assignees:[dev('cleo'),req('mina')],

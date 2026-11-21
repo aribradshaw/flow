@@ -177,6 +177,16 @@ describe('edits',()=>{
     assert.equal(card.title,'Ad copy v2');assert.equal(card.column,'uat');assert.notEqual(card.moved,'2026-10-01T00:00:00.000Z');
     assert.equal(db.devops.cards[0].title,'Ad copy','the owner db passed in is not mutated');
   });
+  test('a recipient can record actual points without touching the estimate',()=>{
+    const db=owner(),e=share({kind:'person',nodeId:'bo'},'edit');
+    const r=applyRecipientEdit(db,e,{kind:'card',id:'k-cb',fields:{actual:6}},bo);
+    assert.ok(r.ok);assert.deepEqual(r.ownerDbPatch,[{kind:'card',id:'k-cb',field:'actual',value:6}]);
+    assert.deepEqual([r.history[0].old,r.history[0].new],[null,6]);
+    const card=applyOwnerPatch(db,r.ownerDbPatch).devops.cards.find(x=>x.id==='k-cb');
+    assert.deepEqual([card.points,card.actual],[2,6]);
+    assert.equal(applyRecipientEdit(db,e,{kind:'card',id:'k-cb',fields:{actual:-1}},bo).error,'invalid');
+    assert.equal(applyRecipientEdit(db,e,{kind:'card',id:'k-cb',fields:{actual:null}},bo).ownerDbPatch.length,0,'null over no value is no change');
+  });
   test('stubs are immutable; out-of-scope and private records are refused',()=>{
     const db=owner(),s=share({kind:'person',nodeId:'bo'}),bo={email:BO};
     assert.equal(applyRecipientEdit(db,s,{kind:'node',id:'flygon',fields:{name:'X'}},bo).error,'stub');
@@ -366,6 +376,9 @@ describe('conflicts (card #61): last write wins, the loser is told',()=>{
     const mine=structuredClone(seen);card(mine).title='Bo title';card(mine).points=5;
     const e=extractRecipientChanges(now,mine,fieldBase(seen,mine)).edits[0];
     assert.deepEqual(e.fields,{title:'Bo title',points:5});assert.deepEqual(e.clash,['title'],'points did not change on the owner side');
+    const act=structuredClone(seen);card(act).actual=7;
+    assert.deepEqual(fieldBase(seen,act).card,{[id]:{actual:null}},'sync records the actual points a save changed');
+    assert.deepEqual(extractRecipientChanges(now,act,fieldBase(seen,act)).edits[0].fields,{actual:7},'actual points carry through a shared save');
     const fresh=applyProjection(recipient(),now),mine2=structuredClone(fresh);card(mine2).title='Bo title';
     assert.equal(extractRecipientChanges(now,mine2,fieldBase(fresh,mine2)).edits[0].clash,undefined,'an edit over the value Bo saw is no conflict');
     const same=structuredClone(seen);card(same).title='Owner title';

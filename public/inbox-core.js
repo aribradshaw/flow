@@ -107,6 +107,7 @@ export function applyPatch(db,patch,{now=new Date().toISOString(),palette=['#7cb
       if(!isNew)set(c,'title',str(o.title)&&o.title.trim()?o.title.trim().slice(0,200):undefined,may,what);
       set(c,'description',str(o.description)?o.description.slice(0,8000):undefined,may||!c.description,what);
       set(c,'points',Number.isFinite(o.points)&&o.points>=0&&o.points<=1000?o.points:undefined,may||c.points==null,what);
+      set(c,'actual',Number.isFinite(o.actual)&&o.actual>=0&&o.actual<=1000?o.actual:undefined,may||c.actual==null,what);
       set(c,'due',o.due,may||!c.due,what);
       if(p)set(c,'project',p.id,may||!c.project,what);
       if(it)set(c,'item',it.id,may||!c.item,what);

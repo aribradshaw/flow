@@ -104,7 +104,8 @@ test('summaries: what a card bubble shows, from data the viewer has',()=>{
   assert.deepEqual(s.labels,[{name:'Urgent',color:['#fdd5d2','#8e1f17']},{name:'Odd',color:['#e8e9eb','#3f4247']}]);
   assert.deepEqual(s.project,{name:'Lantern',color:'#3b7dd8'});
   assert.deepEqual(s.assignees.map(a=>[a.name,!!a.image]),[['Ana Example',true],['Bo',false]]);
-  assert.equal(s.due,'2026-12-01');assert.equal(s.points,3);
+  assert.equal(s.due,'2026-12-01');assert.equal(s.points,3);assert.equal(s.actual,null);
+  {const d=db();d.devops.cards[0].actual=5;assert.deepEqual([core.summarize(d,CARD).points,core.summarize(d,CARD).actual],[3,5])}
   // Default column names when the board has none of its own; a project colour that is not a colour is dropped.
   const d=db();d.devops.columns=[];d.projects[0].color='red;background:url(x)';
   assert.equal(core.summarize(d,CARD).column.name,'Doing');assert.equal(core.summarize(d,CARD).project.color,'');

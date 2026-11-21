@@ -77,7 +77,7 @@
     &quot;env&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>items[].due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>items</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>items[].actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>items[].due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>items[].item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>items[].agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>nextCursor</code></td><td>string | null</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;items&quot;: {
@@ -114,6 +114,13 @@
               &quot;number&quot;,
               &quot;null&quot;
             ]
+          },
+          &quot;actual&quot;: {
+            &quot;type&quot;: [
+              &quot;number&quot;,
+              &quot;null&quot;
+            ],
+            &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
           },
           &quot;due&quot;: {
             &quot;type&quot;: &quot;string&quot;
@@ -246,6 +253,7 @@
         &quot;l-high&quot;
       ],
       &quot;points&quot;: 3,
+      &quot;actual&quot;: null,
       &quot;due&quot;: &quot;2026-11-15&quot;,
       &quot;assignees&quot;: [
         {
@@ -296,7 +304,7 @@
     &quot;card&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -335,6 +343,13 @@
             &quot;number&quot;,
             &quot;null&quot;
           ]
+        },
+        &quot;actual&quot;: {
+          &quot;type&quot;: [
+            &quot;number&quot;,
+            &quot;null&quot;
+          ],
+          &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
         },
         &quot;due&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -455,6 +470,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -481,7 +497,7 @@
 }</code></pre></section>
 <section class="op" id="op-cards-create"><h3><code>cards.create</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/envs/{env}/cards</code> <span class="muted">MCP <code>cards_create</code></span></p>
-<p class="summary">Create a DevOps card</p><p>Add a card (it gets the next #number). Lands in Requests / Sprinted unless <code>column</code> says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>column</code></td><td>string</td><td></td><td>Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of <code>requests</code>, <code>doing</code>, <code>blocked</code>, <code>uat</code>, <code>done</code>, <code>must</code>, <code>nice</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>project</code></td><td>string</td><td></td><td>Project id or name; &quot;&quot; for none.</td></tr><tr><td><code>labels</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>due</code></td><td>string</td><td></td><td>YYYY-MM-DD, or &quot;&quot; for none.</td></tr><tr><td><code>assignees</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>assignees[].node</code></td><td>string</td><td><span class="req">required</span></td><td>A person on a chart: node id or name.</td></tr><tr><td><code>assignees[].role</code></td><td>enum</td><td></td><td>One of <code>developer</code>, <code>tester</code>, <code>requester</code>.</td></tr><tr><td><code>checklist</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>checklist[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>checklist[].text</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>checklist[].done</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>links</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>links[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>links[].kind</code></td><td>enum</td><td></td><td>One of <code>pr</code>, <code>commit</code>, <code>url</code>.</td></tr><tr><td><code>links[].url</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>item</code></td><td>string</td><td></td><td>Timeline item id or title; &quot;&quot; for none.</td></tr><tr><td><code>agents</code></td><td>string[]</td><td></td><td>Delegate the card to these agents (replaces the list; [] for none). It joins each one&#39;s work queue (agents.work).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Create a DevOps card</p><p>Add a card (it gets the next #number). Lands in Requests / Sprinted unless <code>column</code> says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>column</code></td><td>string</td><td></td><td>Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of <code>requests</code>, <code>doing</code>, <code>blocked</code>, <code>uat</code>, <code>done</code>, <code>must</code>, <code>nice</code>.</td></tr><tr><td><code>title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>project</code></td><td>string</td><td></td><td>Project id or name; &quot;&quot; for none.</td></tr><tr><td><code>labels</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>due</code></td><td>string</td><td></td><td>YYYY-MM-DD, or &quot;&quot; for none.</td></tr><tr><td><code>assignees</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>assignees[].node</code></td><td>string</td><td><span class="req">required</span></td><td>A person on a chart: node id or name.</td></tr><tr><td><code>assignees[].role</code></td><td>enum</td><td></td><td>One of <code>developer</code>, <code>tester</code>, <code>requester</code>.</td></tr><tr><td><code>checklist</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>checklist[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>checklist[].text</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>checklist[].done</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>links</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>links[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>links[].kind</code></td><td>enum</td><td></td><td>One of <code>pr</code>, <code>commit</code>, <code>url</code>.</td></tr><tr><td><code>links[].url</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>item</code></td><td>string</td><td></td><td>Timeline item id or title; &quot;&quot; for none.</td></tr><tr><td><code>agents</code></td><td>string[]</td><td></td><td>Delegate the card to these agents (replaces the list; [] for none). It joins each one&#39;s work queue (agents.work).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -534,6 +550,15 @@
       ],
       &quot;minimum&quot;: 0,
       &quot;maximum&quot;: 1000
+    },
+    &quot;actual&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;null&quot;
+      ],
+      &quot;minimum&quot;: 0,
+      &quot;maximum&quot;: 1000,
+      &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
     },
     &quot;due&quot;: {
       &quot;type&quot;: &quot;string&quot;,
@@ -642,7 +667,7 @@
     &quot;title&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -681,6 +706,13 @@
             &quot;number&quot;,
             &quot;null&quot;
           ]
+        },
+        &quot;actual&quot;: {
+          &quot;type&quot;: [
+            &quot;number&quot;,
+            &quot;null&quot;
+          ],
+          &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
         },
         &quot;due&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -803,6 +835,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -829,7 +862,7 @@
 }</code></pre></section>
 <section class="op" id="op-cards-update"><h3><code>cards.update</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-patch">PATCH</span> <code>/api/v1/envs/{env}/cards/{card}</code> <span class="muted">MCP <code>cards_update</code></span></p>
-<p class="summary">Update a DevOps card</p><p>Change a card&#39;s fields. Lists you send (labels, assignees, checklist, links) replace the old ones. The column only changes through cards.move, which applies the board&#39;s gates.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>card</code></td><td>string | integer</td><td><span class="req">required</span></td><td>Card number or id.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>project</code></td><td>string</td><td></td><td>Project id or name; &quot;&quot; for none.</td></tr><tr><td><code>labels</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>due</code></td><td>string</td><td></td><td>YYYY-MM-DD, or &quot;&quot; for none.</td></tr><tr><td><code>assignees</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>assignees[].node</code></td><td>string</td><td><span class="req">required</span></td><td>A person on a chart: node id or name.</td></tr><tr><td><code>assignees[].role</code></td><td>enum</td><td></td><td>One of <code>developer</code>, <code>tester</code>, <code>requester</code>.</td></tr><tr><td><code>checklist</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>checklist[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>checklist[].text</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>checklist[].done</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>links</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>links[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>links[].kind</code></td><td>enum</td><td></td><td>One of <code>pr</code>, <code>commit</code>, <code>url</code>.</td></tr><tr><td><code>links[].url</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>item</code></td><td>string</td><td></td><td>Timeline item id or title; &quot;&quot; for none.</td></tr><tr><td><code>agents</code></td><td>string[]</td><td></td><td>Delegate the card to these agents (replaces the list; [] for none). It joins each one&#39;s work queue (agents.work).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Update a DevOps card</p><p>Change a card&#39;s fields. Lists you send (labels, assignees, checklist, links) replace the old ones. The column only changes through cards.move, which applies the board&#39;s gates.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>env</code></td><td>string</td><td><span class="req">required</span></td><td>Environment id (see envs.list).</td></tr><tr><td><code>card</code></td><td>string | integer</td><td><span class="req">required</span></td><td>Card number or id.</td></tr><tr><td><code>title</code></td><td>string</td><td></td><td></td></tr><tr><td><code>description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>project</code></td><td>string</td><td></td><td>Project id or name; &quot;&quot; for none.</td></tr><tr><td><code>labels</code></td><td>string[]</td><td></td><td></td></tr><tr><td><code>points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>due</code></td><td>string</td><td></td><td>YYYY-MM-DD, or &quot;&quot; for none.</td></tr><tr><td><code>assignees</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>assignees[].node</code></td><td>string</td><td><span class="req">required</span></td><td>A person on a chart: node id or name.</td></tr><tr><td><code>assignees[].role</code></td><td>enum</td><td></td><td>One of <code>developer</code>, <code>tester</code>, <code>requester</code>.</td></tr><tr><td><code>checklist</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>checklist[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>checklist[].text</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>checklist[].done</code></td><td>boolean</td><td></td><td></td></tr><tr><td><code>links</code></td><td>object[]</td><td></td><td></td></tr><tr><td><code>links[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>links[].kind</code></td><td>enum</td><td></td><td>One of <code>pr</code>, <code>commit</code>, <code>url</code>.</td></tr><tr><td><code>links[].url</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>item</code></td><td>string</td><td></td><td>Timeline item id or title; &quot;&quot; for none.</td></tr><tr><td><code>agents</code></td><td>string[]</td><td></td><td>Delegate the card to these agents (replaces the list; [] for none). It joins each one&#39;s work queue (agents.work).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;env&quot;: {
@@ -876,6 +909,15 @@
       ],
       &quot;minimum&quot;: 0,
       &quot;maximum&quot;: 1000
+    },
+    &quot;actual&quot;: {
+      &quot;type&quot;: [
+        &quot;number&quot;,
+        &quot;null&quot;
+      ],
+      &quot;minimum&quot;: 0,
+      &quot;maximum&quot;: 1000,
+      &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
     },
     &quot;due&quot;: {
       &quot;type&quot;: &quot;string&quot;,
@@ -984,7 +1026,7 @@
     &quot;card&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -1023,6 +1065,13 @@
             &quot;number&quot;,
             &quot;null&quot;
           ]
+        },
+        &quot;actual&quot;: {
+          &quot;type&quot;: [
+            &quot;number&quot;,
+            &quot;null&quot;
+          ],
+          &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
         },
         &quot;due&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -1145,6 +1194,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -1222,7 +1272,7 @@
     &quot;column&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -1261,6 +1311,13 @@
             &quot;number&quot;,
             &quot;null&quot;
           ]
+        },
+        &quot;actual&quot;: {
+          &quot;type&quot;: [
+            &quot;number&quot;,
+            &quot;null&quot;
+          ],
+          &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
         },
         &quot;due&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -1383,6 +1440,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -1422,6 +1480,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -1539,6 +1598,13 @@
                   &quot;number&quot;,
                   &quot;null&quot;
                 ]
+              },
+              &quot;actual&quot;: {
+                &quot;type&quot;: [
+                  &quot;number&quot;,
+                  &quot;null&quot;
+                ],
+                &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
               },
               &quot;due&quot;: {
                 &quot;type&quot;: &quot;string&quot;
@@ -1742,6 +1808,7 @@
           &quot;l-high&quot;
         ],
         &quot;points&quot;: 3,
+        &quot;actual&quot;: null,
         &quot;due&quot;: &quot;2026-11-15&quot;,
         &quot;assignees&quot;: [
           {
@@ -1798,6 +1865,7 @@
           &quot;l-high&quot;
         ],
         &quot;points&quot;: 3,
+        &quot;actual&quot;: null,
         &quot;due&quot;: &quot;2026-11-15&quot;,
         &quot;assignees&quot;: [
           {
@@ -1857,7 +1925,7 @@
     &quot;entry&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>renumbered</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>previousNumber</code></td><td>integer | null</td><td><span class="req">required</span></td><td>The number it had before, when renumbered.</td></tr><tr><td><code>message</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>rev</code></td><td>integer</td><td><span class="req">required</span></td><td>Workspace revision after (or at) this call.</td></tr><tr><td><code>card</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.number</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.title</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.description</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.column</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.project</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.labels</code></td><td>string[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.points</code></td><td>number | null</td><td></td><td></td></tr><tr><td><code>card.actual</code></td><td>number | null</td><td></td><td>Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.</td></tr><tr><td><code>card.due</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.assignees</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.checklist</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.links</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>card.item</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.created</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.updated</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.moved</code></td><td>string</td><td></td><td></td></tr><tr><td><code>card.agents</code></td><td>string[]</td><td></td><td>AgentFlow agents the card is delegated to (ids).</td></tr><tr><td><code>renumbered</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>previousNumber</code></td><td>integer | null</td><td><span class="req">required</span></td><td>The number it had before, when renumbered.</td></tr><tr><td><code>message</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;rev&quot;: {
@@ -1896,6 +1964,13 @@
             &quot;number&quot;,
             &quot;null&quot;
           ]
+        },
+        &quot;actual&quot;: {
+          &quot;type&quot;: [
+            &quot;number&quot;,
+            &quot;null&quot;
+          ],
+          &quot;description&quot;: &quot;Points the card actually took, recorded after the work (for example from the agents&#39; token use). Separate from points, the up-front estimate.&quot;
         },
         &quot;due&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -2032,6 +2107,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {
@@ -2072,6 +2148,7 @@
       &quot;l-high&quot;
     ],
     &quot;points&quot;: 3,
+    &quot;actual&quot;: null,
     &quot;due&quot;: &quot;2026-11-15&quot;,
     &quot;assignees&quot;: [
       {

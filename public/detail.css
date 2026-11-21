@@ -19,6 +19,8 @@
 .prop-pair>.prop:first-child input{padding:0 2px;text-align:center}
 .prop-pair input[type=date]{min-width:0;padding:0 2px;font-size:12px}
 .prop-pair input[type=number]::-webkit-inner-spin-button{display:none}
+.prop-pair.pts>.prop{grid-template-columns:auto 34px}
+.prop-pair.pts input{padding:0 2px;text-align:center}
 .cd-side .two{gap:6px}
 .cd-side .two .prop.stack{margin-top:2px}
 .cd-side .two input[type=date]{height:26px}

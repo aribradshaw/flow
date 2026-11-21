@@ -3,6 +3,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {start,KEY,OTHER_KEY} from './fixtures/server.mjs';
 import {operations} from './fixtures/registry.mjs';
+import {getOperation} from '../lib/registry.mjs';
 import {createMcp,toolFor,PROTOCOL_VERSIONS} from '../lib/mcp.mjs';
 import {openapiFor,operationsFrom,requestFor} from '../lib/api-spec.mjs';
 
@@ -117,4 +118,14 @@ test('createMcp core and the OpenAPI round trip',async()=>{
   assert.deepEqual(requestFor(move,{env:'a b',number:4,column:'doing'}),{method:'POST',path:'/api/v1/envs/a%20b/cards/4/move',query:'',body:{column:'doing'}});
   assert.deepEqual(requestFor(operations[0],{env:'e',project:'X',limit:2}),{method:'GET',path:'/api/v1/envs/e/cards',query:'?project=X&limit=2',body:undefined});
   assert.throws(()=>requestFor(move,{number:1}),e=>e.status===400);
+});
+
+test('the real cards tools take and return actual points next to the estimate',()=>{
+  for(const id of ['cards.create','cards.update']){
+    const {inputSchema}=toolFor(getOperation(id));
+    assert.deepEqual(inputSchema.properties.actual.type,['number','null'],id);
+    assert.equal(inputSchema.properties.actual.maximum,1000,id);
+    assert.ok(inputSchema.properties.points,id);
+  }
+  assert.ok(toolFor(getOperation('cards.get')).outputSchema.properties.card.properties.actual);
 });

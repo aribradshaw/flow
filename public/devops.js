@@ -8,7 +8,7 @@ import {getPref,setPref} from './prefs.js';
 import {detailModal,ask} from './modal.js';
 import {store,change,checkpoint,commit,save,step} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
-import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,sortCards,priorityLabels,withPriority,moveTargets,capList} from './devops-core.js';
+import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
@@ -81,7 +81,7 @@ function sortMenu(b){
 }
 // The sort menu's items, also the Sort submenu of a column's right-click menu.
 function sortItems(col){
-  const cur=sortOf(col),groups=[['manual'],['newest','oldest','updated'],['due','due-late'],['points-high','points-low'],['priority','number','title']];
+  const cur=sortOf(col),groups=[['manual'],['newest','oldest','updated'],['due','due-late'],['points-high','points-low','actual-high','actual-low'],['priority','number','title']];
   return groups.flatMap((g,i)=>[...(i?['-']:[]),...g.map(k=>({label:k==='manual'&&col==='done'?'Manual (recently moved first)':sortName(k),checked:cur===k,run:()=>setSort(col,k)}))]);
 }
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
@@ -227,7 +227,7 @@ function cardHtml(c){
   return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${locked(c)?' ro':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
     ${ls.length?`<div class="dc-labels">${ls.slice(0,3).map(pill).join('')}${ls.length>3?`<span class="dc-more" data-tip="${esc(ls.slice(3).map(l=>l.name).join(', '))}">+${ls.length-3}</span>`:''}</div>`:''}
     <div class="dc-title" data-tip="${c.title.length>90?esc(c.title):''}" data-tip-delay="700">${esc(c.title)}</div>
-    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${c.points!=null?`<span class="dc-pts">${c.points} pts</span>`:''}
+    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${ptsText(c)?`<span class="dc-pts">${ptsText(c)}</span>`:''}
       ${c.due?`<span class="dc-due ${tone}" data-tip="${tone==='overdue'?'Overdue':tone==='soon'?'Due soon':'Due'} · ${esc(fmt(c.due))}">${icon('calendar',12)}${esc(fmt(c.due))}</span>`:''}
       ${c.checklist.length?`<span class="dc-chk${done===c.checklist.length?' all':''}" data-tip="Checklist">${icon('checkSq',12)}${done}/${c.checklist.length}</span>`:''}
       ${c.links.length?`<span class="dc-ico" data-tip="${esc(c.links.map(l=>`${LINK_KINDS[l.kind]}: ${l.url}`).join('\n'))}">${icon('link',12)}</span>`:''}
@@ -503,7 +503,8 @@ function cardDetailHtml(c){
     <div class="rail-g" role="group" aria-label="Planning">
       ${prop('Column',`<select id="dc-col"${ro}>${dv().columns.map(x=>opt(x.id,x.name,c.column)).join('')}</select>${clash(c,'column')}`,{ic:'board',for:'dc-col'})}
       ${prop('Project',`<select id="dc-proj"${mine}>${opt('','No project',c.project)}${projectOpts}</select>`,{ic:'tag',for:'dc-proj'})}
-      <div class="prop-pair">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}"${ro}>${clash(c,'points')}`,{ic:'target',for:'dc-pts'})}${prop('Due',`<input id="dc-due" type="date" value="${c.due}"${ro}>${clash(c,'due')}`,{ic:'calendar',for:'dc-due'})}</div>
+      <div class="prop-pair pts">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}"${ro}>${clash(c,'points')}`,{ic:'target',for:'dc-pts'})}${prop('Actual points',`<input id="dc-act" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.actual??''}"${ro}>${clash(c,'actual')}`,{ic:'check',for:'dc-act'})}</div>
+      ${prop('Due',`<input id="dc-due" type="date" value="${c.due}"${ro}>${clash(c,'due')}`,{ic:'calendar',for:'dc-due'})}
       ${prop('Timeline item',`<select id="dc-item"${mine}>${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
     </div>
     <div class="rail-g" role="group" aria-label="People">
@@ -570,10 +571,10 @@ export function inspectorClick(e){
 // Text fields autosave as you type: one undo step per open form.
 export function inspectorInput(e){
   const t=e.target,c=card(selected),form=$('#dedit');
-  if(!c||!form||!['dc-title','dc-pts','dc-due','dc-desc'].includes(t.id)||locked(c))return;
-  const title=$('#dc-title').value.trim(),pts=$('#dc-pts').value;if(!title)return;
+  if(!c||!form||!['dc-title','dc-pts','dc-act','dc-due','dc-desc'].includes(t.id)||locked(c))return;
+  const title=$('#dc-title').value.trim(),num=v=>v===''||!Number.isFinite(+v)?null:Math.max(0,Math.min(1000,+v));if(!title)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
-  Object.assign(c,{title,points:pts===''||!Number.isFinite(+pts)?null:Math.max(0,Math.min(1000,+pts)),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
+  Object.assign(c,{title,points:num($('#dc-pts').value),actual:num($('#dc-act').value),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
   save();render();
 }
 export function inspectorChange(e){

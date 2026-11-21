@@ -238,12 +238,24 @@ test('cards: create, get, update, list, and move through the board gates',async(
   assert.ok(c.checklist[0].id&&c.links[0].id);
   assert.equal((await op('cards.create',{env:ENV,title:'X',labels:['ghost']})).body.code,'unknown_label');
   assert.equal((await op('cards.create',{env:ENV,title:'X',assignees:[{node:'Kestrel Group'}]})).body.code,'unknown_person','only people can be assigned');
-  assert.equal((await op('cards.create',{env:ENV,title:'Second',column:'must'})).body.card.number,2);
+  {const second=(await op('cards.create',{env:ENV,title:'Second',column:'must',actual:2})).body.card;assert.deepEqual([second.number,second.points,second.actual],[2,null,2])}
   r=await op('cards.get',{env:ENV,card:'#1'});assert.equal(r.body.card.id,c.id);
   r=await op('cards.get',{env:ENV,card:c.id});assert.equal(r.body.card.number,1);
   assert.equal((await op('cards.get',{env:ENV,card:99})).body.code,'card_not_found');
   r=await op('cards.update',{env:ENV,card:1,title:'Build the sign-up form',checklist:[{...c.checklist[0],done:true}],points:null});
   assert.deepEqual([r.body.card.title,r.body.card.checklist[0].done,r.body.card.points],['Build the sign-up form',true,null]);
+  // actual (points the work took) is its own field: setting one never changes the other.
+  assert.equal(c.actual,null,'actual defaults to null');
+  r=await op('cards.update',{env:ENV,card:1,points:3});
+  r=await op('cards.update',{env:ENV,card:1,actual:8});
+  assert.deepEqual([r.body.card.points,r.body.card.actual],[3,8]);
+  r=await op('cards.update',{env:ENV,card:1,points:5});
+  assert.deepEqual([r.body.card.points,r.body.card.actual],[5,8]);
+  assert.equal((await op('cards.get',{env:ENV,card:1})).body.card.actual,8);
+  assert.equal((await op('cards.list',{env:ENV})).body.items.find(x=>x.number===1).actual,8);
+  assert.equal((await op('cards.update',{env:ENV,card:1,actual:1001})).body.code,'invalid_input');
+  r=await op('cards.update',{env:ENV,card:1,actual:null,points:null});
+  assert.deepEqual([r.body.card.points,r.body.card.actual],[null,null]);
   assert.equal((await op('cards.update',{env:ENV,card:1,column:'done'})).body.code,'invalid_input','the column only moves through cards.move');
 
   // Doing needs a developer (or an explicit confirm to leave it unassigned).

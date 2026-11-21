@@ -1,7 +1,7 @@
 // DevOps board data: defaults, validation and pure helpers (no DOM, no storage), so verify.mjs
 // can exercise them in Node. Label colours are designed to stay readable on white.
 // db.devops = {columns:[{id,name}], cards:[card], nextNumber, labels:[{id,name,section,color}]}
-// card = {id,number,title,description,column,project,labels[],points,due,assignees[{node,role}],
+// card = {id,number,title,description,column,project,labels[],points,actual,due,assignees[{node,role}],
 //         checklist[{id,text,done}],links[{id,kind,url}],item,created,updated,moved}  (moved: last column change)
 // Card order inside a column is the order of db.devops.cards.
 
@@ -57,7 +57,7 @@ export function cleanDevops(d,db={}){
     const iso=v=>typeof v==='string'&&!Number.isNaN(Date.parse(v))?v:now;
     return {id:c.id,number,title:c.title.slice(0,200),description:str(c.description,8000),column:COLUMNS.some(([k])=>k===c.column)?c.column:MERGED[c.column]||NEW_COLUMN,
       project:projects.has(c.project)?c.project:'',labels:Array.isArray(c.labels)?[...new Set(c.labels)].filter(l=>labelIds.has(l)):[],
-      points:Number.isFinite(c.points)&&c.points>=0&&c.points<=1000?c.points:null,due:DATE.test(c.due||'')?c.due:'',
+      points:Number.isFinite(c.points)&&c.points>=0&&c.points<=1000?c.points:null,actual:Number.isFinite(c.actual)&&c.actual>=0&&c.actual<=1000?c.actual:null,due:DATE.test(c.due||'')?c.due:'',
       assignees:(Array.isArray(c.assignees)?c.assignees:[]).filter(a=>a&&typeof a.node==='string').map(a=>({node:a.node,role:ROLES.includes(a.role)?a.role:'developer'}))
         .filter((a,i,all)=>all.findIndex(b=>b.node===a.node&&b.role===a.role)===i).slice(0,20),
       checklist:(Array.isArray(c.checklist)?c.checklist:[]).filter(x=>x&&typeof x.text==='string').slice(0,200).map(x=>({id:typeof x.id==='string'?x.id:id(),text:x.text.slice(0,300),done:!!x.done})),
@@ -69,9 +69,16 @@ export function cleanDevops(d,db={}){
   return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
 }
 
+// A card's points as the tile shows them: the estimate, the actual, or "3 → 8 pts" when they differ.
+export function ptsText({points:p,actual:a}){
+  const has=v=>v!=null&&Number.isFinite(v);
+  if(has(p)&&has(a))return p===a?`${p} pts`:`${p} → ${a} pts`;
+  return has(a)?`${a} pts actual`:has(p)?`${p} pts`:'';
+}
+
 export function newCard(dv,over={}){
   const now=new Date().toISOString();
-  const c={id:id(),number:dv.nextNumber++,title:'New card',description:'',column:NEW_COLUMN,project:'',labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',created:now,updated:now,moved:now,...over};
+  const c={id:id(),number:dv.nextNumber++,title:'New card',description:'',column:NEW_COLUMN,project:'',labels:[],points:null,actual:null,due:'',assignees:[],checklist:[],links:[],item:'',created:now,updated:now,moved:now,...over};
   dv.cards.push(c);return c;
 }
 
@@ -141,6 +148,7 @@ export const memberColor=nodeId=>{let h=0;for(const ch of nodeId)h=(h*31+ch.char
 // [key, menu label, short header label]. 'manual' is board order (the order of db.devops.cards).
 export const SORTS=[['manual','Manual','Manual'],['newest','Newest first','Newest'],['oldest','Oldest first','Oldest'],['updated','Recently updated','Updated'],
   ['due','Due date: soonest first','Due soon'],['due-late','Due date: latest first','Due late'],['points-high','Points: most to least','Most pts'],['points-low','Points: least to most','Least pts'],
+  ['actual-high','Actual: most to least','Most actual'],['actual-low','Actual: least to most','Least actual'],
   ['priority','Priority','Priority'],['number','Card number','Number'],['title','Title A to Z','A to Z']];
 export const sortKey=k=>SORTS.some(([s])=>s===k)?k:'manual';
 // Priority rank: Urgency labels outrank Priority labels; within a section, the order the labels are listed
@@ -158,7 +166,8 @@ export function sortCards(cards,sort,labels=[]){
   const pr=k==='priority'?priorityRank(labels):null;
   // [value, direction]: direction 1 ascending, -1 descending; null/'' values are missing.
   const val={newest:c=>[c.created,-1],oldest:c=>[c.created,1],updated:c=>[c.updated,-1],due:c=>[c.due||null,1],'due-late':c=>[c.due||null,-1],
-    'points-high':c=>[c.points??null,-1],'points-low':c=>[c.points??null,1],priority:c=>{const r=pr(c);return [r===Infinity?null:r,1]},
+    'points-high':c=>[c.points??null,-1],'points-low':c=>[c.points??null,1],
+    'actual-high':c=>[c.actual??null,-1],'actual-low':c=>[c.actual??null,1],priority:c=>{const r=pr(c);return [r===Infinity?null:r,1]},
     number:c=>[c.number,1],title:c=>[c.title,1]}[k];
   const cmp=(a,b)=>typeof a==='string'&&typeof b==='string'?(k==='title'?nameCmp.compare(a,b):a<b?-1:a>b?1:0):a-b;
   return cards.map((c,i)=>[c,i,...val(c)]).sort((x,y)=>{

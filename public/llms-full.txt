@@ -58,7 +58,7 @@ The DevOps board is a card board. Each card has an auto-incrementing `#number`.
 
 Columns, in order: `requests` (Requests / Sprinted, where new cards land), `doing`, `blocked`, `uat`, `done`, then the two backlogs `must` (Must Have) and `nice` (Nice to Have).
 
-A card holds `title, description, column, project, labels[], points, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item. Responses also list `agents`, the AgentFlow agents the card is delegated to (see AgentFlow: delegation and the work queue).
+A card holds `title, description, column, project, labels[], points, actual, due, assignees[{node, role}], checklist[{text, done}], links[{kind, url}], item` and the `created` / `updated` / `moved` timestamps. Assignee roles are `developer`, `tester` and `requester`, and each assignee is a person card on the chart. Link kinds are `pr`, `commit` and `url`. `item` links the card to a timeline item. `points` is the estimate made up front and `actual` the points the card actually took, recorded after the work (for example from the agents' token use); both are a number from 0 to 1000 or null, and setting one never changes the other. Responses also list `agents`, the AgentFlow agents the card is delegated to (see AgentFlow: delegation and the work queue).
 
 ### Gates
 
@@ -83,7 +83,7 @@ A save that removes cards without a Delete (an undo, a restored snapshot) still 
 
 ### Board order and column sorts
 
-Board order is the order of the cards in the board (`cards.list` returns it); dragging a card within a column changes it. In the app, each column header has a sort menu: Manual (board order), newest or oldest first, recently updated, due date, points, priority (Urgency labels, then Priority labels, in the order they are listed) or card number and title. A sort is a view for one person: it is kept in their preferences, never in the workspace, and it does not change the board order or any card. Cards missing the sorted value (no due date, no points, no priority label) go last, and ties keep board order. Reordering inside a sorted column is refused until it is back on Manual; moving a card into a sorted column puts it at the end of the board order.
+Board order is the order of the cards in the board (`cards.list` returns it); dragging a card within a column changes it. In the app, each column header has a sort menu: Manual (board order), newest or oldest first, recently updated, due date, points, actual points, priority (Urgency labels, then Priority labels, in the order they are listed) or card number and title. A sort is a view for one person: it is kept in their preferences, never in the workspace, and it does not change the board order or any card. Cards missing the sorted value (no due date, no points, no actual points, no priority label) go last, and ties keep board order. Reordering inside a sorted column is refused until it is back on Manual; moving a card into a sorted column puts it at the end of the board order.
 
 ## Agent inbox
 
@@ -1414,6 +1414,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `items[].project` | string |  |  |
 | `items[].labels` | string[] | yes |  |
 | `items[].points` | number | null |  |  |
+| `items[].actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `items[].due` | string |  |  |
 | `items[].assignees` | object[] | yes |  |
 | `items[].checklist` | object[] | yes |  |
@@ -1447,6 +1448,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards?project=Lantern&h
         "l-high"
       ],
       "points": 3,
+      "actual": null,
       "due": "2026-11-15",
       "assignees": [
         {
@@ -1505,6 +1507,7 @@ One card by number ("12" or "#12") or id.
 | `card.project` | string |  |  |
 | `card.labels` | string[] | yes |  |
 | `card.points` | number | null |  |  |
+| `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
@@ -1536,6 +1539,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -1581,6 +1585,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `project` | string |  | Project id or name; "" for none. |
 | `labels` | string[] |  |  |
 | `points` | number | null |  |  |
+| `actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
 | `assignees` | object[] |  |  |
 | `assignees[].node` | string | yes | A person on a chart: node id or name. |
@@ -1610,6 +1615,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `card.project` | string |  |  |
 | `card.labels` | string[] | yes |  |
 | `card.points` | number | null |  |  |
+| `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
@@ -1643,6 +1649,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards" \
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -1688,6 +1695,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `project` | string |  | Project id or name; "" for none. |
 | `labels` | string[] |  |  |
 | `points` | number | null |  |  |
+| `actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
 | `assignees` | object[] |  |  |
 | `assignees[].node` | string | yes | A person on a chart: node id or name. |
@@ -1717,6 +1725,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `card.project` | string |  |  |
 | `card.labels` | string[] | yes |  |
 | `card.points` | number | null |  |  |
+| `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
@@ -1750,6 +1759,7 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -1810,6 +1820,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `card.project` | string |  |  |
 | `card.labels` | string[] | yes |  |
 | `card.points` | number | null |  |  |
+| `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
@@ -1843,6 +1854,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -1892,6 +1904,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -1986,6 +1999,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards" \
           "l-high"
         ],
         "points": 3,
+        "actual": null,
         "due": "2026-11-15",
         "assignees": [
           {
@@ -2052,6 +2066,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards?q=%2312&p
           "l-high"
         ],
         "points": 3,
+        "actual": null,
         "due": "2026-11-15",
         "assignees": [
           {
@@ -2120,6 +2135,7 @@ Put a deleted card back on the board: same id, column, fields, checklist and lin
 | `card.project` | string |  |  |
 | `card.labels` | string[] | yes |  |
 | `card.points` | number | null |  |  |
+| `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
@@ -2154,6 +2170,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/%2312/re
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -2204,6 +2221,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/del_6f1c
       "l-high"
     ],
     "points": 3,
+    "actual": null,
     "due": "2026-11-15",
     "assignees": [
       {
@@ -2606,6 +2624,7 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `items[].project` | string |  |  |
 | `items[].labels` | string[] | yes |  |
 | `items[].points` | number | null |  |  |
+| `items[].actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `items[].due` | string |  |  |
 | `items[].assignees` | object[] | yes |  |
 | `items[].checklist` | object[] | yes |  |
@@ -2677,6 +2696,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
         "l-high"
       ],
       "points": 3,
+      "actual": null,
       "due": "2026-11-15",
       "assignees": [
         {

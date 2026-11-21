@@ -171,7 +171,7 @@ export function summarize(db,{kind,id},{photo=n=>n.image}={}){
     return {kind:'card',title:short(c.title,200),number:Number.isInteger(c.number)?c.number:null,column:{id:short(c.column,20),name:short(col,80)},
       labels:(c.labels||[]).map(l=>labels.get(l)).filter(Boolean).slice(0,4).map(l=>({name:short(l.name,40),color:colorOf(l.color)})),
       project:p?{name:short(p.name,80),color:HEX.test(p.color||'')?p.color:''}:null,assignees:people.slice(0,3),more:Math.max(0,people.length-3),
-      due:/^\d{4}-\d{2}-\d{2}$/.test(c.due||'')?c.due:'',points:Number.isFinite(c.points)?c.points:null};
+      due:/^\d{4}-\d{2}-\d{2}$/.test(c.due||'')?c.due:'',points:Number.isFinite(c.points)?c.points:null,actual:Number.isFinite(c.actual)?c.actual:null};
   }
   const n=nodesOf(db).get(id);if(!n||n.linked?.stub)return null;
   const img=n.type==='person'?photo(n):'';

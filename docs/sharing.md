@@ -53,7 +53,7 @@ The result is `{share, chart, nodes, edges, projects, timeline, cards, labels}`,
   - edge: `percent`
   - project: `name`, `color`
   - item: `title`, `kind`, `status`, `priority`, `start`, `end`, `owner`, `link`, `notes`, `release` (`''` or a shared release, as its linked or owner id)
-  - card: `title`, `description`, `column`, `points`, `due`, `labels` (owner label ids), `checklist`, `links`, `assignees`
+  - card: `title`, `description`, `column`, `points`, `actual`, `due`, `labels` (owner label ids), `checklist`, `links`, `assignees`
   - `assignees` holds the people the recipient can see: in-scope person cards (linked or owner ids) and members (`@email`); anything else is `invalid`. It replaces only those: the owner's hidden assignees stay on the card. A member is stored as the owner's person card with their email when there is one, else as `@email`. History records only the people the recipient can see.
 
   Layout (x, y, w, h, chart) is never an edit: it is a per-environment placement, and any permission may change it.
