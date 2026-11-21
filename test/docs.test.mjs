@@ -43,7 +43,10 @@ test('concepts reach the outputs, and no release version is embedded',async()=>{
   for(const [f,body] of Object.entries(files)){assert.ok(!body.includes(`Version ${newest}`),f);assert.ok(!/Version \d+\.\d+\.\d+/.test(body),f)}
   for(const f of ['public/llms.txt','public/llms-full.txt','docs/generated/api.md','public/docs/index.html'])assert.ok(files[f].includes('/api/devlog'),f);
   assert.match(files['skills/flygon-flow/SKILL.md'],/^---\nname: flygon-flow\ndescription: .+\n---\n/);
-  assert.match(files['public/docs/docs.css'],/--flygon-green:#7cb980/);
+  // Docs share the app's tokens; Flygon's brand colors come from @flygon/styles (/flygon-styles.css), not a copy.
+  assert.match(files['public/docs/docs.css'],/--accent-line:var\(--flygon-green\)/);
+  assert.doesNotMatch(files['public/docs/docs.css'],/--flygon-green:#/i);
+  assert.ok(files['public/docs/index.html'].includes('<link rel="stylesheet" href="../flygon-styles.css"><link rel="stylesheet" href="docs.css">'));
 });
 
 test('output is deterministic',async()=>{

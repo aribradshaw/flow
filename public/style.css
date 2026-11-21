@@ -1,6 +1,6 @@
 :root{--ink:#1d2725;--muted:#66726e;--faint:#98a39f;--line:#e3e7e5;--line2:#ccd4d1;--bg:#f6f7f6;--hover:#eef1ef;--danger:#b4443a;--warn:#c27a1a;--r:4px;
-  /* Flygon LC brand (invoice-app brand.css / logoPalette.js), used only as accents on the grey base */
-  --flygon-green:#7cb980;--flygon-dark:#324b34;--flygon-light:#d1ecb0;--flygon-tint:#eef7e6;--flygon-brick:#a8524c;--flygon-brick-hover:#974a44;
+  /* Flygon LC brand, used only as accents on the grey base. --flygon-green, -dark, -light, -tint, -brick and
+     -brick-hover come from @flygon/styles (served as /flygon-styles.css, linked before this file). */
   --flygon-mint:#9cd29f;--flygon-olive:#88a374;--flygon-rose:#d87881;
   /* --accent: text/icons on white (dark green, 9.9:1). --accent-2: light wash behind it.
      --accent-line: selection and active marks. --primary: brick call to action (white text 5.3:1). */

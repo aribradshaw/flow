@@ -241,3 +241,5 @@ Inspector fields autosave valid edits as you type. The coloured dot in the top b
 ## Built by Flygon LC
 
 Flow is made by [Flygon LC](https://flygonlc.com) and licensed under [MIT](LICENSE).
+
+Flow's brand colors and themes come from the `@flygon/styles` package, which is not MIT: it stays under Flygon LC's own notice (all rights reserved), with a grant that copies of Flow may use it as shipped. See its LICENSE in `node_modules/@flygon/styles`.

@@ -28,7 +28,7 @@ fetch('/api/instance').then(r=>r.ok?r.json():null).then(v=>{
   if(!v)return;
   instanceName=v.name||'Flow';instanceLogo=v.logo||'';
   document.title=instanceName;
-  document.documentElement.style.setProperty('--flygon-green',v.accent);
+  if(v.accent)document.documentElement.style.setProperty('--flygon-green',v.accent);
   renderTop();
 }).catch(()=>{});
 

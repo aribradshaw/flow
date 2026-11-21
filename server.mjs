@@ -910,6 +910,8 @@ async function prefs(req,res){
   res.writeHead(405);res.end();return true;
 }
 
+// @flygon/styles (dist/themes.css): Flygon's brand colors on :root plus its themes. index.html and the docs link it.
+const FLYGON_STYLES_PATH='/flygon-styles.css',flygonStylesFile=fileURLToPath(import.meta.resolve('@flygon/styles/themes.css'));
 // Static files: any existing file under public/ (so new modules need no restart). The decoded path
 // is resolved and must stay inside public/; dotfiles and unknown types are refused.
 function resolveStatic(url){
@@ -925,7 +927,7 @@ const server=http.createServer(async(req,res)=>{
   try{req.flowEmbed=await auth.embed.decide(req);for(const [k,v] of Object.entries(auth.embed.headers(req.flowEmbed)))res.setHeader(k,v)}catch{}
   if(req.url.split('?')[0]==='/api/instance'&&req.method==='GET'){
     const name=String(process.env.FLOW_INSTANCE_NAME||'Flow').trim().slice(0,80)||'Flow';
-    const accent=/^#[0-9a-fA-F]{6}$/.test(process.env.FLOW_ACCENT_COLOR||'')?process.env.FLOW_ACCENT_COLOR:'#7cb980';
+    const accent=/^#[0-9a-fA-F]{6}$/.test(process.env.FLOW_ACCENT_COLOR||'')?process.env.FLOW_ACCENT_COLOR:''; // '' keeps --flygon-green from @flygon/styles
     const logo=String(process.env.FLOW_LOGO_PATH||'');
     json(res,200,{name,accent,logo:/^\/(?!\/)[A-Za-z0-9/_-]+\.(?:svg|png|webp)$/.test(logo)&&!logo.includes('..')?logo:''});return;
   }
@@ -936,6 +938,8 @@ const server=http.createServer(async(req,res)=>{
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
+  // Flygon brand colors and themes from the @flygon/styles package, served as installed (not copied into public/).
+  if(bare===FLYGON_STYLES_PATH&&(req.method==='GET'||req.method==='HEAD')){try{const b=readFileSync(flygonStylesFile);res.writeHead(200,{'Content-Type':'text/css; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(req.method==='HEAD'?undefined:b)}catch{res.writeHead(500);res.end('Unable to load file')}return}
   if(bare==='/skill.md'&&req.method==='GET'){try{const b=readFileSync(new URL('./skills/flygon-flow/SKILL.md',import.meta.url));res.writeHead(200,{'Content-Type':'text/markdown; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(b)}catch{res.writeHead(404);res.end()}return}
   let file;try{file=resolveStatic(decodeURIComponent(req.url?.split('?')[0]||'/'))}catch{file=null}
   if(!file||(req.method!=='GET'&&req.method!=='HEAD')){res.writeHead(404);res.end('Not found');return;}
