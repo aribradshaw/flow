@@ -119,13 +119,14 @@ export async function authChecks(assert){
     r=await other.call('GET','/api/saves');
     assert(r.status===200&&!r.data.saves.some(s=>s.id===ownerSave||s.id===legacy),"auth: another user does not see Owner's private saves");
     assert((await other.call('GET','/api/saves/'+ownerSave)).status===404&&(await other.call('GET','/api/saves/'+legacy)).status===404,'auth: loading a private save of someone else is 404');
-    assert((await other.call('PUT','/api/backups/x',workspace())).status===404&&(await other.call('POST','/api/saves',workspace({id:'default-workspace',name:'Mine now',visibility:'public'}))).status===404,"auth: writing into Owner's private environment is 404, even claiming it is public");
+    r=await other.call('PUT','/api/backups/x',workspace());
+    assert(r.status===200&&r.data?.saved===false&&r.data.skipped&&(await other.call('POST','/api/saves',workspace({id:'default-workspace',name:'Mine now',visibility:'public'}))).status===404,"auth: writing into Owner's private environment is 404, even claiming it is public; disk backups are the owner's only");
     const theirs={id:'other-env',name:'Other space',visibility:'private'};
     r=await other.call('POST','/api/saves',workspace(theirs));const otherSave=r.data?.id;
     assert(r.status===200&&r.data.env.owner==='other@example.test'&&(await other.call('GET','/api/saves/'+otherSave)).data.data.environment.ownerEmail==='other@example.test','auth: a new environment is owned by whoever first saves it, and the stored copy records that owner');
     assert(!(await owner.call('GET','/api/saves')).data.saves.some(s=>s.id===otherSave)&&(await owner.call('GET','/api/saves/'+otherSave)).status===404,"auth: the owner's private environment is hidden from Owner too");
     await other.call('POST','/api/saves',workspace({...theirs,visibility:'public'}));
-    assert((await owner.call('GET','/api/saves')).data.saves.some(s=>s.id===otherSave)&&(await owner.call('GET','/api/saves/'+otherSave)).status===200,'auth: a public environment is readable by other signed-in users');
+    assert(!(await owner.call('GET','/api/saves')).data.saves.some(s=>s.id===otherSave)&&(await owner.call('GET','/api/saves/'+otherSave)).status===200,'auth: a public environment is readable by other signed-in users by id, but never listed to them');
     assert((await owner.call('POST','/api/saves',workspace({...theirs,visibility:'public'}))).status===403,'auth: a public environment is read-only for non-owners (403)');
     const mfa=agent();r=await mfa.call('POST','/api/auth/sign-in',{email:'mfa@example.test',password:'synthetic-pass-mfa'});
     assert(r.status===200&&r.data.step==='verify'&&!mfa.jar.has('flow_sid'),'auth: two-factor accounts get a verify step and no session yet');
@@ -179,13 +180,12 @@ export async function authChecks(assert){
     assert(r.status===200&&nEnv&&nEnv!==jEnv&&nEnv!=='default-workspace'&&(await newbie.call('GET','/api/workspace?env='+jEnv)).status===404,'invites: a brand-new account also gets its own isolated environment');
     r=await agent().call('POST','/api/auth/sign-in',{email:'revoked@example.test',password:'synthetic-pass-revoked'});
     assert(r.status===403,'invites: a revoked invite gives no access');
-    // An invite to a verified alias works: the person signs in (with 2FA) and the alias invite is claimed.
+    // A sign-in tries one claim at most (the invite for the login email): an invite to an alias is
+    // matched only through its link's token (OneProfileID invitations), never by trying open invites.
     await owner.call('POST','/api/invites',{email:'alias.second@example.test'});
     const ali=agent();await ali.call('POST','/api/auth/sign-in',{email:'alias.primary@example.test',password:'synthetic-pass-alias'});
-    r=await ali.call('POST','/api/auth/two-factor',{code:'123456'});
-    const ac=mock.claims.find(c=>c.email==='alias.primary@example.test');
-    assert(r.status===200&&ac?.claimedEmail==='alias.second@example.test'&&(await ali.call('GET','/api/workspace')).data.env!=='default-workspace','invites: an invite to a verified alias of the person is accepted');
-    assert(!mock.claims.some(c=>c.email!=='alias.primary@example.test'&&c.claimedEmail==='alias.second@example.test'),'invites: nobody else can claim an alias invite');
+    const before=mock.claims.length;r=await ali.call('POST','/api/auth/two-factor',{code:'123456'});
+    assert(!mock.claims.some(c=>c.claimedEmail==='alias.second@example.test')&&mock.claims.length===before,'invites: without its token an alias invite is not tried (no claim loop over open invites)');
     list=(await owner.call('GET','/api/invites')).data.invites;
     assert(list.find(i=>i.email==='casey@example.test')?.claimedAt&&list.find(i=>i.email==='revoked@example.test')?.revokedAt,'invites: the owner sees who joined and who was revoked');
     // Persistent sessions: with Postgres, a sign-in survives a server restart (a deploy).

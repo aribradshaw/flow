@@ -1,6 +1,6 @@
 Subject: You're invited to Flygon Flow
 
-Flygon invited you to Flygon Flow: org charts, timelines and a DevOps board in one place.
+A Flygon Flow member invited you to Flygon Flow: org charts, timelines and a DevOps board in one place.
 
 Sign in to Flow: http://127.0.0.1:4317
 

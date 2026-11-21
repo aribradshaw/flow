@@ -43,13 +43,18 @@ Sign in to Flow: https://flow.example.test
 Use "Continue with OneProfileID" with this email address (casey@example.test). If you already have a OneProfileID account, sign in as usual; you will start in your own private workspace.
 
 If you were not expecting this, you can ignore this email.`);
-  assert.match(inviteEmail(samples['invite-local']).text,/^Flygon invited you/);
+  assert.match(inviteEmail(samples['invite-local']).text,/^A Flygon Flow member invited you/);
 });
 
-test('an inviter name stays text', ()=>{
-  const m=inviteEmail({to:'casey@example.test',appUrl:'https://flow.example.test',inviter:'<b>Pat</b> https://evil.example'});
-  assert.ok(m.html.includes('&lt;b&gt;Pat&lt;/b&gt; https://evil.example invited you'));
-  assert.doesNotMatch(m.html,/href="https:\/\/evil|<b>Pat/);
+test('an inviter name stays plain text, and never a link or an address', ()=>{
+  const m=inviteEmail({to:'casey@example.test',appUrl:'https://flow.example.test',inviter:'<b>Pat & Co'});
+  assert.ok(m.html.includes('bPat &amp; Co invited you'));
+  assert.doesNotMatch(m.html,/<b>Pat/);
+  for(const bad of ['<b>Pat</b>','Pat https://evil.example','Pat evil.example','pat@evil.example','www.evil','x'.repeat(61)]){
+    const t=inviteEmail({to:'casey@example.test',appUrl:'https://flow.example.test',inviter:bad});
+    assert.match(t.text,/^A Flygon Flow member invited you/,bad);
+    assert.doesNotMatch(t.html,/evil/,bad);
+  }
 });
 
 test('render snapshots (HTML and text)', ()=>{

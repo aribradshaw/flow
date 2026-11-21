@@ -724,6 +724,7 @@ function render(){
 store.onChange=render;
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
+store.onLimit=msg=>{if(msg)toast(msg)};
 setPeopleSource(()=>peopleOf(store.db||{}));
 startOpidPhotos({db:()=>store.db,render:()=>render()});
 // Signing in (or changing the account photo) changes which cards show the user's photo.

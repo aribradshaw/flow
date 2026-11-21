@@ -29,7 +29,10 @@ const envs=registry(fileURLToPath(backupRoot));
 const {workspaceStore,SCHEMA:WORKSPACE_SCHEMA}=await import('./lib/workspaces.mjs');
 const {sessionStore,SCHEMA:SESSION_SCHEMA}=await import('./lib/sessions.mjs');
 const {inviteStore,validEmail,SCHEMA:INVITE_SCHEMA}=await import('./lib/invites.mjs');
-const {createMailer,rateLimit,inviteEmail}=await import('./lib/mailer.mjs');
+// Guardrails (lib/limits.mjs): per-person caps, persistent rate windows; people who signed in (lib/users.mjs).
+const limitsMod=await import('./lib/limits.mjs');
+const {userStore,SCHEMA:USER_SCHEMA}=await import('./lib/users.mjs');
+const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
@@ -64,6 +67,9 @@ async function backup(req,res){
   if(!match)return false;
   if(req.method!=='PUT'||req.headers['content-type']!=='application/json'||!trusted(req)){res.writeHead(403);res.end();return true;}
   const user=await requireUser(req,res);if(!user)return true;
+  // On a shared server, disk backups are the owner's: everyone else's work is in the server's workspace
+  // history already, and per-browser files would let anyone fill the disk.
+  if(auth.mode==='opid'&&!isOwnerEmail(user.email)){req.resume();json(res,200,{saved:false,skipped:'Disk backups are kept for the owner only; your workspace is saved on the server with its history.'});return true}
   readBody(req,res,body=>{try{
     let data=JSON.parse(body);
     if(!validDb(data))throw Error('Invalid chart database');
@@ -95,7 +101,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -108,11 +114,16 @@ function localList(){
   try{return readdirSync(savesRoot).filter(f=>f.endsWith('.json')).map(f=>{try{const s=JSON.parse(readFileSync(savesRoot+'/'+f,'utf8'));return s?.id?{id:s.id,at:s.at,label:s.label,charts:s.charts,items:s.items,env:envs.of(s.data)}:null}catch{return null}}).filter(Boolean)}
   catch{return []}
 }
-function writeLocal(s){
+// File names: <time>_<owner tag>_<id>.json (older ones: <time>_<id>.json, counted as the owner's).
+// Each owner's saves are pruned on their own, so nobody's saves can push out anyone else's.
+const ownerTag=email=>isOwnerEmail(email)?'o':'u'+Buffer.from(String(email||'').toLowerCase()).toString('base64url').slice(0,40).replace(/_/g,'-');
+function writeLocal(s,owner){
   mkdirSync(savesRoot,{recursive:true});
-  writeFileSync(`${savesRoot}/${s.at.replace(/[:.]/g,'-')}_${s.id}.json`,JSON.stringify(s));
-  const files=readdirSync(savesRoot).filter(f=>f.endsWith('.json')).sort();
-  for(const f of files.slice(0,Math.max(0,files.length-KEEP_LOCAL)))unlinkSync(savesRoot+'/'+f);
+  const tag=ownerTag(owner),keep=isOwnerEmail(owner)?KEEP_LOCAL:Math.min(KEEP_LOCAL,CAPS.maxSaves);
+  writeFileSync(`${savesRoot}/${s.at.replace(/[:.]/g,'-')}_${tag}_${s.id}.json`,JSON.stringify(s));
+  const mine=f=>{const p=f.slice(0,-5).split('_');return p.length===3?p[1]===tag:tag==='o'};
+  const files=readdirSync(savesRoot).filter(f=>f.endsWith('.json')&&mine(f)).sort();
+  for(const f of files.slice(0,Math.max(0,files.length-keep)))unlinkSync(savesRoot+'/'+f);
 }
 const cloudError=e=>String(e?.message||e).replace(/postgres(ql)?:\/\/\S+/gi,'[database]').slice(0,200);
 const rowEnv=r=>envs.get(r.env_id||DEFAULT_ENV.id)||{id:r.env_id,name:'Workspace',ownerEmail:r.env_owner||'',visibility:r.env_visibility==='public'?'public':'private',members:[]};
@@ -127,11 +138,14 @@ async function saves(req,res){
   const user=await requireUser(req,res);if(!user)return true;
   try{
     if(req.method==='GET'&&url==='/api/saves'){
-      const local=localList().filter(s=>canRead(s.env,user)),byId=new Map(local.map(s=>[s.id,{...s,env:envInfo(s.env),local:true,cloud:false}]));
+      // Listed: environments the user owns or is a member of. Public ones of others open by id only;
+      // they are never listed or discoverable here.
+      const listable=e=>canRead(e,user)&&(sameEmail(e.ownerEmail,user.email)||e.members?.some(m=>sameEmail(m,user.email)));
+      const local=localList().filter(s=>listable(s.env)),byId=new Map(local.map(s=>[s.id,{...s,env:envInfo(s.env),local:true,cloud:false}]));
       let status='off';
       try{const db=await cloud();if(db){status='ok';
         for(const r of (await db.query('select id,saved_at,label,charts,items,env_id,env_owner,env_visibility from org_chart_studio_saves order by saved_at desc limit 200')).rows){
-          const e=rowEnv(r);if(!canRead(e,user))continue;
+          const e=rowEnv(r);if(!listable(e))continue;
           const s=byId.get(r.id)||{id:r.id,at:r.saved_at.toISOString(),label:r.label,charts:r.charts,items:r.items,env:envInfo(e),local:false};s.cloud=true;byId.set(r.id,s);
         }}}catch(e){status='error: '+cloudError(e)}
       json(res,200,{cloud:status,user:{email:user.email},saves:[...byId.values()].sort((a,b)=>b.at.localeCompare(a.at))});return true;
@@ -142,13 +156,17 @@ async function saves(req,res){
         let data;try{data=JSON.parse(body)}catch{}
         if(!validDb(data)){json(res,400,{error:'Invalid chart database'});return}
         const e0=envs.of(data);if(!canWrite(e0,user)){denied(res,e0,user);return}
+        const L=limitsOf(e0.unregistered?user.email:e0.ownerEmail),things=size(data),bytes=limitsMod.bytesOf(data);
+        if(things>CAPS.maxItems){json(res,413,{error:`This workspace holds ${things.toLocaleString('en-US')} cards, nodes and items; a workspace holds up to ${CAPS.maxItems.toLocaleString('en-US')}. Nothing was saved.`,code:'too_many_items'});return}
+        if(bytes>L.maxWorkspaceBytes){json(res,413,{error:`This save is ${limitsMod.fmtBytes(bytes)}; a save holds up to ${limitsMod.fmtBytes(L.maxWorkspaceBytes)}. Nothing was saved.`,code:'workspace_too_large'});return}
         const e=envs.claim(data,user);stamp(data,e);data=stripLinked(data);
         const n=summary(data),s={id:randomUUID(),at:new Date().toISOString(),label:data.charts.map(c=>c.name).join(', ').slice(0,200),...n,data};
         let local=false,cloudOk=false,error='';
-        try{writeLocal(s);local=true}catch(err){error='Local save failed'}
+        try{writeLocal(s,e.ownerEmail);local=true}catch(err){error='Local save failed'}
         try{const db=await cloud();if(db){
           await db.query('insert into flygon_flow_environments(id,name,owner_email,visibility,members) values($1,$2,$3,$4,$5) on conflict (id) do update set name=excluded.name,visibility=excluded.visibility',[e.id,e.name,e.ownerEmail,e.visibility,JSON.stringify(e.members)]);
-          await db.query('insert into org_chart_studio_saves(id,saved_at,label,charts,items,data,env_id,env_owner,env_visibility) values($1,$2,$3,$4,$5,$6,$7,$8,$9)',[s.id,s.at,s.label,n.charts,n.items,data,e.id,e.ownerEmail,e.visibility]);cloudOk=true}else if(!VERIFY)error||='Cloud not configured'}
+          await db.query('insert into org_chart_studio_saves(id,saved_at,label,charts,items,data,env_id,env_owner,env_visibility) values($1,$2,$3,$4,$5,$6,$7,$8,$9)',[s.id,s.at,s.label,n.charts,n.items,data,e.id,e.ownerEmail,e.visibility]);cloudOk=true;
+          if(!isOwnerEmail(e.ownerEmail))await db.query('delete from org_chart_studio_saves where lower(env_owner)=lower($1) and id not in (select id from org_chart_studio_saves where lower(env_owner)=lower($1) order by saved_at desc limit $2)',[e.ownerEmail,CAPS.maxSaves])}else if(!VERIFY)error||='Cloud not configured'}
         catch(err){error||='Cloud save failed: '+cloudError(err)}
         json(res,local||cloudOk?200:500,{id:s.id,at:s.at,local,cloud:cloudOk,env:envInfo(e),error});
       });
@@ -204,7 +222,14 @@ async function inbox(req,res){
 // (OWNER_EMAIL) for imports and for a local app syncing to production.
 // With FLOW_SYNC_URL + FLOW_SYNC_TOKEN set (e.g. Owner's local app), these calls are relayed to that
 // server; the local file copy is the offline fallback.
-const workspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null)});
+const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null)});
+const CAPS=auth.CAPS,isOwnerEmail=e=>sameEmail(e,auth.OWNER_EMAIL),limitsOf=email=>limitsMod.limitsFor(CAPS,{owner:isOwnerEmail(email)});
+const users=userStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+// Someone with no row yet who already owns data used Flow before people were recorded: not new.
+const accountOf=async email=>await users.get(email).catch(()=>null)||((await rawWorkspaces.owned(email)).length?{firstSeen:'1970-01-01T00:00:00.000Z'}:null);
+auth.useUsers(users,async email=>(await rawWorkspaces.owned(email)).length>0);
+const workspaces=limitsMod.cappedWorkspaces(rawWorkspaces,{caps:CAPS,isOwner:isOwnerEmail,accountOf,count:d=>size(d)});
+const rates=limitsMod.rateStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 const invites=inviteStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 auth.useInvites(invites);
 const shares=shareStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
@@ -316,6 +341,7 @@ async function applyRecipientSave(envId,user,data,base){
       }
       if(!patch.length)break;
       const out=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:core.applyOwnerPatch(home.data,patch),by:user.email,owner:home.owner,visibility:home.visibility,name:home.name});
+      if(out.refused)break;
       if(out.conflict)continue;
       await shares.record(hist);break;
     }
@@ -344,7 +370,8 @@ async function recordOwnerChanges(envId,user,before,after,base){
 const emptyWorkspace=(id,name,owner)=>({active:'chart-'+id,charts:[{id:'chart-'+id,name:'Untitled chart',nodes:[],edges:[]}],projects:[],timeline:[],environment:{id,name,ownerEmail:owner,visibility:'private',members:[]}});
 async function createEnvironment(user,name){
   const id=randomUUID();name=String(name||'My workspace').trim().slice(0,80)||'My workspace';
-  await workspaces.put(id,{baseRev:0,data:emptyWorkspace(id,name,user.email),by:user.email,owner:user.email,name});
+  const out=await workspaces.put(id,{baseRev:0,data:emptyWorkspace(id,name,user.email),by:user.email,owner:user.email,name});
+  if(out.refused){const e=Error(out.refused.error);e.refused=out.refused;throw e}
   envs.claim({environment:{id,name,visibility:'private'}},user);
   return id;
 }
@@ -439,6 +466,7 @@ async function workspace(req,res){
         const it=body.intent&&typeof body.intent==='object'&&!Array.isArray(body.intent)?body.intent:null;
         const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source,opidUser:opidId(user)});
+        if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code,limit:true});return}
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
         // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
@@ -451,7 +479,7 @@ async function workspace(req,res){
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
         // OneProfileID links this save tried to add for someone else were refused: the browser reads the workspace back.
         if(out.opidRefused?.length)photoCache.clear();
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.publicRefused?{publicRefused:out.publicRefused}:{}),...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;
@@ -534,6 +562,7 @@ async function opidApi(req,res){
           delete n.opidUser;
         }
         const out=await workspaces.put(target.env,{baseRev:home.rev,data,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'opid-link'},opidUser:me});
+        if(out.refused)return json(res,out.refused.status,{error:out.refused.error,code:out.refused.code});
         if(out.conflict)continue;
         photoCache.clear();if(b.link)seenBy(target.env,user);
         return json(res,200,{linked:b.link,rev:out.rev});
@@ -600,7 +629,10 @@ async function environments(req,res){
     const own=await workspaces.owned(user.email);
     json(res,200,{environments:own.map(w=>({id:w.envId,name:w.name||w.data?.environment?.name||'Workspace',visibility:w.visibility,rev:w.rev,updatedAt:w.updatedAt}))});return true;
   }
-  if(!id&&req.method==='POST'){readJson(req,res,async b=>{json(res,200,{id:await createEnvironment(user,b?.name)})});return true}
+  if(!id&&req.method==='POST'){readJson(req,res,async b=>{
+    try{json(res,200,{id:await createEnvironment(user,b?.name)})}
+    catch(e){if(e.refused)json(res,e.refused.status,{error:e.refused.error,code:e.refused.code});else json(res,500,{error:'Could not create the environment'})}
+  });return true}
   if(!id||!ENV_ID.test(id)){json(res,404,{error:'Not found'});return true}
   if(req.method==='DELETE'&&id===DEFAULT_ENV.id&&sameEmail(user.email,auth.OWNER_EMAIL)){json(res,400,{error:"Default workspace cannot be removed"});return true}
   const w=await workspaces.get(id);
@@ -609,8 +641,10 @@ async function environments(req,res){
     readJson(req,res,async b=>{
       const name=b?.name!==undefined?String(b.name).trim().slice(0,80):w.name,visibility=b?.visibility==='public'?'public':b?.visibility==='private'?'private':w.visibility;
       if(!name){json(res,400,{error:'A name is required'});return}
+      if(visibility==='public'&&w.visibility!=='public'){const why=await workspaces.publicRefusal(w.owner);if(why){json(res,403,{error:why,code:'public_too_soon'});return}}
       const data={...w.data,environment:{...(w.data.environment||{}),id,name,visibility,ownerEmail:w.owner}};
       const out=await workspaces.put(id,{baseRev:w.rev,data,by:user.email,owner:w.owner,visibility,name});
+      if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code});return}
       if(out.conflict){json(res,409,{error:'Changed meanwhile; try again'});return}
       envs.claim(data,{email:w.owner});json(res,200,{id,name,visibility,rev:out.rev});
     });
@@ -624,12 +658,24 @@ async function environments(req,res){
   res.writeHead(405);res.end();return true;
 }
 // ---------- app invites (owner only): invite an email to Flow itself; no email is sent ----------
-const mailer=createMailer(),limit=rateLimit();
+const mailer=createMailer();
 const APP_URL=(auth.appOrigin||process.env.FLOW_PUBLIC_URL||'http://127.0.0.1:4317').replace(/\/+$/,'');
-async function sendInvite(email,user){
+// Invite emails are limited per sender and per recipient in persistent windows (they survive deploys).
+async function mailLimit(sender,recipient){
+  if(!await rates.take('mail:s:'+sender.toLowerCase(),20,3600e3))return 'You have sent a lot of invites in the last hour. Try again later.';
+  if(!await rates.take('mail:r:'+recipient.toLowerCase(),3,3600e3))return 'This person was emailed several times in the last hour. Try again later.';
+  return '';
+}
+// The inviter's name as OneProfileID has it: the signed-in session's, or for the owner token the
+// owner's from their last sign-in. Never a name typed into Flow.
+async function inviterName(user){
+  if(!user.token)return user.name||'';
+  return (await users.get(auth.OWNER_EMAIL).catch(()=>null))?.name||'';
+}
+async function sendInvite(email,user,{link=APP_URL}={}){
   if(!mailer.configured)return {ok:false,notConfigured:true,error:'Email is not configured'};
-  const why=limit(user.email,email);if(why)return {ok:false,error:why};
-  return mailer.send({to:email,...inviteEmail({to:email,appUrl:APP_URL,inviter:user.name&&user.name!=='Owner (token)'?user.name:'Example Owner'})});
+  const why=await mailLimit(user.email,email);if(why)return {ok:false,error:why};
+  return mailer.send({to:email,...inviteEmail({to:email,appUrl:APP_URL,link,inviter:await inviterName(user)})});
 }
 async function invitesApi(req,res){
   const u=new URL(req.url,'http://x');if(u.pathname!=='/api/invites')return false;
@@ -820,11 +866,19 @@ const {mcpHandler}=await import('./lib/mcp.mjs');
 // a database error fails closed.
 const apiKeys=apiKeyStore({dir:fileURLToPath(backupRoot),db:()=>cloud(),mode:auth.mode==='opid'&&!VERIFY?'live':'test'});
 const keyEnvs=async u=>[...new Set([...(await workspaces.owned(u.email)).map(w=>w.envId),...(sameEmail(u.email,auth.OWNER_EMAIL)?[DEFAULT_ENV.id]:[])])];
-const keysApi=apiKeyRoutes({userFor:auth.userFor,store:apiKeys,readJson,trusted,envsFor:keyEnvs});
+const keysApi=apiKeyRoutes({userFor:auth.userFor,store:apiKeys,readJson,trusted,envsFor:keyEnvs,maxKeys:u=>limitsOf(u.email).maxApiKeys});
 const apiLimit=memoryRateLimit({perMinute:120}),baseEnvCheck=envCheckFor(workspaces);
 // The store the API works on: each environment's own data (no linked copies; edges to them left out),
 // and for a key, only the environments it is for.
 // Readers other than the owner (members, public environments) see only that a card is linked, as in the app.
+// Cards whose latest change came from a share recipient, not the environment's owner (agents.work holds them).
+async function heldCards(envId,ids){
+  const out=new Set();if(!ids.length)return out;
+  const w=await workspaces.get(envId).catch(()=>null);if(!w)return out;
+  if(!(await shares.list({ownerEnv:envId})).length)return out;
+  for(const id of ids){const h=(await shares.history({envId,kind:'card',recordId:id,limit:1}))[0];if(h&&!sameEmail(h.by,w.owner))out.add(id)}
+  return out;
+}
 const apiStore=(key,user)=>({...workspaces,
   async get(id){const w=await workspaces.get(id);if(!w?.data)return w;const data=dropDangling(structuredClone(stripLinked(w.data)));
     if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
@@ -841,13 +895,13 @@ async function apiV1Route(req,res){
   // One authentication per request (it also counts towards the key's rate limit).
   let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
   if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiLimit});
+  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiLimit,heldCards});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp'}),
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 

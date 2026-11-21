@@ -2260,7 +2260,7 @@ Get an agent's work queue
 
 `GET /api/v1/envs/{env}/agents/{agent}/work` · scope `read` · MCP tool `agents_work`
 
-What a runner needs to work as this agent: its `brief` and its queue, the open DevOps cards delegated to it (cards.update agents, or the card's Delegated to picker). Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. `columns` narrows the queue, e.g. ["doing","requests"] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.
+What a runner needs to work as this agent: its `brief` and its queue, the open DevOps cards delegated to it (cards.update agents, or the card's Delegated to picker). A card last changed by someone outside the environment (through an edit share) is left out until the owner changes it again. Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. `columns` narrows the queue, e.g. ["doing","requests"] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.
 
 **Input**
 

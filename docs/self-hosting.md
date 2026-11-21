@@ -29,6 +29,31 @@ With the SSO client set, the sign-in screen also offers **Sign in with your phon
 
 `RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. `FLOW_EMAIL_FROM` is a sender on a domain verified in Resend, for example `Flygon Flow <flow@flygonlc.com>`. The invite is laid out by [OneMail](https://github.com/aribradshaw/onemail): its header logo is `/email/flow-logo@2x.png` from your instance's public URL, so it shows only when that URL is https; otherwise the header is the name as text. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
 
+## Limits
+
+A Flow that other people can join keeps each person within limits, so one account cannot fill the server. The owner (`OWNER_EMAIL`) has larger limits and no environment or storage cap. Set any of these to change them; the defaults are in brackets.
+
+| Setting | Applies to | Default |
+|---|---|---|
+| `FLOW_MAX_ENVIRONMENTS` | environments one person owns (archived ones excluded) | 5 |
+| `FLOW_MAX_WORKSPACE_BYTES` / `FLOW_OWNER_MAX_WORKSPACE_BYTES` | one saved workspace | 2 MB / 5 MB |
+| `FLOW_HISTORY_KEEP` / `FLOW_OWNER_HISTORY_KEEP` | revisions kept per workspace | 20 / 100 |
+| `FLOW_MAX_API_KEYS` / `FLOW_OWNER_MAX_API_KEYS` | active API keys per person | 5 / 50 |
+| `FLOW_MAX_USER_BYTES` | everything one person stores, archived environments included | 25 MB |
+| `FLOW_MAX_ITEMS` | cards, nodes, edges, projects, timeline items, agents and workflows in one workspace | 20,000 |
+| `FLOW_MAX_SAVES` | Save snapshots kept per person (the owner keeps 200) | 20 |
+| `FLOW_MAX_USERS` | people who may join; after that, new sign-ups see "Flow is full right now" and can ask to be told when there is room | 500 |
+| `FLOW_PUBLIC_AFTER_DAYS` | days before a new account may make an environment public | 7 |
+| `FLOW_MEMBER_INVITES_PER_WEEK` | invites one member may send in a rolling week (the owner: no limit) | 5 |
+| `FLOW_AUTH_RATE_IP` / `FLOW_AUTH_RATE_USER` | sign-in requests per minute per client address / per person | 30 / 10 |
+
+- A save over a limit is refused with a message that says which limit, and nothing is changed. A save that makes a workspace smaller always goes through, so someone over a limit can delete things.
+- Invite email limits (20 an hour per sender, 3 an hour per recipient) and member invite quotas are kept in Postgres (`flygon_flow_rate_events`), or a file beside the backups, so a deploy does not reset them.
+- Disk backups (`BACKUP_DIR`) are kept for the owner only; everyone's workspace is on the server with its revision history.
+- Public environments open by their link (id) for anyone signed in, but are never listed to other people.
+- AgentFlow: a card last changed by someone outside the environment (through an edit share) is left out of `agents.work` until the owner changes it again in Flow, so text from outside never starts a runner by itself. Runners use the owner's API key for one environment, and a member's key never reaches the owner's environments.
+- A public instance (OneProfileID on https) does not start without `OWNER_EMAIL`.
+
 ## Embed Flow in another site
 
 By default Flow refuses to be shown inside another site's frame (`Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`), which protects against clickjacking. To show Flow in a dashboard, a home-screen app or a kiosk, list the sites that may embed it in `FLOW_FRAME_ANCESTORS`, separated by spaces or commas:
