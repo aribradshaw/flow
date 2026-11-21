@@ -72,7 +72,7 @@ test('caps come from env vars with the documented defaults; the owner keeps larg
   assert.equal(caps({FLOW_MAX_USERS:'3'}).maxUsers,3);
   assert.equal(caps({FLOW_MAX_USERS:'nope'}).maxUsers,500,'a bad value keeps the default');
   const o=limitsFor(c,{owner:true}),m=limitsFor(c,{owner:false});
-  assert.equal(o.maxEnvironments,Infinity);assert.equal(o.historyKeep,100);assert.equal(m.historyKeep,20);assert.equal(m.invitesPerWeek,5);
+  assert.equal(o.maxEnvironments,Infinity);assert.equal(o.maxItems,100000);assert.equal(m.maxItems,20000);assert.equal(o.historyKeep,100);assert.equal(m.historyKeep,20);assert.equal(m.invitesPerWeek,5);
   const l=memoryLimiter({max:2,ms:1000});assert.deepEqual([l.take('a'),l.take('a'),l.take('a'),l.take('b')],[true,true,false,true]);
   assert.equal(requestIp({headers:{'x-forwarded-for':'1.1.1.1, 2.2.2.2'},socket:{}}),'2.2.2.2','the hop the proxy added, not one the client chose');
 });

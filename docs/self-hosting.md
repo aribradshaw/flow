@@ -43,7 +43,7 @@ A Flow that other people can join keeps each person within limits, so one accoun
 | `FLOW_HISTORY_KEEP` / `FLOW_OWNER_HISTORY_KEEP` | revisions kept per workspace | 20 / 100 |
 | `FLOW_MAX_API_KEYS` / `FLOW_OWNER_MAX_API_KEYS` | active API keys per person | 5 / 50 |
 | `FLOW_MAX_USER_BYTES` | everything one person stores, archived environments included | 25 MB |
-| `FLOW_MAX_ITEMS` | cards, nodes, edges, projects, timeline items, agents and workflows in one workspace | 20,000 |
+| `FLOW_MAX_ITEMS` / `FLOW_OWNER_MAX_ITEMS` | cards, nodes, edges, projects, timeline items, agents and workflows in one workspace | 20,000 / 100,000 |
 | `FLOW_MAX_SAVES` | Save snapshots kept per person (the owner keeps 200) | 20 |
 | `FLOW_MAX_USERS` | people who may join; after that, new sign-ups see "Flow is full right now" and can ask to be told when there is room | 500 |
 | `FLOW_PUBLIC_AFTER_DAYS` | days before a new account may make an environment public | 7 |

@@ -157,7 +157,7 @@ async function saves(req,res){
         if(!validDb(data)){json(res,400,{error:'Invalid chart database'});return}
         const e0=envs.of(data);if(!canWrite(e0,user)){denied(res,e0,user);return}
         const L=limitsOf(e0.unregistered?user.email:e0.ownerEmail),things=size(data),bytes=limitsMod.bytesOf(data);
-        if(things>CAPS.maxItems){json(res,413,{error:`This workspace holds ${things.toLocaleString('en-US')} cards, nodes and items; a workspace holds up to ${CAPS.maxItems.toLocaleString('en-US')}. Nothing was saved.`,code:'too_many_items'});return}
+        if(things>L.maxItems){json(res,413,{error:`This workspace holds ${things.toLocaleString('en-US')} cards, nodes and items; a workspace holds up to ${L.maxItems.toLocaleString('en-US')}. Nothing was saved.`,code:'too_many_items'});return}
         if(bytes>L.maxWorkspaceBytes){json(res,413,{error:`This save is ${limitsMod.fmtBytes(bytes)}; a save holds up to ${limitsMod.fmtBytes(L.maxWorkspaceBytes)}. Nothing was saved.`,code:'workspace_too_large'});return}
         const e=envs.claim(data,user);stamp(data,e);data=stripLinked(data);
         const n=summary(data),s={id:randomUUID(),at:new Date().toISOString(),label:data.charts.map(c=>c.name).join(', ').slice(0,200),...n,data};
