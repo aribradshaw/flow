@@ -78,7 +78,8 @@ export async function authChecks(assert){
   const legacy=randomUUID();mkdirSync(join(dir,'saves'),{recursive:true});
   writeFileSync(join(dir,'saves',`2026-01-01T00-00-00-000Z_${legacy}.json`),JSON.stringify({id:legacy,at:'2026-01-01T00:00:00.000Z',label:'Legacy',charts:1,items:0,data:workspace()}));
   const mailLog=join(dir,'mail.jsonl');
-  const env={FLOW_EMAIL_TRANSPORT:'file:'+mailLog,FLOW_EMAIL_FROM:'Flow <noreply@example.test>',PORT:String(APP),ORG_CHART_VERIFY:'1',SAVES_DIR:join(dir,'saves'),BACKUP_DIR:join(dir,'backups'),OPID_BASE_URL:`http://127.0.0.1:${MOCK}`,OPID_APP_ID:APP_ID,OPID_APP_SECRET:SECRET,OPID_APP_ORIGIN:BASE};
+  // Invite-only (FLOW_OPEN_SIGNUP=off): these checks are about invites; open sign-up is in test/open-signup.test.mjs.
+  const env={FLOW_OPEN_SIGNUP:'off',FLOW_EMAIL_TRANSPORT:'file:'+mailLog,FLOW_EMAIL_FROM:'Flow <noreply@example.test>',PORT:String(APP),ORG_CHART_VERIFY:'1',SAVES_DIR:join(dir,'saves'),BACKUP_DIR:join(dir,'backups'),OPID_BASE_URL:`http://127.0.0.1:${MOCK}`,OPID_APP_ID:APP_ID,OPID_APP_SECRET:SECRET,OPID_APP_ORIGIN:BASE};
   // Binding: local mode refuses a public HOST; OPID mode listens on 0.0.0.0 by default.
   const pub=start({...env,PORT:'4394',HOST:'0.0.0.0',OPID_BASE_URL:'',OPID_APP_ID:'',OPID_APP_SECRET:'',OPID_APP_ORIGIN:''});let pubErr='';pub.stderr.on('data',d=>pubErr+=d);
   assert(await new Promise(r=>{pub.once('exit',c=>r(c!==0&&/Refusing to listen/.test(pubErr)));setTimeout(()=>{pub.kill();r(false)},4000)}),'deploy: local mode refuses to listen on a public address');
@@ -134,7 +135,7 @@ export async function authChecks(assert){
     r=await mfa.call('POST','/api/auth/two-factor',{code:'123456'});
     assert(r.status===200&&r.data.user.email==='mfa@example.test'&&mfa.jar.has('flow_sid'),'auth: the right two-factor code completes sign-in');
     r=await agent().call('POST','/api/auth/sign-in',{email:'nomember@example.test',password:'synthetic-pass-none'});
-    assert(r.status===403&&/access/.test(r.data.error)&&mock.claims.length===1,'auth: an account without Flygon Flow membership is refused (no bootstrap for non-owners)');
+    assert(r.status===403&&r.data.code==='denied'&&/invite-only/.test(r.data.error)&&r.data.error.includes('nomember@example.test')&&mock.claims.length===1,'auth: an account without Flygon Flow membership is refused (no bootstrap for non-owners)');
     mock.revoke('other@example.test');
     assert((await other.call('GET','/api/saves')).status===401,'auth: a central sign-out or revocation ends the app session on the next request');
     r=await owner.call('POST','/api/auth/sign-out',{});

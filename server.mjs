@@ -31,7 +31,7 @@ const {sessionStore,SCHEMA:SESSION_SCHEMA}=await import('./lib/sessions.mjs');
 const {inviteStore,validEmail,SCHEMA:INVITE_SCHEMA}=await import('./lib/invites.mjs');
 // Guardrails (lib/limits.mjs): per-person caps, persistent rate windows; people who signed in (lib/users.mjs).
 const limitsMod=await import('./lib/limits.mjs');
-const {userStore,SCHEMA:USER_SCHEMA}=await import('./lib/users.mjs');
+const {userStore,accessRequestStore,SCHEMA:USER_SCHEMA,REQUEST_SCHEMA}=await import('./lib/users.mjs');
 const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
@@ -101,7 +101,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -230,6 +230,7 @@ const accountOf=async email=>await users.get(email).catch(()=>null)||((await raw
 auth.useUsers(users,async email=>(await rawWorkspaces.owned(email)).length>0);
 const workspaces=limitsMod.cappedWorkspaces(rawWorkspaces,{caps:CAPS,isOwner:isOwnerEmail,accountOf,count:d=>size(d)});
 const rates=limitsMod.rateStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+const accessRequests=accessRequestStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});auth.useAccessRequests(accessRequests);
 const invites=inviteStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 auth.useInvites(invites);
 const shares=shareStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
@@ -685,7 +686,7 @@ async function invitesApi(req,res){
   if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
   const user=tok||await requireUser(req,res);if(!user)return true;
   if(!sameEmail(user.email,auth.OWNER_EMAIL)){json(res,403,{error:'Only the owner can invite people'});return true}
-  if(req.method==='GET'){json(res,200,{invites:await invites.list()});return true}
+  if(req.method==='GET'){json(res,200,{invites:await invites.list(),requests:await accessRequests.list()});return true}
   // POST {email[, resend:true][, send:false]}: record (or re-open) the invite, then email it unless
   // send:false. resend:true only emails an existing, not revoked invite.
   if(req.method==='POST'){readJson(req,res,async b=>{
@@ -693,7 +694,7 @@ async function invitesApi(req,res){
     if(sameEmail(b.email,auth.OWNER_EMAIL)){json(res,400,{error:'That is the owner'});return}
     let invite;
     if(b.resend){invite=await invites.find(b.email);if(!invite||invite.revokedAt){json(res,404,{error:'No open invite for that email'});return}}
-    else invite=await invites.add(b.email,user.email);
+    else{invite=await invites.add(b.email,user.email);await accessRequests.remove(b.email).catch(()=>{})}
     if(b.send===false){json(res,200,{invite,sent:false});return}
     const mail=await sendInvite(invite.email,user);
     json(res,200,{invite,sent:mail.ok,...(mail.ok?{}:{emailError:mail.error,notConfigured:!!mail.notConfigured})});

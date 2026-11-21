@@ -152,7 +152,7 @@ Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/
 
 ## Deploying
 - `npm ci && npm start` (Node 22 or newer). Without OPID_* the server only listens on 127.0.0.1 and refuses a public `HOST`; with OPID_* set it listens on `HOST` (default `0.0.0.0`) at `PORT`.
-- Set `OWNER_EMAIL` to the address that should own your instance. That account gets the app's `owner` membership on its first verified OneProfileID sign-in; everyone else needs an invite and a claimed app membership.
+- Set `OWNER_EMAIL` to the address that should own your instance (a public deploy does not start without it). That account gets the app's `owner` membership on its first verified OneProfileID sign-in. Anyone else with a verified OneProfileID account can join and starts in their own private workspace (open sign-up, up to `FLOW_MAX_USERS`); set `FLOW_OPEN_SIGNUP=off` to keep it invite-only. Per-person limits are in [docs/self-hosting.md](docs/self-hosting.md#limits).
 - Storage: `BACKUP_DIR`, `SAVES_DIR` and `INBOX_DIR` (e.g. a volume at `/data/backups`, `/data/saves`, `/data/inbox`; the inbox defaults beside `BACKUP_DIR`). The environments registry lives in `BACKUP_DIR`.
 - Cloud saves: `DATABASE_URL`; set `DATABASE_SSL=no-verify` for a TLS proxy with a self-signed chain (e.g. Railway's public URL), or `DATABASE_SSL=1` for verified TLS.
 

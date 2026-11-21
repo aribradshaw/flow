@@ -92,8 +92,9 @@ test('a denied sign-in makes at most one OneProfileID claim call, however many i
   const r=await agent('10.2.0.1')('POST','/api/auth/sign-in',{email:NOBODY,password:'pw-nobody'});
   assert.equal(r.status,403);assert.ok(claimCalls<=1,`${claimCalls} claim calls`);
   claimCalls=0;USERS['stranger@example.test']={id:'u-stranger',name:'S',pw:'pw-s',member:null};
-  assert.equal((await agent('10.2.0.2')('POST','/api/auth/sign-in',{email:'stranger@example.test',password:'pw-s'})).status,403);
-  assert.equal(claimCalls,0,'no invite for the login email: no claim at all while sign-up is closed');
+  const r2=await agent('10.2.0.2')('POST','/api/auth/sign-in',{email:'stranger@example.test',password:'pw-s'});
+  assert.equal(r2.status,403);assert.equal(r2.data.code,'closed','OneProfileID refused self-enrollment');
+  assert.equal(claimCalls,1,'no invite for the login email: one self-enrollment claim');
 });
 
 test('/api/auth/* is rate-limited per client address and per person',async()=>{
