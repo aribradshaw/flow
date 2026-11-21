@@ -1,0 +1,9 @@
+Subject: You're invited to Flygon Flow
+
+Pat Example invited you to Flygon Flow: org charts, timelines and a DevOps board in one place.
+
+Sign in to Flow: https://flow.example.test
+
+Use "Continue with OneProfileID" with this email address (casey@example.test). If you already have a OneProfileID account, sign in as usual; you will start in your own private workspace.
+
+If you were not expecting this, you can ignore this email.

@@ -13,3 +13,6 @@ inbox/
 docs/media/frames/
 __pycache__/
 *.pyc
+
+# Local scratch (OneMail previews and the like)
+.scratch/

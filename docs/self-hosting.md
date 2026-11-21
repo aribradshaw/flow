@@ -27,7 +27,7 @@ To offer **Continue with OneProfileID** for passkeys and existing OneProfileID b
 
 With the SSO client set, the sign-in screen also offers **Sign in with your phone** for screens that cannot use passkeys, such as kiosk web views: it shows a QR code and a short code, the person approves on their phone with a passkey, and the screen signs in. It uses the OAuth device flow with the same SSO client, so the operator must enable device sign-in for that client. The screen starts on this option when the browser has no passkey support (no `PublicKeyCredential`), its user agent contains `Saguaro`, or the page was once opened with `?saguaro=1`. Set `OPID_DEVICE_SIGN_IN=off` to turn it off.
 
-`RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
+`RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. `FLOW_EMAIL_FROM` is a sender on a domain verified in Resend, for example `Flygon Flow <flow@flygonlc.com>`. The invite is laid out by [OneMail](https://github.com/aribradshaw/onemail): its header logo is `/email/flow-logo@2x.png` from your instance's public URL, so it shows only when that URL is https; otherwise the header is the name as text. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
 
 ## Embed Flow in another site
 
