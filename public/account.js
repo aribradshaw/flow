@@ -464,6 +464,43 @@ const clock=s=>`${Math.floor(s/60)}:${String(Math.max(0,s%60)).padStart(2,'0')}`
 let opidUi=null;
 const loadOpidUi=()=>opidUi||=import(OPID_UI).catch(()=>null);
 
+// After a refused or interrupted sign-in: what happened, as whom (the OneProfileID account signed in on
+// this browser), and what to do next. Every state offers a way forward; none is a bare retry.
+const SIGNIN={
+  denied:{msg:'Flow is invite-only right now.',next:'request',ask:'Tell me when I can join'},
+  closed:{msg:'Flow is invite-only right now.',next:'request',ask:'Tell me when I can join'},
+  full:{msg:'Flow is full right now.',next:'request',ask:"Tell me when there's room"},
+  expired:{msg:'That sign-in took too long, so it was stopped.',next:'retry'},
+  failed:{msg:'Sign-in did not complete.',next:'retry'},
+  busy:{msg:'Too many sign-in attempts from here. Wait a minute.',next:'retry'},
+  unavailable:{msg:'OneProfileID is temporarily unavailable.',next:'retry'},
+};
+async function gateState(o,why){
+  const box=o.querySelector('[data-gate-state]'),msg=box.querySelector('[data-gate-error]'),acts=box.querySelector('[data-gate-acts]'),st=SIGNIN[why]||SIGNIN.failed;
+  let who=null;try{const r=await nativeFetch('/api/auth/pending',{cache:'no-store'});if(r.ok)who=(await r.json()).email||null}catch{}
+  msg.textContent=`${st.msg}${who?` You're signed in to OneProfileID as ${who}.`:''}`;
+  acts.innerHTML=`${st.next==='request'?`<button type="button" class="acct-submit" data-gate-action="request">${esc(st.ask)}</button>`:`<button type="button" class="acct-submit" data-gate-action="retry">Try again</button>`}
+    ${who?`<button type="button" class="acct-link" data-gate-action="switch">Use a different account</button>`:''}`;
+  box.hidden=false;
+  // The main button would only repeat the same answer for a refused account.
+  if(st.next==='request'){const pol=o.querySelector('[data-gate-policy]');if(pol)pol.textContent=why==='full'?'Flow has as many people as it can take for now.':'Right now, joining needs an invite from someone already using Flow.';const b=o.querySelector('#acctSso');if(b)b.hidden=true;o.querySelector('[data-sso]').hidden=true}
+  acts.addEventListener('click',async e=>{
+    const a=e.target.closest('[data-gate-action]')?.dataset.gateAction;if(!a)return;
+    if(a==='retry'){location.assign('/api/auth/sso/start?resume=1');return}
+    if(a==='request'){
+      const r=await post('/api/auth/request-access',{reason:why}).catch(()=>({ok:false,data:{}}));
+      msg.textContent=r.ok?`Thanks. We'll email ${r.data.email} when you can join.`:(r.data?.error||'Could not send that. Try again.');
+      if(r.ok)acts.querySelector('[data-gate-action="request"]')?.remove();return;
+    }
+    if(a==='switch'){
+      // Flow forgets this OneProfileID account here; OneProfileID keeps its own sign-in until signed out there.
+      await post('/api/auth/sign-out',{}).catch(()=>{});
+      msg.textContent='Signed out of Flow. To use another OneProfileID account, sign out on OneProfileID too, then continue again.';
+      acts.innerHTML=`${session.accountUrl?`<a class="acct-submit" href="${esc(session.accountUrl)}" target="_blank" rel="noopener" data-gate-action="opid">Sign out on OneProfileID</a>`:''}<button type="button" class="acct-link" data-gate-action="retry">Continue</button>`;
+      const b=o.querySelector('#acctSso');if(b)b.hidden=false;
+    }
+  });
+}
 function showSignIn(){
   if(signingIn)return;signingIn=true;closeMenu();
   const o=document.createElement('div');
@@ -475,16 +512,20 @@ function showSignIn(){
     <span class="logo acct-gate-logo">${logoMark(40)}</span>
     ${joinEmail!==null?`<div data-join><h1 id="acctGateT">You're invited to Flygon Flow</h1>
     <p class="acct-muted">Mind maps, timelines and task boards. Free; your charts are private.</p>
-    <p class="acct-muted">${joinEmail?`Continue with OneProfileID as <strong>${esc(joinEmail)}</strong>.`:'Continue with OneProfileID.'} New to OneProfileID? Choose Continue, then <strong>Make an account</strong>${joinEmail?' with that address':''}: your date of birth, your name and a 6-digit code we email you.</p></div>`
-    :`<h1 id="acctGateT">Sign in to Flygon Flow</h1>
-    <p class="acct-muted">Use your OneProfileID account.</p>`}
+    <p class="acct-muted">${joinEmail?`Continue with OneProfileID as <strong>${esc(joinEmail)}</strong>.`:'Continue with OneProfileID.'} New to OneProfileID? Continue below, then choose <strong>Make an account</strong>${joinEmail?' with that address':''}: your date of birth, your name and a 6-digit code we email you.</p></div>`
+    :`<h1 id="acctGateT">Flygon Flow</h1>
+    <p class="acct-lead">Mind maps, timelines and task boards. Free; your charts are private.</p>
+    <p class="acct-muted" data-gate-policy>${session.openSignup===false?'Flow is invite-only here: sign in with the email you were invited at.':'Anyone with a OneProfileID account can join. New to OneProfileID? You can make an account on the next screen, in about a minute.'}</p>`}
     ${session.sso?`<div class="acct-form acct-sso" id="flow-sso">
       <opid-sign-in id="acctSso" type="button" mode="light" variant="solid"></opid-sign-in>
-      <button type="button" class="acct-submit fallback" data-sso hidden>Continue with OneProfileID</button>
-      <p class="acct-hint">${svg('fingerprint',14)}Face ID, Touch ID, Windows Hello or a security key</p>
+      <button type="button" class="acct-submit fallback" data-sso hidden>Get started</button>
+      <div class="acct-state" data-gate-state hidden><p class="acct-err" data-gate-error role="alert"></p><div class="acct-state-acts" data-gate-acts></div></div>
       <p class="acct-err" role="alert" hidden></p>
-      ${session.device?`<button type="button" class="acct-link" data-phone>Sign in with your phone</button>`:''}
-      <button type="button" class="acct-link" data-pw>Use email and password instead</button>
+      <details class="acct-other"><summary>Other ways to sign in</summary>
+        ${session.device?`<button type="button" class="acct-link" data-phone>Sign in with your phone (needs a passkey)</button>`:''}
+        <button type="button" class="acct-link" data-pw>Email and password (only accounts that have a password)</button>
+      </details>
+      ${session.accountUrl?`<p class="acct-foot">Your OneProfileID account settings: <a href="${esc(session.accountUrl)}" target="_blank" rel="noopener">${esc(new URL(session.accountUrl).host)}</a></p>`:''}
     </div>`:''}
     ${session.device?`<div class="acct-form acct-device" id="flow-device" hidden>
       <p class="acct-muted acct-device-lead">Scan with your phone's camera, then approve with your passkey.</p>
@@ -533,10 +574,14 @@ function showSignIn(){
     o.querySelector('[data-sso]').addEventListener('click',go);
     o.querySelector('[data-pw]').addEventListener('click',()=>{ssoBox.hidden=true;login.hidden=false;login.email.focus()});
     login.querySelector('[data-passkey]').addEventListener('click',()=>{login.hidden=true;ssoBox.hidden=false;focusSso()});
-    const SIGNIN={denied:'This OneProfileID account does not have access to Flygon Flow.',expired:'That sign-in took too long or was interrupted. Try again.',
-      failed:'Sign-in did not complete. Try again.',unavailable:'OneProfileID is temporarily unavailable. Try again shortly.'};
     const q=new URLSearchParams(location.search),why=q.get('signin');
-    if(why){err(ssoBox,SIGNIN[why]||SIGNIN.failed);q.delete('signin');history.replaceState(null,'',location.pathname+(q.size?'?'+q:'')+location.hash)}
+    if(why){
+      q.delete('signin');history.replaceState(null,'',location.pathname+(q.size?'?'+q:'')+location.hash);
+      // A sign-in that took too long (making an account, say) starts again once by itself.
+      let retried=false;try{retried=sessionStorage.getItem('flow.ssoRetry')==='1';if(why==='expired'&&!retried)sessionStorage.setItem('flow.ssoRetry','1')}catch{retried=true}
+      if(why==='expired'&&!retried){o.querySelector('#acctSso').toggleAttribute('loading',true);location.assign('/api/auth/sso/start?resume=1');return}
+      gateState(o,why);
+    }
   }
   // Sign in with your phone: show a QR code and a short code, poll until the phone approves.
   if(phoneBox){
@@ -633,7 +678,7 @@ window.fetch=async(...args)=>{
     if(r.ok)session=await r.json();
   }catch{}
   ready=true;sessionChanged();refreshButton();markKnown();
-  if(opid()){loadOpidUi();if(!user())showSignIn()}
+  if(opid()){loadOpidUi();if(!user())showSignIn();else try{sessionStorage.removeItem('flow.ssoRetry')}catch{}}
   // Signed in already when an invite link opens: the app itself.
   if(user()&&location.pathname==='/join')history.replaceState(null,'','/');
 })();

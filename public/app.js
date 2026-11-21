@@ -21,6 +21,7 @@ import {onPrefs,syncPrefs} from './prefs.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
 import {edgeGeometry,tidyLayout} from './mindmap-layout.js';
+import {firstRun,canvasHint} from './first-run.js';
 import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
@@ -718,6 +719,9 @@ function render(){
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
   renderInspector();photosMaybe();chatRendered();
+  // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
+  const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}
+  firstRun({store,replaceDb,envId:currentEnv(),signedIn:!!sessionUser()});
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
   if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }

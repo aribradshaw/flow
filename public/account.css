@@ -201,3 +201,16 @@ button.sc-k:hover{border-color:var(--line2);background:#fff}
 [data-photo-status][aria-busy=true]{animation:photo-saving 1s ease-in-out infinite alternate}
 @keyframes photo-saving{to{opacity:.55}}
 @media(prefers-reduced-motion:reduce){[data-photo-status][aria-busy=true]{animation:none}}
+/* Sign-in card: what Flow is, other ways to sign in, and states after a refused or interrupted sign-in. */
+.acct-lead{margin:6px 0 2px;color:var(--ink);font-size:14px;line-height:1.45}
+.acct-other{margin-top:8px;color:var(--muted);font-size:12px;text-align:center}
+.acct-other summary{cursor:pointer;list-style:none;text-decoration:underline;text-underline-offset:2px}
+.acct-other summary::-webkit-details-marker{display:none}
+.acct-other[open]{display:flex;flex-direction:column;align-items:center;gap:2px}
+.acct-foot{margin:12px 0 0;color:var(--faint);font-size:11px;text-align:center}
+.acct-foot a{color:inherit}
+.acct-state{display:flex;flex-direction:column;gap:2px;margin-top:8px;text-align:left}
+.acct-state[hidden]{display:none}
+.acct-state .acct-err{margin:0}
+.acct-state-acts{display:flex;flex-direction:column}
+.acct-state-acts a.acct-submit{display:flex;align-items:center;justify-content:center;text-decoration:none}

@@ -418,7 +418,7 @@ async function workspace(req,res){
     let w=envId?await workspaces.get(envId):null;
     // No environment named: the owner's is Default workspace (even before it has data); others get their newest.
     if(!envId){const owner=sameEmail(user.email,auth.OWNER_EMAIL);w=owner?await workspaces.get(DEFAULT_ENV.id):null;w||=await workspaces.ownedBy(user.email);envId=w?.envId||(owner?DEFAULT_ENV.id:null)}
-    // Someone signed in for the first time (an invited person): their own new, empty environment.
+    // Someone signed in for the first time (invited, or open sign-up): their own new, empty environment.
     if(!envId&&!user.token){envId=await createEnvironment(user,'My workspace');w=await workspaces.get(envId)}
     if(!envId){json(res,200,{env:null,rev:0,data:null});return true}
     if(w?.archivedAt){json(res,404,{error:'Not found'});return true}

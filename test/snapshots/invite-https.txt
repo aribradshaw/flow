@@ -5,6 +5,6 @@ Pat Example invited you to Flygon Flow: mind maps, timelines and task boards. It
 Accept the invite: https://flow.example.test/join?invite=tok_example_0123456789&email=casey%40example.test
 
 Sign in with OneProfileID using this email address (casey@example.test).
-New to OneProfileID? Choose Continue, then "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
+New to OneProfileID? Open the link, continue, then choose "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
 
 If you were not expecting this, you can ignore this email.

@@ -1174,3 +1174,16 @@ body.split-drag .pane{pointer-events:none}
   .prop{min-height:36px}
 }
 
+/* First run (first-run.js): the empty-chart hint and the start picker. */
+.canvas-hint-slot{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center}
+.canvas-hint{max-width:340px;padding:12px 16px;border:1px dashed var(--line2);border-radius:8px;background:rgba(255,255,255,.92);color:var(--muted);font-size:13px;text-align:center;line-height:1.5}
+.canvas-hint kbd{padding:0 5px;border:1px solid var(--line2);border-radius:3px;background:#fff;font:600 11px/18px inherit;color:var(--ink)}
+.first-run{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(29,39,37,.35)}
+.first-run-card{width:min(520px,100%);padding:24px;border-radius:10px;background:#fff;box-shadow:0 18px 50px rgba(0,0,0,.2)}
+.first-run-card h2{margin:0 0 6px;font-size:18px}
+.first-run-card>p{margin:0 0 16px;color:var(--muted)}
+.first-run-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.first-run-choice{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--line2);border-radius:8px;background:#fff;text-align:left;font:inherit;color:var(--ink);cursor:pointer}
+.first-run-choice:hover,.first-run-choice:focus-visible{border-color:var(--flygon-green);background:var(--hover)}
+.first-run-choice span{color:var(--muted);font-size:12px}
+@media (max-width:520px){.first-run-choices{grid-template-columns:1fr}}

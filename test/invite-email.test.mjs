@@ -41,7 +41,7 @@ test('the invite renders with logo, preheader, button and footer, and keeps its 
 Accept the invite: https://flow.example.test/join?invite=tok_example_0123456789&email=casey%40example.test
 
 Sign in with OneProfileID using this email address (casey@example.test).
-New to OneProfileID? Choose Continue, then "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
+New to OneProfileID? Open the link, continue, then choose "Make an account" with this address. It takes a minute: your date of birth, your name and a 6-digit code we email you.
 
 If you were not expecting this, you can ignore this email.`);
   assert.match(inviteEmail(samples['invite-local']).text,/Accept the invite: http:\/\/127\.0\.0\.1:4317\n/,'without a link: the instance URL');
