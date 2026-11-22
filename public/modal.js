@@ -8,20 +8,26 @@
 //   askTime(text,{value,ok,future}) → Promise<Date|null>   the same, with a date and time field (local time);
 //     value: a Date to start from; future: refuse a time that has already passed
 //
-// Native <dialog> + showModal: the page behind is inert and focus stays inside. Opening grows from
-// the source element's rect (FLIP, transform only) with a backdrop fade; closing shrinks back into
+// Native <dialog> + showModal: the page behind is inert and focus stays inside. Opening grows toward
+// the source element (uniform scale, transform only) with a backdrop fade; closing shrinks back into
 // it. Reduced motion: fade only. A second open or close cancels the animation in flight, so rapid
 // toggling never leaves a ghost.
 const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 const EASE='cubic-bezier(.2,.7,.2,1)';
 
+// Grows from the source with one uniform scale (never stretched): it starts slightly smaller and
+// nudged toward the source's centre, then settles; closing runs the same path back, a bit faster.
+const SETTLE='cubic-bezier(.16,1,.3,1)';
 function grow(d,from,dir){
   const box=d.getBoundingClientRect(),r=from?.isConnected?from.getBoundingClientRect():null;
-  if(reduced()||!r||!r.width)return d.animate([{opacity:0},{opacity:1}],{duration:dir>0?120:60,easing:'ease-out',direction:dir>0?'normal':'reverse',fill:'both'});
-  const t=`translate(${r.left-box.left}px,${r.top-box.top}px) scale(${r.width/box.width},${r.height/box.height})`;
-  return d.animate([{transform:t,opacity:.4,borderRadius:'6px'},{transform:'none',opacity:1}],{duration:dir>0?200:150,easing:dir>0?EASE:'ease-in',direction:dir>0?'normal':'reverse',fill:'both'});
+  const opts={duration:dir>0?240:160,easing:dir>0?SETTLE:'cubic-bezier(.4,0,1,1)',fill:'both'};
+  if(reduced()||!r||!r.width||!box.width)return d.animate([{opacity:0},{opacity:1}],{...opts,duration:dir>0?120:80,easing:'ease-out',direction:dir>0?'normal':'reverse'});
+  const dx=(r.left+r.width/2-(box.left+box.width/2))*.25,dy=(r.top+r.height/2-(box.top+box.height/2))*.25;
+  const t=`translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) scale(.94)`;
+  const k=[{transform:t,opacity:0},{transform:'none',opacity:1}];
+  return d.animate(dir>0?k:k.reverse(),opts);
 }
-const fadeBackdrop=(d,dir)=>{try{return d.animate([{opacity:0},{opacity:1}],{duration:dir>0?200:150,pseudoElement:'::backdrop',direction:dir>0?'normal':'reverse',fill:'both'})}catch{return null}};
+const fadeBackdrop=(d,dir)=>{try{return d.animate([{opacity:0},{opacity:1}],{duration:dir>0?240:160,pseudoElement:'::backdrop',direction:dir>0?'normal':'reverse',fill:'both'})}catch{return null}};
 
 export function detailModal({cls='',label='Details',from=null,onClose,events={}}={}){
   const d=document.createElement('dialog');d.className='modal '+cls;d.setAttribute('aria-label',label);d.setAttribute('aria-modal','true');
