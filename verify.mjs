@@ -506,7 +506,7 @@ try{
     const sortBtn='[data-dcol=requests] .dcol-sort',sortPref=()=>js(`JSON.parse(localStorage.getItem('flygon-flow-prefs')||'{}').devopsSort?.requests||''`);
     assert(await shownOrder()==='QA Card B,QA Card C'&&await js(`(()=>{const b=document.querySelector('${sortBtn}'),h=b.closest('.dcol-h').getBoundingClientRect(),r=b.getBoundingClientRect(),n=b.closest('.dcol-h').querySelector('.nm').getBoundingClientRect();return b.getAttribute('aria-haspopup')==='menu'&&b.getAttribute('aria-expanded')==='false'&&!b.classList.contains('on')&&Math.abs(h.right-2-r.right)<3&&r.left>n.right})()`),'sort: each column header has a sort menu button at its top right, in Manual (board order) by default');
     await js(`document.querySelector('${sortBtn}').focus()`);await key('ArrowDown',40);await sleep(150);
-    assert(await js(`document.querySelector('${sortBtn}').getAttribute('aria-expanded')==='true'&&document.activeElement?.closest('.cm [role=menu]')?.getAttribute('aria-label')==='Sort Requests / Sprinted'&&[...document.querySelectorAll('.cm [role=menuitemcheckbox]')].map(i=>i.textContent.trim()).join('|')==='${['Manual','Newest first','Oldest first','Recently updated','Due date: soonest first','Due date: latest first','Points: most to least','Points: least to most','Priority','Card number','Title A to Z'].join('|')}'&&document.querySelector('.cm [aria-checked=true]')?.textContent.trim()==='Manual'`),'sort: ↓ on the button opens the sort menu (every option, Manual checked)');
+    assert(await js(`document.querySelector('${sortBtn}').getAttribute('aria-expanded')==='true'&&document.activeElement?.closest('.cm [role=menu]')?.getAttribute('aria-label')==='Sort Requests / Sprinted'&&[...document.querySelectorAll('.cm [role=menuitemcheckbox]')].map(i=>i.textContent.trim()).join('|')==='${['Manual','Newest first','Oldest first','Recently updated','Due date: soonest first','Due date: latest first','Points: most to least','Points: least to most','Actual: most to least','Actual: least to most','Priority','Card number','Title A to Z'].join('|')}'&&document.querySelector('.cm [aria-checked=true]')?.textContent.trim()==='Manual'`),'sort: ↓ on the button opens the sort menu (every option, Manual checked)');
     await key('ArrowDown',40);await key('Enter',13);await sleep(350);
     assert(await shownOrder()==='QA Card C,QA Card B'&&await order()==='QA Card B,QA Card C'&&await sortPref()==='newest','sort: Newest first reorders the column on screen only; the saved board order is unchanged and the choice is a user pref');
     assert(await js(`(()=>{const b=document.querySelector('${sortBtn}');return document.activeElement===b&&b.classList.contains('on')&&b.textContent.trim()==='Newest'&&b.getAttribute('aria-expanded')==='false'&&/Newest first/.test(b.getAttribute('aria-label'))})()`),'sort: the button shows the sort as a subtle chip and keeps focus');
@@ -527,6 +527,31 @@ try{
     await call('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});await sleep(500);
     await js(`document.querySelector('${sortBtn}').click()`);await sleep(150);await js(`document.querySelector('.cm [role=menuitemcheckbox]').click()`);await sleep(350);
     assert(await shownOrder()==='QA Card B,QA Card C'&&await sortPref()===''&&await js(`!document.querySelector('${sortBtn}').classList.contains('on')`),'sort: Manual restores the board order');}
+  // Snooze: the card's clock menu (presets with their times), hidden until it wakes, the column toggle shows it dimmed, Unsnooze, expiry.
+  {const cSel=`[data-card="${C.id}"]`,btn=`${cSel} .dc-snz-btn`,tog='[data-dcol=requests] .dcol-snz';
+    const snoozedAt=async()=>(await saved()).devops.cards.find(c=>c.id===C.id).snoozedUntil;
+    const items=()=>js(`[...document.querySelectorAll('.cm:not(.cm-child) .cm-item')].map(i=>i.querySelector('.cm-l').textContent+'='+(i.querySelector('.cm-note')?.textContent||'')).join('|')`);
+    const pickItem=t=>js(`(()=>{const r=[...document.querySelectorAll('.cm .cm-item')].find(r=>r.querySelector('.cm-l').textContent===${JSON.stringify(t)});r?.click();return !!r})()`);
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:2,y:2});await js(`document.activeElement?.blur()`);
+    // Hidden until hover or focus where there is hover; touch screens (hover:none) always show it.
+    assert(await until(`getComputedStyle(document.querySelector('${btn}')).opacity===(matchMedia('(hover:none)').matches?'1':'0')`,2000)&&await js(`(()=>{const b=document.querySelector('${btn}');return !!b&&b.getAttribute('aria-haspopup')==='menu'&&!document.querySelector('${tog}')})()`),'snooze: each card has a quiet clock button (hidden until hover or focus, always shown on touch) and no column toggle while nothing is snoozed');
+    await js(`document.querySelector('${btn}').focus()`);await key('ArrowDown',40);
+    assert(await until(`!!document.querySelector('.cm')`)&&await until(`getComputedStyle(document.querySelector('${btn}')).opacity==='1'`)&&/^In 1 hour=\d{1,2}:\d\d\s?[AP]M\|In 3 hours=[^|]+\|Tomorrow=\w{3} 9:00\s?AM\|Next week=[^|]*9:00\s?AM\|Custom…=$/.test(await items()),'snooze: the keyboard opens the menu: In 1 hour, In 3 hours, Tomorrow 9:00 AM, Next week 9:00 AM and Custom…, with resolved times');
+    const t0=Date.now();await pickItem('In 3 hours');
+    assert(await until(`!document.querySelector('${cSel}')&&!!document.querySelector('${tog}')`)&&Math.abs(Date.parse(await snoozedAt())-t0-3*36e5)<6e4,'snooze: In 3 hours stores the time on the card and hides it from its column');
+    assert(await js(`(()=>{const t=document.querySelector('${tog}');return t.getAttribute('aria-pressed')==='false'&&t.textContent.trim()==='1'&&document.querySelector('[data-dcol=requests] .dcol-h em').textContent==='2'})()`)&&/snoozed until/.test(await js(`document.querySelector('#toast')?.textContent||''`)),'snooze: the column header counts the snoozed card and the toast says when it wakes');
+    await js(`document.querySelector('${tog}').click()`);
+    assert(await until(`!!document.querySelector('${cSel}.snoozed')`)&&await js(`(()=>{const c=document.querySelector('${cSel}');return getComputedStyle(c.querySelector('.dc-title')).opacity<1&&!!c.querySelector('.dc-snz')?.textContent.trim()&&getComputedStyle(c.querySelector('.dc-snz-btn')).opacity==='1'&&document.querySelector('${tog}').getAttribute('aria-pressed')==='true'&&JSON.parse(localStorage.getItem('flygon-flow-prefs')).devopsSnoozed?.requests===true})()`),'snooze: the column toggle shows snoozed cards, dimmed with their wake time, and is remembered as a pref');
+    await js(`document.querySelector('${btn}').click()`);
+    assert(await until(`!!document.querySelector('.cm')`)&&(await items()).startsWith('Unsnooze=until '),'snooze: on a snoozed card the menu offers Unsnooze first');
+    await pickItem('Unsnooze');
+    assert(await until(`!!document.querySelector('${cSel}:not(.snoozed)')&&!document.querySelector('${tog}')`)&&await snoozedAt()===undefined,'snooze: Unsnooze returns the card and clears snoozedUntil');
+    await key('z',90,2);
+    assert(await until(`!!document.querySelector('${cSel}.snoozed')`),'snooze: Ctrl+Z puts the snooze back');
+    await js(`document.querySelector('${tog}').click()`);await until(`!document.querySelector('${cSel}')`);
+    await js(`(async()=>{const s=await import('/store.js');s.change(()=>{s.store.db.devops.cards.find(c=>c.id===${JSON.stringify(C.id)}).snoozedUntil=new Date(Date.now()+1500).toISOString()})})()`);
+    assert(await until(`!document.querySelector('${cSel}')`,1000)&&await until(`!!document.querySelector('${cSel}:not(.snoozed)')&&!document.querySelector('${tog}')`,5000),'snooze: when the time passes the card comes back on its own');
+    await js(`(async()=>{const s=await import('/store.js');s.change(()=>{delete s.store.db.devops.cards.find(c=>c.id===${JSON.stringify(C.id)}).snoozedUntil})})()`);await sleep(150);}
   // Right-click menus: a card (move through the gates, undo), the keyboard path, a column, the board, text fields.
   {const rc=(sel,kb=false)=>js(`(()=>{const el=document.querySelector(${JSON.stringify(sel)}),r=el.getBoundingClientRect(),kb=${kb};if(kb)el.focus();const e=new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:kb?0:r.x+r.width/2,clientY:kb?0:r.y+Math.min(20,r.height/2)});el.dispatchEvent(e);return e.defaultPrevented})()`);
     const menuLabel=()=>js(`document.querySelector('.cm [role=menu]')?.getAttribute('aria-label')||''`);
@@ -535,7 +560,7 @@ try{
     const colOf=async id=>(await saved()).devops.cards.find(c=>c.id===id)?.column;
     const bSel=`[data-card="${B.id}"]`;
     await rc(bSel);
-    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()===`Card #${B.number}: QA Card B`&&/^Open\|Move to\|Assign developer\|Labels\|Priority\|.*Copy link\|Copy card number\|Delete card$/.test(await labels()),'right-click a card: Open, Move to, Assign, Labels, Priority, Copy link and number, Delete');
+    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()===`Card #${B.number}: QA Card B`&&/^Open\|Snooze\|Move to\|Assign developer\|Labels\|Priority\|.*Copy link\|Copy card number\|Delete card$/.test(await labels()),'right-click a card: Open, Move to, Assign, Labels, Priority, Copy link and number, Delete');
     await pick('Move to');
     assert(await until(`!!document.querySelector('.cm-child')`)&&await js(`[...document.querySelectorAll('.cm-child [aria-checked=true] .cm-l')].map(l=>l.textContent).join()`)==='Requests / Sprinted','Move to lists the columns with the current one checked');
     await pick('Blocked');
@@ -554,7 +579,7 @@ try{
     assert(await until(`!document.querySelector('.cm')&&document.activeElement?.dataset.card===${JSON.stringify(C.id)}`),'Esc closes the card menu and focus returns to the card');
     // A column: new card there, then delete it from its own menu.
     await rc('[data-dcol=uat] .dcol-b');
-    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()==='Column: UAT'&&/^New card in UAT\|Sort\|Rename column…$/.test(await labels()),'right-click a column: new card there, sort, rename');
+    assert(await until(`!!document.querySelector('.cm')`)&&await menuLabel()==='Column: UAT'&&/^New card in UAT\|Sort\|Rename column…\|Show snoozed cards$/.test(await labels()),'right-click a column: new card there, sort, rename');
     const before=(await saved()).devops.cards.length;
     await pick('New card in UAT');
     assert(await until(`!!document.querySelector('dialog.card-modal[open]')&&document.querySelector('[data-dcol=uat] .dcard')!=null`),'New card in UAT adds a card to that column and opens it');

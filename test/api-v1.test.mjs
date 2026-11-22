@@ -257,6 +257,19 @@ test('cards: create, get, update, list, and move through the board gates',async(
   r=await op('cards.update',{env:ENV,card:1,actual:null,points:null});
   assert.deepEqual([r.body.card.points,r.body.card.actual],[null,null]);
   assert.equal((await op('cards.update',{env:ENV,card:1,column:'done'})).body.code,'invalid_input','the column only moves through cards.move');
+  // Snooze: an ISO time snoozes the card for everyone; "" or null wakes it; a broken time is refused.
+  assert.equal((await op('cards.get',{env:ENV,card:1})).body.card.snoozedUntil,null,'null when awake');
+  const until=new Date(Date.now()+864e5).toISOString().replace('.000Z','Z');
+  r=await op('cards.update',{env:ENV,card:1,snoozedUntil:until});
+  assert.equal(r.body.card.snoozedUntil,new Date(until).toISOString());
+  assert.equal((await op('cards.get',{env:ENV,card:1})).body.card.snoozedUntil,new Date(until).toISOString(),'stored');
+  assert.deepEqual((await op('cards.list',{env:ENV,snoozed:true})).body.items.map(x=>x.number),[1]);
+  assert.ok(!(await op('cards.list',{env:ENV,snoozed:false})).body.items.some(x=>x.number===1));
+  assert.equal((await op('cards.update',{env:ENV,card:1,snoozedUntil:'next tuesday'})).body.code,'invalid_snooze');
+  r=await op('cards.update',{env:ENV,card:1,snoozedUntil:''});assert.equal(r.body.card.snoozedUntil,null);
+  await op('cards.update',{env:ENV,card:1,snoozedUntil:until});
+  r=await op('cards.update',{env:ENV,card:1,snoozedUntil:null});assert.equal(r.body.card.snoozedUntil,null);
+  r=await op('cards.update',{env:ENV,card:1,snoozedUntil:new Date(Date.now()-6e4).toISOString()});assert.equal(r.body.card.snoozedUntil,null,'a past time wakes it');
 
   // Doing needs a developer (or an explicit confirm to leave it unassigned).
   r=await op('cards.move',{env:ENV,card:1,column:'doing'});

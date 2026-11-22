@@ -5,10 +5,10 @@ import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {openMenu} from './menu.js';
 import {getPref,setPref} from './prefs.js';
-import {detailModal,ask} from './modal.js';
+import {detailModal,ask,askTime} from './modal.js';
 import {store,change,checkpoint,commit,save,step} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
-import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList} from './devops-core.js';
+import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList,isSnoozed,nextWake,snoozePresets,wakeText} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 
@@ -65,6 +65,61 @@ function ordered(col,list){
   if(k==='manual')return col==='done'?[...list].sort((a,b)=>b.moved.localeCompare(a.moved)):list;
   return sortCards(list,k,dv().labels);
 }
+// Snoozed cards (devops-core.js isSnoozed): hidden from their column unless its header toggle shows them,
+// dimmed with their wake time. The choice is per column, per user (prefs); the snooze itself is the card's.
+const showSnoozed=col=>!!getPref('devopsSnoozed')?.[col];
+function toggleSnoozed(col){
+  const all={...(getPref('devopsSnoozed')||{})};
+  if(all[col])delete all[col];else all[col]=true;
+  setPref('devopsSnoozed',all);render();
+  $('#devopsView').querySelector(`[data-dcol="${col}"] .dcol-snz`)?.focus({preventScroll:true});
+}
+// A column's cards as shown, from the filtered cards: {all (in the column), snoozed, list (shown, in order)}.
+function colCards(col,cards){
+  const all=cards.filter(c=>c.column===col),now=Date.now(),snoozed=all.filter(c=>isSnoozed(c,now));
+  return {all,snoozed,list:ordered(col,showSnoozed(col)||!snoozed.length?all:all.filter(c=>!isSnoozed(c,now)))};
+}
+// Re-render when the next snooze ends, so the card comes back on its own (no server job needed).
+let wakeTimer=0;
+function scheduleWake(){
+  clearTimeout(wakeTimer);const t=nextWake(dv().cards);if(t===null)return;
+  wakeTimer=setTimeout(()=>{if(nextWake(dv().cards)!==t||t<=Date.now())rerender();else scheduleWake()},Math.min(Math.max(0,t-Date.now())+50,36e5));
+}
+const snoozeTip=c=>`Snoozed until ${when(c.snoozedUntil)}`;
+// The snooze menu, on a card's clock button and in its right-click menu: Unsnooze (when snoozed), the presets
+// with the time each one lands on, and Custom… (a date and time).
+function snoozeItems(id){
+  const c=card(id),now=new Date(),on=isSnoozed(c);
+  return [
+    ...(on?[{label:'Unsnooze',icon:'x',note:`until ${wakeText(c.snoozedUntil,now)}`,run:()=>setSnooze(id,null)},'-']:[]),
+    ...snoozePresets(now).map(([k,label,at])=>({label,icon:'clock',note:wakeText(at,now),run:()=>setSnooze(id,at)})),
+    {label:'Custom…',icon:'calendar',run:()=>customSnooze(id)},
+  ];
+}
+function snoozeMenu(b,id){
+  if(Date.now()-(+b.dataset.closed||0)<400)return;
+  const c=card(id);if(!c)return;
+  b.setAttribute('aria-expanded','true');
+  openMenu(b,snoozeItems(id),{label:`Snooze #${c.number}`,align:'end',onClose(){b.setAttribute('aria-expanded','false');b.dataset.closed=Date.now()}});
+}
+async function customSnooze(id){
+  const c=card(id);if(!c)return;
+  const start=isSnoozed(c)?new Date(c.snoozedUntil):snoozePresets()[2][2];
+  const at=await askTime(`Snooze #${c.number} until`,{value:start,ok:'Snooze',future:true});
+  if(at)setSnooze(id,at);
+}
+// Snooze a card until `at` (a Date), or wake it (null). One undo step. A card that leaves the board hands
+// focus to its neighbour in the column.
+function setSnooze(id,at){
+  const c=card(id);if(!c)return;
+  if(locked(c)){toast(lockedMsg(c),true);return}
+  const el=cardEl(id),next=el&&(el.nextElementSibling?.matches('[data-card]')?el.nextElementSibling:el.previousElementSibling?.matches('[data-card]')?el.previousElementSibling:null),
+    hadFocus=el?.contains(document.activeElement)||document.activeElement===document.body;
+  change(()=>{if(at)c.snoozedUntil=at.toISOString();else delete c.snoozedUntil;touch(c)});
+  const hidden=at&&!showSnoozed(c.column);
+  toast(at?`#${c.number} snoozed until ${wakeText(at)}${hidden?'. The clock in its column header shows snoozed cards.':''}`:`#${c.number} is awake`);
+  if(hadFocus&&!modal){const here=cardEl(id);(here?here.querySelector('.dc-snz-btn')||here:next&&cardEl(next.dataset.card))?.focus({preventScroll:true})}
+}
 function setSort(col,k){
   const all={...(getPref('devopsSort')||{})};
   if(k==='manual')delete all[col];else all[col]=k;
@@ -93,6 +148,7 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
     if(e.target.classList.contains('dv-modal')){finishPick('');return}
     const pk=e.target.closest('[data-picker]');if(pk){openFilter(pk);return}
     const so=e.target.closest('.dcol-sort');if(so){sortMenu(so);return}
+    const sz=e.target.closest('.dc-snz-btn');if(sz){snoozeMenu(sz,sz.dataset.id);return}
     const b=e.target.closest('[data-dv]');if(b)action(b.dataset.dv,b);
   });
   el.addEventListener('change',e=>{
@@ -106,9 +162,10 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
   el.addEventListener('contextmenu',contextMenu);
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
   // Enter opens a card; Space picks it up (drag.js).
-  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
+  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'&&!e.target.closest('button')){e.preventDefault();select(c.dataset.card)}
     // A menu button: ↓ / ↑ open the sort menu too.
-    const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}});
+    const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}
+    const sz=e.target.closest('.dc-snz-btn');if(sz&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();snoozeMenu(sz,sz.dataset.id)}});
   sortable=createSortable(el,{
     item:'[data-card]',list:'.dcol-b',kind:'devops-card',listOf:x=>x.closest('[data-dcol]'),keyOf:z=>z.dataset.dcol,idOf:x=>x.dataset.card,
     ignore:'button,a,input,select,.dv-more',scroller:()=>el.querySelector('.dv-scroll'),
@@ -132,7 +189,7 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
   // its own slot is quiet), and a card moved into it goes to the end of the board order.
   if(sortOf(to)!=='manual'){
     if(from===to){
-      const vis=ordered(to,filterCards(db(),ui).filter(x=>x.column===to)).slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
+      const vis=colCards(to,filterCards(db(),ui)).list.slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
       if((vis[i-1]?.id??null)!==(afterId??null)||(vis[i+1]?.id??null)!==(beforeId??null))toast(`${colName(to)} is sorted by ${sortName(sortOf(to)).toLowerCase()}. Switch to Manual to reorder.`);
       return false;
     }
@@ -223,11 +280,12 @@ let cardAgents=new Map();
 const agentBub=a=>{const [bg,fg]=memberColor(a.id);return `<span class="bub agent" style="background:${bg};color:${fg}" data-tip="Agent: ${esc(a.name)}${a.title?` · ${esc(a.title)}`:''}">${icon('bot',11)}</span>`};
 function cardHtml(c){
   const ags=cardAgents.get(c.id)||[],ls=c.labels.map(label).filter(Boolean),p=project(c.project),tone=dueTone(c,today()),done=c.checklist.filter(x=>x.done).length,ppl=byPerson(c);
-  const l=linkOf(c);
-  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${locked(c)?' ro':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
+  const l=linkOf(c),zz=isSnoozed(c),ro=locked(c);
+  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${ro?' ro':''}${zz?' snoozed':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${zz?`, snoozed until ${wakeText(c.snoozedUntil)}`:''}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
+    ${ro?'':`<button type="button" class="dc-snz-btn" data-id="${esc(c.id)}" aria-haspopup="menu" aria-expanded="false" aria-label="${zz?`${esc(snoozeTip(c))}. Change or unsnooze`:`Snooze #${c.number}`}" data-tip="${zz?`${esc(snoozeTip(c))}\nChange or unsnooze`:'Snooze\nHide this card until a later time'}">${icon('clock',13)}</button>`}
     ${ls.length?`<div class="dc-labels">${ls.slice(0,3).map(pill).join('')}${ls.length>3?`<span class="dc-more" data-tip="${esc(ls.slice(3).map(l=>l.name).join(', '))}">+${ls.length-3}</span>`:''}</div>`:''}
     <div class="dc-title" data-tip="${c.title.length>90?esc(c.title):''}" data-tip-delay="700">${esc(c.title)}</div>
-    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${ptsText(c)?`<span class="dc-pts">${ptsText(c)}</span>`:''}
+    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${zz?`<span class="dc-snz" data-tip="${esc(snoozeTip(c))}">${icon('clock',12)}${esc(wakeText(c.snoozedUntil))}</span>`:''}${ptsText(c)?`<span class="dc-pts">${ptsText(c)}</span>`:''}
       ${c.due?`<span class="dc-due ${tone}" data-tip="${tone==='overdue'?'Overdue':tone==='soon'?'Due soon':'Due'} · ${esc(fmt(c.due))}">${icon('calendar',12)}${esc(fmt(c.due))}</span>`:''}
       ${c.checklist.length?`<span class="dc-chk${done===c.checklist.length?' all':''}" data-tip="Checklist">${icon('checkSq',12)}${done}/${c.checklist.length}</span>`:''}
       ${c.links.length?`<span class="dc-ico" data-tip="${esc(c.links.map(l=>`${LINK_KINDS[l.kind]}: ${l.url}`).join('\n'))}">${icon('link',12)}</span>`:''}
@@ -237,13 +295,19 @@ function cardHtml(c){
 // Six slots: four working columns, Done, then the two backlogs stacked in one slot.
 // Done lists the most recently moved cards first so paging hides the old ones.
 function colHtml(col,cards){
-  const list=ordered(col.id,cards.filter(c=>c.column===col.id)),sk=sortOf(col.id);
+  const {all,snoozed,list}=colCards(col.id,cards),sk=sortOf(col.id);
   let n=shown.get(col.id)||PAGE;
   const at=list.findIndex(c=>c.id===selected);
   if(reveal&&at>=n){n=Math.ceil((at+1)/PAGE)*PAGE;shown.set(col.id,n)}
   const left=list.length-n;
-  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em>${list.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}${sortButton(col,sk)}</div>
+  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em${snoozed.length?` data-tip="${all.length} card${all.length===1?'':'s'} · ${snoozed.length} snoozed"`:''}>${all.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}${snoozeToggle(col,snoozed.length)}${sortButton(col,sk)}</div>
     <div class="dcol-b">${list.slice(0,n).map(cardHtml).join('')}${left>0?`<button type="button" class="txt dv-more" data-dv="more" data-col="${col.id}">Load more (${left} left)</button>`:''}</div></section>`;
+}
+// Next to the sort: how many cards here are snoozed, and whether they are shown (pressed) or hidden.
+function snoozeToggle(col,n){
+  if(!n)return '';
+  const on=showSnoozed(col.id),what=`${n} snoozed card${n===1?'':'s'}`;
+  return `<button type="button" class="dcol-snz${on?' on':''}" data-dv="snzCol" data-col="${col.id}" aria-pressed="${on}" aria-label="${on?'Hide':'Show'} ${what} in ${esc(col.name)}" data-tip="${on?`Showing ${what}\nClick to hide them until they wake`:`${what} hidden\nClick to show them, dimmed`}">${icon('clock',13)}<span>${n}</span></button>`;
 }
 // Top right of each column header. Sorted: it shows the sort's short name, in the accent colour.
 function sortButton(col,k){
@@ -278,11 +342,13 @@ export function render(){
   if(pop?.type==='pick')el.querySelector('[data-pick]')?.focus();
   // First paint this session: a brief skeleton fitted to the real board, then the board.
   if(!painted&&sc.clientWidth){painted=true;requestAnimationFrame(()=>{if(sc.isConnected)busy(sc,160)})}
+  scheduleWake();
 }
 function action(name,b){
   ({
     add:()=>addCard(NEW_COLUMN),
     colAdd:()=>addCard(b.dataset.col),
+    snzCol:()=>toggleSnoozed(b.dataset.col),
     hideDone:toggleDone,
     more(){const col=b.dataset.col,list=b.closest('.dcol-b');b.disabled=true;skeletonAppend(list,3);setTimeout(()=>{shown.set(col,(shown.get(col)||PAGE)+PAGE);render()},180)},
     clear(){ui=FILTERS();keepUi();render()},
@@ -341,6 +407,7 @@ function cardMenu(e,id){
     {label:'Open',icon:'pencil',key:'Enter',run:()=>select(id)},
     c.column==='uat'&&!ro&&{label:'Approve (move to Done)',icon:'check',run:()=>approve(id)},
     '-',
+    {label:isSnoozed(c)?`Snoozed until ${wakeText(c.snoozedUntil)}`:'Snooze',icon:'clock',disabled:ro,items:snoozeItems(id)},
     {label:'Move to',icon:'board',disabled:ro,items:moveTargets(dv().columns,c).map(t=>({label:t.name,checked:t.current,run:()=>{if(!t.current)requestMove(id,t.id)}}))},
     {label:'Assign developer',icon:'terminal',disabled:ro||!ppl.length,items:[...pc.shown.map(p=>({label:p.name,checked:devs.has(p.id),run:edit(id,x=>{
       const has=x.assignees.some(a=>a.node===p.id&&a.role==='developer');
@@ -367,6 +434,7 @@ function colMenu(e,col){
     '-',
     {label:'Sort',icon:'sort',items:sortItems(col)},
     {label:'Rename column…',icon:'pencil',run:()=>rename(col)},
+    {label:'Show snoozed cards',icon:'clock',checked:showSnoozed(col),note:String(colCards(col,filterCards(db(),ui)).snoozed.length),run:()=>toggleSnoozed(col)},
     col==='done'&&{label:'Hide Done',icon:'check',checked:ui.hideDone,run:toggleDone},
   ].filter(Boolean),{label:`Column: ${name}`});
 }
@@ -469,7 +537,7 @@ function modalKey(e){
   if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable)return;
   const dir=matches(e,'devops.prevCard')?-1:matches(e,'devops.nextCard')?1:0;if(!dir)return;
   const c=card(selected);if(!c)return;
-  const list=ordered(c.column,filterCards(db(),ui).filter(x=>x.column===c.column));
+  const list=colCards(c.column,filterCards(db(),ui)).list;
   const next=list[list.findIndex(x=>x.id===c.id)+dir];if(!next)return;
   e.preventDefault();selected=next.id;reveal=true;rerender();
 }
@@ -486,9 +554,9 @@ function cardDetailHtml(c){
   const ppl=peopleFor(c),items=[...db().timeline].filter(i=>!l||sameSource(i,c)).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
   const projectOpts=db().projects.map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
   const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
-  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
+  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span>${isSnoozed(c)?`<span class="cd-snz" data-tip="${esc(snoozeTip(c))}">${icon('clock',12)}Snoozed until ${esc(wakeText(c.snoozedUntil))}</span>`:''}<span class="sp"></span>
     ${c.column==='uat'&&ed?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
-    ${chat.on()?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'data-dc="chat"'}):''}${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
+    ${ed?ib('clock',isSnoozed(c)?`${snoozeTip(c)}\nChange or unsnooze`:'Snooze\nHide this card until a later time',{attrs:'data-dc="snooze" aria-haspopup="menu"'}):''}${chat.on()?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'data-dc="chat"'}):''}${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
     <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">${sharedNote(c)}
     <label for="dc-title">Title</label>${clash(c,'title')}<input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}"${ro}>
     <label for="dc-desc">Description</label>${clash(c,'description')}<textarea id="dc-desc" rows="9" maxlength="8000" placeholder="${ed?'Why this card exists, what should be delivered':''}"${ro}>${esc(c.description)}</textarea>
@@ -561,6 +629,7 @@ export function inspectorClick(e){
   if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
     onChange(v){setAgents(c,v)}});return}
   if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
+  if(b.dataset.dc==='snooze'){openMenu(b,snoozeItems(c.id),{label:`Snooze #${c.number}`,align:'end'});return}
   if(b.dataset.dc==='labelNew'){labelForm=!labelForm;$('#dc-newrow').hidden=!labelForm;b.setAttribute('aria-expanded',labelForm);if(labelForm)$('#dc-newlabel')?.focus();return}
   if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
   if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}

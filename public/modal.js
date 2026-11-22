@@ -5,6 +5,8 @@
 //     m.from(el)       the element it grows from / shrinks back into (e.g. the clicked card)
 //     m.close()        animated close (promise); onClose runs after it is gone
 //   ask(text,{ok,cancel,danger}) → Promise<boolean>   a small confirm dialog on top of anything
+//   askTime(text,{value,ok,future}) → Promise<Date|null>   the same, with a date and time field (local time);
+//     value: a Date to start from; future: refuse a time that has already passed
 //
 // Native <dialog> + showModal: the page behind is inert and focus stays inside. Opening grows from
 // the source element's rect (FLIP, transform only) with a backdrop fade; closing shrinks back into
@@ -71,6 +73,33 @@ export function ask(text,{ok='OK',cancel='Cancel',danger=false}={}){
       d.animate([{opacity:1,transform:'none'},{opacity:0,transform:reduced()?'none':'scale(.97)'}],{duration:100,fill:'forwards'}).finished.catch(()=>{}).then(()=>{d.close();d.remove()});resolve(v)};
     d.addEventListener('click',e=>{const b=e.target.closest('[data-ask]');if(b)finish(b.dataset.ask==='ok')});
     d.addEventListener('cancel',e=>{e.preventDefault();finish(false)});
+    d.addEventListener('keydown',e=>e.stopPropagation());
+  });
+}
+
+// A date and time, in local time (a datetime-local field). Resolves null when cancelled.
+export function askTime(text,{value=new Date(),ok='OK',cancel='Cancel',future=false}={}){
+  const pad=n=>String(n).padStart(2,'0'),local=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return new Promise(resolve=>{
+    const d=document.createElement('dialog');d.className='modal ask-dlg ask-time';d.setAttribute('aria-modal','true');
+    const [head,...rest]=String(text).split('\n');
+    d.innerHTML=`<form method="dialog"><p class="ask-t" id="ask-time-t"></p><p class="ask-m"></p><input type="datetime-local" class="ask-in" required aria-labelledby="ask-time-t"><p class="ask-err" role="alert"></p>
+      <div class="ask-b"><button type="button" class="txt" data-ask="cancel"></button><button type="submit" class="txt primary" data-ask="ok"></button></div></form>`;
+    d.querySelector('.ask-t').textContent=head;d.querySelector('.ask-m').textContent=rest.join('\n');
+    d.querySelector('[data-ask=ok]').textContent=ok;d.querySelector('[data-ask=cancel]').textContent=cancel;
+    const input=d.querySelector('.ask-in'),err=d.querySelector('.ask-err');input.value=local(value);
+    if(future)input.min=local(new Date());
+    document.body.append(d);d.showModal();fadeBackdrop(d,1);input.focus();
+    let done=false;
+    const finish=v=>{if(done)return;done=true;fadeBackdrop(d,-1);
+      d.animate([{opacity:1},{opacity:0}],{duration:100,fill:'forwards'}).finished.catch(()=>{}).then(()=>{d.close();d.remove()});resolve(v)};
+    d.querySelector('form').addEventListener('submit',e=>{e.preventDefault();
+      const t=input.value?new Date(input.value):null;
+      if(!t||Number.isNaN(+t)){err.textContent='Pick a date and a time.';return}
+      if(future&&+t<=Date.now()){err.textContent='Pick a time that has not passed yet.';return}
+      finish(t)});
+    d.querySelector('[data-ask=cancel]').addEventListener('click',()=>finish(null));
+    d.addEventListener('cancel',e=>{e.preventDefault();finish(null)});
     d.addEventListener('keydown',e=>e.stopPropagation());
   });
 }

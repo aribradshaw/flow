@@ -1074,7 +1074,7 @@ List DevOps cards
 
 `GET /api/v1/envs/{env}/cards` · scope `read` · MCP tool `cards_list`
 
-Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), agent (AgentFlow agent: cards delegated to it), q ("#12" or title text), hideDone.
+Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), agent (AgentFlow agent: cards delegated to it), q ("#12" or title text), hideDone, snoozed (true: only cards snoozed now; false: only awake ones; left out: both).
 
 **Input**
 
@@ -1088,6 +1088,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `agent` | string |  | AgentFlow agent id or name: cards delegated to it. |
 | `q` | string |  |  |
 | `hideDone` | boolean |  |  |
+| `snoozed` | boolean |  | true: only cards snoozed now; false: leave them out. |
 | `limit` | integer |  | Page size (1-200, default 50). |
 | `cursor` | string |  | nextCursor from the previous page. |
 
@@ -1106,6 +1107,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `items[].points` | number | null |  |  |
 | `items[].actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `items[].due` | string |  |  |
+| `items[].snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `items[].assignees` | object[] | yes |  |
 | `items[].checklist` | object[] | yes |  |
 | `items[].links` | object[] | yes |  |
@@ -1158,6 +1160,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards?project=Lantern&h
       "created": "2026-10-29T17:00:00.000Z",
       "updated": "2026-10-29T17:00:00.000Z",
       "moved": "2026-10-29T17:00:00.000Z",
+      "snoozedUntil": null,
       "agents": [
         "a1"
       ]
@@ -1199,6 +1202,7 @@ One card by number ("12" or "#12") or id.
 | `card.points` | number | null |  |  |
 | `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
+| `card.snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
 | `card.links` | object[] | yes |  |
@@ -1249,6 +1253,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -1277,6 +1282,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `points` | number | null |  |  |
 | `actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
+| `snoozedUntil` | string | null |  | Snooze the card until this time: an ISO time such as 2026-11-23T16:00:00Z (include Z or a time zone offset). "" or null wakes it. A time already past wakes it too. |
 | `assignees` | object[] |  |  |
 | `assignees[].node` | string | yes | A person on a chart: node id or name. |
 | `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
@@ -1307,6 +1313,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `card.points` | number | null |  |  |
 | `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
+| `card.snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
 | `card.links` | object[] | yes |  |
@@ -1359,6 +1366,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -1372,7 +1380,7 @@ Update a DevOps card
 
 `PATCH /api/v1/envs/{env}/cards/{card}` · scope `write` · MCP tool `cards_update`
 
-Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. The column only changes through cards.move, which applies the board's gates.
+Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. snoozedUntil snoozes the card until an ISO time ("" or null wakes it). The column only changes through cards.move, which applies the board's gates.
 
 **Input**
 
@@ -1387,6 +1395,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `points` | number | null |  |  |
 | `actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
+| `snoozedUntil` | string | null |  | Snooze the card until this time: an ISO time such as 2026-11-23T16:00:00Z (include Z or a time zone offset). "" or null wakes it. A time already past wakes it too. |
 | `assignees` | object[] |  |  |
 | `assignees[].node` | string | yes | A person on a chart: node id or name. |
 | `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
@@ -1417,6 +1426,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `card.points` | number | null |  |  |
 | `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
+| `card.snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
 | `card.links` | object[] | yes |  |
@@ -1469,6 +1479,58 @@ curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
+    "agents": [
+      "a1"
+    ]
+  }
+}
+```
+
+**Example: Snooze until Monday**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/cards/12" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"snoozedUntil":"2026-11-23T16:00:00Z"}'
+```
+
+```json
+{
+  "rev": 53,
+  "card": {
+    "id": "k1",
+    "number": 12,
+    "title": "Build sign-up form",
+    "description": "",
+    "column": "requests",
+    "project": "p1",
+    "labels": [
+      "l-high"
+    ],
+    "points": 3,
+    "actual": null,
+    "due": "2026-11-15",
+    "assignees": [
+      {
+        "node": "cleo",
+        "role": "developer"
+      }
+    ],
+    "checklist": [
+      {
+        "id": "x1",
+        "text": "Email field",
+        "done": false
+      }
+    ],
+    "links": [],
+    "item": "i1",
+    "created": "2026-10-29T17:00:00.000Z",
+    "updated": "2026-10-29T17:00:00.000Z",
+    "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": "2026-11-23T16:00:00.000Z",
     "agents": [
       "a1"
     ]
@@ -1512,6 +1574,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `card.points` | number | null |  |  |
 | `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
+| `card.snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
 | `card.links` | object[] | yes |  |
@@ -1564,6 +1627,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -1614,6 +1678,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/cards/12/move" \
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -1709,6 +1774,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards" \
         "created": "2026-10-29T17:00:00.000Z",
         "updated": "2026-10-29T17:00:00.000Z",
         "moved": "2026-10-29T17:00:00.000Z",
+        "snoozedUntil": null,
         "agents": [
           "a1"
         ]
@@ -1776,6 +1842,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards?q=%2312&p
         "created": "2026-10-29T17:00:00.000Z",
         "updated": "2026-10-29T17:00:00.000Z",
         "moved": "2026-10-29T17:00:00.000Z",
+        "snoozedUntil": null,
         "agents": [
           "a1"
         ]
@@ -1827,6 +1894,7 @@ Put a deleted card back on the board: same id, column, fields, checklist and lin
 | `card.points` | number | null |  |  |
 | `card.actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `card.due` | string |  |  |
+| `card.snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `card.assignees` | object[] | yes |  |
 | `card.checklist` | object[] | yes |  |
 | `card.links` | object[] | yes |  |
@@ -1880,6 +1948,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/%2312/re
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -1931,6 +2000,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/deleted-cards/del_6f1c
     "created": "2026-10-29T17:00:00.000Z",
     "updated": "2026-10-29T17:00:00.000Z",
     "moved": "2026-10-29T17:00:00.000Z",
+    "snoozedUntil": null,
     "agents": [
       "a1"
     ]
@@ -2316,6 +2386,7 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `items[].points` | number | null |  |  |
 | `items[].actual` | number | null |  | Points the card actually took, recorded after the work (for example from the agents' token use). Separate from points, the up-front estimate. |
 | `items[].due` | string |  |  |
+| `items[].snoozedUntil` | string | null |  | When the snooze ends (ISO time). Until then the board hides the card for everyone (a column header can show its snoozed cards); afterwards it is a normal card again. null when not snoozed. |
 | `items[].assignees` | object[] | yes |  |
 | `items[].checklist` | object[] | yes |  |
 | `items[].links` | object[] | yes |  |
@@ -2406,6 +2477,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/agents/Researcher/work?
       "created": "2026-10-29T17:00:00.000Z",
       "updated": "2026-10-29T17:00:00.000Z",
       "moved": "2026-10-29T17:00:00.000Z",
+      "snoozedUntil": null,
       "agents": [
         "a1"
       ]

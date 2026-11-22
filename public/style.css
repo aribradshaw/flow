@@ -360,6 +360,26 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .dcol-sort:hover,.dcol-sort[aria-expanded=true]{background:var(--hover);color:var(--ink)}
 .dcol-sort.on{border-color:color-mix(in srgb,var(--flygon-green) 60%,transparent);background:var(--flygon-tint);color:var(--flygon-dark)}
 .dcol-sort.on:hover,.dcol-sort.on[aria-expanded=true]{background:color-mix(in srgb,var(--flygon-light) 60%,#fff)}
+/* Snoozed cards (devops.js): the header toggle sits beside the sort; pressed shows them, dimmed. */
+.dcol-snz{flex:none;display:inline-flex;align-items:center;gap:3px;height:22px;min-width:22px;padding:0 5px;border:1px solid transparent;border-radius:5px;background:none;
+  color:var(--muted);font:inherit;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;cursor:pointer;transition:background .1s,color .1s}
+.dcol-snz .i{flex:none}
+.dcol-snz:hover{background:var(--hover);color:var(--ink)}
+.dcol-snz.on{border-color:color-mix(in srgb,var(--flygon-green) 60%,transparent);background:var(--flygon-tint);color:var(--flygon-dark)}
+.dcol-snz.on:hover{background:color-mix(in srgb,var(--flygon-light) 60%,#fff)}
+.dc-snz-btn{position:absolute;top:5px;right:5px;z-index:1;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:5px;
+  background:#fff;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .1s,background .1s,color .1s}
+.dcard:hover .dc-snz-btn,.dcard:focus-visible .dc-snz-btn,.dcard:focus-within .dc-snz-btn,.dc-snz-btn[aria-expanded=true],.dcard.snoozed .dc-snz-btn{opacity:1}
+.dc-snz-btn:hover,.dc-snz-btn[aria-expanded=true]{background:var(--hover);color:var(--ink)}
+.dcard.snoozed .dc-snz-btn{border-color:color-mix(in srgb,var(--flygon-green) 60%,transparent);background:var(--flygon-tint);color:var(--flygon-dark)}
+.dcard.snoozed{background:var(--bg);border-style:dashed}
+.dcard.snoozed>.dc-labels,.dcard.snoozed>.dc-title,.dcard.snoozed>.dc-foot{opacity:.6}
+.dcard.snoozed::before,.dcard.snoozed::after{opacity:.5}
+.dc-snz{color:var(--flygon-dark);font-weight:600}
+.cd-snz{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:1px 7px;border-radius:9px;background:var(--flygon-tint);color:var(--flygon-dark);font-size:11.5px;font-weight:600;white-space:nowrap}
+.cm-note{margin-left:14px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ask-in{width:100%;height:32px;margin:0 0 4px}
+.ask-err{min-height:16px;margin:0 0 6px;color:#b42318;font-size:12px}
 .dcol-h em{font-style:normal;font-weight:600;color:var(--faint);font-variant-numeric:tabular-nums}
 .dcol-h .ib{width:24px;height:24px;opacity:0}.dcol:hover .dcol-h .ib,.dcol-h .ib:focus-visible{opacity:1}
 .dcol[data-dcol=done] .dcol-h em{color:var(--flygon-dark)}
@@ -1166,11 +1186,11 @@ body.split-drag .pane{pointer-events:none}
 .ibody label em,.prop-l em{color:var(--muted)}
 /* Touch has no hover: controls revealed on hover stay visible, and small ones get room. */
 @media (hover:none){
-  .col-h .ib,.dcol-h .ib,.row-acts{opacity:1!important;visibility:visible!important}
+  .col-h .ib,.dcol-h .ib,.row-acts,.dc-snz-btn{opacity:1!important;visibility:visible!important}
 }
 @media (pointer:coarse){
   .opts button{min-width:32px;height:32px}
-  .dcol-sort{min-width:30px;height:28px}
+  .dcol-sort,.dcol-snz{min-width:30px;height:28px}
   .prop{min-height:36px}
 }
 
