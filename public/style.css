@@ -367,6 +367,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .dcol-snz:hover{background:var(--hover);color:var(--ink)}
 .dcol-snz.on{border-color:color-mix(in srgb,var(--flygon-green) 60%,transparent);background:var(--flygon-tint);color:var(--flygon-dark)}
 .dcol-snz.on:hover{background:color-mix(in srgb,var(--flygon-light) 60%,#fff)}
+/* The toolbar's snoozed count (devops.js boardSnoozeToggle): the same clock, beside the card count. */
+.dv-snz{margin-left:-2px}
 .dc-snz-btn{position:absolute;top:5px;right:5px;z-index:1;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:5px;
   background:#fff;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .1s,background .1s,color .1s}
 .dcard:hover .dc-snz-btn,.dcard:focus-visible .dc-snz-btn,.dcard:focus-within .dc-snz-btn,.dc-snz-btn[aria-expanded=true],.dcard.snoozed .dc-snz-btn{opacity:1}

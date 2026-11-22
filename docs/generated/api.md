@@ -2330,7 +2330,7 @@ Get an agent's work queue
 
 `GET /api/v1/envs/{env}/agents/{agent}/work` · scope `read` · MCP tool `agents_work`
 
-What a runner needs to work as this agent: its `brief` and its queue, the open DevOps cards delegated to it (cards.update agents, or the card's Delegated to picker). A card last changed by someone outside the environment (through an edit share) is left out until the owner changes it again. Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. `columns` narrows the queue, e.g. ["doing","requests"] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.
+What a runner needs to work as this agent: its `brief` and its queue, the open DevOps cards delegated to it (cards.update agents, or the card's Delegated to picker). A card last changed by someone outside the environment (through an edit share) is left out until the owner changes it again. A snoozed card (snoozedUntil in the future) is left out too, still delegated, and comes back on its own when the snooze ends; includeSnoozed: true keeps snoozed cards in. Order: doing, requests, blocked, uat, must, nice (work in progress first; Blocked and UAT wait on others), then soonest due date, then #number. `columns` narrows the queue, e.g. ["doing","requests"] for cards it can act on now. Report back with cards.update (checklist, links) and cards.move.
 
 **Input**
 
@@ -2339,6 +2339,7 @@ What a runner needs to work as this agent: its `brief` and its queue, the open D
 | `env` | string | yes | Environment id (see envs.list). |
 | `agent` | string | yes | Agent id or name. |
 | `columns` | string[] |  | Only these columns (comma-separated in a query string). |
+| `includeSnoozed` | boolean |  | true: keep cards that are snoozed now (left out by default). |
 | `limit` | integer |  | Page size (1-200, default 50). |
 | `cursor` | string |  | nextCursor from the previous page. |
 

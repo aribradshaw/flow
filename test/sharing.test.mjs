@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import net from 'node:net';
 import {resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
   createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
   shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView} from '../lib/sharing-core.mjs';
@@ -426,10 +427,12 @@ describe('storage',()=>{
     before(async()=>{
       dir=mkdtempSync(join(tmpdir(),'flow-shares-pg-'));
       const {default:EmbeddedPostgres}=await import('embedded-postgres');
-      pg=new EmbeddedPostgres({databaseDir:join(dir,'pg'),user:'flow',password:'flow-test',port:54341,persistent:false,onLog:()=>{},onError:()=>{}});
+      // A port the OS says is free right now, so the test never collides with a local service.
+      const port=await new Promise((ok,no)=>{const s=net.createServer().once('error',no);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>ok(p))})});
+      pg=new EmbeddedPostgres({databaseDir:join(dir,'pg'),user:'flow',password:'flow-test',port,persistent:false,onLog:()=>{},onError:()=>{}});
       await pg.initialise();await pg.start();await pg.createDatabase('flow');
       const {default:PG}=await import('pg');
-      pool=new PG.Pool({connectionString:'postgres://flow:flow-test@127.0.0.1:54341/flow',max:2});
+      pool=new PG.Pool({connectionString:`postgres://flow:flow-test@127.0.0.1:${port}/flow`,max:2});
     });
     after(async()=>{await pool?.end().catch(()=>{});await pg?.stop().catch(()=>{});rmSync(dir,{recursive:true,force:true})});
     test('migrations run twice, then the same checks pass',async()=>{

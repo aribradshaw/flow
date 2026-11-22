@@ -252,6 +252,19 @@ test('the work queue: open delegated cards, active work first, then due date and
   assert.deepEqual(workQueue(db,'ghost'),[]);
 });
 
+test('the work queue leaves snoozed cards out until they wake, still delegated',()=>{
+  const db=base(),now=Date.parse('2026-11-21T12:00:00Z'),later='2026-11-21T15:00:00.000Z';
+  db.devops.cards.push({id:'k4',number:4,title:'Snoozed',column:'requests',due:'',snoozedUntil:later},{id:'k5',number:5,title:'Woke up',column:'requests',due:'',snoozedUntil:'2026-11-21T09:00:00.000Z'});
+  db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{cards:['k1','k4','k5']});
+  assert.deepEqual(workQueue(db,a.id,{now}).map(c=>c.number),[1,5],'a snooze still running is left out; an ended one is not');
+  assert.deepEqual(workQueue(db,a.id,{now,includeSnoozed:true}).map(c=>c.number),[1,4,5],'includeSnoozed keeps it');
+  assert.deepEqual(workQueue(db,a.id,{now:Date.parse(later)}).map(c=>c.number),[1,4,5],'back in the queue the moment the snooze ends');
+  assert.deepEqual(a.cards,['k1','k4','k5'],'the delegation is untouched');
+  db.devops.cards.find(c=>c.id==='k4').snoozedUntil=new Date(Date.now()+36e5).toISOString();
+  assert.match(agentBrief(db,a.id),/#4 Snoozed \([^)]*, snoozed until [^)]+\)/,'the brief marks the card snoozed');
+});
+
 test('the DevOps board filters cards by delegated agent',async()=>{
   const {filterCards}=await import('../public/devops-core.js');
   const db=base();db.agentflow=seedAgentflow();

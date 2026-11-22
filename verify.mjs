@@ -537,15 +537,22 @@ try{
     assert(await until(`getComputedStyle(document.querySelector('${btn}')).opacity===(matchMedia('(hover:none)').matches?'1':'0')`,2000)&&await js(`(()=>{const b=document.querySelector('${btn}');return !!b&&b.getAttribute('aria-haspopup')==='menu'&&!document.querySelector('${tog}')})()`),'snooze: each card has a quiet clock button (hidden until hover or focus, always shown on touch) and no column toggle while nothing is snoozed');
     await js(`document.querySelector('${btn}').focus()`);await key('ArrowDown',40);
     assert(await until(`!!document.querySelector('.cm')`)&&await until(`getComputedStyle(document.querySelector('${btn}')).opacity==='1'`)&&/^In 1 hour=\d{1,2}:\d\d\s?[AP]M\|In 3 hours=[^|]+\|Tomorrow=\w{3} 9:00\s?AM\|Next week=[^|]*9:00\s?AM\|Custom…=$/.test(await items()),'snooze: the keyboard opens the menu: In 1 hour, In 3 hours, Tomorrow 9:00 AM, Next week 9:00 AM and Custom…, with resolved times');
+    const cnt=()=>js(`document.querySelector('.dv-count').textContent`),before=await cnt();
     const t0=Date.now();await pickItem('In 3 hours');
     assert(await until(`!document.querySelector('${cSel}')&&!!document.querySelector('${tog}')`)&&Math.abs(Date.parse(await snoozedAt())-t0-3*36e5)<6e4,'snooze: In 3 hours stores the time on the card and hides it from its column');
     assert(await js(`(()=>{const t=document.querySelector('${tog}');return t.getAttribute('aria-pressed')==='false'&&t.textContent.trim()==='1'&&document.querySelector('[data-dcol=requests] .dcol-h em').textContent==='2'})()`)&&/snoozed until/.test(await js(`document.querySelector('#toast')?.textContent||''`)),'snooze: the column header counts the snoozed card and the toast says when it wakes');
+    // The toolbar counts awake cards; a clock beside it counts snoozed ones and shows them in every column.
+    assert(parseInt(await cnt())===parseInt(before)-1&&await js(`(()=>{const z=document.querySelector('.dv-bar .dv-snz');return !!z&&z.textContent.trim()==='1'&&z.getAttribute('aria-pressed')==='false'&&z.getAttribute('aria-label')==='1 snoozed card. Show them in every column'&&!!z.querySelector('.i')})()`),'snooze: the toolbar count leaves the snoozed card out and a clock beside it counts it');
+    await js(`document.querySelector('.dv-snz').click()`);
+    assert(await until(`!!document.querySelector('${cSel}.snoozed')`)&&await js(`document.querySelector('.dv-snz').getAttribute('aria-pressed')==='true'&&document.querySelector('${tog}').getAttribute('aria-pressed')==='true'&&document.activeElement?.classList.contains('dv-snz')`),'snooze: the toolbar clock shows snoozed cards in every column (the column toggles agree)');
+    await js(`document.querySelector('.dv-snz').click()`);
+    assert(await until(`!document.querySelector('${cSel}')`)&&await js(`document.querySelector('.dv-snz').getAttribute('aria-pressed')==='false'&&!JSON.parse(localStorage.getItem('flygon-flow-prefs')).devopsSnoozed?.requests`),'snooze: clicking it again hides them');
     await js(`document.querySelector('${tog}').click()`);
     assert(await until(`!!document.querySelector('${cSel}.snoozed')`)&&await js(`(()=>{const c=document.querySelector('${cSel}');return getComputedStyle(c.querySelector('.dc-title')).opacity<1&&!!c.querySelector('.dc-snz')?.textContent.trim()&&getComputedStyle(c.querySelector('.dc-snz-btn')).opacity==='1'&&document.querySelector('${tog}').getAttribute('aria-pressed')==='true'&&JSON.parse(localStorage.getItem('flygon-flow-prefs')).devopsSnoozed?.requests===true})()`),'snooze: the column toggle shows snoozed cards, dimmed with their wake time, and is remembered as a pref');
     await js(`document.querySelector('${btn}').click()`);
     assert(await until(`!!document.querySelector('.cm')`)&&(await items()).startsWith('Unsnooze=until '),'snooze: on a snoozed card the menu offers Unsnooze first');
     await pickItem('Unsnooze');
-    assert(await until(`!!document.querySelector('${cSel}:not(.snoozed)')&&!document.querySelector('${tog}')`)&&await snoozedAt()===undefined,'snooze: Unsnooze returns the card and clears snoozedUntil');
+    assert(await until(`!!document.querySelector('${cSel}:not(.snoozed)')&&!document.querySelector('${tog}')`)&&await snoozedAt()===undefined&&!await js(`!!document.querySelector('.dv-snz')`)&&await cnt()===before,'snooze: Unsnooze returns the card and clears snoozedUntil (and the toolbar clock goes)');
     await key('z',90,2);
     assert(await until(`!!document.querySelector('${cSel}.snoozed')`),'snooze: Ctrl+Z puts the snooze back');
     await js(`document.querySelector('${tog}').click()`);await until(`!document.querySelector('${cSel}')`);

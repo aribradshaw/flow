@@ -468,6 +468,17 @@ test('AgentFlow: delegating cards to agents and the work queue a runner reads',a
   r=await op('agents.work',{env:ENV,agent:'Runner bot',limit:1});
   assert.deepEqual([r.body.items.map(c=>c.number),!!r.body.nextCursor],[[1],true],'the queue pages like other lists');
   assert.equal((await op('agents.work',{env:ENV,agent:'Nobody'})).body.code,'unknown_agent');
+  // Snoozed: out of the queue (and its pages) until it wakes, still delegated; includeSnoozed keeps it.
+  await op('cards.update',{env:ENV,card:1,snoozedUntil:new Date(Date.now()+36e5).toISOString()});
+  r=await op('agents.work',{env:ENV,agent:'Runner bot'});
+  assert.deepEqual([r.body.items.map(c=>c.number),r.body.nextCursor],[[sooner],null],'a snoozed card leaves the queue');
+  assert.deepEqual((await op('agents.work',{env:ENV,agent:'Runner bot',limit:1})).body.items.map(c=>c.number),[sooner],'and is not the next card');
+  r=await op('agents.work',{env:ENV,agent:'Runner bot',includeSnoozed:true});
+  assert.deepEqual(r.body.items.map(c=>c.number),[1,sooner],'includeSnoozed keeps it');
+  assert.equal(r.body.items[0].agents.includes(bot.id),true,'still delegated');
+  assert.deepEqual((await call('GET',`/api/v1/envs/${ENV}/agents/${bot.id}/work?includeSnoozed=true`)).body.items.map(c=>c.number),[1,sooner],'includeSnoozed in a query string');
+  await op('cards.update',{env:ENV,card:1,snoozedUntil:null});
+  assert.deepEqual((await op('agents.work',{env:ENV,agent:'Runner bot'})).body.items.map(c=>c.number),[1,sooner],'awake again: back in the queue');
   // Query arrays: repeated keys, a comma list, and what the CLI (requestFor) and the docs' curl lines send all agree.
   const want=(await op('agents.work',{env:ENV,agent:'Runner bot',columns:['doing','requests']})).body.items.map(c=>c.number);
   assert.deepEqual(want,[1,sooner]);

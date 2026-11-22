@@ -36,6 +36,7 @@
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
+import {isSnoozed} from './devops-core.js';
 
 export const AGENT_KINDS={agent:'AI agent',human:'Human',team:'Team',automation:'Automation'};
 export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired:'Retired'};
@@ -357,10 +358,12 @@ export function delegate(af,cardId,agentIds){
 // An agent's work queue: open cards delegated to it. Work in progress first, then new requests,
 // then cards waiting on others (Blocked, UAT), then the backlogs; within each, soonest due, then #number.
 export const QUEUE_ORDER=['doing','requests','blocked','uat','must','nice'];
-export function workQueue(db,agentId){
+// A snoozed card (devops-core.js isSnoozed) stays delegated but sits out of the queue until its snooze
+// ends; includeSnoozed keeps it in.
+export function workQueue(db,agentId,{includeSnoozed=false,now=Date.now()}={}){
   const a=agentOf(db.agentflow,agentId);if(!a)return [];
   const ids=new Set(a.cards),rank=c=>{const i=QUEUE_ORDER.indexOf(c.column);return i<0?QUEUE_ORDER.length:i};
-  return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done').sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
+  return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done'&&(includeSnoozed||!isSnoozed(c,now))).sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
 }
 
 // ---------- scheduled jobs ----------
@@ -596,7 +599,7 @@ export function filterWorkflows(af,f={}){
 // who it answers to and what Flow work it owns right now.
 const bullets=(xs,empty='None')=>xs.length?xs.map(x=>`- ${x}`).join('\n'):`- ${empty}`;
 const colName=(db,c)=>db.devops?.columns?.find(x=>x.id===c.column)?.name||c.column;
-const cardLine=(db,c)=>`#${c.number} ${c.title} (${colName(db,c)}${c.due?`, due ${c.due}`:''})`;
+const cardLine=(db,c)=>`#${c.number} ${c.title} (${colName(db,c)}${c.due?`, due ${c.due}`:''}${isSnoozed(c)?`, snoozed until ${c.snoozedUntil}`:''})`;
 const itemLine=i=>`${i.title} (${i.kind}${i.start?`, ${i.start}${i.end?` to ${i.end}`:''}`:', unscheduled'}, ${i.status})`;
 function workSection(db,x){
   const w=workFor(db,x);

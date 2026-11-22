@@ -74,6 +74,15 @@ function toggleSnoozed(col){
   setPref('devopsSnoozed',all);render();
   $('#devopsView').querySelector(`[data-dcol="${col}"] .dcol-snz`)?.focus({preventScroll:true});
 }
+// The toolbar's clock: shows (or hides) snoozed cards in every column that has some, through the same
+// per-column prefs. Pressed when all of those columns already show them.
+const allSnoozedShown=cols=>cols.length>0&&cols.every(showSnoozed);
+function toggleAllSnoozed(cols){
+  const all={...(getPref('devopsSnoozed')||{})},on=allSnoozedShown(cols);
+  for(const col of cols)if(on)delete all[col];else all[col]=true;
+  setPref('devopsSnoozed',all);render();
+  $('#devopsView').querySelector('.dv-snz')?.focus({preventScroll:true});
+}
 // A column's cards as shown, from the filtered cards: {all (in the column), snoozed, list (shown, in order)}.
 function colCards(col,cards){
   const all=cards.filter(c=>c.column===col),now=Date.now(),snoozed=all.filter(c=>isSnoozed(c,now));
@@ -259,8 +268,9 @@ function openFilter(b){
   openPicker(b,{items:items(),selected:ui[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){ui[k]=v;keepUi();render()}});
 }
 const filtersOn=()=>!!(ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone);
-function toolbar(n){
-  const active=filtersOn();
+// cards: the filtered cards. The count is the awake ones; snoozed ones get their own clock beside it.
+function toolbar(cards){
+  const active=filtersOn(),now=Date.now(),zz=cards.filter(c=>isSnoozed(c,now)),n=cards.length-zz.length;
   const ents=nodesOf(['entity','area']).filter(e=>e.id===ui.entity||entityProjects(db(),e.id).length);
   return `<div class="tl-bar dv-bar">
     ${pickerButton('dv-projects','Projects',projectItems(),ui.projects,{tip:'Filter by project'})}
@@ -270,7 +280,7 @@ function toolbar(n){
     ${pickerButton('dv-labels','Labels',labelItems(),ui.labels,{tip:'Filter by label'})}
     <input id="dv-q" type="search" placeholder="Search # or title" value="${esc(ui.q)}" aria-label="Search cards by number or title">
     ${ib('check',ui.hideDone?'Show Done':'Hide Done',{cls:ui.hideDone?'on':'',attrs:'data-dv="hideDone"'})}
-    <span class="dv-count">${n} card${n===1?'':'s'}</span>
+    <span class="dv-count">${n} card${n===1?'':'s'}</span>${boardSnoozeToggle(zz)}
     ${active?`<button type="button" class="txt" data-dv="clear">Clear</button>`:''}<span class="sp"></span>
     ${ib('undo','Recently deleted · restore a card',{attrs:'data-dv="deleted"'})}
     ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>`;
@@ -309,6 +319,12 @@ function snoozeToggle(col,n){
   const on=showSnoozed(col.id),what=`${n} snoozed card${n===1?'':'s'}`;
   return `<button type="button" class="dcol-snz${on?' on':''}" data-dv="snzCol" data-col="${col.id}" aria-pressed="${on}" aria-label="${on?'Hide':'Show'} ${what} in ${esc(col.name)}" data-tip="${on?`Showing ${what}\nClick to hide them until they wake`:`${what} hidden\nClick to show them, dimmed`}">${icon('clock',13)}<span>${n}</span></button>`;
 }
+// In the toolbar, after the count: how many filtered cards are snoozed; toggles them in every column.
+function boardSnoozeToggle(zz){
+  if(!zz.length)return '';
+  const cols=[...new Set(zz.map(c=>c.column))],on=allSnoozedShown(cols),n=zz.length,what=`${n} snoozed card${n===1?'':'s'}`;
+  return `<button type="button" class="dcol-snz dv-snz${on?' on':''}" data-dv="snzAll" data-cols="${esc(cols.join(','))}" aria-pressed="${on}" aria-label="${what}. ${on?'Hide':'Show'} them in every column" data-tip="${what}\n${on?'Click to hide them in every column':'Click to show them in every column, dimmed'}">${icon('clock',13)}<span>${n}</span></button>`;
+}
 // Top right of each column header. Sorted: it shows the sort's short name, in the accent colour.
 function sortButton(col,k){
   const short=SORTS.find(([s])=>s===k)[2],on=k!=='manual';
@@ -335,7 +351,7 @@ export function render(){
   const cards=filterCards(db(),ui);
   cardAgents=new Map();for(const a of db().agentflow?.agents||[])for(const id of a.cards)cardAgents.set(id,[...(cardAgents.get(id)||[]),a]);
   // Cards that stay glide to their new place; added ones fade in, removed ones fade out.
-  flipList(el,'.dcard',c=>c.dataset.card,()=>{el.innerHTML=toolbar(cards.length)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'')});
+  flipList(el,'.dcard',c=>c.dataset.card,()=>{el.innerHTML=toolbar(cards)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'')});
   const sc=el.querySelector('.dv-scroll');
   if(keep){[sc.scrollLeft,sc.scrollTop]=keep;for(const c of el.querySelectorAll('[data-dcol]'))c.querySelector('.dcol-b').scrollTop=keep[2].get(c.dataset.dcol)||0}
   if(reveal){reveal=false;el.querySelector('.dcard.sel')?.scrollIntoView({block:'nearest',inline:'center'})}
@@ -349,6 +365,7 @@ function action(name,b){
     add:()=>addCard(NEW_COLUMN),
     colAdd:()=>addCard(b.dataset.col),
     snzCol:()=>toggleSnoozed(b.dataset.col),
+    snzAll:()=>toggleAllSnoozed(b.dataset.cols.split(',')),
     hideDone:toggleDone,
     more(){const col=b.dataset.col,list=b.closest('.dcol-b');b.disabled=true;skeletonAppend(list,3);setTimeout(()=>{shown.set(col,(shown.get(col)||PAGE)+PAGE);render()},180)},
     clear(){ui=FILTERS();keepUi();render()},

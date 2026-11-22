@@ -120,7 +120,7 @@ A workflow has `name, description, status, trigger, schedule, steps[{agent, acti
 
 Delegating a DevOps card to an agent puts it in that agent's **work queue**. The person on the card stays accountable; the agent does the work. Delegate in the card's **Delegated to** picker, from the agent's side panel (Cards), or with `cards.update` (`agents: ["Researcher"]`; `[]` clears it). Cards show their agents as square badges, and the board's **Agents** filter shows one agent's cards. A card can be delegated to several agents.
 
-`agents.work` returns everything a runner needs in one call: the agent, its brief, and its queue, which holds the open delegated cards. The queue is ordered Doing, Requests / Sprinted, Blocked, UAT, then the backlogs, and by soonest due date and `#number` within each. `columns: ["doing","requests"]` keeps only the cards it can act on now. A runner loop on any machine looks like this:
+`agents.work` returns everything a runner needs in one call: the agent, its brief, and its queue, which holds the open delegated cards. The queue is ordered Doing, Requests / Sprinted, Blocked, UAT, then the backlogs, and by soonest due date and `#number` within each. `columns: ["doing","requests"]` keeps only the cards it can act on now. A snoozed card stays delegated but is left out of the queue until its snooze ends, then comes back on its own (`includeSnoozed: true` keeps snoozed cards in); the brief marks it snoozed. A runner loop on any machine looks like this:
 
 1. `agents.work` with the agent's name and `columns: ["doing","requests"]`.
 2. Take the first card. Move it to Doing with `cards.move` if it is new.
