@@ -138,6 +138,7 @@ function openMenu(){
     ${envRow()}
     <div class="acct-sep" role="separator"></div>
     <div class="acct-row"><button type="button" role="menuitem" class="acct-item" data-acct="settings">${svg('settings')}Settings</button>${currentVersion()?`<button type="button" role="menuitem" class="acct-ver" data-acct="devlog" data-tip="DevLog" aria-label="DevLog: version ${esc(currentVersion())}">${esc(currentVersion())}</button>`:''}</div>
+    ${opid()&&u&&session.sso?`<button type="button" role="menuitem" class="acct-item" data-acct="switch">${svg('swap')}Use a different account</button>`:''}
     ${opid()&&u?`<button type="button" role="menuitem" class="acct-item danger" data-acct="logout">${svg('logout')}Log out</button>`:''}
     ${opid()?'<div class="acct-foot"><opid-badge mode="light" kind="backed"></opid-badge></div>':''}`;
   document.body.append(menu);
@@ -160,7 +161,7 @@ document.addEventListener('click',e=>{
   const t=e.target instanceof Element?e.target:null;if(!t)return;
   if(t.closest('#acctBtn')){menu?closeMenu():openMenu();return}
   const item=t.closest('.acct-menu [data-acct]');
-  if(item){const a=item.dataset.acct;closeMenu();if(a==='settings')openSettings();else if(a==='devlog')openSettings('devlog');else if(a==='logout')signOut();
+  if(item){const a=item.dataset.acct;closeMenu();if(a==='settings')openSettings();else if(a==='devlog')openSettings('devlog');else if(a==='logout')signOut();else if(a==='switch')switchAccount();
     else if(a==='env')openEnv(item.dataset.id);else if(a==='env-new')openSettings('environment').then?.(()=>document.querySelector('#envNew')?.focus());return}
   if(menu&&!t.closest('.acct-menu'))closeMenu();
 });
@@ -236,12 +237,18 @@ async function fillInvites(panel){
   const box=panel.querySelector('[data-invites]');if(!box)return;
   let r;try{r=await fetch('/api/invites',{cache:'no-store'})}catch{return}
   if(!r.ok)return;const {invites=[],quota=null,requests=null}=await r.json();
-  const left=quota?Math.max(0,quota.limit-quota.used):null;
+  const left=quota?Math.max(0,quota.limit-quota.used):null,isOwner=Array.isArray(requests);
+  // The owner also sees everyone who joined, and can remove someone (their data stays; a new invite brings them back).
+  let members=[];if(isOwner)try{const m=await fetch('/api/members',{cache:'no-store'});if(m.ok)members=((await m.json()).members||[]).filter(x=>!x.owner)}catch{}
+  const status=i=>i.revokedAt&&i.claimedAt?'Removed':i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited';
   await keepFocus(panel,()=>{box.innerHTML=`${sec('Invite to Flow')}
     <p class="acct-muted">Invite a friend: they get an email to join with OneProfileID (or make an account) and start in their own private workspace. They see nothing of yours unless you share it.${quota?` You can send ${left} more this week.`:''}</p>
     <form class="env-row" data-invite-form><input id="inviteEmail" type="email" placeholder="name@example.com" aria-label="Email to invite" required${left===0?' disabled':''}><button type="submit" class="txt primary"${left===0?' disabled':''}>Invite</button></form>
     <p class="acct-err" data-invite-err hidden></p><p class="acct-muted" data-invite-msg hidden></p>
-    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${i.revokedAt?'Revoked':i.claimedAt?'Joined':'Invited'}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" id="inviteResend-${esc(i.email)}" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>
+    <ul class="env-list">${invites.map(i=>`<li><span class="env-n">${esc(i.email)}</span><span class="env-s">${status(i)}</span>${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" id="inviteResend-${esc(i.email)}" data-invite-resend="${esc(i.email)}">Resend</button>`:''}${!i.revokedAt&&!i.claimedAt?`<button type="button" class="txt" data-invite-revoke="${esc(i.email)}">Revoke</button>`:''}${!i.revokedAt&&i.claimedAt&&isOwner?`<button type="button" class="txt" data-member-remove="${esc(i.email)}" data-member-via="invite">Remove</button>`:''}</li>`).join('')||'<li class="acct-muted">No invites yet</li>'}</ul>
+    ${isOwner&&members.length?`${sec('People in Flow')}<p class="acct-muted">Removing someone signs them out everywhere and turns off their API keys. Their charts stay; inviting them again lets them back in.</p>
+    <p class="acct-err" data-member-err hidden></p>
+    <ul class="env-list">${members.map(m=>`<li><span class="env-n">${esc(m.name&&m.name!==m.email?`${m.name} · ${m.email}`:m.email)}</span>${m.removedAt?`<span class="env-s">Removed</span><button type="button" class="txt" data-invite-request="${esc(m.email)}">Invite again</button>`:`<button type="button" class="txt" data-member-remove="${esc(m.email)}">Remove</button>`}</li>`).join('')}</ul>`:''}
     ${requests?.length?`${sec('Asked to join')}<p class="acct-muted">These people signed in while Flow was full or invite-only. Inviting one lets them in.</p>
     <ul class="env-list">${requests.map(q=>`<li><span class="env-n">${esc(q.name?`${q.name} · ${q.email}`:q.email)}</span><button type="button" class="txt" data-invite-request="${esc(q.email)}">Invite</button></li>`).join('')}</ul>`:''}`});
 }
@@ -370,6 +377,12 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     const sdt=t.closest?.('[data-sh-detach]');if(sdt){ask('Remove these shared cards from this environment?\nYou can add them again any time.',{ok:'Remove'}).then(ok=>{if(ok)shDo(()=>shareApi.detach(sdt.dataset.shDetach,currentEnv()),true)});return}
     const iq=t.closest?.('[data-invite-request]');if(iq){fetch('/api/invites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:iq.dataset.inviteRequest})}).then(r=>r.json()).then(j=>{fillInvites(panel).then(()=>inviteMsg(panel,j))});return}
     const ir=t.closest?.('[data-invite-revoke]');if(ir){fetch('/api/invites?email='+encodeURIComponent(ir.dataset.inviteRevoke),{method:'DELETE'}).then(()=>fillInvites(panel));return}
+    const mr=t.closest?.('[data-member-remove]');if(mr){const who=mr.dataset.memberRemove;
+      ask(`Remove ${who} from Flow?\nThey are signed out everywhere and their API keys stop working. Their charts are kept; you can invite them again.`,{ok:'Remove',danger:true}).then(async ok=>{if(!ok)return;
+        const r=await fetch(mr.dataset.memberVia==='invite'?'/api/invites?email='+encodeURIComponent(who):'/api/members?email='+encodeURIComponent(who),{method:'DELETE'}).catch(()=>null);
+        const j=await r?.json().catch(()=>({}))||{};await fillInvites(panel);
+        const p=panel.querySelector('[data-member-err]')||panel.querySelector('[data-invite-err]');
+        if(p){p.textContent=!r?.ok?(j.error||'Could not remove them. Try again.'):j.opidRevoked===false?`Removed from Flow. OneProfileID has not confirmed yet; Flow keeps refusing ${who} and will retry.`:'';p.hidden=!p.textContent}});return}
     const sc=t.closest?.('[data-sc]');if(sc){recording=sc.dataset.sc;scMsg=null;drawTab('shortcuts').then(()=>d.querySelector(`[data-sc="${recording}"]`)?.focus());return}
     const rs=t.closest?.('[data-sc-reset]');if(rs){resetShortcut(rs.dataset.scReset);scMsg=null;drawTab('shortcuts');return}
     if(t.closest?.('[data-sc-reset-all]')){resetAll();scMsg=null;recording=null;drawTab('shortcuts');return}
@@ -440,6 +453,15 @@ async function post(path,body){
   let data={};try{data=await r.json()}catch{}
   return {ok:r.ok,status:r.status,data};
 }
+// Sign-in again on OneProfileID with "Continue as …" / "Use a different account" (prompt=select_account).
+// Flow's own session ends first, so the account chosen there is the one Flow opens.
+const SWITCH_URL='/api/auth/sso/start?prompt=select_account';
+async function switchAccount(){
+  await post('/api/auth/sign-out',{}).catch(()=>{});
+  location.assign(SWITCH_URL);
+}
+// Starting SSO with the email Flow already knows pre-fills OneProfileID's sign-in and sign-up (editable there).
+const ssoStart=({resume=false,hint=''}={})=>{const q=new URLSearchParams();if(resume)q.set('resume','1');if(hint)q.set('hint',hint);return '/api/auth/sso/start'+(q.size?'?'+q:'')};
 async function signOut(){
   const r=await post('/api/auth/sign-out',{});
   if(r.ok)location.reload();
@@ -470,6 +492,7 @@ const SIGNIN={
   denied:{msg:'Flow is invite-only right now.',next:'request',ask:'Tell me when I can join'},
   closed:{msg:'Flow is invite-only right now.',next:'request',ask:'Tell me when I can join'},
   full:{msg:'Flow is full right now.',next:'request',ask:"Tell me when there's room"},
+  revoked:{msg:'The owner removed this account from Flow. Ask them to invite you again, or sign in with another account.',next:'switch'},
   expired:{msg:'That sign-in took too long, so it was stopped.',next:'retry'},
   failed:{msg:'Sign-in did not complete.',next:'retry'},
   busy:{msg:'Too many sign-in attempts from here. Wait a minute.',next:'retry'},
@@ -479,26 +502,23 @@ async function gateState(o,why){
   const box=o.querySelector('[data-gate-state]'),msg=box.querySelector('[data-gate-error]'),acts=box.querySelector('[data-gate-acts]'),st=SIGNIN[why]||SIGNIN.failed;
   let who=null;try{const r=await nativeFetch('/api/auth/pending',{cache:'no-store'});if(r.ok)who=(await r.json()).email||null}catch{}
   msg.textContent=`${st.msg}${who?` You're signed in to OneProfileID as ${who}.`:''}`;
-  acts.innerHTML=`${st.next==='request'?`<button type="button" class="acct-submit" data-gate-action="request">${esc(st.ask)}</button>`:`<button type="button" class="acct-submit" data-gate-action="retry">Try again</button>`}
-    ${who?`<button type="button" class="acct-link" data-gate-action="switch">Use a different account</button>`:''}`;
+  acts.innerHTML=st.next==='switch'?`<button type="button" class="acct-submit" data-gate-action="switch">Use a different account</button>`
+    :`${st.next==='request'?`<button type="button" class="acct-submit" data-gate-action="request">${esc(st.ask)}</button>`:`<button type="button" class="acct-submit" data-gate-action="retry">Try again</button>`}
+    ${session.sso?`<button type="button" class="acct-link" data-gate-action="switch">Use a different account</button>`:''}`;
   box.hidden=false;
   // The main button would only repeat the same answer for a refused account.
-  if(st.next==='request'){const pol=o.querySelector('[data-gate-policy]');if(pol)pol.textContent=why==='full'?'Flow has as many people as it can take for now.':'Right now, joining needs an invite from someone already using Flow.';const b=o.querySelector('#acctSso');if(b)b.hidden=true;o.querySelector('[data-sso]').hidden=true}
+  if(st.next!=='retry'){const pol=o.querySelector('[data-gate-policy]');if(pol)pol.textContent=why==='full'?'Flow has as many people as it can take for now.':why==='revoked'?'Coming back needs a new invite from the owner.':'Right now, joining needs an invite from someone already using Flow.';const b=o.querySelector('#acctSso');if(b)b.hidden=true;o.querySelector('[data-sso]').hidden=true}
   acts.addEventListener('click',async e=>{
     const a=e.target.closest('[data-gate-action]')?.dataset.gateAction;if(!a)return;
-    if(a==='retry'){location.assign('/api/auth/sso/start?resume=1');return}
+    // Trying again as the same OneProfileID account: its email is pre-filled there.
+    if(a==='retry'){location.assign(ssoStart({resume:true,hint:who||''}));return}
     if(a==='request'){
       const r=await post('/api/auth/request-access',{reason:why}).catch(()=>({ok:false,data:{}}));
       msg.textContent=r.ok?`Thanks. We'll email ${r.data.email} when you can join.`:(r.data?.error||'Could not send that. Try again.');
       if(r.ok)acts.querySelector('[data-gate-action="request"]')?.remove();return;
     }
-    if(a==='switch'){
-      // Flow forgets this OneProfileID account here; OneProfileID keeps its own sign-in until signed out there.
-      await post('/api/auth/sign-out',{}).catch(()=>{});
-      msg.textContent='Signed out of Flow. To use another OneProfileID account, sign out on OneProfileID too, then continue again.';
-      acts.innerHTML=`${session.accountUrl?`<a class="acct-submit" href="${esc(session.accountUrl)}" target="_blank" rel="noopener" data-gate-action="opid">Sign out on OneProfileID</a>`:''}<button type="button" class="acct-link" data-gate-action="retry">Continue</button>`;
-      const b=o.querySelector('#acctSso');if(b)b.hidden=false;
-    }
+    // OneProfileID asks "Continue as …" or lets them pick another account, then comes back here.
+    if(a==='switch'){e.target.closest('button')?.toggleAttribute('disabled',true);switchAccount();return}
   });
 }
 function showSignIn(){
@@ -569,7 +589,7 @@ function showSignIn(){
 
   // Passkeys and biometrics run on OneProfileID's own page; it sends the browser straight back here.
   if(ssoBox){
-    const go=()=>{o.querySelector('#acctSso').toggleAttribute('loading',true);location.assign('/api/auth/sso/start')};
+    const go=()=>{o.querySelector('#acctSso').toggleAttribute('loading',true);location.assign(ssoStart({hint:joinEmail||''}))};
     o.querySelector('#acctSso').addEventListener('opid-sign-in',e=>{e.preventDefault();go()});
     o.querySelector('[data-sso]').addEventListener('click',go);
     o.querySelector('[data-pw]').addEventListener('click',()=>{ssoBox.hidden=true;login.hidden=false;login.email.focus()});
@@ -579,7 +599,7 @@ function showSignIn(){
       q.delete('signin');history.replaceState(null,'',location.pathname+(q.size?'?'+q:'')+location.hash);
       // A sign-in that took too long (making an account, say) starts again once by itself.
       let retried=false;try{retried=sessionStorage.getItem('flow.ssoRetry')==='1';if(why==='expired'&&!retried)sessionStorage.setItem('flow.ssoRetry','1')}catch{retried=true}
-      if(why==='expired'&&!retried){o.querySelector('#acctSso').toggleAttribute('loading',true);location.assign('/api/auth/sso/start?resume=1');return}
+      if(why==='expired'&&!retried){o.querySelector('#acctSso').toggleAttribute('loading',true);nativeFetch('/api/auth/pending',{cache:'no-store'}).then(r=>r.ok?r.json():{}).catch(()=>({})).then(p=>location.assign(ssoStart({resume:true,hint:p?.email||''})));return}
       gateState(o,why);
     }
   }

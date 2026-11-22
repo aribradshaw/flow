@@ -40,7 +40,9 @@ const core=await import('./lib/sharing-core.mjs');
 const opidPhotos=await import('./lib/opid-photos.mjs');
 const {validOpidUser}=await import('./lib/cleaners.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
-auth.useSessionStore(sessionStore({db:()=>cloud(),max:auth.SESSION_MAX}));
+const flowSessions=sessionStore({db:()=>cloud(),max:auth.SESSION_MAX});auth.useSessionStore(flowSessions);
+// Removing people from Flow (lib/revocations.mjs): the owner's removals and OneProfileID's membership events.
+const {revocationStore,membershipControl,SCHEMA:REVOCATION_SCHEMA}=await import('./lib/revocations.mjs');
 const {shrinks,size,keepCounters}=await import('./public/sync-core.js');
 const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
@@ -101,7 +103,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA,...REVOCATION_SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -233,6 +235,28 @@ const rates=limitsMod.rateStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 const accessRequests=accessRequestStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});auth.useAccessRequests(accessRequests);
 const invites=inviteStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 auth.useInvites(invites);
+const revocations=revocationStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+auth.useRevocations(revocations,args=>memberships.revoke({...args,by:'flow'}));
+// Who in Flow holds a OneProfileID membership id: recorded at sign-in, else an open sign-up's own id, else an invite's.
+async function memberOf(localId){
+  if(localId==='owner')return {email:auth.OWNER_EMAIL,opidId:(await users.get(auth.OWNER_EMAIL))?.opidId||''};
+  const u=await users.byLocalId(localId)||(await users.list()).find(x=>x.opidId&&auth.selfLocalId(x.opidId)===localId);
+  if(u)return {email:u.email,opidId:u.opidId};
+  const i=await invites.byLocalId(localId);if(!i)return null;
+  const v=await users.get(i.email);return {email:i.email,opidId:v?.opidId||''};
+}
+// A removed person's access ends everywhere here: Flow sessions, API keys, and so MCP and the CLI.
+async function endAccess({email,opidId}){
+  await flowSessions.deleteUser({email,opidId});
+  if(email)await apiKeys.revokeAll(email);
+}
+const memberships=membershipControl({store:revocations,opid:auth.opidMembership,resolve:memberOf,endAccess});
+// The membership id to revoke for someone who uses Flow.
+async function localIdOf(u){
+  if(u.localId)return u.localId;
+  const i=await invites.find(u.email);if(i?.claimedAt)return i.localId;
+  return u.opidId?auth.selfLocalId(u.opidId):'';
+}
 const shares=shareStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Who opened which workspace with their OneProfileID account (its owner, or a share's recipient).
 const opidMembers=opidPhotos.memberStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
@@ -718,8 +742,44 @@ async function invitesApi(req,res){
   });return true}
   if(req.method==='DELETE'){
     const i=await invites.find(u.searchParams.get('email'));
+    // Revoking an invite someone already used removes them from Flow: that is the owner's to do.
+    if(i?.claimedAt&&!i.revokedAt){
+      if(!isOwner){json(res,403,{error:'Only the owner can remove someone who joined.'});return true}
+      const r=await memberships.revoke({localId:i.localId,email:(await users.byLocalId(i.localId))?.email||i.email,by:user.email});
+      await invites.revoke(i.email);
+      json(res,200,{revoked:true,removed:true,opidRevoked:r.opidRevoked});return true;
+    }
     if(i&&(isOwner||sameEmail(i.invitedBy,user.email)))await invites.revoke(i.email);
     json(res,200,{revoked:true});return true;
+  }
+  res.writeHead(405);res.end();return true;
+}
+
+// ---------- people in Flow: the owner sees who joined and can remove someone ----------
+//   GET    /api/members                 owner: everyone who signed in, with removals
+//   DELETE /api/members?email=<address> owner: revoke their membership (here and on OneProfileID), end
+//                                        their sessions and disable their API keys. Their data stays.
+async function membersApi(req,res){
+  const u=new URL(req.url,'http://x');if(u.pathname!=='/api/members')return false;
+  const tok=tokenUser(req);
+  if(!tok&&req.headers.authorization){json(res,401,{error:'Invalid token'});return true}
+  if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
+  const user=tok||await requireUser(req,res);if(!user)return true;
+  if(!isOwnerEmail(user.email)){json(res,403,{error:'Only the owner manages who is in Flow'});return true}
+  if(req.method==='GET'){
+    const {list}=await revocations.active(),gone=new Map(list.filter(r=>r.email).map(r=>[r.email,r.revokedAt]));
+    const members=(await users.list()).map(m=>({email:m.email,name:m.name,firstSeen:m.firstSeen,lastSeen:m.lastSeen,owner:isOwnerEmail(m.email),removedAt:gone.get(m.email)||null}));
+    json(res,200,{members});return true;
+  }
+  if(req.method==='DELETE'){
+    const email=String(u.searchParams.get('email')||'').trim().toLowerCase();
+    if(isOwnerEmail(email)){json(res,400,{error:'The owner cannot be removed'});return true}
+    const m=await users.get(email);if(!m){json(res,404,{error:'Nobody with that email uses Flow'});return true}
+    const localId=await localIdOf(m);
+    if(!localId||localId==='owner'){json(res,409,{error:'Could not find their Flow membership'});return true}
+    const r=await memberships.revoke({localId,email:m.email,opidId:m.opidId,by:user.email});
+    const i=await invites.find(m.email);if(i&&!i.revokedAt)await invites.revoke(m.email);
+    json(res,200,{removed:true,email:m.email,opidRevoked:r.opidRevoked});return true;
   }
   res.writeHead(405);res.end();return true;
 }
@@ -1010,7 +1070,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
@@ -1037,5 +1097,11 @@ if(auth.mode==='local'&&!LOOPBACK.includes(host)){console.error(`Refusing to lis
 let port=Number(process.env.PORT||4317);
 server.on('error',e=>{if(e.code==='EADDRINUSE'&&!process.env.PORT){port++;server.listen(port,host);}else{console.error(e);process.exit(1);}});
 server.once('listening',()=>{setImmediate(()=>recordDevlog().catch(()=>{}))});
+// Follow OneProfileID's membership events (revocations made elsewhere) every FLOW_MEMBERSHIP_POLL_SECONDS
+// (default 60; 0 or off: never). Off in local mode.
+server.once('listening',()=>{
+  const v=String(process.env.FLOW_MEMBERSHIP_POLL_SECONDS??'60').trim(),s=v==='off'?0:Number(v);
+  memberships.start(Number.isFinite(s)&&s>0?Math.max(1,s)*1000:0);
+});
 server.on('listening',()=>{const url=auth.mode==='opid'&&!LOOPBACK.includes(host)?`${auth.appOrigin} (listening on ${host}:${server.address().port})`:`http://${host==='::1'?'[::1]':host}:${server.address().port}`;if(!VERIFY&&auth.mode==='local')writeFileSync(new URL('./running.json',import.meta.url),JSON.stringify({url,pid:process.pid}));console.log(`Flygon Flow: ${url} (${auth.mode==='opid'?'OneProfileID sign-in':'local single-user mode'}${auth.mode==='local'&&SYNC_URL&&SYNC_TOKEN?`, syncing with ${SYNC_HOST}`:''})`);});
 server.listen(port,host);

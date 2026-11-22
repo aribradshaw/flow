@@ -7,6 +7,8 @@
 //   node tools/env.mjs invite <email> --to <url> [--resend] [--no-email]   |   invites --to <url>   |   revoke <email> --to <url>
 //       app invites as the owner (same rules as Settings › Invite to Flow); the invite email is sent when
 //       the server has email configured (--resend re-sends an existing invite, --no-email skips it)
+//   node tools/env.mjs members --to <url>   |   remove <email> --to <url>
+//       who joined Flow; remove ends someone's membership (here and on OneProfileID), sessions and API keys
 //   node tools/env.mjs share --env default-workspace --person "Bo Marsh" --permission edit --email bo@… --to <url> [--dry-run]
 //       share a person and everything below them (or exactly the cards given with repeated --node <name|id>,
 //       --project <name|id>, --label <name|id>, --whole) with another Flow user; prints exactly what they
@@ -52,6 +54,16 @@ if(['invite','invites','revoke'].includes(cmd)){
   if(cmd==='invite')console.log(`${flag('resend')?'Re-sent the invite to':'Invited'} ${d.invite.email}: ${d.sent?'email sent':d.notConfigured?'email not configured on the server, nothing sent':flag('no-email')?'no email sent':'email NOT sent ('+d.emailError+')'}. ${d.link?` Send them this link: ${d.link}`:` They join at ${base}/join with OneProfileID using that address.`}`);
   else if(cmd==='revoke')console.log(`Revoked the invite for ${email}.`);
   else for(const i of d.invites)console.log(`${i.email}  ${i.revokedAt?'revoked':i.claimedAt?'joined '+i.claimedAt:'invited '+i.createdAt}`);
+  process.exit(0);
+}
+if(['members','remove'].includes(cmd)){
+  const email=rest[0]&&!rest[0].startsWith('--')?rest[0]:'';
+  if(cmd==='remove'&&!email)fail('Usage: node tools/env.mjs remove <email> --to <url>');
+  const r=await fetch(`${base}/api/members${cmd==='remove'?'?email='+encodeURIComponent(email):''}`,{method:cmd==='remove'?'DELETE':'GET',headers:{authorization:'Bearer '+token}});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)fail(`The server answered ${r.status}: ${d.error||'no access'}`);
+  if(cmd==='remove')console.log(`Removed ${d.email} from Flow${d.opidRevoked?'':' (OneProfileID has not confirmed yet; Flow refuses them and retries)'}.`);
+  else for(const m of d.members)console.log(`${m.email}  ${m.owner?'owner':m.removedAt?'removed '+m.removedAt:'last seen '+m.lastSeen}`);
   process.exit(0);
 }
 if(['share','shares','unshare'].includes(cmd)){
