@@ -1632,7 +1632,7 @@ async function mcpRoute(req,res){
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
     ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState,proposals:apiProposals,sharing:shareSvc.forUser(user,keyAllows)}),
-    origins:auth.appOrigin?[auth.appOrigin]:[]});
+    origins:auth.appOrigin?[auth.appOrigin]:[],rateLimit:apiRateLimit});
 }
 
 // ---------- DevLog: GET /api/devlog?page=N&q=text, one page (10) of releases ----------

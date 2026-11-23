@@ -56,7 +56,7 @@ There are no deletes except `edges.delete`; nodes, cards, items and projects are
 
 - `lib/registry.mjs` is built here to the shared contract; handlers live in a private map so `operations` stays plain, JSON-serialisable data for the MCP, CLI and docs workers.
 - `envs.list` lists environments the caller **owns** (`store.owned`), matching `/api/environments`; public environments are reachable by id.
-- The rate-limit hook is optional; `memoryRateLimit({perMinute})` is a per-user in-memory bucket (writes cost 2). It is per process.
+- The rate-limit hook is optional; `memoryRateLimit({perMinute})` is a per-user in-memory bucket (writes cost 2). It is per process. `mcpHandler` takes the same hook, so each MCP `tools/call` counts against the same limit (a refused call is a tool error with code `rate_limited`).
 - `/api/v1/openapi.json` is public (no data in it) and sends `Access-Control-Allow-Origin: *`; nothing else sends CORS headers, so the session path cannot be used cross-site (and POST/PATCH require `application/json`, which forces a preflight).
 - In local relay mode (`FLOW_SYNC_URL`), the API acts on the local workspace copy; it does not relay.
 

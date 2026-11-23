@@ -129,3 +129,18 @@ test('the real cards tools take and return actual points next to the estimate',(
   }
   assert.ok(toolFor(getOperation('cards.get')).outputSchema.properties.card.properties.actual);
 });
+
+test('tools/call counts against the same rate limit as the REST API (card #671)',async()=>{
+  const http=(await import('node:http')).default,{mcpHandler}=await import('../lib/mcp.mjs'),{memoryRateLimit}=await import('../lib/api-v1.mjs');
+  const limit=memoryRateLimit({perMinute:3}),calls=[];
+  const server=http.createServer((req,res)=>mcpHandler(req,res,{operations,authenticate:async()=>({id:'key:1',email:'a@example.test'}),
+    invoke:async id=>{calls.push(id);return {items:[]}},rateLimit:limit}));
+  await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
+  const url=`http://127.0.0.1:${server.address().port}/mcp`;
+  const call=i=>fetch(url,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer flow_x'},body:JSON.stringify({jsonrpc:'2.0',id:i,method:'tools/call',params:{name:'cards_list',arguments:{env:'default-workspace'}}})}).then(r=>r.json());
+  const out=[];for(let i=1;i<=5;i++)out.push((await call(i)).result);
+  assert.deepEqual(out.map(r=>!!r.isError),[false,false,false,true,true]);
+  assert.equal(out[3].structuredContent.error.code,'rate_limited');assert.equal(out[3].structuredContent.error.status,429);
+  assert.equal(calls.length,3,'refused calls never run');
+  server.closeAllConnections();await new Promise(ok=>server.close(ok));
+});
