@@ -718,7 +718,7 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
-  renderInspector();dv.renderHostedCards();photosMaybe();chatRendered();
+  renderInspector();dv.renderHostedCards();tl.renderHostedEditors();photosMaybe();chatRendered();
   // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
   const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}
   firstRun({store,replaceDb,envId:currentEnv(),signedIn:!!sessionUser()});
@@ -748,7 +748,10 @@ window.addEventListener('flow:session',()=>render());
 tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
 dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
 // AgentFlow agents and workflows link to cards and timeline items.
-af.mount({rerender:render,toast,officeOverlays:{card:dv.openCardModal},openProjects:()=>toTimeline(tl.focusProjects),openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
+af.mount({rerender:render,toast,officeOverlays:{
+  card:dv.openCardModal,item:tl.openItemModal,projects:tl.openProjectsModal,agent:af.openAgentModal,queue:af.openQueueModal,
+  leaveForAgent:id=>toAgentflow(()=>af.focus({agentId:id})),
+},openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
 // Extension point: add palette tools without changing the canvas engine.
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.

@@ -29,7 +29,8 @@ function grow(d,from,dir){
 }
 const fadeBackdrop=(d,dir)=>{try{return d.animate([{opacity:0},{opacity:1}],{duration:dir>0?240:160,pseudoElement:'::backdrop',direction:dir>0?'normal':'reverse',fill:'both'})}catch{return null}};
 
-export function detailModal({cls='',label='Details',from=null,host=document.body,onClose,events={}}={}){
+let detailIdSequence=0;
+export function detailModal({cls='',label='Details',from=null,host=document.body,scopeIds=false,onClose,events={}}={}){
   const d=document.createElement('dialog');d.className='modal '+cls;d.setAttribute('aria-label',label);d.setAttribute('aria-modal','true');
   d.innerHTML='<div class="modal-body"></div>';
   host.append(d);
@@ -44,7 +45,8 @@ export function detailModal({cls='',label='Details',from=null,host=document.body
   let done=false;const finish=()=>{if(done)return;done=true;stop();if(d.open)d.close();d.remove();onClose?.()};
   d.addEventListener('close',()=>{if(!done){if(!closing)closing=Promise.resolve();finish()}});
   d.addEventListener('mousedown',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)m.close()}});
-  const m={el:d,body:d.firstChild,from(el){src=el},
+  const prefix=scopeIds?'detail-'+(++detailIdSequence)+'-':'';
+  const m={el:d,body:d.firstChild,prefix,query(selector){return m.body.querySelector(detailSelector(selector,prefix))},from(el){src=el},
     open(){d.showModal();stop();anims=[grow(d,src,1),fadeBackdrop(d,1)].filter(Boolean);anims[0]?.finished.then(()=>{anims[0]?.cancel()},()=>{})},
     close(){
       if(closing)return closing;
@@ -62,13 +64,29 @@ export function detailModal({cls='',label='Details',from=null,host=document.body
   return m;
 }
 
+export const detailFieldId=el=>el.dataset.detailField||el.id;
+const detailSelector=(selector,prefix)=>prefix&&selector.startsWith('#')?'#'+prefix+selector.slice(1):selector;
+
 // Keep a focused field and its caret when a detail body is refreshed.
 export function paintDetail(m,html,first){
   const a=document.activeElement,keep=m.body.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
   m.body.innerHTML=html;
+  if(m.prefix){
+    const ids=new Set();
+    for(const el of m.body.querySelectorAll('[id]')){
+      ids.add(el.id);el.dataset.detailField=el.id;el.id=m.prefix+el.id;
+    }
+    const refs=['for','list','aria-controls','aria-labelledby','aria-describedby'];
+    for(const el of m.body.querySelectorAll(refs.map(attr=>'['+attr+']').join(','))){
+      for(const attr of refs){
+        const value=el.getAttribute(attr);
+        if(value)el.setAttribute(attr,value.split(/\s+/).map(id=>ids.has(id)?m.prefix+id:id).join(' '));
+      }
+    }
+  }
   const f=keep&&m.body.querySelector('#'+CSS.escape(keep.id));
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
-  else if(!m.el.contains(document.activeElement)||document.activeElement===m.el)m.body.querySelector(first)?.focus({preventScroll:true});
+  else if(!m.el.contains(document.activeElement)||document.activeElement===m.el)m.query(first)?.focus({preventScroll:true});
 }
 
 // A small confirm on top of everything (gates). Enter confirms, Esc cancels.

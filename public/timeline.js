@@ -3,7 +3,7 @@ import {$,esc,ib,uid,clone,download,pickerButton,openPicker,prop,hint} from './u
 import {store,change,checkpoint,commit,snapshot,save,PALETTE,cleanRepos} from './store.js';
 import {cardsForItem,isOpen,readyToClose} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {detailModal,ask} from './modal.js';
+import {detailModal,paintDetail,detailFieldId,ask} from './modal.js';
 import {panel} from './motion.js';
 import {linkOf,canEdit,locked,lockedMsg,ownerMsg,linkedTip,sharedBadge,sharedChip,sharedNote,sameSource,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 import {isForeign} from './combined-core.js';
@@ -371,53 +371,72 @@ export function add(over={}){
   const t=$('#ti-title');t?.focus();t?.select();
 }
 const refuse=i=>{toast(linkOf(i)?.foreign||linkOf(i)?.permission==='edit'?ownerMsg(i,'This item'):lockedMsg(i),true)};
-function remove(id){if(linkOf(item(id))){refuse(item(id));return}change(()=>{db().timeline=db().timeline.filter(i=>i.id!==id);for(const i of db().timeline)if(i.release===id)i.release='';for(const c of db().devops.cards)if(c.item===id)c.item='';selected=null})}
-function duplicate(id){const i=item(id);if(linkOf(i)){refuse(i);return}if(i)change(()=>{const c={...clone(i),id:uid(),title:i.title+' (copy)'};db().timeline.push(c);selected=c.id})}
+function remove(id){if(linkOf(item(id))){refuse(item(id));return}change(()=>{db().timeline=db().timeline.filter(i=>i.id!==id);for(const i of db().timeline)if(i.release===id)i.release='';for(const c of db().devops.cards)if(c.item===id)c.item='';if(selected===id)selected=null})}
+function duplicate(id,pick=id=>selected=id){const i=item(id);if(linkOf(i)){refuse(i);return}if(i)change(()=>{const c={...clone(i),id:uid(),title:i.title+' (copy)'};db().timeline.push(c);pick(c.id)})}
 // This environment's own project of that name (never a combined environment's), or a new one.
 export function projectByName(name){
   const found=db().projects.find(p=>!isForeign(p.id)&&p.name.toLowerCase()===name.toLowerCase());if(found)return found;
   const p={id:uid(),name:name.slice(0,80),color:PALETTE[db().projects.length%PALETTE.length],entity:''};db().projects.push(p);return p;
 }
-function addTag(input){
-  const name=input.value.trim(),i=item(selected);if(!name||!i)return;
-  change(()=>{const p=projectByName(name);if(!i.projects.includes(p.id))i.projects.push(p.id)});
-  $('#ti-proj')?.focus();
-}
-
 // One option of a segmented item field. The chosen one shows its word: the icons alone are unreadable cold.
 const segBtn=(field,v,x,on,dis)=>`<button type="button" id="ti-${field}-${v}" class="${on?'on':''}" data-tset="${field}:${v}" data-tip="${esc(x.label)}" aria-label="${esc(x.label)}" aria-pressed="${on}"${dis?' disabled':''}>${icon(x.icon,13)}${on?`<span>${esc(x.word||x.label)}</span>`:''}</button>`;
 const setField=(field,name,entries,cur,dis=false)=>`<div class="ti-set"><div class="cd-lab">${esc(name)}${cur?'':' <em>none</em>'}</div><div class="opts" role="group" aria-label="${esc(name)}">${entries.map(([v,x])=>segBtn(field,v,x,cur===v,dis)).join('')}</div></div>`;
 // An item opens as a modal growing from its bar or card (modal.js); the Projects panel stays a side panel.
-let modal=null,modalFor=null;
+let modal=null;
+const hostedEditors=new Set();
 const itemEl=id=>document.querySelector(`#timelineView [data-item="${CSS.escape(id)}"]`);
+const boardEditor=createEditorHandlers({
+  root:()=>selected==='projects'?$('#inspector'):modal?.body,
+  id:()=>selected,select,refresh:()=>rerender(),openCard:id=>openCard(id),duplicate,
+});
+export const inspectorClick=boardEditor.click,inspectorInput=boardEditor.input,
+  inspectorChange=boardEditor.change,inspectorKey=boardEditor.keydown;
+
 export function renderInspector(pane){
   panel(pane,selected==='projects');
   if(selected==='projects')pane.innerHTML=projectsHtml();
   const i=item(selected);
   if(!i){if(modal&&!modal.closing)modal.close();return}
   if(!modal||modal.closing){
-    const m=detailModal({cls:'item-modal',label:'Timeline item',from:itemEl(i.id),
-      events:{click:inspectorClick,input:inspectorInput,change:inspectorChange,keydown:inspectorKey},
+    const m=detailModal({cls:'item-modal',label:'Timeline item',from:itemEl(i.id),events:boardEditor,
       onClose(){const id=m.forId;if(modal===m)modal=null;if(selected===id){selected=null;rerender()}if(!m.quiet)itemEl(id)?.focus({preventScroll:true})}});
     modal=m;
   }
-  modalFor=modal.forId=i.id;modal.from(itemEl(i.id));
-  const a=document.activeElement,keep=modal.el.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
-  modal.body.innerHTML=itemHtml(i);
+  modal.forId=i.id;modal.from(itemEl(i.id));
+  paintDetail(modal,itemHtml(i),'#ti-title');
   if(linkOf(i))loadHistory(modal.body);
-  const f=keep&&document.getElementById(keep.id);
-  if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
-  else if(!modal.el.contains(document.activeElement))modal.el.querySelector('#ti-title')?.focus({preventScroll:true});
+}
+
+export function openItemModal(id,opts){return item(id)?openEditor(id,opts):undefined}
+export function openProjectsModal(_id,opts){return openEditor('projects',opts)}
+export function renderHostedEditors(){for(const paint of hostedEditors)paint()}
+function openEditor(id,{host,from,onClose,openItem,openCard,openLink}){
+  const projects=id==='projects';
+  const handlers=createEditorHandlers({
+    root:()=>m.body,query:selector=>m.query(selector),id:()=>id,select:next=>next?openItem(next):m.close(),refresh:paint,openCard,openLink,
+    duplicate:id=>{let copy;duplicate(id,next=>copy=next);if(copy)openItem(copy)},
+    redraw:()=>{},
+  });
+  const m=detailModal({host,from,scopeIds:true,cls:projects?'projects-modal':'item-modal',label:projects?'Projects':'Timeline item',
+    events:handlers,onClose(){hostedEditors.delete(paint);onClose?.()}});
+  hostedEditors.add(paint);paint();return m;
+  function paint(){
+    if(m.closing)return;
+    if(projects){paintDetail(m,projectsHtml(),'[data-ti=close]');return}
+    const i=item(id);if(!i){m.close();return}
+    paintDetail(m,itemHtml(i,{host}), '#ti-title');
+    if(linkOf(i))loadHistory(m.body);
+  }
 }
 // How a conflict notice names an earlier value of an item field.
 const clash=(i,f)=>clashHtml(i,f,{show:v=>f==='release'?item(v)?.title||'none':f==='kind'?KINDS[v]?.label||v:f==='status'?statusInfo(v)?.label||v:f==='priority'?PRIORITY[v]?.label||'none':v});
-function itemHtml(i){
+function itemHtml(i,{host}={}){
   // A linked item (docs/sharing.md): view and comment lock every field; edit unlocks the ones its owner
   // allows. Its projects are the owner's.
   const l=linkOf(i),ed=canEdit(i),ro=ed?'':' disabled';
   const k=KINDS[i.kind],people=chartNames(['person']);
   const sugg=[...db().projects.filter(p=>!isForeign(p.id)&&!i.projects.includes(p.id)).map(p=>p.name),...chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase()))];
-  const link=/^https?:\/\//i.test(i.link)?`<a class="ib" href="${esc(i.link)}" target="_blank" rel="noopener" data-tip="Open link" aria-label="Open link">${icon('external')}</a>`:'';
+  const link=!/^https?:\/\//i.test(i.link)?'':host?ib('external','Link details',{attrs:'data-ti="openLink"'}):`<a class="ib" href="${esc(i.link)}" target="_blank" rel="noopener" data-tip="Open link" aria-label="Open link">${icon('external')}</a>`;
   // Releases sharing a project come first in the target-release picker.
   const releases=db().timeline.filter(r=>r.kind==='release'&&r.id!==i.id&&sameSource(r,i)).sort((a,b)=>(b.projects.some(p=>i.projects.includes(p))-a.projects.some(p=>i.projects.includes(p)))||(a.start||'9999').localeCompare(b.start||'9999'));
   const inRelease=i.kind==='release'?db().timeline.filter(x=>x.release===i.id):[],linked=cardsForItem(db(),i.id);
@@ -433,7 +452,7 @@ function itemHtml(i){
       ${l?'':`<input id="ti-proj" list="ti-proj-list" placeholder="${i.projects.length?'':'Add project…'}" aria-label="Add project">`}</div>
     <datalist id="ti-proj-list">${sugg.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>
     ${inRelease.length?`<div class="cd-lab">In this release <em>${inRelease.filter(closed).length}/${inRelease.length} done</em></div><ul class="links" aria-label="In this release">${inRelease.map(x=>`<li><button type="button" data-goto-item="${esc(x.id)}" data-tip="${esc(statusInfo(x.status).label)}">${icon(STATUS[x.status].icon,12)}<span>${esc(x.title)}</span><em>${x.priority?icon(PRIORITY[x.priority].icon,11):''}</em></button></li>`).join('')}</ul>`:''}
-    ${linked.length?`<div class="cd-lab">DevOps cards <em>${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</em></div><ul class="links" aria-label="DevOps cards">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="Open card in DevOps">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
+    ${linked.length?`<div class="cd-lab">DevOps cards <em>${linked.filter(c=>!isOpen(c)).length}/${linked.length} done</em></div><ul class="links" aria-label="DevOps cards">${linked.map(c=>`<li><button type="button" data-goto-card="${esc(c.id)}" data-tip="${host?'Open card':'Open card in DevOps'}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(colName(c.column))}</em></button></li>`).join('')}</ul>`:''}
     ${l?historyHtml(i,'item'):''}
     </div><aside class="cd-side ibody">
     <div class="rail-g" role="group" aria-label="Schedule and ownership">
@@ -446,77 +465,86 @@ function itemHtml(i){
 function projectsHtml(){
   const sugg=chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase())).slice(0,30),cs=cards();
   return `<div class="ihead"><span class="k">${icon('tag')}</span><strong>Projects</strong><span class="sp"></span>${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-ti="close"'})}</div>
-    <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`,l=linkOf(p),ro=canEdit(p)?'':' disabled';
+    <div class="ibody projects-editor" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`,l=linkOf(p),ro=canEdit(p)?'':' disabled';
       // A shared project: its name and colour follow the share's permission; where it sits is the owner's.
       return `<div class="prow${l?' linked':''}">${sharedBadge(p,{inline:true})}<input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"${ro}><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"${ro}><em tabindex="0" role="img" data-tip="${items}" aria-label="${items}">${n}</em>${l?'':ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
         <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"${l?' disabled':''}><option value="">Not under an entity</option>${cs.filter(c=>c.id===p.entity||sameSource(c,p)).map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select>${l?'':`<input class="repos" data-prepos="${esc(p.id)}" value="${esc((p.repos||[]).join(', '))}" maxlength="2000" placeholder="Repos: owner/name, …" data-tip="Code repositories of this project, comma separated (a name, owner/name or a git remote). In the 3D office, teammates' agents working in them show their details to everyone who can see this project." aria-label="Repositories for ${esc(p.name)}" spellcheck="false">`}${clashHtml(p,'name')}${clashHtml(p,'color')}</div>`}).join('')}
     <div class="prow"><input id="pnew" maxlength="80" placeholder="New project" aria-label="New project name">${ib('plus','Add project',{attrs:'data-ti="padd"'})}</div>
     ${sugg.length?`<div class="cd-lab">From your mind maps ${hint('Entity and area names from your charts. Click one to add it as a project.','From your mind maps')}</div><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project" aria-label="Add ${esc(s)} as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
 }
-export function inspectorClick(e){
-  const b=e.target.closest('button');if(!b)return;
-  const i=item(selected);
-  if(i&&clashClick(b,i,(f,v)=>change(()=>{i[f]=v;if(f==='start'&&!v)i.end=''}),rerender))return;
-  if(selected==='projects'&&(b.dataset.clashSee||b.dataset.clashRestore||b.dataset.clashDismiss)){
-    const p=project(b.closest('.prow')?.querySelector('[data-pname]')?.dataset.pname);if(p)clashClick(b,p,(f,v)=>change(()=>p[f]=v),rerender);return;
+function createEditorHandlers({root,query,id,select,refresh,openCard,openLink,duplicate,redraw=renderView}){
+  const $=query||((selector)=>root()?.querySelector(selector));
+  function addTag(input){
+    const name=input.value.trim(),i=item(id());if(!name||!i||linkOf(i))return;
+    change(()=>{const p=projectByName(name);if(!i.projects.includes(p.id))i.projects.push(p.id)});
+    $('#ti-proj')?.focus();
   }
-  if(b.dataset.i==='shComment'&&i){postComment(modal.body,i).catch(err=>toast(err.message,true));return}
-  if(i&&locked(i)&&(b.dataset.tset||b.dataset.untag||b.dataset.ti==='complete')){toast(lockedMsg(i),true);return}
-  if(i&&linkOf(i)&&b.dataset.untag)return;
-  if(b.dataset.pdel&&linkOf(project(b.dataset.pdel))){toast(linkOf(project(b.dataset.pdel)).foreign?ownerMsg(project(b.dataset.pdel),'This project'):'Shared projects belong to their owner.',true);return}
-  if(b.dataset.tset&&i){
-    const [f,v]=b.dataset.tset.split(':');
-    change(()=>{i[f]=f==='priority'&&i.priority===v?'':v;if(f==='kind'&&KINDS[v].range&&dated(i)&&!isRange(i))i.end=n2d(d2n(i.start)+13);if(f==='kind'&&v==='release')i.release=''});return;
+  function click(e){
+    const b=e.target.closest('button');if(!b)return;
+    const i=item(id());
+    if(i&&clashClick(b,i,(f,v)=>change(()=>{i[f]=v;if(f==='start'&&!v)i.end=''}),refresh))return;
+    if(id()==='projects'&&(b.dataset.clashSee||b.dataset.clashRestore||b.dataset.clashDismiss)){
+      const p=project(b.closest('.prow')?.querySelector('[data-pname]')?.dataset.pname);if(p)clashClick(b,p,(f,v)=>change(()=>p[f]=v),refresh);return;
+    }
+    if(b.dataset.i==='shComment'&&i){postComment(root(),i).catch(err=>toast(err.message,true));return}
+    if(i&&locked(i)&&(b.dataset.tset||b.dataset.untag||b.dataset.ti==='complete')){toast(lockedMsg(i),true);return}
+    if(i&&linkOf(i)&&b.dataset.untag)return;
+    if(b.dataset.pdel&&linkOf(project(b.dataset.pdel))){toast(linkOf(project(b.dataset.pdel)).foreign?ownerMsg(project(b.dataset.pdel),'This project'):'Shared projects belong to their owner.',true);return}
+    if(b.dataset.tset&&i){
+      const [f,v]=b.dataset.tset.split(':');
+      change(()=>{i[f]=f==='priority'&&i.priority===v?'':v;if(f==='kind'&&KINDS[v].range&&dated(i)&&!isRange(i))i.end=n2d(d2n(i.start)+13);if(f==='kind'&&v==='release')i.release=''});return;
+    }
+    if(b.dataset.untag&&i){change(()=>i.projects=i.projects.filter(p=>p!==b.dataset.untag));return}
+    if(b.dataset.gotoItem){select(b.dataset.gotoItem);return}
+    if(b.dataset.gotoCard){openCard(b.dataset.gotoCard);return}
+    if(b.dataset.padd){change(()=>projectByName(b.dataset.padd));return}
+    if(b.dataset.pdel){
+      const p=project(b.dataset.pdel),n=db().timeline.filter(x=>x.projects.includes(p.id)).length;
+      const drop=()=>change(()=>{db().projects=db().projects.filter(x=>x.id!==p.id);for(const x of db().timeline)x.projects=x.projects.filter(id=>id!==p.id);for(const c of db().devops.cards)if(c.project===p.id)c.project=''});
+      if(!n){drop();return}
+      ask(`Delete project "${p.name}"?
+  It will be removed from ${n} item${n===1?'':'s'}. You can undo this.`,{ok:'Delete',danger:true}).then(ok=>{if(ok)drop()});return;
+    }
+    ({complete:()=>toggleDone(id()),dup:()=>duplicate(id()),delete:()=>remove(id()),close:()=>select(null),openLink:()=>openLink?.(i.link),
+      padd(){const v=$('#pnew').value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}})[b.dataset.ti]?.();
   }
-  if(b.dataset.untag&&i){change(()=>i.projects=i.projects.filter(p=>p!==b.dataset.untag));return}
-  if(b.dataset.gotoItem){select(b.dataset.gotoItem);return}
-  if(b.dataset.gotoCard){openCard(b.dataset.gotoCard);return}
-  if(b.dataset.padd){change(()=>projectByName(b.dataset.padd));return}
-  if(b.dataset.pdel){
-    const p=project(b.dataset.pdel),n=db().timeline.filter(x=>x.projects.includes(p.id)).length;
-    const drop=()=>change(()=>{db().projects=db().projects.filter(x=>x.id!==p.id);for(const x of db().timeline)x.projects=x.projects.filter(id=>id!==p.id);for(const c of db().devops.cards)if(c.project===p.id)c.project=''});
-    if(!n){drop();return}
-    ask(`Delete project "${p.name}"?
-It will be removed from ${n} item${n===1?'':'s'}. You can undo this.`,{ok:'Delete',danger:true}).then(ok=>{if(ok)drop()});return;
-  }
-  ({complete:()=>toggleDone(selected),dup:()=>duplicate(selected),delete:()=>remove(selected),close:()=>select(null),
-    padd(){const v=$('#pnew').value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}})[b.dataset.ti]?.();
-}
-// Fields autosave as you type, one undo step per open form.
-export function inspectorInput(e){
-  const t=e.target;
-  if(t.id==='ti-proj'){if(e.inputType==='insertReplacementText'||!e.inputType)addTag(t);return}
-  if(t.id==='pnew'||t.dataset.punder||t.dataset.prepos||t.id==='ti-release')return;
-  if(t.dataset.pname||t.dataset.pcolor){
-    const p=project(t.dataset.pname||t.dataset.pcolor),form=$('#pedit');if(!p||locked(p))return;
-    if(t.dataset.pname&&!t.value.trim())return;
+  // Fields autosave as you type, one undo step per open form.
+  function input(e){
+    const t=e.target;
+    if(detailFieldId(t)==='ti-proj'){if(e.inputType==='insertReplacementText'||!e.inputType)addTag(t);return}
+    if(detailFieldId(t)==='pnew'||t.dataset.punder||t.dataset.prepos||detailFieldId(t)==='ti-release')return;
+    if(t.dataset.pname||t.dataset.pcolor){
+      const p=project(t.dataset.pname||t.dataset.pcolor),form=$('#pedit');if(!p||locked(p))return;
+      if(t.dataset.pname&&!t.value.trim())return;
+      if(!edited.has(form)){checkpoint();edited.add(form)}
+      if(t.dataset.pname)p.name=t.value.trim();else p.color=t.value;
+      save();redraw();return;
+    }
+    const form=$('#tedit'),i=item(id());if(!form||!i||locked(i)||t.matches('[data-sh-comment]'))return;
+    const title=$('#ti-title').value.trim(),start=$('#ti-start').value,end=$('#ti-end').value;
+    if(!title)return;
     if(!edited.has(form)){checkpoint();edited.add(form)}
-    if(t.dataset.pname)p.name=t.value.trim();else p.color=t.value;
-    save();renderView();return;
+    const wasDated=dated(i);
+    Object.assign(i,{title,start,end:start&&end&&end>start?end:'',owner:$('#ti-owner').value.trim(),link:$('#ti-link').value.trim(),notes:$('#ti-notes').value});
+    $('#ti-end').min=start;$('#ti-end').disabled=!start;
+    save();if(wasDated!==dated(i))refresh();else redraw();
   }
-  const form=$('#tedit'),i=item(selected);if(!form||!i||locked(i)||t.matches('[data-sh-comment]'))return;
-  const title=$('#ti-title').value.trim(),start=$('#ti-start').value,end=$('#ti-end').value;
-  if(!title)return;
-  if(!edited.has(form)){checkpoint();edited.add(form)}
-  const wasDated=dated(i);
-  Object.assign(i,{title,start,end:start&&end&&end>start?end:'',owner:$('#ti-owner').value.trim(),link:$('#ti-link').value.trim(),notes:$('#ti-notes').value});
-  $('#ti-end').min=start;$('#ti-end').disabled=!start;
-  save();if(wasDated!==dated(i))rerender();else renderView();
-}
-export function inspectorChange(e){
-  const t=e.target;
-  if(t.id==='ti-proj'&&!linkOf(item(selected)))addTag(t);
-  if(t.id==='ti-release'){const i=item(selected);if(i&&!locked(i))change(()=>i.release=t.value)}
-  if(t.dataset.punder){const p=project(t.dataset.punder);if(p&&!linkOf(p))change(()=>p.entity=t.value)}
-  if(t.dataset.prepos){const p=project(t.dataset.prepos),r=cleanRepos(t.value.split(/[,\s]+/));if(p&&!linkOf(p)&&r.join()!==(p.repos||[]).join())change(()=>{if(r.length)p.repos=r;else delete p.repos})}
-}
-export function inspectorKey(e){
-  // The item panel keeps its keys to itself, so its shortcut is handled here. Letters still type in its fields.
-  if(!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return}
-  if(e.key!=='Enter')return;
-  if(e.target.id==='ti-proj'){e.preventDefault();addTag(e.target)}
-  if(e.target.dataset.prepos){e.preventDefault();e.target.blur();return}
-  if(e.target.id==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
+  function changed(e){
+    const t=e.target;
+    if(detailFieldId(t)==='ti-proj')addTag(t);
+    if(detailFieldId(t)==='ti-release'){const i=item(id());if(i&&!locked(i))change(()=>i.release=t.value)}
+    if(t.dataset.punder){const p=project(t.dataset.punder);if(p&&!linkOf(p))change(()=>p.entity=t.value)}
+    if(t.dataset.prepos){const p=project(t.dataset.prepos),r=cleanRepos(t.value.split(/[,\s]+/));if(p&&!linkOf(p)&&r.join()!==(p.repos||[]).join())change(()=>{if(r.length)p.repos=r;else delete p.repos})}
+  }
+  function key(e){
+    // The item panel keeps its keys to itself, so its shortcut is handled here. Letters still type in its fields.
+    if(!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&matches(e,'timeline.complete')&&item(id())){e.preventDefault();toggleDone(id());return}
+    if(e.key!=='Enter')return;
+    if(detailFieldId(e.target)==='ti-proj'){e.preventDefault();addTag(e.target)}
+    if(e.target.dataset.prepos){e.preventDefault();e.target.blur();return}
+    if(detailFieldId(e.target)==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
+  }
+  return {click,input,change:changed,keydown:key};
 }
 // Mark done, or reopen a done item as planned.
 const toggleDone=id=>{const i=item(id);if(i&&locked(i)){toast(lockedMsg(i),true);return}if(i)change(()=>i.status=i.status==='done'?'planned':'done')};

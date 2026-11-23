@@ -142,3 +142,23 @@
 /* Doors to other offices (office-portals.js): "<owner>'s office", with its environment's name. */
 .of-label.portal .of-portal{display:flex;flex-direction:column;align-items:center;max-width:200px;padding:3px 10px;border-radius:10px;background:rgba(61,111,182,.92);color:#fff;font-size:11.5px;line-height:1.25;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .of-label.portal .of-portal small{opacity:.85;font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+/* Editors and linked records stay in the office's native dialog stack. */
+.of dialog.modal::backdrop{background:#192d3b40;backdrop-filter:none}
+.of dialog.modal{max-height:88vh}
+.of .projects-modal,.of .office-record-modal{width:min(620px,92vw)}
+.of .projects-editor,.office-record-body{overflow:auto}
+.office-record-body .af-hero{margin-bottom:12px}
+.office-record-body h2,.office-record-body h3,.office-record-body .af-hero p{margin:0}
+.office-record-body h2{font-size:18px}
+.office-record-body h3{font-size:13px;margin:12px 0 5px}
+.office-agent-fields{display:grid;gap:6px;margin:0}
+.office-agent-fields>div{display:grid;grid-template-columns:95px minmax(0,1fr);gap:8px}
+.office-agent-fields dt{color:var(--muted)}
+.office-agent-fields dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.office-record-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+.office-record-actions .office-leave-link:only-child{margin-left:auto}
+.office-leave-link{color:var(--muted);font-size:12px}
+.office-url{overflow-wrap:anywhere}
+.office-card-link{border:0;padding:0;background:none;color:var(--accent);font:inherit;text-align:left;cursor:pointer}
+.office-card-link:hover{text-decoration:underline}

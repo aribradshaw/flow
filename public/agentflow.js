@@ -5,9 +5,9 @@ import {linkOf,canEdit} from './share.js';
 import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {ask,detailModal} from './modal.js';
+import {ask,detailModal,paintDetail} from './modal.js';
 import {openMenu,menuOpen} from './menu.js';
-import {store,change,checkpoint,commit,save} from './store.js';
+import {store,change,checkpoint,commit,save,subscribeWorkspace} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,rootsOf,setupSteps,JOBS_STALE,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
@@ -44,9 +44,9 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');return `<span class="pill" style="background:${bg};color:${fg}">${esc(names[s]||s)}</span>`};
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
-let openProjects,officeOverlays,officeModule;
+let officeOverlays,officeModule;
 export function mount(opts){
-  openProjects=opts.openProjects;officeOverlays=opts.officeOverlays;
+  officeOverlays=opts.officeOverlays;
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
@@ -571,9 +571,7 @@ async function openOffice(link={}){
   m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
     agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
     ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
-    // Cards in the owner's office carry the owner's ids; in a shared environment they open as its linked copies.
-    openProjects,overlays:o?{card:(id,opts)=>officeOverlays?.card?.(L(id),opts)}:officeOverlays,cardId:link.cardId&&o?unL(link.cardId):link.cardId,
-    focusAgent:id=>{id=L(id);if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()},
+    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
@@ -758,12 +756,49 @@ const cardItems=()=>db().devops.cards.filter(own).map(c=>({value:c.id,label:`#${
 const itemItems=()=>db().timeline.filter(own).sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
 const PICKERS={'af-projects':['projects',projectItems,'Projects'],'af-cards':['cards',cardItems,'Cards'],'af-items':['items',itemItems,'Timeline items']};
 const linkCount=x=>x.projects.length+x.cards.length+x.items.length;
-function linksHtml(x){
+function linksHtml(x,{readOnly=false}={}){
   const w=workFor(db(),x);
   const cards=w.cards.map(c=>`<li><button type="button" data-af-card="${esc(c.id)}" data-tip="${x.cards.includes(c.id)?'Linked card':'Open card in a linked project'}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(db().devops.columns.find(k=>k.id===c.column)?.name||c.column)}${c.due?' · '+esc(c.due):''}</em></button></li>`).join('');
-  const items=w.items.map(i=>`<li><button type="button" data-af-item="${esc(i.id)}" data-tip="Open in the Timeline">${icon(i.kind==='deadline'?'flag':'gantt',12)}<span>${esc(i.title)}</span><em>${esc(i.start||'unscheduled')}</em></button></li>`).join('');
-  return `<div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>
+  const items=w.items.map(i=>`<li><button type="button" data-af-item="${esc(i.id)}" data-tip="${readOnly?'Open timeline item':'Open in the Timeline'}">${icon(i.kind==='deadline'?'flag':'gantt',12)}<span>${esc(i.title)}</span><em>${esc(i.start||'unscheduled')}</em></button></li>`).join('');
+  return `${readOnly?'':`<div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>`}
     ${cards||items?`<ul class="links af-links">${cards}${items}</ul>`:`<div class="dc-hint">Nothing linked yet: projects, cards and deadlines.</div>`}`;
+}
+// The office uses the same agent identity and work links, with a read-only summary of the editor tabs.
+export function openAgentModal(id,opts){return agent(id)?openAgentOverlay(id,opts,false):undefined}
+export function openQueueModal(id,opts){return agent(id)?openAgentOverlay(id,opts,true):undefined}
+function openAgentOverlay(id,{host,from,onClose,openCard,openItem,openQueue,leaveForAgent},queue){
+  const m=detailModal({host,from,cls:'office-record-modal',label:queue?'Work queue':'Agent details',
+    onClose(){unsubscribe();onClose?.()},events:{click(e){
+      const b=e.target.closest('button');if(!b)return;
+      if(b.matches('[data-office-close]'))m.close();
+      else if(b.dataset.afCard)openCard(b.dataset.afCard);
+      else if(b.dataset.afItem)openItem(b.dataset.afItem);
+      else if(b.matches('[data-office-queue]'))openQueue(id);
+      else if(b.matches('[data-office-agent-tab]'))leaveForAgent(id);
+    }}});
+  const unsubscribe=subscribeWorkspace(paint);
+  paint();return m;
+  function paint(){
+    if(m.closing)return;
+    const a=agent(id);if(!a){m.close();return}
+    const header=`<div class="ihead cd-h"><span class="k">${icon(queue?'branch':KIND_ICON[a.kind])}</span><strong>${queue?'Work queue':'Agent details'}</strong><span class="sp"></span>${ib('x','Close',{attrs:'data-office-close'})}</div>`;
+    const info=(name,value)=>value?`<div><dt>${name}</dt><dd>${esc(value)}</dd></div>`:'';
+    const list=queue?workQueue(db(),id,{includeSnoozed:true}):[];
+    paintDetail(m,header+`<div class="ibody office-record-body">
+      <div class="af-hero">${avatarHtml(a)}<div><h2>${esc(a.name)}</h2>${a.title?`<p>${esc(a.title)}</p>`:''}</div></div>
+      ${queue?(list.length?`<ul class="links">${list.map(c=>`<li><button type="button" data-af-card="${esc(c.id)}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(db().devops.columns.find(col=>col.id===c.column)?.name||c.column)}${c.due?' · '+esc(c.due):''}</em></button></li>`).join('')}</ul>`:'<p class="dc-hint">No open cards are delegated to this agent.</p>')
+        :`<dl class="office-agent-fields">
+          ${info('Kind',AGENT_KINDS[a.kind])}${info('Status',AGENT_STATUS[a.status])}${info('Purpose',a.purpose)}${info('Instructions',a.instructions)}
+          ${info('Reports to',agent(a.reportsTo)?.name)}${info('Supervisor',person(a.supervisor)?.name)}
+          ${info('Runner',a.runtime)}${info('Models',modelsOf(a).join(', '))}${info('Schedule',a.schedule)}
+          ${info('Inputs',a.inputs.join(', '))}${info('Outputs',a.outputs.join(', '))}${info('Tools',a.tools.join(', '))}
+          ${info('Projects',a.projects.map(id=>project(id)?.name).filter(Boolean).join(', '))}
+        </dl>
+        <h3>Linked work</h3>${linksHtml(a,{readOnly:true})}
+        <div class="office-record-actions">${a.kind==='agent'?'<button type="button" class="txt" data-office-queue>Open work queue</button>':''}
+          <button type="button" class="txt office-leave-link" data-office-agent-tab>Open in AgentFlow ↗</button></div>`}
+      </div>`,'[data-office-close]');
+  }
 }
 // The candidates for Reports to: not itself and not one of its own reports.
 const managersFor=a=>af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).has(x.id)).sort(byName);

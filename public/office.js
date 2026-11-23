@@ -6,7 +6,9 @@
 // arrives here is already what this person may see. Loaded on demand from the AgentFlow toolbar.
 import * as THREE from './vendor/three/three.module.min.js';
 import {icon} from './icons.js';
-import {esc,uid} from './ui.js';
+import {esc,ib,uid} from './ui.js';
+import {detailModal} from './modal.js';
+import {officeOverlayActions} from './office-overlays-core.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
 import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
@@ -32,7 +34,7 @@ let S=null; // the open office
 
 // ---------- opening and closing ----------
 // opts: {env, current (the app's environment), offices:[{id,name}], agentflow():[] (the local store's agents, for current),
-//        focusAgent(id) (opens an AgentFlow agent; current env only), me:{name,image}, toast(msg,bad),
+//        overlays (hosted editors), me:{name,image}, toast(msg,bad),
 //        focus (optional: a live agent's id, or an AgentFlow agent's id or name, to show once it arrives), onClose()}
 export function openOffice(opts){
   if(S)return;
@@ -108,15 +110,23 @@ export function closeOffice(){
 export function officeHistory(state){
   if(!S)return false;
   const top=S.overlays.at(-1),key=state?.officeOverlay;
-  if(!top)return key?.startsWith(S.overlaySession+'/')||false;
+  if(!top)return typeof key==='string'&&key.startsWith(S.overlaySession+'/');
   if(key!==top.key){
     const keep=S.overlays.findIndex(entry=>entry.key===key)+1;
-    for(const entry of S.overlays.splice(keep).reverse())entry.modal.close();
+    const office=S,removed=office.overlays.splice(keep),expected=office.overlays.at(-1);
+    Promise.all(removed.reverse().map(entry=>entry.modal.close())).then(()=>{
+      if(S!==office||office.overlays.at(-1)!==expected)return;
+      const parent=office.overlays.at(-1)?.modal.el||office.bridge?.dialog||office.root;
+      if(parent.contains(document.activeElement))return;
+      const from=removed.at(-1)?.from;
+      (from?.isConnected&&parent.contains(from)?from:parent).focus({preventScroll:true});
+    });
+    if(!keep)office.leaveOverlay?.();
   }
   return true;
 }
 function openOverlay(kind,id){
-  const office=S,open=office?.opts.overlays?.[kind];if(!open)return;
+  const office=S,open=kind==='link'?openLinkDetails:office?.opts.overlays?.[kind];if(!office||!open)return;
   const at=office.overlays.findIndex(entry=>entry.kind===kind&&entry.id===id);
   if(at>=0){
     const distance=office.overlays.length-1-at;
@@ -125,17 +135,33 @@ function openOverlay(kind,id){
   }
   clearKeys();office.pointer?.cancelOrbit();
   const key=office.overlaySession+'/'+uid(),from=document.activeElement;
-  const modal=open(id,{host:office.root,from,onClose(){
+  const modal=open(id,{host:office.root,from,...officeOverlayActions(openOverlay),leaveForAgent:agentId=>{
+    const leave=office.opts.overlays.leaveForAgent;
+    // Remove the overlay entries as a unit before handing focus over to the AgentFlow tab.
+    office.leaveOverlay=()=>{closeOffice();leave?.(agentId)};
+    history.go(-office.overlays.length);
+  },onClose(){
     if(S!==office)return;
     const i=office.overlays.findIndex(entry=>entry.key===key);
     if(history.state?.officeOverlay===key)history.back();
     else if(i>=0)office.overlays.splice(i,1);
   }});
   if(!modal)return;
-  office.overlays.push({kind,id,key,modal});
+  office.overlays.push({kind,id,key,modal,from});
   history.pushState({...history.state,officeOverlay:key},'');
 }
-function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env,focus:''};S.switching=true;closeOffice();openOffice(opts)}
+function openLinkDetails(url,{host,from,onClose}){
+  if(!/^https?:\/\//i.test(url))return;
+  const m=detailModal({host,from,onClose,cls:'office-record-modal',label:'Link details',events:{click:e=>{
+    if(e.target.closest('[data-office-close]'))m.close();
+  }}});
+  m.body.innerHTML=`<div class="ihead cd-h"><span class="k">${icon('link')}</span><strong>Link details</strong><span class="sp"></span>${ib('x','Close',{attrs:'data-office-close'})}</div>
+    <div class="ibody office-record-body"><p class="office-url">${esc(url)}</p>
+      <a class="txt office-leave-link" href="${esc(url)}" target="_blank" rel="noopener">Open website ↗</a></div>`;
+  m.body.querySelector('[data-office-close]').focus();
+  return m;
+}
+function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env,focus:'',cardId:undefined};S.switching=true;closeOffice();openOffice(opts)}
 // opts.focus (#office/<id>): show that agent's panel as soon as it is in the office (live agents can
 // arrive a few seconds after the snapshot); given up after 20 seconds.
 function focusPending(){
@@ -255,12 +281,11 @@ function connectAgents(opener){
   // The current workspace owns the key even when visiting another workspace's office.
   // In an environment shared with you (opts.keyEnv), the key is for your own environment.
   const env=office.opts.keyEnv||office.opts.current,name=office.opts.keyEnvName||office.opts.offices.find(o=>o.id===env)?.name;
-  clearKeys();
+  clearKeys();office.pointer?.cancelOrbit();
   const bridge=openBridgeDialog({env,envName:name,sources:office.sources,openProjects:()=>{
-    closeOffice();office.opts.openProjects?.();
+    openOverlay('projects');
   }});
   office.bridge=bridge;
-  clearKeys();
   bridge.dialog.addEventListener('keydown',e=>e.stopPropagation());
   office.root.append(bridge.dialog);bridge.dialog.showModal();
   bridge.dialog.addEventListener('close',()=>{
@@ -720,7 +745,13 @@ function onClick(e){
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
     allow:()=>decide('allow'),deny:()=>decide('deny'),
     afInfo(){closeMenu();showAf(b.dataset.id)},
+    agentDetails:()=>openAgentPanelOverlay('agent',b.dataset.id),
+    agentQueue:()=>openAgentPanelOverlay('queue',b.dataset.id),
   })[b.dataset.of]?.();
+}
+function openAgentPanelOverlay(kind,id){
+  S.interact?.closeOpen();closePanel();S.root.focus({preventScroll:true});
+  openOverlay(kind,S.opts.agentRecordId?.(id)||id);
 }
 function agentOf(member,id){return (S.live.get(member)||[]).find(a=>a.id===id)}
 function showAgent(member,id){S.panelFor={type:'agent',member,id};refreshPanel()}
@@ -733,11 +764,11 @@ function refreshPanel(){
   let html='';
   if(p.type==='af'){
     const a=afAgents().find(x=>x.id===p.id);if(!a){S.panel.hidden=true;return}
-    const here=S.env===S.opts.current&&S.opts.focusAgent;
+    const here=S.env===S.opts.current&&S.opts.overlays?.agent;
     html=`<div class="of-ph">${icon(a.kind==='human'?'user':a.kind==='team'?'users':a.kind==='automation'?'gear':'bot',16)}<b>${esc(a.name)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>
       <div class="of-pb">${row('Role',a.title)}${row('Kind',a.kind)}${row('Status',a.status)}<p class="of-note">An AgentFlow ${a.kind==='human'?'person':a.kind} of this environment.</p>
       ${a.kind==='agent'?deskPanel(a,seatsByAgent(S.live,S.afPlaced).get(a.id)||[],{desk:(S.snapAgentflow||[]).find(x=>x.id===a.id)?.desk,nameOf,vendorName:v=>(VENDOR[v]||VENDOR.other).name,me:S.meKey}):''}
-      ${here?`<button type="button" class="txt" data-of="openAfAgent" data-id="${esc(a.id)}">${icon('external',13)}Open in AgentFlow</button>`:''}</div>`;
+      ${here?`<div class="of-btns"><button type="button" class="txt" data-of="agentDetails" data-id="${esc(a.id)}">${icon('user',13)}Agent details</button>${a.kind==='agent'?`<button type="button" class="txt" data-of="agentQueue" data-id="${esc(a.id)}">${icon('branch',13)}Work queue</button>`:''}</div>`:''}</div>`;
   }else{
     const a=agentOf(p.member,p.id),owner=S.members.find(m=>m.key===p.member);
     if(!a){html=`<div class="of-ph"><b>Agent</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div><div class="of-pb"><p class="of-note">It stopped reporting.</p></div>`}
@@ -765,7 +796,6 @@ function refreshPanel(){
   // Your own agent: its transcript, a message box and Stop (office-steer.js), kept across redraws.
   if(p.type==='agent'){const a=agentOf(p.member,p.id);if(a)S.steer.attach(S.panel.querySelector('.of-steer-slot'),a)}
   for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
-  S.panel.querySelector('[data-of="openAfAgent"]')?.addEventListener('click',e=>{const id=e.currentTarget.dataset.id,f=S.opts.focusAgent;closeOffice();f?.(id)});
 }
 function decide(decision){
   const p=S.panelFor,a=p&&agentOf(p.member,p.id);if(!a?.pending||!a.mine)return;
@@ -777,7 +807,8 @@ function decide(decision){
 const isTyping=el=>el?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable=false])');
 function onKey(e){
   if(!S)return;
-  if(overlayOpen()||e.target.closest?.('dialog[open]'))return
+  if(e.target.closest?.('dialog[open]'))return;
+  if(overlayOpen()){e.stopPropagation();return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.interact?.closeOpen())return;

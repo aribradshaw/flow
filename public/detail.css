@@ -73,10 +73,10 @@ dialog.card-modal,dialog.item-modal{overflow:hidden}
 .tag button::after{content:'';position:absolute;inset:-7px}
 
 /* Projects panel */
-#pedit .prow{margin:3px 0;gap:4px 6px}
-#pedit .prow:has(.under){padding-bottom:3px;border-bottom:1px solid var(--line)}
-#pedit .prow .sel-btn{margin:-2px 0 0 28px}
-#pedit .prow em{color:var(--muted)}
+.projects-editor .prow{margin:3px 0;gap:4px 6px}
+.projects-editor .prow:has(.under){padding-bottom:3px;border-bottom:1px solid var(--line)}
+.projects-editor .prow .sel-btn{margin:-2px 0 0 28px}
+.projects-editor .prow em{color:var(--muted)}
 
 /* MindMap inspector */
 #edit .prop{margin-top:6px}

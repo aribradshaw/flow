@@ -5,7 +5,7 @@ import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {openMenu} from './menu.js';
 import {getPref,setPref} from './prefs.js';
-import {detailModal,paintDetail,ask,askTime} from './modal.js';
+import {detailModal,paintDetail,detailFieldId,ask,askTime} from './modal.js';
 import {store,change,checkpoint,commit,save,step} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList,isSnoozed,nextWake,snoozePresets,wakeText} from './devops-core.js';
@@ -559,9 +559,9 @@ const cardHash=c=>`#devops/card/${envOf(c)?envOf(c)+'/':''}${c.number}`;
 const HASH=/^#devops\/card\/(?:([A-Za-z0-9-]{1,64})\/)?(\d+)$/;
 const byHash=h=>{const m=HASH.exec(h);return m?dv().cards.find(x=>x.number===+m[2]&&envOf(x)===(m[1]||'')):null};
 export const officeCardId=number=>byHash(`#devops/card/${number}`)?.id;
-export function openCardModal(id,{host,from,onClose,openItem,openAgent}){
+export function openCardModal(id,{host,from,onClose,openItem,openAgent,openLink}){
   if(!card(id))return;
-  const editor=createCardEditor(id,{host,from,openItem,openAgent,onClose:()=>{hostedCards.delete(editor);onClose?.()}});
+  const editor=createCardEditor(id,{host,from,openItem,openAgent,openLink,onClose:()=>{hostedCards.delete(editor);onClose?.()}});
   hostedCards.add(editor);editor.paint();return editor.m;
 }
 export function renderHostedCards(){for(const editor of hostedCards)editor.paint()}
@@ -623,7 +623,7 @@ function cardDetailHtml(c,{labelForm,host,openItem,openAgent}){
     ${clash(c,'checklist')}<ul class="dc-list" aria-label="Checklist">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"${ro}><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ed?ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`}):''}</li>`).join('')}</ul>
     ${ed?`<div class="dc-row"><input id="dc-chk" maxlength="300" placeholder="Add an item and press Enter" aria-label="New checklist item">${ib('plus','Add item',{attrs:'data-dc="chkAdd"'})}</div>`:''}
     <div class="cd-lab">Links ${hint('A pull request, a commit or any URL','Links')}</div>
-    ${clash(c,'links')}<ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ed?ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`}):''}</li>`).join('')}</ul>
+    ${clash(c,'links')}<ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?host?`<button type="button" class="nm office-card-link" data-office-card-link="${esc(l.url)}">${esc(l.url)}</button>`:`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ed?ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`}):''}</li>`).join('')}</ul>
     ${ed?`<div class="dc-row"><select id="dc-lkind" aria-label="Link type">${Object.entries(LINK_KINDS).map(([k,n])=>opt(k,n,'pr')).join('')}</select><input id="dc-lurl" maxlength="500" placeholder="https:// or a commit SHA" aria-label="Link">${ib('plus','Add link',{attrs:'data-dc="linkAdd"'})}</div>`:''}
     ${l?historyHtml(c,'card'):''}
     </div><aside class="cd-side ibody">
@@ -665,11 +665,11 @@ function setAgents(c,ids,update=rerender){
   if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);update();return}
   touch(c);commit(before);update();
 }
-function createCardEditor(id,{host,from,onClose,openItem,openAgent}){
-  const editor={id,host,openItem,openAgent,labelForm:false,paint};
-  const m=editor.m=detailModal({host,from,cls:'card-modal',label:`Card #${card(id).number}`,onClose,
+function createCardEditor(id,{host,from,onClose,openItem,openAgent,openLink}){
+  const editor={id,host,openItem,openAgent,openLink,labelForm:false,paint};
+  const m=editor.m=detailModal({host,from,scopeIds:!!host,cls:'card-modal',label:`Card #${card(id).number}`,onClose,
     events:{click:inspectorClick,input:inspectorInput,change:inspectorChange,keydown(e){inspectorKey(e);if(!host)modalKey(e)}}});
-  const $=sel=>m.body.querySelector(sel);
+  const $=m.query;
   const update=()=>host?paint():rerender();
   const close=()=>host?m.close():select(null);
   function paint(){
@@ -704,6 +704,7 @@ function createCardEditor(id,{host,from,onClose,openItem,openAgent}){
         onChange(v){change(()=>{const live=card(c.id);if(live&&!locked(live)){live.assignees=[...live.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(live)}})}});return}
     if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
       onChange(v){const live=card(c.id);if(live)setAgents(live,v,update)}});return}
+    if(b.dataset.officeCardLink){editor.openLink(b.dataset.officeCardLink);return}
     if(b.dataset.dcAgent){editor.openAgent?.(b.dataset.dcAgent);return}
     if(b.dataset.dc==='snooze'){openMenu(b,snoozeItems(c.id),{label:`Snooze #${c.number}`,align:'end'});return}
     if(b.dataset.dc==='labelNew'){editor.labelForm=!editor.labelForm;$('#dc-newrow').hidden=!editor.labelForm;b.setAttribute('aria-expanded',editor.labelForm);if(editor.labelForm)$('#dc-newlabel')?.focus();return}
@@ -716,7 +717,7 @@ function createCardEditor(id,{host,from,onClose,openItem,openAgent}){
   // Text fields autosave as you type: one undo step per open form.
   function inspectorInput(e){
     const t=e.target,c=card(editor.id),form=$('#dedit');
-    if(!c||!form||!['dc-title','dc-pts','dc-act','dc-due','dc-desc'].includes(t.id)||locked(c))return;
+    if(!c||!form||!['dc-title','dc-pts','dc-act','dc-due','dc-desc'].includes(detailFieldId(t))||locked(c))return;
     const title=$('#dc-title').value.trim(),num=v=>v===''||!Number.isFinite(+v)?null:Math.max(0,Math.min(1000,+v));if(!title)return;
     if(!edited.has(form)){checkpoint();edited.add(form)}
     Object.assign(c,{title,points:num($('#dc-pts').value),actual:num($('#dc-act').value),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
@@ -726,15 +727,15 @@ function createCardEditor(id,{host,from,onClose,openItem,openAgent}){
     const t=e.target,c=card(editor.id);if(!c)return;
     // A linked card's project and timeline item are its owner's; locked cards take no field changes.
     if(t.matches('[data-sh-comment]'))return;
-    if((linkOf(c)&&(t.id==='dc-proj'||t.id==='dc-item'))||(locked(c)&&(t.id==='dc-col'||t.dataset.chk))){update();return}
-    if(t.id==='dc-col')requestMove(c.id,t.value,Infinity,null,editor);
-    else if(t.id==='dc-proj')change(()=>{c.project=t.value;touch(c)});
-    else if(t.id==='dc-item')change(()=>{c.item=t.value;touch(c)});
+    if((linkOf(c)&&(detailFieldId(t)==='dc-proj'||detailFieldId(t)==='dc-item'))||(locked(c)&&(detailFieldId(t)==='dc-col'||t.dataset.chk))){update();return}
+    if(detailFieldId(t)==='dc-col')requestMove(c.id,t.value,Infinity,null,editor);
+    else if(detailFieldId(t)==='dc-proj')change(()=>{c.project=t.value;touch(c)});
+    else if(detailFieldId(t)==='dc-item')change(()=>{c.item=t.value;touch(c)});
     else if(t.dataset.chk)change(()=>{const x=c.checklist.find(y=>y.id===t.dataset.chk);if(x)x.done=t.checked;touch(c)});
   }
   function inspectorKey(e){
     if(e.key!=='Enter')return;
-    const f={'dc-chk':addCheck,'dc-lurl':addLink,'dc-newlabel':addLabel}[e.target.id];
+    const f={'dc-chk':addCheck,'dc-lurl':addLink,'dc-newlabel':addLabel}[detailFieldId(e.target)];
     if(f){e.preventDefault();f()}else if(e.target.tagName==='INPUT')e.preventDefault();
   }
   return editor;
