@@ -20,7 +20,9 @@
 // Doing means an agent is working the card now. After starting work, every pass sends any card in a
 // live agent's queue that sits in Doing with no thread running for it (waiting behind maxRunning, no
 // T3 project, no model would start) back to the top of Requests. A thread interrupted or cancelled in
-// T3, or a card that failed on every model, moves to Blocked; `retry <number>` puts it back in Requests.
+// T3, a card that failed on every model, or a thread that cannot be read for LOST_AFTER passes in a row
+// (deleted in T3), moves to Blocked; `retry <number>` puts it back in Requests. A card whose run finished
+// and that comes back from UAT to Requests or Doing is worked again, told it is rework.
 //
 // Models. An agent lists `models` in order: the primary first, then fallbacks. If `t3 thread start`
 // fails on a model, the runner tries the next one. If a started thread fails (T3 status failed or
@@ -151,6 +153,9 @@ const log=(...a)=>console.log(new Date().toISOString(),...a);
 
 // Set by main(), so importing this file (the tests do) reads no settings and exits nowhere.
 let args=[],cmd='tick',cfgPath='',cfg={},FLOW={url:'',key:''},DRY=true,T3='t3',T3HOME=tilde('~/.t3');
+// Ticks in a row a running thread may fail to be read before its run counts as lost (about 30 minutes at
+// the usual 5-minute tick).
+const LOST_AFTER=6;
 const splitModel=m=>{const i=m.indexOf(':');return i>0?[m.slice(0,i),m.slice(i+1)]:[null,m]};
 const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
 
@@ -1599,13 +1604,14 @@ function startOn(order,argvFor,text,label){
   return {thread:null,model:null,tried};
 }
 const attemptsOf=(tried,thread,at)=>tried.map(t=>({model:t.model,started:at,...(t.ok?{thread}:{result:'not started',why:t.error})}));
-function prompt(agent,brief,card,retry){
+function prompt(agent,brief,card,retry,rework){
   const checklist=(card.checklist||[]).map(x=>`- [${x.done?'x':' '}] ${x.text}`).join('\n');
   return `You are working as the AgentFlow agent "${agent.name}". Your brief follows, then the card to work on.\n\n${brief}\n\n---\n\n`
     +`# Card #${card.number}: ${card.title}\n\n${card.description||'(no description)'}\n\n${checklist?`## Checklist\n\n${checklist}\n\n`:''}${card.due?`Due: ${card.due}\n\n`:''}`
     +`Do the work for this card. When you finish, reply with a short summary of what you did, anything left undone, and links to any pull requests or commits. `
     +`The runner moves the card to UAT for a person to review when this thread finishes, so do not move it yourself.`
-    +(retry?`\n\nAn earlier attempt on ${retry} did not finish. Check the project for partial work from it before you start.`:'');
+    +(retry?`\n\nAn earlier attempt on ${retry} did not finish. Check the project for partial work from it before you start.`:'')
+    +(rework?`\n\nThis card was worked before (thread ${rework.thread}, finished ${rework.finished||'earlier'}) and came back from review. Check the card and that thread for what is still wanted before you start.`:'');
 }
 // "[Flow] <Agent>: #<n> <card title>": the 3D office seats the thread at the agent's desk from it (lib/office-seats.mjs),
 // so the agent and the number always fit in the 120 characters: a long name is cut, then the card's title.
@@ -1623,7 +1629,14 @@ async function tickLocal(){
   const catalogue=await report().catch(e=>{log('report failed:',e.message);return catalog()});
   // Threads started earlier: done ones send their card to UAT, failed ones go on to the next model.
   for(const r of Object.values(state.runs).filter(r=>r.status==='running')){
-    let shown;try{shown=t3(['thread','show',r.thread,'--messages','3'])}catch(e){log(`#${r.number}: cannot read thread ${r.thread}: ${e.message}`);continue}
+    // A thread that cannot be read (deleted in T3, say) would hold a running slot forever: after LOST_AFTER
+    // ticks in a row it counts as stopped, so its card goes to Blocked and the queue moves on.
+    let shown;try{shown=t3(['thread','show',r.thread,'--messages','3'])}catch(e){
+      r.readFails=(r.readFails||0)+1;log(`#${r.number}: cannot read thread ${r.thread} (${r.readFails}/${LOST_AFTER}): ${e.message}`);
+      if(r.readFails>=LOST_AFTER){const now=new Date().toISOString(),cur=(r.attempts||[]).find(x=>x.thread===r.thread);if(cur){cur.result='lost';cur.why='thread could not be read';cur.ended=now}
+        log(`#${r.number} (${r.agent}): thread ${r.thread} is gone; run "retry ${r.number}" to start it over`);await block(r.number);r.status='lost';r.finished=now}
+      save();continue}
+    if(r.readFails){delete r.readFails;save()} // only failures in a row count
     const th=shown.thread||{};
     if(th.activeRunId||['running','preparing','queued','starting'].includes(th.status)){log(`#${r.number} (${r.agent}) still running on ${r.model||'its model'}`);continue}
     if(th.pendingRequestCount>0||th.status==='waiting'){log(`#${r.number} (${r.agent}) is waiting for an answer in T3: ${th.title}`);continue}
@@ -1657,14 +1670,17 @@ async function tickLocal(){
     if(!modelsOf(a).some(m=>splitModel(m)[0])){log(`${a.name}: live but no model of the form provider:model; skipped`);continue}
     if(running()+wouldStart.size>=(cfg.maxRunning??1)){if(!full)log(`at maxRunning (${cfg.maxRunning??1}); the rest wait for the next pass`);full=true;continue}
     if(Object.values(state.runs).some(r=>r.status==='running'&&r.agentId===a.id))continue;
-    const card=work.items.find(c=>!state.runs[c.id]&&!wouldStart.has(c.id));
+    // A card whose last run finished (it went to UAT) and came back to Requests or Doing is worked again;
+    // a stopped, failed or lost one waits for "retry".
+    const card=work.items.find(c=>(!state.runs[c.id]||state.runs[c.id].status==='done')&&!wouldStart.has(c.id));
     if(!card){log(`${a.name}: nothing to do`);continue}
     const project=projectFor(card,projects);
     if(!project){log(`${a.name}: #${card.number} has no T3 project (set "project" or "projects"); skipped`);continue}
     const title=titleOf(a,card),{order,why}=await plan(a,card,project,catalogue);
     log(`${a.name}: #${card.number} on ${order[0]} (${why})${order.length>1?`; then ${order.slice(1).join(', ')}`:''}`);
     if(DRY){log(`dry run: would start "${title}" on ${order[0]} in ${project}`);wouldStart.add(card.id);continue}
-    const st=startOn(order,startArgv(title,project),prompt(a,work.brief,card),a.name);
+    const again=state.runs[card.id]?.status==='done'?state.runs[card.id]:null;
+    const st=startOn(order,startArgv(title,project),prompt(a,work.brief,card,null,again),a.name);
     if(!st.thread){log(`${a.name}: #${card.number} could not start on any model; left for the next pass`);continue}
     if(card.column==='requests'){
       try{await flow('POST',`/cards/${encodeURIComponent(card.number)}/move`,{column:'doing',...(cfg.developer?{developer:cfg.developer}:{})})}
@@ -1682,7 +1698,7 @@ async function tickLocal(){
   // Requests. Last first, each to index 0, so they keep their order.
   const seen=new Set(),idle=queued.filter(c=>c.column==='doing'&&!seen.has(c.id)&&seen.add(c.id)&&state.runs[c.id]?.status!=='running'&&!wouldStart.has(c.id));
   for(const c of idle.reverse()){
-    const last=state.runs[c.id],why=last?`its last run ${last.status}; "retry ${c.number}" starts it again`:'no thread is running for it';
+    const last=state.runs[c.id],why=!last?'no thread is running for it':last.status==='done'?'it waits for a free slot':`its last run ${last.status}; "retry ${c.number}" starts it again`;
     if(DRY){log(`dry run: would move #${c.number} from Doing back to Requests (${why})`);continue}
     try{await flow('POST',`/cards/${encodeURIComponent(c.number)}/move`,{column:'requests',index:0});log(`#${c.number} back to Requests: ${why}`)}
     catch(e){log(`#${c.number}: could not move back to Requests: ${e.message}`)}
@@ -1704,9 +1720,10 @@ async function status(){
   for(const a of agents){const ms=modelsOf(a);console.log(`  ${a.name}: ${ms.length?`${a.auto?'auto from ':''}${ms.join(', ')}`:'(no model)'}`)}
   for(const r of Object.values(state.runs).filter(r=>r.status==='running'))console.log(`  running: #${r.number} for ${r.agent} on ${r.model||'?'}, thread ${r.thread}`);
   for(const r of Object.values(state.runs).filter(r=>r.status==='failed'))console.log(`  failed: #${r.number} for ${r.agent} on every model (${(r.attempts||[]).map(x=>x.model).join(', ')})`);
+  for(const r of Object.values(state.runs).filter(r=>r.status==='lost'))console.log(`  lost: #${r.number} for ${r.agent}: thread ${r.thread} could not be read; "retry ${r.number}" starts it over`);
 }
 async function retry(){
-  const n=String(args.filter(a=>!a.startsWith('-'))[1]||'').replace(/^#/,''),state=readJson(stateFile)||{runs:{}};
+  const n=String(positional()[1]||'').replace(/^#/,''),state=readJson(stateFile)||{runs:{}};
   const hit=Object.entries(state.runs).find(([,r])=>String(r.number)===n);
   if(!hit){console.error(`No card #${n} in ${stateFile}`);process.exit(1)}
   if(hit[1].status==='running'){console.error(`#${n} is running (thread ${hit[1].thread})`);process.exit(1)}
@@ -1738,8 +1755,11 @@ async function jobsCmd(){
 }
 async function reportCmd(){await report();await reportRemotes({force:true})}
 
+// The command and its arguments: everything that is not a flag or the value of --config / --remote,
+// so `--config <file> status` works as well as `status --config <file>`.
+const positional=()=>args.filter((a,i)=>!a.startsWith('-')&&!['--config','--remote'].includes(args[i-1]));
 async function main(argv){
-  args=argv;cmd=args.find(a=>!a.startsWith('-'))||'tick';
+  args=argv;cmd=positional()[0]||'tick';
   cfgPath=args.includes('--config')?args[args.indexOf('--config')+1]:join(cfgDir,'runner.json');
   cfg=readJson(cfgPath)||{};
   const cmds={report:reportCmd,tick,status,retry,jobs:jobsCmd};

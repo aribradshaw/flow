@@ -711,7 +711,7 @@ test('the jobs table shows TZ and ORIGIN; older servers get the older fields',as
 
 // ---------- tick: Doing means working now ----------
 // A stub Flow server and a fake `t3` (threads.json in its folder says each thread's status).
-async function tickAgainst({queues,cards={},runs={},threads={},dry=false,maxRunning=1}){
+async function tickAgainst({queues,cards={},runs={},threads={},dry=false,maxRunning=1,argv=['tick']}){
   const moves=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{
     const send=(body,code=200)=>{res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))};
     if(req.headers.authorization!=='Bearer k')return send({error:'no'},401);
@@ -732,6 +732,7 @@ async function tickAgainst({queues,cards={},runs={},threads={},dry=false,maxRunn
     writeFileSync(join(bin,'t3'),`#!${process.execPath}
 const fs=require('fs'),path=require('path'),f=path.join(__dirname,'threads.json'),a=process.argv.slice(2),t=JSON.parse(fs.readFileSync(f,'utf8'));
 if(a[0]==='thread'&&a[1]==='start'){const id='t-new-'+Object.keys(t).length;t[id]='running';fs.writeFileSync(f,JSON.stringify(t));console.log(JSON.stringify({threadId:id}))}
+else if(a[0]==='thread'&&a[1]==='show'&&t[a[2]]==='gone')process.exit(1);
 else if(a[0]==='thread'&&a[1]==='show')console.log(JSON.stringify({thread:{status:t[a[2]]||'completed',title:a[2]},messages:[]}));
 else process.exit(1);
 `,{mode:0o755});
@@ -740,7 +741,7 @@ else process.exit(1);
       t3:join(bin,'t3'),t3Home:join(home,'t3'),opencode:'',grok:'',jobs:false,project:home,maxRunning,dryRun:dry}));
     const env={...process.env,HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.state')};
     for(const k of Object.keys(env))if(k.startsWith('FLOW_'))delete env[k];
-    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,'tick'],{env,timeout:30000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
+    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,...argv.map(a=>a==='$CONFIG'?join(home,'.config','flygon-flow','runner.json'):a)],{env,timeout:30000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
     const state=JSON.parse(readFileSync(join(home,'.state','flygon-flow','runner-state.json'),'utf8'));
     return {...out,moves,state};
   }finally{srv.close();rmSync(home,{recursive:true,force:true})}
@@ -774,4 +775,29 @@ test('tick: a dry run only says what it would move',async()=>{
   assert.match(r.stdout,/dry run: would start "\[Flow\] Builder: #2 Card 2"/);
   assert.match(r.stdout,/dry run: would move #4 from Doing back to Requests/);
   assert.doesNotMatch(r.stdout,/would move #2 /);
+});
+
+// Card #673.
+const runOf=(n,thread,extra={})=>({agent:'Builder',agentId:'Builder',number:n,thread,model:'claudeAgent:claude-sonnet-5-5',order:['claudeAgent:claude-sonnet-5-5'],status:'running',attempts:[{model:'claudeAgent:claude-sonnet-5-5',thread}],...extra});
+test('tick: a thread that cannot be read frees its slot after LOST_AFTER passes, and its card goes to Blocked',async()=>{
+  let r=await tickAgainst({queues:{Builder:[card(1,'doing'),card(2,'requests')]},runs:{c1:runOf(1,'t1')},threads:{t1:'gone'},cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);assert.equal(r.state.runs.c1.status,'running','one failed read is not enough');assert.equal(r.state.runs.c1.readFails,1);
+  assert.deepEqual(r.moves,[],'and nothing else starts while it holds the slot');
+  r=await tickAgainst({queues:{Builder:[card(2,'requests')]},runs:{c1:runOf(1,'t1',{readFails:5})},threads:{t1:'gone'},cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c1.status,'lost');assert.equal(r.state.runs.c1.attempts[0].result,'lost');
+  assert.deepEqual(r.moves,[{card:1,column:'blocked'},{card:2,column:'doing'}],'blocked, and the next card starts');
+  r=await tickAgainst({queues:{Builder:[]},runs:{c1:runOf(1,'t1',{readFails:3})},threads:{t1:'running'}});
+  assert.equal(r.state.runs.c1.readFails,undefined,'a good read resets the count');
+});
+test('tick: a card that went to UAT and came back is worked again; a failed one still waits for retry',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(7,'requests')],Reviewer:[card(8,'requests')]},maxRunning:2,
+    runs:{c7:runOf(7,'t7',{status:'done',finished:'2026-11-20T00:00:00Z'}),c8:runOf(8,'t8',{agent:'Reviewer',agentId:'Reviewer',status:'failed'})}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c7.status,'running');assert.notEqual(r.state.runs.c7.thread,'t7');
+  assert.equal(r.state.runs.c8.status,'failed');assert.deepEqual(r.moves,[{card:7,column:'doing'}]);
+});
+test('--config works before the command too',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(3,'requests')]},argv:['--config','$CONFIG','tick']});
+  assert.equal(r.code,0,r.stderr);assert.deepEqual(r.moves,[{card:3,column:'doing'}]);
 });
