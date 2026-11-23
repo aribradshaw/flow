@@ -8,6 +8,7 @@
 // Temp folders and loopback only. Run: npm test
 import {test,describe,before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {createServer as createNetServer} from 'node:net';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {mkdtempSync,rmSync,readFileSync,writeFileSync} from 'node:fs';
@@ -116,7 +117,9 @@ describe('card edits (sync-core)',()=>{
 
 // ---------- the board's save path on a real server ----------
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
-const MOCK=4416,APP=4417,BASE=`http://127.0.0.1:${APP}`,TOKEN='stale-board-e2e-token-0123456789abcdefghij';
+// Ports the OS hands out (other suites or servers on this machine may hold fixed ones).
+const freePort=()=>new Promise((ok,no)=>{const s=createNetServer().once('error',no);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>ok(p))})});
+const MOCK=await freePort(),APP=await freePort(),BASE=`http://127.0.0.1:${APP}`,TOKEN='stale-board-e2e-token-0123456789abcdefghij';
 function mockOpid(){
   const sessions=new Map(),u={id:'u-owner',name:'Example Owner',localId:'owner'};
   const identity=()=>({user:{id:u.id,email:OWNER,name:u.name},session:{id:randomUUID()},memberships:[{localId:u.localId}]});

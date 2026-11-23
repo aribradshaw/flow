@@ -5,6 +5,7 @@
 // are blanked or test values, so nothing here can reach production.
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {createServer as createNetServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import http from 'node:http';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
@@ -17,7 +18,9 @@ import {linkedFields,noteEdits} from '../public/sync-core.js';
 const made=(shown,local)=>noteEdits(null,linkedFields(shown),local);
 
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
-const MOCK=4416,APP=4417,BASE=`http://127.0.0.1:${APP}`,APP_ID='flygon-flow-combined-fixture',SECRET='synthetic-combined-secret-0123456789abcdef',TOKEN='combined-e2e-token-0123456789abcdefghijklm';
+// Ports the OS hands out (other suites or servers on this machine may hold fixed ones).
+const freePort=()=>new Promise((ok,no)=>{const s=createNetServer().once('error',no);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>ok(p))})});
+const MOCK=await freePort(),APP=await freePort(),BASE=`http://127.0.0.1:${APP}`,APP_ID='flygon-flow-combined-fixture',SECRET='synthetic-combined-secret-0123456789abcdef',TOKEN='combined-e2e-token-0123456789abcdefghijklm';
 const OWNER='owner@example.test',BO='bo@example.test';
 const USERS={[OWNER]:{id:'u-owner',name:'Example Owner',pw:'pw-owner',localId:'owner'},[BO]:{id:'u-bo',name:'Bo B',pw:'pw-bo',localId:'u-bo'}};
 function mockOpid(){
