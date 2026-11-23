@@ -47,14 +47,17 @@ function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n
 const people=()=>nodesOf(['person']);
 // Members of shares (docs/sharing.md) are assigned as '@<email>': on a linked card, the share's members;
 // on one's own shared card, the recipients it is shared with (db.shareMembers, from the server).
-const memberList=()=>{const m=new Map();for(const x of [...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
-const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
+const workspaceMembers=()=>[...new Set([db().environment?.ownerEmail,...db().environment?.members||[]].filter(Boolean))]
+  .filter(email=>!people().some(p=>!linkOf(p)&&p.email?.toLowerCase()===email.toLowerCase()))
+  .map(email=>({id:'@'+email.toLowerCase(),name:email,type:'person'}));
+const memberList=()=>{const m=new Map();for(const x of [...workspaceMembers(),...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
+export const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
 // Who can be assigned to a card. A linked card: the person cards of its share and the share's members,
 // never anyone else of the owner's. One's own card: one's person cards, plus recipients it is shared with.
-function peopleFor(c){
+export function peopleFor(c){
   if(!c)return [...people(),...memberList().values()];
   if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>({...m,type:'person'}))];
-  return [...people().filter(p=>!isForeign(p.id)),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id)).map(m=>({...m,type:'person'}))];
+  return [...people().filter(p=>!isForeign(p.id)),...new Map([...workspaceMembers(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id))].map(m=>[m.id,{...m,type:'person'}])).values()];
 }
 // Another environment's records never go on this environment's own cards (and the reverse): a card's
 // project, timeline item, labels and people come from where the card lives.

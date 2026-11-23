@@ -557,7 +557,7 @@ async function openOffice(){
   const first=offices.some(o=>o.id===pick)?pick:offices[1]?.id||env;
   const u=sessionUser();
   m.openOffice({env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
-    openProjects,
+    openProjects,openCard,
     focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).

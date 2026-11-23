@@ -326,7 +326,7 @@ async function project(envId,user,data){
     const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
       .map(x=>({id:x.id,status:x.status,at:x.decidedAt,titles:core.proposalPreview(inScope(home.data,s),x).map(r=>r.title).slice(0,5)}));
     sig.push(`${s.id}:${s.permission}:${core.addsOf(s)}:${home.rev}:${pending.map(x=>x.id+'@'+x.updatedAt).join('+')}:${decided.length}`);
-    meta.push({id:s.id,permission:s.permission,adds:core.addsOf(s),ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members,
+    meta.push({id:s.id,permission:s.permission,adds:core.addsOf(s),ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members.map(m=>({...m,officeKey:officeHub.memberKey(m.email)})),
       ...(p.share.pending.length?{pending:p.share.pending}:{}),...(decided.length?{decided}:{})});
     const sc=core.resolveScope(home.data,s);
     for(const e of await shares.history({envId:s.ownerEnv,over:user.email,since,limit:200}))
@@ -341,7 +341,7 @@ async function project(envId,user,data){
       const m=members.get(e)||members.set(e,{id:core.memberId(e),email:e,name:e,cards:new Set()}).get(e);
       for(const id of core.resolveScope(own,s).cardIds)m.cards.add(id);
     }
-    if(members.size)d.shareMembers=[...members.values()].map(m=>({...m,cards:[...m.cards]}));
+    if(members.size)d.shareMembers=[...members.values()].map(m=>({...m,officeKey:officeHub.memberKey(m.email),cards:[...m.cards]}));
     if(out.length)for(const e of await shares.history({envId,over:user.email,since,limit:200}))conflicts.push(core.conflictView(e));
   }
   for(const sid of core.linkedShareIds(d))if(!meta.some(m=>m.id===sid)){
@@ -1298,7 +1298,8 @@ async function officeEnv(envId){
   const owner=String(w?.owner||e?.ownerEmail||'').toLowerCase();
   const recipients=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt).map(s=>s.recipientEmail);
   const emails=[...new Set([owner,...(e?.members||[]),...(data?.environment?.members||[]),...recipients].map(x=>String(x||'').toLowerCase()).filter(Boolean))];
-  const members=await Promise.all(emails.map(async email=>{const u=await users.get(email).catch(()=>null);return {email,name:u?.name||await personName(email),lastSeen:u?.lastSeen||''}}));
+  const people=afCore.peopleOf(data||{});
+  const members=await Promise.all(emails.map(async email=>{const u=await users.get(email).catch(()=>null);return {email,name:u?.name||await personName(email),lastSeen:u?.lastSeen||'',personIds:people.filter(p=>sameEmail(p.email,email)).map(p=>p.id)}}));
   return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,members,
     projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
     agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[],
@@ -1320,11 +1321,19 @@ async function officeAccessNow(envId,user){
   const w=await workspaces.get(envId).catch(()=>null);if(w?.archivedAt)return {ok:false};
   const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[]}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
   if(canRead(e,user))return {ok:true,all:true,projectIds:new Set()};
-  const mine=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt&&sameEmail(s.recipientEmail,user.email));
+  const active=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt);
+  const mine=active.filter(s=>sameEmail(s.recipientEmail,user.email));
   if(!mine.length||!w?.data)return {ok:false};
-  const d=normalizeDb(structuredClone(stripLinked(w.data))),ids=new Set(),cardIds=new Set();let all=false;
-  for(const s of mine){if(s.scope?.kind==='environment')all=true;const r=core.resolveScope(d,s);for(const id of r.projectIds)ids.add(id);for(const id of r.cardIds)cardIds.add(id)}
-  return {ok:true,all,projectIds:ids,cardIds};
+  const d=normalizeDb(structuredClone(stripLinked(w.data))),projectIds=new Set(),cardIds=new Set(),scopes=[];
+  let all=false;
+  for(const s of mine){
+    const scope=core.resolveScope(d,s);
+    if(s.scope?.kind==='environment')all=true;
+    for(const id of scope.projectIds)projectIds.add(id);
+    for(const id of scope.cardIds)cardIds.add(id);
+    scopes.push({id:s.id,nodeIds:new Set(scope.nodeIds)});
+  }
+  return {ok:true,all,projectIds,cardIds,scopes};
 }
 const officeSeen=new Map();
 async function officeAccess(envId,user){
@@ -1332,7 +1341,7 @@ async function officeAccess(envId,user){
   if(hit&&Date.now()-hit.at<15000)return hit.access;
   const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
 }
-const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv},secret:officeSecret});
+const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow},secret:officeSecret});
 // /api/office/{env}/events (SSE), presence, say, emote, answer: the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;

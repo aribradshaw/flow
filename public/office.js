@@ -9,6 +9,7 @@ import {icon} from './icons.js';
 import {esc} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
+import {createOfficeBoards} from './office-boards.js';
 import {openBridgeDialog} from './office-connect.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
@@ -56,6 +57,7 @@ export function openOffice(opts){
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B/X to sprint</dd>
+        <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
     </aside>
@@ -80,6 +82,7 @@ export function closeOffice(){
   if(!S)return;const s=S;S=null;
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
+  s.boards?.dispose();
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
 }
@@ -195,8 +198,11 @@ function initScene(){
   const cv=renderer.domElement;
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
+  const office=S;
+  S.boards=createOfficeBoards({env:S.env,world:S.world,stage:S.stage,camera,position:()=>office.pos,agents:afAgents,
+    openCard:id=>{closeOffice();office.opts.openCard?.(id)}});
   S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,
-    hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
+    hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);frame(Math.min(.05,S.clock.getDelta()),S.clock.elapsedTime)};loop();
 }
 function toggleOverview(){
@@ -247,6 +253,7 @@ function buildRooms(){
     buildDesks(m.key,false);
   });
   updateColliders();
+  S.boards?.rebuild(S.rooms,{commonRadius:S.commonR||10,boardAnchor:key=>S.worldLayout?.boardAnchor?.(key)});
 }
 // A room is lit while its member has the office open; otherwise dimmed, with when they were last here.
 const ago=iso=>{const t=Date.parse(iso);if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} d ago`};
@@ -301,6 +308,7 @@ function afAgents(){
 const afOf=id=>afAgents().find(a=>a.id===id);
 const afFor=key=>afAgents().find(a=>a.member&&a.member===key);
 function buildAgentflow(){
+  S.boards?.invalidate();
   if(S.afGroup){clear(S.afGroup);S.org?.dispose();S.org=null}
   const g=new THREE.Group();S.afGroup=g;S.world.add(g);
   const list=afAgents().slice(0,200),{pos,radius}=orgLayout(list);
@@ -374,13 +382,17 @@ function showEmote(key,k){
 function hitAt(e){
   if(!S.camera)return null;const r=S.renderer.domElement.getBoundingClientRect();
   S.ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),S.camera);
+  const board=S.boards?.hit(S.ray);
   for(const h of S.ray.intersectObjects(S.clickables,true)){
+    if(board&&board.distance<h.distance)break;
     if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
     let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
-  const g=S.ray.intersectObject(S.ground)[0];return g?{kind:'',point:g.point}:null;
+  const g=S.ray.intersectObject(S.ground)[0];
+  return board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point}:g?{kind:'',point:g.point}:null;
 }
 function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
+  if(S.boards?.pick(hit.board))return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
   if(hit.kind==='person'){openMenu(hit.obj.userData.key,e);return}
@@ -566,6 +578,7 @@ function frame(dt,t){
   S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
     {held:S.pointer.orbiting||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
+  S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);
   placeLabels();
 }

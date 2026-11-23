@@ -80,6 +80,8 @@ function normalize(db){
 // fresh: this browser had no saved workspace (sync then takes the server's copy).
 // onSaved: called after every local change (sync.js uploads it); adoptRemote() does not call it.
 // lost: this browser could not store its last copy (too big), so it started without one.
+const listeners=new Set();
+export function subscribeWorkspace(listener){listeners.add(listener);return ()=>listeners.delete(listener)}
 export const store={db:null,undo:[],redo:[],fresh:true,lost:false,onChange(){},onStatus(){},onSaved(){}};
 try{store.lost=localStorage.getItem(KEY+'-lost')==='1'}catch{}
 {
@@ -121,6 +123,7 @@ function saveLocal(){
     store.onStatus('warn','Browser save failed · backing up to disk…');
   }
   backupPending=body;clearTimeout(backupTimer);backupTimer=setTimeout(flushBackup,400);
+  for(const listener of listeners)listener();
 }
 window.addEventListener('pagehide',()=>{if(backupPending)fetch('/api/backups/'+backupId,{method:'PUT',headers:{'Content-Type':'application/json'},body:backupPending,keepalive:true}).catch(()=>{})});
 
