@@ -16,6 +16,7 @@ import {openBridgeDialog} from './office-connect.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
+import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -122,7 +123,7 @@ function connect(){
   on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
-  on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel();focusPending()});
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending()});
   on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildAgentflow();buildRooms()}refreshPanel()});
   on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
   on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
@@ -299,28 +300,35 @@ function buildDesks(key,refresh=true){
   room.boxes=[];
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
   for(const b of S.activity?.lounge(g)||[])room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
-  const agents=S.live.get(key)||[],cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
-  if(!agents.length){const o=new THREE.Object3D();o.position.set(0,0,-1);g.add(o);label(o,'<span class="of-empty">No agents running</span>',{y:0.4,cls:'muted',near:22})}
+  // Sessions seated at an AgentFlow agent's desk sit in the common area instead (buildSeats).
+  const all=S.live.get(key)||[],agents=all.filter(a=>!isSeated(a,S.afPlaced)),away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
+  if(!agents.length){const o=new THREE.Object3D();o.position.set(0,0,-1);g.add(o);label(o,`<span class="of-empty">${away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'No agents running'}</span>`,{y:0.4,cls:'muted',near:22})}
   agents.slice(0,16).forEach((a,i)=>{
     const col=i%cols,row=Math.floor(i/cols),x=(col-(cols-1)/2)*sx,z=-ROOM_D/2+1.4+row*2.1;
-    const d=new THREE.Group();d.position.set(x,0,z);g.add(d);
     room.boxes.push(officeBox(room.center.x+x*cos+z*sin,room.center.z-x*sin+z*cos,room.facing,1.7,0.8,0.76));
-    d.add(part(M.box,M.desk,[0,0.72,0],[1.7,0.08,0.8]),part(M.box,M.desk,[0,0.36,-0.25],[1.5,0.7,0.12]));
-    const scr=new THREE.MeshLambertMaterial({color:'#3b4542',emissive:'#000000',flatShading:true});
-    const screen=part(M.box,scr,[0,1.08,-0.25],[0.8,0.5,0.06]);screen.userData.own=true;d.add(screen);
-    // The mascot faces the room's back wall (its desk) and so the camera, which looks in from outside.
-    const m=createMascot(mascotKind(a.vendor,a.model),{color:VENDOR_COLOR[a.vendor],scale:.52}),mascot=new THREE.Group();
-    m.group.position.y=0.62;mascot.add(m.group);mascot.position.set(0,0,0.85);mascot.rotation.y=Math.PI;d.add(mascot);
-    mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase:(i*1.7+key.length)%6.28};
-    mascot.add(shadow(0.45));
-    mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
-    S.activity?.attach(mascot,a,{member:key,desk:d,root:g});
-    const name=a.private?'Private project':a.title||VENDOR[a.vendor]?.name||'Agent',at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
-    label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`,{y:1.75,cls:'agent click',near:16});
-    if(a.status==='waiting')label(mascot,`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`,{y:2.25,cls:'bang click'});
-    scr.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
+    makeDesk(g,a,key,x,z,a.private?'Private project':seatTag(a,'',a.title||VENDOR[a.vendor]?.name||'Agent'),{phase:(i*1.7+key.length)%6.28});
   });
   if(refresh)updateColliders();
+}
+// One live session at a desk (in its owner's room, or beside an AgentFlow agent): the desk and its screen,
+// the mascot with its subagents, and its clickable name tag.
+function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}={}){
+  const d=new THREE.Group();d.position.set(x,0,z);d.scale.setScalar(scale);parent.add(d);
+  d.add(part(M.box,M.desk,[0,0.72,0],[1.7,0.08,0.8]),part(M.box,M.desk,[0,0.36,-0.25],[1.5,0.7,0.12]));
+  const scr=new THREE.MeshLambertMaterial({color:'#3b4542',emissive:'#000000',flatShading:true});
+  const screen=part(M.box,scr,[0,1.08,-0.25],[0.8,0.5,0.06]);screen.userData.own=true;d.add(screen);
+  // The mascot faces the room's back wall (its desk) and so the camera, which looks in from outside.
+  const m=createMascot(mascotKind(a.vendor,a.model),{color:VENDOR_COLOR[a.vendor],scale:.52}),mascot=new THREE.Group();
+  m.group.position.y=0.62;mascot.add(m.group);mascot.position.set(0,0,0.85);mascot.rotation.y=Math.PI;d.add(mascot);
+  mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase};
+  mascot.add(shadow(0.45));
+  mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
+  S.activity?.attach(mascot,a,{member:key,desk:d,root:parent,lounge});
+  const at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
+  label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`,{y:tagY,cls:'agent click',near:16});
+  if(a.status==='waiting')label(mascot,`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`,{y:tagY+0.5,cls:'bang click'});
+  scr.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
+  return d;
 }
 // ---------- AgentFlow agents in the common area ----------
 // Laid out like the org chart. AI agents are robots, teams round tables, automations little machines (all
@@ -338,12 +346,17 @@ function buildAgentflow(){
   if(S.afGroup){clear(S.afGroup);S.org?.dispose();S.org=null}
   const g=new THREE.Group();S.afGroup=g;S.world.add(g);
   const list=afAgents().slice(0,200),{pos,radius}=orgLayout(list);
+  // Seats: which agents have a place here decides which sessions leave their owners' rooms; an AI agent with
+  // nobody at its desk is dimmed.
+  const was=[...S.afPlaced||[]].join('\n');S.afPlaced=new Set(list.filter(a=>pos.has(a.id)).map(a=>a.id));S.afPos=pos;
+  if(S.rooms.size&&[...S.afPlaced].join('\n')!==was){for(const k of S.rooms.keys())buildDesks(k,false);updateColliders()}
+  const seats=seatsByAgent(S.live,S.afPlaced);S.seatSig=seatSig(seats);
   if(S.commonR!==radius){S.commonR=radius;S.rug.scale.setScalar(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
   const items=[],people=[];
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
     if(a.kind==='human'){if(a.member&&S.people.has(a.member))continue;people.push({a,p,offline:!!a.member,dim})}
-    else items.push({id:a.id,kind:a.kind==='team'?'team':a.kind==='automation'?'automation':'agent',x:p.x,z:p.z,dim});
+    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,dim:dim||kind==='agent'&&!seats.has(a.id)})}
   }
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
   for(const it of items){const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);const a=afOf(it.id);
@@ -354,7 +367,25 @@ function buildAgentflow(){
     label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
     return f;
   });
+  buildSeats(seats);
 }
+// Seats (office-seats.js): each live session working on an AgentFlow agent's card sits at a small desk beside
+// that agent, seen from any side, with the agent's name and the card on its tag; up to three per agent.
+const seatSig=seats=>[...seats].map(([id,l])=>id+':'+l.length).sort().join();
+function buildSeats(seats=seatsByAgent(S.live,S.afPlaced)){
+  // Detached anchors tell the activity module (office-activity.js) their actors are gone.
+  if(S.seatGroup){clear(S.seatGroup);S.seatGroup.clear()}const g=new THREE.Group();S.seatGroup=g;S.world.add(g);
+  for(const [id,sitting] of seats){
+    const p=S.afPos?.get(id),a=afOf(id);if(!p||!a)continue;
+    sitting.slice(0,3).forEach(({member,agent},i,list)=>{
+      // Its own anchor, turned so the mascot sits between the agent and its desk: the activity's frame (office-activity.js).
+      const at=new THREE.Group();at.position.set(p.x+1.12,0,p.z+(i-(list.length-1)/2)*0.85);at.rotation.y=-Math.PI/2;g.add(at);
+      makeDesk(at,agent,member,0,0,seatTag(agent,a.name),{tagY:list.length>1&&i%2?1.15:1.6,phase:i*1.7,scale:0.5,lounge:false});
+    });
+  }
+}
+// A session report changed: re-seat, and redraw the org only when who is busy changed (that dims or lights robots).
+function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(seats)!==S.seatSig)buildAgentflow();else buildSeats(seats)}
 
 // ---------- people ----------
 // A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
@@ -486,6 +517,8 @@ function onClick(e){
 function agentOf(member,id){return (S.live.get(member)||[]).find(a=>a.id===id)}
 function showAgent(member,id){S.panelFor={type:'agent',member,id};refreshPanel()}
 function showAf(id){S.panelFor={type:'af',id};refreshPanel()}
+// The AgentFlow agent whose desk a session sits at, by name.
+const deskOf=a=>a.seat?.agent&&S.afPlaced?.has(a.seat.agent)?afOf(a.seat.agent)?.name||'':'';
 const row=(k,v)=>v?`<div class="of-row"><span>${k}</span><b>${esc(v)}</b></div>`:'';
 function refreshPanel(){
   const p=S?.panelFor;if(!p)return;
@@ -495,6 +528,7 @@ function refreshPanel(){
     const here=S.env===S.opts.current&&S.opts.focusAgent;
     html=`<div class="of-ph">${icon(a.kind==='human'?'user':a.kind==='team'?'users':a.kind==='automation'?'gear':'bot',16)}<b>${esc(a.name)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>
       <div class="of-pb">${row('Role',a.title)}${row('Kind',a.kind)}${row('Status',a.status)}<p class="of-note">An AgentFlow ${a.kind==='human'?'person':a.kind} of this environment.</p>
+      ${a.kind==='agent'?deskPanel(a,seatsByAgent(S.live,S.afPlaced).get(a.id)||[],{desk:(S.snapAgentflow||[]).find(x=>x.id===a.id)?.desk,nameOf,vendorName:v=>(VENDOR[v]||VENDOR.other).name,me:S.meKey}):''}
       ${here?`<button type="button" class="txt" data-of="openAfAgent" data-id="${esc(a.id)}">${icon('external',13)}Open in AgentFlow</button>`:''}</div>`;
   }else{
     const a=agentOf(p.member,p.id),owner=S.members.find(m=>m.key===p.member);
@@ -514,11 +548,12 @@ function refreshPanel(){
         }
         const res=ans&&(!a.pending||ans.requestId===a.pending?.requestId||ans.state==='done')?`<p class="of-res ${ans.state==='done'?(ans.result?.ok?'ok':'bad'):''}">${ans.state==='done'?esc(ans.result?.message||'Done'):`${ans.decision==='allow'?'Allow':'Deny'} sent. Waiting for ${esc(a.host||'the reporter')}…`}</p>`:'';
         html=head+`<div class="of-pb">${row('Status',STATUS[a.status])}${row('Model',a.model?`${v.name} · ${a.model}`:v.name)}${row('Where',a.hostLabel||a.host)}${row('Repo',a.repo?.slug||a.repo?.name)}${row('Project',(a.projects||[]).join(', '))}
-          ${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}</div>`;
+          ${row('Desk',deskOf(a))}${row('Card',a.seat?.card?`#${a.seat.card.number} ${a.seat.card.title}`:'')}${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}</div>`;
       }
     }
   }
   S.panel.innerHTML=html;S.panel.hidden=false;
+  for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
   S.panel.querySelector('[data-of="openAfAgent"]')?.addEventListener('click',e=>{const id=e.currentTarget.dataset.id,f=S.opts.focusAgent;closeOffice();f?.(id)});
 }
 function decide(decision){

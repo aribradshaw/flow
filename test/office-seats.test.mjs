@@ -142,3 +142,24 @@ test('seated sessions are redacted per viewer: the owner sees all; others need t
     assert.deepEqual(sd.agentflow.find(a=>a.id==='af-build').desk.queue,[],'Builder\'s cards are outside Dee\'s share');
   }finally{for(const x of conns)x.close();hub.close();st.close();await new Promise(ok=>server.close(ok))}
 });
+
+test('the page: seated sessions leave their rooms for drawn desks, tags name the agent and card, the desk panel is escaped',async()=>{
+  const {seatsByAgent,isSeated,seatTag,deskPanel}=await import('../public/office-seats.js');
+  const at={id:'x1',vendor:'claude',status:'running',title:'[Flow] Builder: #1 Login bug',seat:{agent:'af-build',card:{number:1,title:'Login bug',column:'doing'}}};
+  const linked={id:'x2',vendor:'codex',status:'idle',title:'Look at things',seat:{agent:'',card:{number:11,title:'Nobody',column:'requests'}}};
+  const elsewhere={id:'x3',vendor:'gemini',status:'running',title:'t',seat:{agent:'af-gone',card:null}};
+  const live=new Map([['m1',[at,linked,elsewhere,{id:'x4',private:true,vendor:'claude',status:'running'}]]]),placed=new Set(['af-build']);
+  assert.deepEqual([...seatsByAgent(live,placed)].map(([k,v])=>[k,v.map(s=>s.agent.id)]),[['af-build',['x1']]]);
+  assert.deepEqual([at,linked,elsewhere].map(a=>isSeated(a,placed)),[true,false,false],'a desk not drawn here keeps the room desk');
+  assert.equal(isSeated(at,undefined),false);
+  assert.equal(seatTag(at,'Builder'),'Builder · #1');
+  assert.equal(seatTag(linked,'','Look at things'),'Look at things · #11');
+  assert.equal(seatTag({...linked,title:'Look at #11'},'','Look at #11'),'Look at #11');
+  assert.equal(seatTag({},'','Plain'),'Plain');
+  const html=deskPanel({name:'Builder'},[{member:'m1',agent:{...at,seat:{...at.seat,card:{...at.seat.card,title:'<img src=x>'}}}}],
+    {desk:{queue:[{number:1,title:'Login bug',column:'doing'}],queued:7,done:[{number:7,title:'Shipped',column:'done'}]},nameOf:()=>'Ann',vendorName:v=>v==='claude'?'Claude':v,me:'m2'});
+  assert.ok(html.includes('data-seat-agent="x1"')&&html.includes('data-seat-member="m1"'));
+  assert.ok(!html.includes('<img')&&html.includes('&lt;img'),'escaped');
+  assert.ok(html.includes('(7 in all)')&&html.includes('Finished this week')&&html.includes('Doing')&&html.includes('Claude · Ann'));
+  assert.ok(deskPanel({name:'Idle'},[]).includes('Nobody'));
+});

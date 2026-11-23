@@ -132,15 +132,16 @@ export function createActivity(office){
 
   // ---------- attach: called by office.js for each mascot it builds ----------
   // a: the agent as this viewer sees it; desk: the desk group (mascot's parent); root: the room's desks group.
+  // lounge: false keeps an idle one at its desk (a session seated at an AgentFlow agent's desk, office-seats.js).
   // -> 'waiting' when it just started waiting (or waits on a new prompt), else ''. Pings for the owner.
-  function attach(mascot,a,{member,desk,root}){
+  function attach(mascot,a,{member,desk,root,lounge=true}){
     const key=member+'\n'+a.id,prev=actors.get(key);
     root.updateWorldMatrix(true,true);
     const home=desk.localToWorld(mascot.position.clone()),facing=new THREE.Euler().setFromQuaternion(root.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y;
     const u=prev||{key,member,pos:home.clone(),yaw:facing+Math.PI,seed:hash(key),phase:'desk',until:0,hopAt:0};
     // A new mascot each rebuild: props start over on it; place and pose carry on.
     for(const m of u.own||[])m.dispose?.();
-    Object.assign(u,{mascot,desk,root,home,facing,props:{},own:[],kind:kindOf(a),status:a.status,mine:!!a.mine});
+    Object.assign(u,{mascot,desk,root,home,facing,lounge,props:{},own:[],kind:kindOf(a),status:a.status,mine:!!a.mine});
     const req=a.pending?.requestId||'',started=!!prev&&a.status==='waiting'&&(prev.lastStatus!=='waiting'||(req&&req!==prev.lastReq));
     u.lastStatus=a.status;u.lastReq=req;actors.set(key,u);
     if(started){u.hopAt=performance.now();if(u.mine)ping()}
@@ -170,7 +171,7 @@ export function createActivity(office){
       u.facePt=null;u.side=null;return u.home;
     }
     u.facePt=null;u.side=null;
-    if(u.status==='idle'){
+    if(u.status==='idle'&&u.lounge){
       // Desk a while, coffee a while, back again.
       if(now>u.until){u.phase=u.phase==='lounge'?'desk':'lounge';u.until=now+(u.phase==='lounge'?5+u.seed*5:7+((u.seed*7)%1)*9)}
       if(u.phase==='lounge'){const a=u.seed*Math.PI*2;return u.root.localToWorld(tmp2.set(LOUNGE.x+0.2+Math.sin(a)*0.65,0,LOUNGE.z+Math.cos(a)*0.65))}
