@@ -1,7 +1,7 @@
 // Coding-agent mascots for the 3D office: chunky low-poly figures built from boxes, ellipsoids and one
 // extrusion, with their colours baked into the vertices. Each is about 1.6 units across, centred on its
 // origin, facing +z.
-//   mascotKind(text)       'claude' | 'openai' | 'deepseek' | 'grok' | 'gemini' | 'orb'  (vendor, model, … any text)
+//   mascotKind(text)       'claude' | 'openai' | 'deepseek' | 'grok' | 'gemini' | 'meta' | 'orb'  (vendor, model, … any text)
 //   createMascot(kind, {color, scale}) -> {group, kind, update(t, state)}
 //       state: {status:'running'|'waiting'|'idle', children: n subagents, phase}
 //       It turns slowly and bobs out of phase with its neighbours; a waiting one hops and glows; an idle one
@@ -10,7 +10,7 @@
 // Geometries and materials are shared between all mascots of a kind.
 import * as THREE from './vendor/three/three.module.min.js';
 
-const KINDS=[[/claude|opus|sonnet|haiku|fable|anthropic/,'claude'],[/gpt|codex|openai|\bo3\b|\bo4/,'openai'],[/deepseek/,'deepseek'],[/grok|xai/,'grok'],[/gemini/,'gemini']];
+const KINDS=[[/claude|opus|sonnet|haiku|fable|anthropic/,'claude'],[/gpt|codex|openai|\bo3\b|\bo4/,'openai'],[/deepseek/,'deepseek'],[/grok|xai/,'grok'],[/gemini/,'gemini'],[/\bmeta\b|llama|\bmuse\b/,'meta']];
 export function mascotKind(...text){const t=text.filter(Boolean).join(' ').toLowerCase();for(const [re,k] of KINDS)if(re.test(t))return k;return 'orb'}
 // Vendor colours, also the orb's colour for anything else.
 export const VENDOR_COLOR={claude:'#d97857',openai:'#2e80ed',deepseek:'#4d6bff',grok:'#17171a',gemini:'#5b7cf5',orb:'#5f9e6e',
@@ -68,10 +68,20 @@ function sparkle(){const b=builder(),k=48,d=.16,ring=[];
     const a=b.v(p[0],p[1],d,nx,ny,0,col(p[0],p[1]));b.v(q[0],q[1],d,nx,ny,0,col(q[0],q[1]));b.v(q[0],q[1],-d,nx,ny,0,col(q[0],q[1]));b.v(p[0],p[1],-d,nx,ny,0,col(p[0],p[1]));
     b.tri(a,a+2,a+1);b.tri(a,a+3,a+2)}
   return b.geometry()}
+// Meta: a fat blue infinity loop, a tube swept along a 1:2 Lissajous curve, deep blue to bright blue.
+function infinity(){const b=builder(),N=96,M=10,r=.15;
+  const at=t=>[.82*Math.sin(t),.36*Math.sin(2*t),.14*Math.cos(t)];
+  const col=x=>{const f=Math.max(0,Math.min(1,x/1.64+.5));return [.04,.45+.15*f,1]};
+  for(let i=0;i<=N;i++){const t=2*Math.PI*i/N,p=at(t),q=at(t+.001),T=[q[0]-p[0],q[1]-p[1],q[2]-p[2]],tl=Math.hypot(...T);T[0]/=tl;T[1]/=tl;T[2]/=tl;
+    let nx=T[1],ny=-T[0],nz=0;const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
+    const B=[T[1]*nz-T[2]*ny,T[2]*nx-T[0]*nz,T[0]*ny-T[1]*nx];
+    for(let j=0;j<=M;j++){const a=2*Math.PI*j/M,c=Math.cos(a),s=Math.sin(a),ox=c*nx+s*B[0],oy=c*ny+s*B[1],oz=c*nz+s*B[2];b.v(p[0]+r*ox,p[1]+r*oy,p[2]+r*oz,ox,oy,oz,col(p[0]))}}
+  for(let i=0;i<N;i++)for(let j=0;j<M;j++){const a=i*(M+1)+j,c=a+M+1;b.tri(a,c,a+1);b.tri(a+1,c,c+1)}
+  return b.geometry()}
 function orb(){const b=builder();b.ell(0,0,0,.75,.75,.75,[1,1,1],10,16);return b.geometry()}
 
 const GEO={},MAT={};
-const BUILD={claude:clawd,openai:cloud,deepseek:whale,grok,gemini:sparkle,orb};
+const BUILD={claude:clawd,openai:cloud,deepseek:whale,grok,gemini:sparkle,meta:infinity,orb};
 export const mascotGeometry=kind=>GEO[kind]||(GEO[kind]=(BUILD[kind]||orb)());
 // One material per kind of look; a waiting one's glow pulses together (one shared material per colour).
 function material(look,color='#ffffff'){

@@ -362,7 +362,7 @@ test('model makers: the icon follows who made the model, not the harness that ru
   assert.equal(k('x:o3-mini'),'openai');assert.equal(k('codex:some-new-model'),'openai','a one-maker harness is the last hint');
   assert.equal(k('antigravity:gemini-3.8-flash-high'),'google');
   assert.equal(k('grok:grok-4.7'),'xai');assert.equal(k('cursor_cursor_pmd:grok-4.7'),'xai');
-  assert.equal(k('opencode:meta-llama/llama-4-scout'),'meta');assert.equal(k('x:qwen3-coder'),'qwen');
+  assert.equal(k('opencode:meta-llama/llama-4-scout'),'meta');assert.equal(k('opencode:vercel/meta/muse-spark-1.3'),'meta');assert.equal(k('cursor_personal:muse-wonder-1.0'),'meta','Muse is Meta');assert.equal(k('x:qwen3-coder'),'qwen');
   assert.equal(k('x:deepseek-v4'),'deepseek');assert.equal(k('x:mistralai/devstral-2'),'mistral');
   assert.equal(k('x:moonshotai/kimi-k3'),'moonshot');assert.equal(k('x:z-ai/glm-5'),'zhipu');
   assert.equal(k('opencode:abliteration/abliterated-model-large-v2'),'abliterated');

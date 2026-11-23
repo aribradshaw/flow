@@ -34,7 +34,7 @@ test('reports are validated and capped: unknown values fall back, strings are cu
   assert.equal(r.source.length,60);assert.ok(Date.parse(r.at));
   assert.deepEqual(r.agents.map(a=>a.id),['a','w']);
   const [a,w]=r.agents;
-  assert.equal(cleanReport({source:'s',agents:[{id:'d',vendor:'other',model:'DeepSeek V4'},{id:'g',vendor:'xai'},{id:'q',model:'qwen3'}]}).agents.map(x=>x.vendor).join(),'deepseek,grok,other');
+  assert.equal(cleanReport({source:'s',agents:[{id:'d',vendor:'other',model:'DeepSeek V4'},{id:'g',vendor:'xai'},{id:'q',model:'qwen3'},{id:'m',model:'muse-wonder-1.0'},{id:'l',vendor:'meta'}]}).agents.map(x=>x.vendor).join(),'deepseek,grok,other,meta,meta');
   assert.equal(a.title.length,200);assert.equal(a.vendor,'codex');assert.equal(a.status,'idle');assert.equal(a.activity,'line break');
   assert.equal(a.children.length,MAX_CHILDREN);assert.equal(a.pending,null,'pending only while waiting');
   assert.ok(!JSON.stringify(a).includes('ghp_secret'));assert.equal(a.repo.remote,'https://github.com/acme/flow.git');

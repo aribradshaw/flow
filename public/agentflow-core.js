@@ -254,7 +254,7 @@ const MAKERS=[
   ['openai','OpenAI',/openai|chatgpt|\bgpt|codex|(^|[^a-z0-9])o\d($|[^a-z0-9])/],
   ['google','Google Gemini',/google|gemini|gemma/],
   ['xai','xAI',/\bx-?ai\b|grok/],
-  ['meta','Meta',/meta-llama|llama|(^|\/)meta\//],
+  ['meta','Meta',/meta-llama|llama|(^|\/)meta\/|\bmuse\b/],
   ['qwen','Qwen',/qwen|qwq|alibaba/],
   ['deepseek','DeepSeek',/deepseek/],
   ['mistral','Mistral',/mistral|mixtral|[cd]evstral|codestral|magistral/],
