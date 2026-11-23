@@ -58,7 +58,7 @@ export function openOffice(opts){
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <button type="button" class="txt" data-of-replay disabled>Replay</button>
       <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
-      <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
+      <span class="of-keys">WASD · E interact · B board · Shift sprint · Space jump · middle/right drag</span>
       <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
@@ -85,6 +85,7 @@ export function openOffice(opts){
         <dt>Pan</dt><dd>Two-finger drag</dd>
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
+        <dt>DevOps board</dt><dd>B opens the full board from anywhere; Esc goes back</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps board</dt><dd>The main board is your DevOps board. Press E at it, or click it, to work on it as in the DevOps tab; Esc returns.</dd>
         <dt>Room boards</dt><dd>Walk up to a room's whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
@@ -1247,6 +1248,7 @@ function onKey(e){
     if(k==='?')toggleControls();
     return;
   }
+  if(k==='b'){e.preventDefault();if(!e.repeat&&!S.replay?.active){if(S.rig?.overview)toggleOverview();S.devops?.focus()}return}
   if(k==='l'){e.preventDefault();if(!e.repeat)openLook();return}
   if(/^[1-4]$/.test(e.key)){e.preventDefault();emote(EMOTES[+e.key-1][0]);return}
   if(!S.replay?.active&&(e.key==='Enter'&&e.target===document.body||e.key==='t')){e.preventDefault();S.root.querySelector('.of-input').focus()}
