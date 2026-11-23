@@ -119,7 +119,11 @@ test('seated sessions are redacted per viewer: the owner sees all; others need t
     // Ann (owner): every seat, with its card.
     assert.deepEqual(live(sa).map(a=>a.seat),[{agent:'af-build',card:{number:1,title:'Login bug',column:'doing'}},{agent:'af-rev',card:{number:10,title:'Shared card',column:'requests'}},{agent:'',card:{number:11,title:'Nobody',column:'requests'}}]);
     assert.deepEqual(sa.agentflow.find(a=>a.id==='af-build').desk.queue.map(c=>c.number),[1,2,5,3,4]);
-    assert.ok(!JSON.stringify(sa.agentflow).includes('"cards"'),'delegated card ids stay on the server');
+    // Delegated card ids reach a viewer only for cards that viewer can see (wall boards use them).
+    const ids=s=>s.agentflow.flatMap(a=>a.cards||[]);
+    assert.ok(ids(sa).includes('c9')&&ids(sa).includes('c1'),'the owner gets every delegated card id');
+    assert.ok(ids(sb).includes('c1')&&!ids(sb).some(id=>id==='c9'||id==='c10'),'Bo gets Flow card ids only, never Site ones');
+    assert.ok(ids(sc).includes('c9')&&!ids(sc).includes('c1'),'Cy gets Site card ids only');
     // Bo sees Flow: Builder's session in full at its desk; the Reviewer session (agent and card outside his share)
     // is redacted although its repo is in Flow; #11 is in Flow, so linked.
     assert.deepEqual(live(sb).map(a=>a.private?'private':a.seat),[{agent:'af-build',card:{number:1,title:'Login bug',column:'doing'}},'private',{agent:'',card:{number:11,title:'Nobody',column:'requests'}}]);
