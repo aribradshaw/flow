@@ -241,7 +241,16 @@ export function createOfficeBoards({env,envName=()=>'',world,camera,position,age
     for(const c of board.columns)if(c.tiles.length){const d=x<c.x?c.x-x:x>c.x+c.w?x-c.x-c.w:0;if(d<gap){gap=d;best=c.tiles[0]}}
     return best;
   }
-  return {hit,pick,rebuild,frame,tileNear,invalidate(){dirty=true},setVisible(value){showing=value;for(const b of boards.values())b.anchor.visible=value},
+  // Where someone stands to look at a board (office-npc.js): in front of it, in the world group's frame, and
+  // which way the board faces. key: a member's key for their room's board, null for the common area's.
+  function spot(key){
+    const board=boards.get(key??null);if(!board)return null;
+    board.anchor.updateWorldMatrix(true,false);
+    const p=board.anchor.getWorldPosition(new THREE.Vector3()),f=new THREE.Vector3(0,0,1).transformDirection(board.anchor.matrixWorld);
+    world.worldToLocal(p);const yaw=Math.atan2(f.x,f.z);
+    return {x:p.x+Math.sin(yaw)*1.6,z:p.z+Math.cos(yaw)*1.6,yaw};
+  }
+  return {hit,pick,rebuild,frame,tileNear,spot,invalidate(){dirty=true},setVisible(value){showing=value;for(const b of boards.values())b.anchor.visible=value},
     dispose(){unsubscribe();for(const b of boards.values())disposeBoard(b);boards.clear();for(const b of badges.values())b.remove()}};
 }
 

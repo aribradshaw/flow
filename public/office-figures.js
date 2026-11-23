@@ -75,16 +75,18 @@ export function animateHuman(rig,t,{moving=false,speed=moving?5:0,grounded=true,
 }
 
 // ---------- the AgentFlow org: robots, team tables, automations (instanced) ----------
-// items: [{id, kind:'agent'|'team'|'automation', x, z, dim}] -> {group, pick(object, instanceId) -> id}
+// items: [{id, kind:'agent'|'team'|'automation', x, z, dim}] -> {group, pick(object, instanceId) -> id,
+//   move(id, x, y, z, yaw, scale)} — move puts one robot somewhere else (office-npc.js walks them).
 export function orgField(items){
-  const g=geo(),group=new THREE.Group(),meshes=[],ids=new Map();
+  const g=geo(),group=new THREE.Group(),meshes=[],ids=new Map(),parts=[];
   const part=(list,geometry,material,place,colorOf)=>{
     if(!list.length)return;
-    const im=new THREE.InstancedMesh(geometry,material,list.length),o=new THREE.Object3D(),c=new THREE.Color();
-    list.forEach((it,i)=>{const [x,y,z,sx,sy,sz,ry=0]=place(it);o.position.set(it.x+x,y,it.z+z);o.rotation.set(0,ry,0);o.scale.set(sx,sy,sz);o.updateMatrix();im.setMatrixAt(i,o.matrix);
+    const im=new THREE.InstancedMesh(geometry,material,list.length),o=new THREE.Object3D(),c=new THREE.Color(),offs=[];
+    list.forEach((it,i)=>{const p=place(it),[x,y,z,sx,sy,sz,ry=0]=p;offs.push(p);o.position.set(it.x+x,y,it.z+z);o.rotation.set(0,ry,0);o.scale.set(sx,sy,sz);o.updateMatrix();im.setMatrixAt(i,o.matrix);
       if(colorOf){c.set(colorOf(it));if(it.dim)c.lerp(new THREE.Color('#c7ccca'),.65);im.setColorAt(i,c)}});
     im.instanceMatrix.needsUpdate=true;if(im.instanceColor)im.instanceColor.needsUpdate=true;
     im.userData.kind='af';ids.set(im,list.map(it=>it.id));group.add(im);meshes.push(im);
+    parts.push({im,offs,index:new Map(list.map((it,i)=>[it.id,i]))});
   };
   const white=new THREE.MeshLambertMaterial({color:'#ffffff',flatShading:true});
   const robots=items.filter(i=>i.kind==='agent'),teams=items.filter(i=>i.kind==='team'),autos=items.filter(i=>i.kind==='automation');
@@ -112,7 +114,22 @@ export function orgField(items){
   const sh=new THREE.InstancedMesh(g.disc,(()=>{const m=matOf('#000000',{basic:true});m.transparent=true;m.opacity=.14;m.depthWrite=false;return m})(),items.length||1);
   const o=new THREE.Object3D();items.forEach((it,i)=>{o.position.set(it.x,0.02,it.z);o.rotation.set(-Math.PI/2,0,0);const r=it.kind==='team'?1.4:0.45;o.scale.set(r,r,r);o.updateMatrix();sh.setMatrixAt(i,o.matrix)});
   sh.count=items.length;group.add(sh);
-  return {group,meshes,pick:(obj,i)=>ids.get(obj)?.[i]??null,dispose(){white.dispose();for(const m of meshes)m.dispose();sh.dispose()}};
+  const shadowAt=new Map(items.map((it,i)=>[it.id,i])),last=new Map(),q=new THREE.Object3D();
+  // One robot's new pose: every part turned about its centre by yaw, the shadow left on the floor. Unchanged
+  // poses cost nothing.
+  function move(id,x,y,z,yaw=0,scale=1){
+    const key=x*1e6+y*1e4+z*1e2+yaw+scale*7,prev=last.get(id);if(prev===key)return;last.set(id,key);
+    const c=Math.cos(yaw),s=Math.sin(yaw);
+    for(const p of parts){
+      const i=p.index.get(id);if(i===undefined)continue;
+      const [ox,oy,oz,sx,sy,sz,ry=0]=p.offs[i];
+      q.position.set(x+(ox*c+oz*s)*scale,y+oy*scale,z+(-ox*s+oz*c)*scale);q.rotation.set(0,ry+yaw,0);q.scale.set(sx*scale,sy*scale,sz*scale);q.updateMatrix();
+      p.im.setMatrixAt(i,q.matrix);p.im.instanceMatrix.needsUpdate=true;p.im.boundingSphere=null;
+    }
+    const k=shadowAt.get(id);
+    if(k!==undefined){q.position.set(x,0.02,z);q.rotation.set(-Math.PI/2,0,0);const r=0.45*scale;q.scale.set(r,r,r);q.updateMatrix();sh.setMatrixAt(k,q.matrix);sh.instanceMatrix.needsUpdate=true}
+  }
+  return {group,meshes,move,pick:(obj,i)=>ids.get(obj)?.[i]??null,dispose(){white.dispose();for(const m of meshes)m.dispose();sh.dispose()}};
 }
 
 // Org chart positions: managers above their reports; reports that have none of their own are packed in a

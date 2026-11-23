@@ -39,6 +39,10 @@
 .of-bubble{display:inline-block;max-width:240px;white-space:normal;padding:6px 10px;border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.14);font-size:12px;line-height:1.35;position:relative}
 .of-bubble::after{content:'';position:absolute;left:50%;bottom:-6px;margin-left:-6px;border:6px solid transparent;border-bottom:0;border-top-color:#fff}
 .of-emote{display:inline-block;font-size:26px;animation:of-rise 2.4s ease-out forwards}
+/* NPCs chatting (office-npc.js): a tiny bubble with an ellipsis, pulsing softly. */
+.of-npc-say{display:inline-block;padding:1px 7px 3px;border-radius:9px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.16);font-size:12px;line-height:1;color:#45535a;animation:of-npc-say 1.6s ease-in-out infinite}
+@keyframes of-npc-say{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.of-npc-say{animation:none}}
 @keyframes of-rise{0%{transform:translateY(8px) scale(.6);opacity:0}15%{transform:translateY(0) scale(1.15);opacity:1}80%{opacity:1}100%{transform:translateY(-34px);opacity:0}}
 @media (prefers-reduced-motion:reduce){.of-emote,.of-bang{animation:none}}
 .of-dock{position:absolute;left:12px;bottom:12px;width:min(360px,calc(100% - 24px));display:flex;flex-direction:column;gap:6px;z-index:2}

@@ -1,15 +1,14 @@
 // What live agents act out in the 3D office (docs/concepts/12-office.md), per activityKind: typing at the
 // keyboard (edit), a floating book (read), a sweeping magnifying glass (search), terminal glyphs (run), a
 // bubbling test tube with green and red flashes (test), a thought cloud (think) and a little globe (web).
-// Idle agents wander to their room's coffee corner and back. An agent that starts waiting walks to its
-// owner's avatar when they are in the office (else stays at its desk), hops there under its "!", and, for
-// the owner only, plays a soft ping (WebAudio, no assets; muted from the HUD). Do not disturb
-// (status.isQuiet) holds that ping: the badge stays, the sound does not play. Clicking it still opens its
-// panel with Allow / Deny (office.js).
+// Each room has a coffee corner. An agent that starts waiting plays a soft ping for its owner (WebAudio, no
+// assets; muted from the HUD). Do not disturb (status.isQuiet) holds that ping: the badge stays, the sound
+// does not play. Clicking it still opens its panel with Allow / Deny (office.js). Where agents walk (to
+// coffee, to their person, in and out) is office-npc.js's.
 //
 // office.js owns the scene and rebuilds a room's desks on every report; this module keeps each agent's
-// place and pose across rebuilds (keyed by owner and agent id), so walks carry on. One set of geometries
-// and materials per open office, shared by every prop; per frame only transforms change.
+// props across rebuilds (keyed by owner and agent id). One set of geometries and materials per open office,
+// shared by every prop; per frame only transforms change.
 import {getPref,setPref} from './prefs.js';
 import {status} from './office-status.js';
 
@@ -66,16 +65,17 @@ export function bindHud(root,{icon,notify,toast}){
 }
 
 // ---------- the scene side ----------
-// office: {THREE, part(geo, mat, pos, scale), M (office.js shared geometry), room(memberKey) -> {group, desks},
-//          person(memberKey) -> {obj} | undefined, roomW, roomD}
+// office: {THREE, part(geo, mat, pos, scale), M (office.js shared geometry), roomW, roomD, npc (office-npc.js)}
 export function createActivity(office){
   const {THREE,part}=office,V=THREE.Vector3,actors=new Map();
+  // The coffee corner's place in a room (room coordinates), for the NPC layer.
+  const loungeSpot=()=>({x:LOUNGE.x+0.2,z:LOUNGE.z});
   const basic=c=>new THREE.MeshBasicMaterial({color:c}),lam=(c,o={})=>new THREE.MeshLambertMaterial({color:c,flatShading:true,...o});
   const G={box:office.M.box,ico:office.M.ico,ico1:office.M.ico1,cyl:new THREE.CylinderGeometry(1,1,1,8),ring:new THREE.TorusGeometry(1,0.16,6,18),thin:new THREE.TorusGeometry(1,0.05,4,24),disc:new THREE.CircleGeometry(1,18),cone:office.M.cone};
   const K={paper:lam('#fbfaf5'),cover:lam('#c0563b'),key:lam('#2a312e'),code:basic('#bfe8cf'),green:basic('#5fd38a'),glass:lam('#cfe6ff',{transparent:true,opacity:.38,depthWrite:false}),
     brass:lam('#c99a3c'),cloud:lam('#ffffff',{transparent:true,opacity:.95}),sea:lam('#4c9be8'),land:lam('#5fae6e'),ringM:lam('#e6edf5'),bubble:lam('#ffffff',{transparent:true,opacity:.75}),
     hand:lam('#f4ede4'),counter:lam('#8c6a4f'),machine:lam('#39413e'),light:basic('#ff6b4a'),mug:lam('#f3efe6'),coffee:lam('#5a3a22'),leaf:lam('#5f9e6e'),pot:lam('#c7b299'),rug:lam('#000',{transparent:true,opacity:.07,depthWrite:false})};
-  const W=office.roomW,D=office.roomD,LOUNGE=new V(-W/2+1.7,0,D/2-1.6),INNER=new V(0,0,D/2-0.9),OUTER=new V(0,0,D/2+1.1);
+  const W=office.roomW,D=office.roomD,LOUNGE=new V(-W/2+1.7,0,D/2-1.6);
   const hash=s=>{let h=2166136261;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);return (h>>>0)/4294967296};
 
   // The coffee corner, in a room's desks group (room coordinates). -> [{x, z, w, d, h}]: its counter, for colliders.
@@ -133,97 +133,42 @@ export function createActivity(office){
   function propFor(u,kind){if(!BUILD[kind])return null;if(!u.props[kind]){const p=BUILD[kind](u);u.props[kind]=p;u.mascot.add(p)}return u.props[kind]}
 
   // ---------- attach: called by office.js for each mascot it builds ----------
-  // a: the agent as this viewer sees it; desk: the desk group (mascot's parent); root: the room's desks group.
-  // lounge: false keeps an idle one at its desk (a session seated at an AgentFlow agent's desk, office-seats.js).
+  // a: the agent as this viewer sees it; desk: the desk group (mascot's parent).
+  // seated: at an AgentFlow agent's desk (office-seats.js), where an idle one stays near its desk.
+  // Where it stands and walks is the NPC layer's (office.npc, office-npc.js); this module acts out its work.
   // -> 'waiting' when it just started waiting (or waits on a new prompt), else ''. Pings for the owner.
-  function attach(mascot,a,{member,desk,root,lounge=true}){
+  function attach(mascot,a,{member,seated=false}){
     const key=JSON.stringify([member,a.source,a.id]),prev=actors.get(key);
-    root.updateWorldMatrix(true,true);
-    const home=desk.localToWorld(new V(0,0,0.85)),facing=new THREE.Euler().setFromQuaternion(root.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y;
-    const u=prev||{key,member,pos:home.clone(),yaw:facing+Math.PI,seed:hash(key),phase:'desk',until:0,hopAt:0};
+    const u=prev||{key,member,seed:hash(key)};
+    // The same mascot when its desk was kept; a new one after a rebuild: props start over on it. Its place and
+    // pose carry on in the NPC layer either way.
     if(u.mascot!==mascot){
       for(const m of u.own||[])m.dispose?.();
       Object.assign(u,{mascot,props:{},own:[]});
     }
-    Object.assign(u,{desk,root,home,facing,lounge,kind:kindOf(a),status:a.status,mine:!!a.mine});
+    Object.assign(u,{kind:kindOf(a),status:a.status,mine:!!a.mine});
     const req=a.pending?.requestId||'',started=!!prev&&a.status==='waiting'&&(prev.lastStatus!=='waiting'||(req&&req!==prev.lastReq));
     u.lastStatus=a.status;u.lastReq=req;actors.set(key,u);
-    if(started){u.hopAt=performance.now();if(u.mine&&!status.isQuiet(member))ping()}
-    place(u,0);
+    if(started&&u.mine&&!status.isQuiet(member))ping();
+    office.npc?.mascot(key,mascot,{a,member,seated,wander:!seated});
     return started?'waiting':'';
   }
 
-  // ---------- walking ----------
-  const tmp=new V(),tmp2=new V(),lp=new V(),lg=new V();
-  const inRoom=p=>Math.abs(p.x)<W/2&&p.z>-D/2&&p.z<D/2+0.6;
-  // The next point towards goal, through the room's door when one end is inside and the other is not.
-  function waypoint(u,goal,out){
-    if(!u.lounge)return out.copy(goal); // a seat in the common area: no room, no door
-    u.root.worldToLocal(lp.copy(u.pos));u.root.worldToLocal(lg.copy(goal));
-    const pin=inRoom(lp),gin=inRoom(lg);
-    if(pin===gin)return out.copy(goal);
-    if(pin){const atDoor=Math.abs(lp.x)<0.6&&lp.z>INNER.z-0.3;return u.root.localToWorld(out.copy(atDoor?OUTER:INNER))}
-    return u.root.localToWorld(out.copy(lp.distanceTo(OUTER)>0.5?OUTER:INNER));
-  }
-  function goalOf(u,now){
-    if(u.status==='waiting'){
-      const p=office.person(u.member);
-      if(p){
-        // Beside the owner, on the side it comes from (chosen once), spread so several agents do not stack.
-        const o=p.obj.position;u.side??=Math.atan2(u.pos.x-o.x,u.pos.z-o.z)+(u.seed-0.5)*1.4;
-        u.facePt=o;return tmp2.set(o.x+Math.sin(u.side)*1.25,0,o.z+Math.cos(u.side)*1.25);
-      }
-      u.facePt=null;u.side=null;return u.home;
-    }
-    u.facePt=null;u.side=null;
-    if(u.status==='idle'&&u.lounge){
-      // Desk a while, coffee a while, back again.
-      if(now>u.until){u.phase=u.phase==='lounge'?'desk':'lounge';u.until=now+(u.phase==='lounge'?5+u.seed*5:7+((u.seed*7)%1)*9)}
-      if(u.phase==='lounge'){const a=u.seed*Math.PI*2;return u.root.localToWorld(tmp2.set(LOUNGE.x+0.2+Math.sin(a)*0.65,0,LOUNGE.z+Math.cos(a)*0.65))}
-      return u.home;
-    }
-    u.phase='desk';return u.home;
-  }
-  // Writes the actor's world place and heading onto its mascot (in its desk's coordinates).
-  function place(u,y,tilt=0){
-    u.desk.worldToLocal(tmp.copy(u.pos));u.mascot.position.set(tmp.x,y,tmp.z);
-    u.mascot.rotation.set(tilt,u.yaw-u.facing,0);
-  }
-  const turn=(a,b,k)=>{const d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;return a+d*Math.min(1,k)};
-
-  // ---------- each frame ----------
+  // ---------- each frame, after the NPC layer has placed everyone ----------
   function tick(dt,t){
-    const now=t;
+    const npc=office.npc;
     for(const [key,u] of actors){
-      if(!u.desk.parent||!u.root.parent){for(const m of u.own)m.dispose?.();actors.delete(key);continue} // its room was rebuilt without it
-      const goal=goalOf(u,now),dist=Math.hypot(goal.x-u.pos.x,goal.z-u.pos.z),atHome=u.pos.distanceTo(u.home)<0.06;
-      let y=0,tilt=0,walking=false;
-      if(dist>0.06){
-        const w=waypoint(u,goal,tmp),dx=w.x-u.pos.x,dz=w.z-u.pos.z,l=Math.hypot(dx,dz)||1,step=Math.min(l,(u.status==='waiting'?3.6:2.4)*dt);
-        u.pos.x+=dx/l*step;u.pos.z+=dz/l*step;u.yaw=turn(u.yaw,Math.atan2(dx,dz),dt*10);walking=true;
-        y=Math.abs(Math.sin(t*12+u.seed*9))*0.09;
-      }else{
-        u.pos.x=goal.x;u.pos.z=goal.z;
-        if(u.facePt)u.yaw=turn(u.yaw,Math.atan2(u.facePt.x-u.pos.x,u.facePt.z-u.pos.z),dt*8);
-        else if(atHome)u.yaw=turn(u.yaw,u.facing+Math.PI,dt*8);
-        else if(u.phase==='lounge'){u.root.localToWorld(tmp.set(LOUNGE.x-1.1,0,LOUNGE.z+0.4));u.yaw=turn(u.yaw,Math.atan2(tmp.x-u.pos.x,tmp.z-u.pos.z),dt*6)}
-        // The mascot itself bobs, and hops while waiting (office-mascots.js); this adds the lean of the work.
-        if(u.status==='running'&&atHome)tilt=u.kind==='edit'?0.12:u.kind==='read'?-0.06:0;
-        else if(u.phase==='lounge')y=Math.abs(Math.sin(t*1.5+u.seed*4))*0.03;
-      }
-      // A fresh wait: a bigger first hop.
-      if(u.hopAt){const k=(performance.now()-u.hopAt)/900;if(k<1)y+=Math.sin(k*Math.PI)*0.6;else u.hopAt=0}
-      place(u,y,tilt);
-      // The prop for its kind shows only while it works at its desk.
-      const show=!walking&&atHome&&u.status==='running'?u.kind:'';
+      if(npc?!npc.alive(key):!u.mascot.parent){for(const m of u.own)m.dispose?.();actors.delete(key);continue}
+      // The prop for its kind shows only while it sits at its desk and works; it leans into the work.
+      const show=(npc?npc.working(key):true)&&u.status==='running'?u.kind:'';
       for(const [k,p] of Object.entries(u.props))p.visible=k===show;
-      if(show){const p=propFor(u,show);if(p){p.visible=true;p.userData.tick?.(t,u.seed)}}
+      if(show){
+        u.mascot.rotation.x+=u.kind==='edit'?0.12:u.kind==='read'?-0.06:0;
+        const p=propFor(u,show);if(p){p.visible=true;p.userData.tick?.(t,u.seed)}
+      }
     }
   }
-  function reset(){
-    for(const u of actors.values()){
-      u.pos.copy(u.home);u.yaw=u.facing+Math.PI;u.phase='desk';u.until=0;u.hopAt=0;u.side=null;
-    }
-  }
-  return {lounge,attach,tick,reset,actors};
+  // A jump in time (seeking a day replay): everyone straight to their place, no walks.
+  function reset(){office.npc?.reset()}
+  return {lounge,loungeSpot,attach,tick,reset,actors};
 }

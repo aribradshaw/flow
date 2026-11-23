@@ -24,6 +24,7 @@ import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from '
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
+import {createNpcs} from './office-npc.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
 import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
@@ -119,7 +120,7 @@ export function closeOffice(){
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.voice?.dispose(); // every call ends; the mic and a shared screen are released
-  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();clearInterval(s.answerTick);
+  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
@@ -452,8 +453,17 @@ function initScene(){
   });
   S.world=new THREE.Group();scene.add(S.world);
   Object.assign(S,{renderer,scene,camera,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
+  // Everyone but people's avatars moves like an NPC: along paths, never snapping (office-npc.js).
+  S.npcLayer=new THREE.Group();S.world.add(S.npcLayer);
+  S.npc=createNpcs({THREE,layer:S.npcLayer,world:S.world,
+    navWorld,person:key=>S.people.get(key),isQuiet:key=>presenceStatus.isQuiet(key),
+    room:roomSpots,boardSpot:key=>S.boards?.spot(key)||null,
+    entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,player:()=>S.pos,
+    label,unlabel:l=>{l.el.remove();S.labelList=S.labelList.filter(x=>x!==l)},
+    // A figure that outlived its desk or its place in the org (walking out): nothing to click or press E on.
+    retire:obj=>{const u=obj.userData;S.clickables=S.clickables.filter(c=>c!==obj);if(u?.kind==='agent')S.interact?.unregister(`agent:${u.member}:${u.id}`);else if(u?.kind==='af')S.interact?.unregister('af:'+u.id)}});
+  S.activity=createActivity({THREE,part,M,roomW:ROOM_W,roomD:ROOM_D,npc:S.npc});
   usePlace(wantedWorld());
-  S.activity=createActivity({THREE,part,M,roomW:ROOM_W,roomD:ROOM_D,person:key=>S.people.get(key)});
   const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
   const cv=renderer.domElement;
@@ -475,7 +485,9 @@ function initScene(){
   S.boards=createOfficeBoards({env:S.env,envName:()=>{const name=office.opts.offices.find(o=>o.id===office.env)?.name||'This office';return office.portalList?.length?`This office ▸ ${name}`:name},world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
-      return kind==='agent'&&entry.cls?.includes('agent')?agentOf(member,id)?.seat?.card:null;
+      if(kind!=='agent'||!entry.cls?.includes('agent'))return null;
+      // No badge on the way to the board to fetch it: it has the card once it took it (office-npc.js).
+      const a=agentOf(member,id);return a&&!S.npc?.hidesCard(deskKey(member,a))?a.seat?.card:null;
     }});
   S.cardDrag=createOfficeCardDrag({root:S.root,env:S.env,local:()=>S.env===S.opts.current,hitAt,targetAt:cardTargetAt,openCard});
   S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:e=>S.replay?.active?null:S.cardDrag.grab(e),
@@ -579,6 +591,9 @@ function buildRooms(){
   buildDoors();
   S.presence?.syncDoors();
   S.voice?.layout();S.walls.push(...(S.voice?.walls||[])); // the meeting room's glass stops people and the camera
+  // NPCs that are new to the office walk in from the edge of the common area, on the main wall's side (or
+  // where the world lets people in).
+  {const w=S.place.id==='classic'&&S.worldLayout.mainWall,d=w&&Math.hypot(w.x,w.z),r=(S.commonR||10)+1.5;S.npcEntrance=d?{x:w.x/d*r,z:w.z/d*r}:S.place.spawn?{x:S.place.spawn.x,z:S.place.spawn.z}:null}
   updateColliders();
   const anchors=S.worldLayout.boardAnchors();
   S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
@@ -621,6 +636,21 @@ function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.k
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
 function updateColliders(){
   S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes),...(S.presence?.doorBoxes()||[])];
+  S.npc?.invalidate(); // NPCs re-plan their walks around what is there now
+}
+// What NPCs walk on (office-nav.js): everything that stops people, and the world's floor heights (decks,
+// stairs, water) within the part of the world the office uses.
+function navWorld(){
+  const c=S.place?.center||{x:0,z:0},r=(S.overviewRadius||12)+4,b=S.place?.bounds;
+  const bounds={minX:Math.max(b?.minX??-Infinity,c.x-r),maxX:Math.min(b?.maxX??Infinity,c.x+r),minZ:Math.max(b?.minZ??-Infinity,c.z-r),maxZ:Math.min(b?.maxZ??Infinity,c.z+r)};
+  // A door its member closed keeps visitors out, not the room's own agents: they come and go through it.
+  return {boxes:[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes)],bounds,ground:S.place?.id==='classic'?null:S.place?.ground};
+}
+// Where a room's NPCs come in and go out (just outside its door) and have coffee, in world coordinates.
+function roomSpots(key){
+  const r=S.rooms.get(key);if(!r)return undefined;
+  if(!r.npc){const f={x:r.center.x,z:r.center.z,facing:r.facing},l=S.activity?.loungeSpot()||{x:-ROOM_W/2+1.9,z:ROOM_D/2-1.6};r.npc={door:toWorld(f,0,ROOM_D/2+1.3),lounge:toWorld(f,l.x,l.z)}}
+  return r.npc;
 }
 function buildDesks(key,refresh=true){
   const room=S.rooms.get(key);if(!room)return;
@@ -681,7 +711,7 @@ function updateDesk(d,a,key,x,z,name,tagY,lounge){
   }
   u.status=a.status;u.children=(a.children||[]).length;
   u.screen.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
-  S.activity?.attach(mascot,a,{member:key,desk:d,root:d.parent,lounge});
+  S.activity?.attach(mascot,a,{member:key,desk:d,root:d.parent,lounge,seated:!lounge});
   const at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
   const tag=`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`;
   if(!u.tag)u.tag=label(mascot,tag,{y:tagY,cls:'agent click',near:16});
@@ -721,10 +751,14 @@ function buildAgentflow(){
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
     if(a.kind==='human'){if(a.member&&(a.member===S.meKey||S.people.has(a.member)))continue;people.push({a,p,offline:!!a.member,dim})}
-    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,dim:dim||kind==='agent'&&!seats.has(a.id)})}
+    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,dim:dim||kind==='agent'&&!seats.has(a.id),still:dim})}
   }
+  // Robots that just left the org are still drawn while they walk out (office-npc.js).
+  const robots=items.filter(it=>it.kind==='agent');
+  if(S.npc)items.push(...S.npc.orgGhosts(new Set(robots.map(it=>it.id))));
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
-  for(const it of items){const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);const a=afOf(it.id);
+  const anchors=new Map();
+  for(const it of items){if(it.ghost)continue;const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);anchors.set(it.id,o);const a=afOf(it.id);
     S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
   S.afPeople=people.map(({a,p,offline,dim})=>{
@@ -734,6 +768,15 @@ function buildAgentflow(){
     label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
     return f;
   });
+  // The org as NPCs: robots walk about when nobody is at their desk; someone who just left the office walks
+  // from where their avatar was to their place in the org.
+  if(S.npc){
+    const humans=people.map(({a,p,dim},i)=>{
+      const left=a.member&&S.leftAt?.get(a.member),from=left&&Date.now()-left.at<20000?left:null;if(from)S.leftAt.delete(a.member);
+      return {id:a.id,obj:S.afPeople[i],x:p.x,z:p.z,member:a.member||'',still:dim,from};
+    });
+    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
+  }
   buildSeats(seats);
 }
 // Seats (office-seats.js): each live session working on an AgentFlow agent's card sits at a small desk beside
@@ -788,7 +831,7 @@ function upsertPerson(p,self=false){
   S.presence?.paintPerson(a);
   return a;
 }
-function removePerson(key){const a=S?.people.get(key);if(!a)return;clear(a.obj);S.people.delete(key);if(S.follow===key)S.follow=null;closeMenu()}
+function removePerson(key){const a=S?.people.get(key);if(!a)return;(S.leftAt??=new Map()).set(key,{x:a.obj.position.x,z:a.obj.position.z,at:Date.now()});clear(a.obj);S.people.delete(key);if(S.follow===key)S.follow=null;closeMenu()}
 const nameOf=key=>S.people.get(key)?.name||S.members.find(m=>m.key===key)?.name||'Someone';
 
 // ---------- chat and emotes ----------
@@ -1165,14 +1208,16 @@ function frame(dt,t,delta){
     p.shade.position.y=0.02-o.position.y;
     animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9});
   }
-  for(const f of S.afPeople||[])animateHuman(f.userData.rig,animation.t,{phase:(f.id%7)*0.9});
+  if(!S.npc)for(const f of S.afPeople||[])animateHuman(f.userData.rig,animation.t,{phase:(f.id%7)*0.9});
   // Agents: running bob and type, waiting hop and glow, idle still; subagents circle.
   for(const c of S.clickables){
     const u=c.userData;if(u.kind!=='agent')continue;
     u.mascot?.update(animation.t,{status:u.status,children:u.children,phase:u.phase});
   }
   pulseMascots(animation.t);
-  // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
+  // Where everyone who is not a person walks (office-npc.js), then what agents act out at their desks
+  // (office-activity.js): after the above, so they have the last word.
+  S.npc?.tick(animation.dt,animation.t);
   S.activity?.tick(animation.dt,animation.t);
   if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,animation.t)}
   if(!paused){
