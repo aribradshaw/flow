@@ -76,6 +76,18 @@ once notifications are allowed.
 
 `ITSAppUsesNonExemptEncryption` is `NO` (the app only uses HTTPS), so builds don't wait on export compliance.
 
+## UI tests
+
+`FlowUITests` drives the app in the simulator the way a person would (tapping and switching columns, opening
+a card, changing tabs). Run it against a local Flow server (`FLOW_TEST_SERVER`, default
+`http://localhost:4391`) while recording the screen to see glitches that screenshots miss:
+
+```sh
+xcrun simctl io booted recordVideo board.mov &   # stop with Ctrl-C when the test ends
+xcodebuild -project Flow.xcodeproj -scheme Flow -destination 'platform=iOS Simulator,name=iPhone 17' \
+  test -only-testing:FlowUITests/BoardFlickerTests
+```
+
 ## Testing in the simulator without tapping
 
 Debug builds read three launch arguments. `-autoSignIn YES` continues as the user who is already

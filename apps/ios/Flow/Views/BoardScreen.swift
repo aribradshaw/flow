@@ -96,20 +96,11 @@ struct BoardScreen: View {
         } else {
             VStack(spacing: 0) {
                 ColumnStrip(board: board, column: $column)
-                // A paging scroll view (not TabView's page style, which jumps when its pages change).
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 0) {
-                        ForEach(BoardColumn.allCases) { col in
-                            columnPage(col)
-                                .containerRelativeFrame(.horizontal)
-                                .id(col)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .scrollIndicators(.hidden)
-                .scrollPosition(id: Binding(get: { column }, set: { if let c = $0 { column = c } }))
+                // One list for the chosen column: no pager of lists (their nested scroll views flickered and
+                // laid out half-width while swiping). Columns change from the strip; swiping a card moves it.
+                columnPage(column)
+                    .id(column)
+                    .transition(.opacity)
             }
         }
     }
@@ -218,7 +209,7 @@ private struct ColumnStrip: View {
                     ForEach(BoardColumn.allCases) { col in
                         let selected = col == column
                         Button {
-                            withAnimation(.easeInOut(duration: 0.25)) { column = col }
+                            withAnimation(.easeInOut(duration: 0.18)) { column = col }
                         } label: {
                             HStack(spacing: 5) {
                                 Circle().fill(Theme.columnColor(col.rawValue)).frame(width: 6, height: 6)
@@ -247,7 +238,6 @@ private struct ColumnStrip: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
-            .scrollClipDisabled()
             .onChange(of: column) { withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(column, anchor: .center) } }
         }
         .sensoryFeedback(.selection, trigger: column)
