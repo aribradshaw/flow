@@ -22,6 +22,7 @@ import * as THREE from './vendor/three/three.module.min.js';
 import {officeBox} from './office-controls.js';
 import {cutaway} from './office-cutaway.js';
 import {meetingAnchors,roomAt,roomReduce,announce,ROOM_OUT,wantedPeers,proximityMix,roomCount,toWorld,isPolite} from './office-voice-core.js';
+import {createRoomPlaque} from './office-plaques.js';
 
 const PREF='flow.office.voice',HIDDEN_MS=120e3,RECONCILE_MS=900,SPEAKING=0.035;
 const svg=p=>`<svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
@@ -283,8 +284,9 @@ export function createVoice(o){
     const sw=Math.min(4,w-1.2),sh=sw*9/16,screen=part(plane,screenOff,[0,1.25+sh/2,-d/2+T/2+0.02],[sw,sh,1]);
     screen.userData={voiceScreen:true,w:sw,h:sh};g.add(screen);V.screen=screen;
     g.add(part(box,frameMat,[0,1.25+sh/2,-d/2+T/2+0.005],[sw+0.12,sh+0.12,0.02]));
-    const sign=new THREE.Object3D();sign.position.set(door/2+0.9,0,d/2+0.05);g.add(sign);
-    V.sign=o.label(sign,`<span class="of-room ofv-sign" style="--c:#4f9fb8"><b>${esc(a.name)}</b><small></small></span>`,{y:H+0.25,cls:'room'});
+    // Wall plaque beside the meeting-room door (same plate as member rooms).
+    V.plaque=createRoomPlaque(g,{x:door/2+0.9,y:H*0.55,z:d/2+0.05},{width:2.1,height:0.48});
+    V.plaque.paint({name:a.name,fg:'#4f9fb8',online:true,extra:'walk in to talk'});
     o.interact?.register({id:'voice:screen',position:()=>{const p=toWorld(a,0,-d/2+1.6);return {x:p.x,y:0,z:p.z}},radius:2.6,height:2.4,priority:1,
       enabled:()=>!!sharer(),label:()=>sharer()?.me?'View your shared screen':`View ${sharerName()}'s screen`,onInteract:()=>{openFull();return closeFull}});
     o.interact?.register({id:'voice:share',position:()=>{const p=toWorld(a,0,0.4);return {x:p.x,y:0,z:p.z}},radius:2.4,height:1.4,
@@ -292,12 +294,11 @@ export function createVoice(o){
     refreshSign();refreshScreen();
   }
   function refreshSign(){
-    const a=V.anchors[0];if(!V.sign||!a)return;
+    const a=V.anchors[0];if(!V.plaque||!a)return;
     const keys=new Set([...V.peers.values()].filter(p=>p.room===a.id).map(p=>p.key));
     if(announce(V.room)===a.id)keys.add(o.meKey());
-    const n=keys.size,el=V.sign.el.querySelector('small'),text=n?` · Live: ${n} in ${a.name}`:' · walk in to talk';
-    if(el.textContent!==text)el.textContent=text;
-    V.sign.el.firstElementChild.classList.toggle('live',n>0);
+    const n=keys.size;
+    V.plaque.paint({name:a.name,fg:'#4f9fb8',online:true,extra:n?`Live: ${n} in ${a.name}`:'walk in to talk'});
   }
 
   // ---------- screen sharing ----------
