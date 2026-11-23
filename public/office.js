@@ -61,22 +61,39 @@ let S=null; // the open office
 export function openOffice(opts){
   if(S)return;
   const root=document.createElement('div');root.className='of';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','3D office');
+  // One row, three jobs: which office and whether it is live, session actions, then view tools.
+  // The thread sheet hangs off this 44px edge, so the bar does not grow a second line.
   root.innerHTML=`<div class="of-top">
-      <span class="of-title">${icon('cube3d',16)}<b>3D office</b></span>
-      ${opts.offices.length>1?`<select class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
-      <select class="of-world" aria-label="World" data-tip="World" hidden>${WORLDS.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}</select>
-      <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
-      <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
-      <button type="button" class="txt" data-of-replay disabled>Replay</button>
-      <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
-      <span class="of-keys">E interact · B board · G go to</span>
-      <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
-      ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
-      <button type="button" class="ib" data-of="goto" aria-label="Go to a place, a person or an agent" aria-expanded="false" data-tip="Go to… (G)">${icon('compass')}</button>
-      <button type="button" class="ib" data-of="map" aria-label="Minimap" aria-pressed="true" data-tip="Minimap (N)">${icon('map')}</button>
-      <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
-      <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
-      <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
+      <div class="of-id">
+        <span class="of-title">${icon('cube3d',16)}<b>3D office</b></span>
+        ${opts.offices.length>1?`<select id="of-office" class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
+        <select id="of-world" class="of-world" aria-label="World" data-tip="World" hidden>${WORLDS.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}</select>
+        <span class="sep" aria-hidden="true"></span>
+        <span class="of-status" role="status" aria-live="polite" data-phase="wait"><i class="of-live" aria-hidden="true"></i><span class="of-status-text">Connecting…</span></span>
+      </div>
+      <span class="sp"></span>
+      <span class="of-keys"><span><kbd>E</kbd> interact</span><span><kbd>B</kbd> board</span><span><kbd>G</kbd> go to</span></span>
+      <span class="sp"></span>
+      <div class="of-session">
+        <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
+        <button type="button" class="txt" data-of-replay disabled>Replay</button>
+        <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
+        <span class="of-presence-slot"></span>
+      </div>
+      <div class="of-tools">
+        <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
+        ${hudHtml(icon,{notify:true})}
+        <span class="sep" aria-hidden="true"></span>
+        <span class="of-zoom" role="group" aria-label="Zoom"><button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button></span>
+        <span class="sep" aria-hidden="true"></span>
+        <button type="button" class="ib" data-of="goto" aria-label="Go to a place, a person or an agent" aria-expanded="false" data-tip="Go to… (G)">${icon('compass')}</button>
+        <button type="button" class="ib" data-of="map" aria-label="Minimap" aria-pressed="true" data-tip="Minimap (N)">${icon('map')}</button>
+        <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
+        <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
+      </div>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" class="ib danger of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button>
+    </div>
     <div class="of-stage"><div class="of-labels" aria-hidden="true"></div>
       <aside class="of-connect-callout" hidden><strong>Your agents aren’t connected yet</strong>
         <button type="button" class="txt primary" data-of="connect">Connect your agents</button>
@@ -233,7 +250,14 @@ function focusPending(){
   const f=afAgents().find(a=>a.id===id||String(a.name||'').toLowerCase()===id.toLowerCase());
   if(f){S.focused=true;showAf(f.id)}
 }
-const status=t=>{const el=S?.root.querySelector('.of-status');if(el&&el.textContent!==t)el.textContent=t};
+const statusPhase=t=>/^Live\b/.test(t)?'live':/not available|No longer/.test(t)?'bad':'wait';
+const status=t=>{
+  const el=S?.root.querySelector('.of-status');if(!el||typeof t!=='string')return;
+  const text=el.querySelector('.of-status-text');
+  if(text){if(text.textContent!==t)text.textContent=t}else if(el.textContent!==t)el.textContent=t;
+  if(el.dataset.phase!==statusPhase(t))el.dataset.phase=statusPhase(t);
+  if(el.dataset.tip!==t)el.dataset.tip=t;
+};
 
 // ---------- the network ----------
 const api=(path,body)=>postJson(`/api/office/${encodeURIComponent(S.env)}/${path}`,body);
