@@ -15,6 +15,7 @@ import {store} from './store.js';
 import {openBridgeDialog} from './office-connect.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
+import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -35,7 +36,7 @@ export function openOffice(opts){
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <span class="of-keys">WASD · Shift sprint · Space jump · middle/right drag</span>
-      <button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
+      ${hudHtml(icon)}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
       <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
@@ -72,6 +73,7 @@ export function openOffice(opts){
   S.controller.reset(S.pos,0);
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
+  bindHud(root,{icon,toast:opts.toast});
   root.addEventListener('focusin',e=>{if(isTyping(e.target))clearKeys()});
   root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
@@ -209,6 +211,7 @@ function initScene(){
   });
   S.world=new THREE.Group();scene.add(S.world);
   Object.assign(S,{renderer,scene,camera,ground,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
+  S.activity=createActivity({THREE,part,M,roomW:ROOM_W,roomD:ROOM_D,person:key=>S.people.get(key)});
   const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
   const cv=renderer.domElement;
@@ -295,6 +298,7 @@ function buildDesks(key,refresh=true){
   const g=new THREE.Group();g.position.copy(room.center);g.rotation.y=room.facing;room.desks=g;S.world.add(g);
   room.boxes=[];
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
+  for(const b of S.activity?.lounge(g)||[])room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
   const agents=S.live.get(key)||[],cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
   if(!agents.length){const o=new THREE.Object3D();o.position.set(0,0,-1);g.add(o);label(o,'<span class="of-empty">No agents running</span>',{y:0.4,cls:'muted',near:22})}
   agents.slice(0,16).forEach((a,i)=>{
@@ -310,8 +314,9 @@ function buildDesks(key,refresh=true){
     mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase:(i*1.7+key.length)%6.28};
     mascot.add(shadow(0.45));
     mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
-    const name=a.private?'Private project':a.title||VENDOR[a.vendor]?.name||'Agent',at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`;
-    label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}" ${at}>${esc(name)}</button>`,{y:1.75,cls:'agent click',near:16});
+    S.activity?.attach(mascot,a,{member:key,desk:d,root:g});
+    const name=a.private?'Private project':a.title||VENDOR[a.vendor]?.name||'Agent',at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
+    label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`,{y:1.75,cls:'agent click',near:16});
     if(a.status==='waiting')label(mascot,`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`,{y:2.25,cls:'bang click'});
     scr.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
   });
@@ -495,9 +500,9 @@ function refreshPanel(){
     const a=agentOf(p.member,p.id),owner=S.members.find(m=>m.key===p.member);
     if(!a){html=`<div class="of-ph"><b>Agent</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div><div class="of-pb"><p class="of-note">It stopped reporting.</p></div>`}
     else{
-      const v=VENDOR[a.vendor]||VENDOR.other,ans=S.answers.get(a.id);
+      const v=VENDOR[a.vendor]||VENDOR.other,ans=S.answers.get(a.id),doing=a.status==='waiting'?'':shownKind(a)[1];
       const head=`<div class="of-ph"><span class="of-dot" style="background:${v.color}"></span><b>${esc(a.private?'Private project':a.title||v.name)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>`;
-      if(a.private)html=head+`<div class="of-pb">${row('Agent',v.name)}${row('Status',STATUS[a.status])}${row('Belongs to',owner?.name)}${a.children?.length?row('Subagents',String(a.children.length)):''}
+      if(a.private)html=head+`<div class="of-pb">${row('Agent',v.name)}${row('Status',STATUS[a.status])}${row('Doing',doing)}${row('Belongs to',owner?.name)}${a.children?.length?row('Subagents',String(a.children.length)):''}
         <p class="of-note">Its details are private: it works in a repo outside the projects you can see here.</p></div>`;
       else{
         let prompt='';
@@ -509,7 +514,7 @@ function refreshPanel(){
         }
         const res=ans&&(!a.pending||ans.requestId===a.pending?.requestId||ans.state==='done')?`<p class="of-res ${ans.state==='done'?(ans.result?.ok?'ok':'bad'):''}">${ans.state==='done'?esc(ans.result?.message||'Done'):`${ans.decision==='allow'?'Allow':'Deny'} sent. Waiting for ${esc(a.host||'the reporter')}…`}</p>`:'';
         html=head+`<div class="of-pb">${row('Status',STATUS[a.status])}${row('Model',a.model?`${v.name} · ${a.model}`:v.name)}${row('Where',a.hostLabel||a.host)}${row('Repo',a.repo?.slug||a.repo?.name)}${row('Project',(a.projects||[]).join(', '))}
-          ${row('Doing',a.activity)}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}</div>`;
+          ${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}</div>`;
       }
     }
   }
@@ -635,6 +640,8 @@ function frame(dt,t){
     u.mascot?.update(t,{status:u.status,children:u.children,phase:u.phase});
   }
   pulseMascots(t);
+  // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
+  S.activity?.tick(dt,t);
   S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
     {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);

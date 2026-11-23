@@ -26,6 +26,8 @@
 .of-name i{position:relative;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--bg);color:var(--fg);font-style:normal;font-size:9px;font-weight:700;overflow:hidden}
 .of-name img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .of-tag{display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;padding:1px 7px;border-radius:9px;background:rgba(29,39,37,.78);color:#fff;font-size:10.5px}
+.of-kind{font-style:normal;margin-right:4px;font-size:10px}
+.of-hud[aria-pressed="true"]{color:var(--accent)}
 .of-tag.priv{background:rgba(102,114,110,.75);font-style:italic}
 .of-tag.af{background:rgba(61,143,102,.86)}
 .of-empty{font-size:11px;color:var(--faint)}
