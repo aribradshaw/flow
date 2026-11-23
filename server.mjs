@@ -1347,13 +1347,15 @@ async function officeEnv(envId){
     // For seats (lib/office-seats.mjs): which card a live session works on, and each agent's queue.
     cards:(data?.devops?.cards||[]).map(c=>({id:c.id,number:c.number,title:c.title,column:c.column,moved:c.moved||'',project:c.project||'',due:c.due||'',snoozedUntil:c.snoozedUntil||''}))};
 }
-// The member a human AgentFlow agent is (as AgentFlow shows its face): its supervisor's person card's email, else
-// the email of the one person card with its name, else the member whose account has its name.
+// The member a human AgentFlow agent is: the one member whose account has its name, else the email of the one
+// person card with its name, else its supervisor's person card's email. The name comes first because a human
+// agent's supervisor is often someone else (their manager), and a person card's email is not always the one
+// they sign in with. Each step only counts when it names a member.
 function humanMember(a,data,members){
   const emails=new Set(members.map(m=>m.email)),people=afCore.peopleOf(data),mail=p=>{const e=String(p?.email||'').toLowerCase();return emails.has(e)?e:''};
-  const sup=people.find(p=>p.id===a.supervisor);if(sup)return mail(sup);
-  const named=afCore.personNamed(people,a.name);if(named?.email)return mail(named);
-  const hits=members.filter(m=>afCore.sameName(m.name,a.name));return hits.length===1?hits[0].email:'';
+  const hits=members.filter(m=>afCore.sameName(m.name,a.name));if(hits.length===1)return hits[0].email;
+  const named=mail(afCore.personNamed(people,a.name));if(named)return named;
+  return mail(people.find(p=>p.id===a.supervisor));
 }
 // Who may enter an environment's office, and which of its projects they see: everyone who can read it
 // sees all of them; a share's recipient sees the projects in their shares' scopes (all for a whole-environment share).
