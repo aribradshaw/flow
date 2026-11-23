@@ -1,10 +1,9 @@
-// Build settings for the Flow app target. Signing (your team) goes in Config/Local.xcconfig,
-// which git ignores: copy Local.xcconfig.example to Local.xcconfig and fill it in.
+// Build settings for the Flow app target (Shared.xcconfig holds what the widgets share).
+
+#include "Shared.xcconfig"
 
 PRODUCT_NAME = Flow
-PRODUCT_BUNDLE_IDENTIFIER = com.flygonlc.flow
-MARKETING_VERSION = 0.1.0
-CURRENT_PROJECT_VERSION = 1
+PRODUCT_BUNDLE_IDENTIFIER = $(APP_BUNDLE_ID)
 
 INFOPLIST_FILE = Config/Info.plist
 GENERATE_INFOPLIST_FILE = YES
@@ -15,20 +14,10 @@ INFOPLIST_KEY_UILaunchScreen_Generation = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 
-TARGETED_DEVICE_FAMILY = 1,2
 SUPPORTS_MACCATALYST = NO
 SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
 ENABLE_PREVIEWS = YES
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
-
-SWIFT_VERSION = 5.0
-SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
-SWIFT_APPROACHABLE_CONCURRENCY = YES
-SWIFT_EMIT_LOC_STRINGS = YES
-
-CODE_SIGN_STYLE = Automatic
-DEVELOPMENT_TEAM =
-
-#include? "Local.xcconfig"
+CODE_SIGN_ENTITLEMENTS = Config/Flow.entitlements

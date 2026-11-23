@@ -8,5 +8,27 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- Widget and notification links: flowapp://inbox, flowapp://card?env=…&id=… -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Flow links</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>flowapp</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Keeps the widgets current while the app is closed (BackgroundRefresh). -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.flygonlc.flow.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

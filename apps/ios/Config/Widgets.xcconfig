@@ -1,0 +1,16 @@
+// Build settings for the widget extension (WidgetKit).
+
+#include "Shared.xcconfig"
+
+PRODUCT_NAME = FlowWidgets
+PRODUCT_BUNDLE_IDENTIFIER = $(APP_BUNDLE_ID).widgets
+
+INFOPLIST_FILE = Config/Widgets-Info.plist
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_CFBundleDisplayName = Flow
+
+SKIP_INSTALL = YES
+APPLICATION_EXTENSION_API_ONLY = YES
+ENABLE_PREVIEWS = YES
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
+CODE_SIGN_ENTITLEMENTS = Config/FlowWidgets.entitlements

@@ -1,28 +1,73 @@
 import SwiftUI
 
+// One card, from the board, the inbox, a notification or a widget.
 struct CardDetailView: View {
     @Environment(AppModel.self) private var model
-    let board: BoardStore
-    let onMove: (FlowCard, BoardColumn) -> Void
-    @State private var card: FlowCard
+    let ref: CardRef
+    let onChange: (FlowCard) -> Void
+    @State private var card: FlowCard?
+    @State private var meta = AppModel.EnvMeta()
+    @State private var mover = CardMover()
+    @State private var editing = false
+    @State private var error: String?
 
-    init(board: BoardStore, card: FlowCard, onMove: @escaping (FlowCard, BoardColumn) -> Void) {
-        self.board = board
-        self.onMove = onMove
-        _card = State(initialValue: card)
+    init(ref: CardRef, initial: FlowCard? = nil, onChange: @escaping (FlowCard) -> Void = { _ in }) {
+        self.ref = ref
+        self.onChange = onChange
+        _card = State(initialValue: initial)
     }
 
-    private var column: BoardColumn? { BoardColumn(rawValue: card.column) }
-
     var body: some View {
+        Group {
+            if let card {
+                details(card)
+            } else if let error {
+                ContentUnavailableView("Can't open this card", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle(card?.numberText ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let card {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Edit") { editing = true }
+                    MoveMenu(card: card) { to in
+                        guard let api = model.api else { return }
+                        Task { await mover.move(api, env: ref.env, card: card, to: to) }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $editing) {
+            if let card {
+                CardEditorView(mode: .edit(env: ref.env, card: card)) { updated($0) }
+            }
+        }
+        .cardMoveDialog(mover)
+        .task { mover.onMoved = { updated($0) }; await refresh() }
+        .refreshable { await refresh() }
+    }
+
+    @ViewBuilder
+    private func details(_ card: FlowCard) -> some View {
+        let column = BoardColumn(rawValue: card.column)
         List {
+            if let message = error ?? mover.error {
+                Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+            }
             Section {
                 Text(card.title)
                     .font(.title3.weight(.semibold))
+                    .textSelection(.enabled)
                 LabeledContent("Column") {
-                    Label(column?.title ?? card.column, systemImage: column?.systemImage ?? "square")
+                    HStack(spacing: 6) {
+                        Image(systemName: column?.systemImage ?? "square").imageScale(.small)
+                        Text(column?.title ?? card.column)
+                    }
                 }
-                if let id = card.project, let p = board.projects[id] {
+                if let id = card.project, let p = meta.projects[id] {
                     LabeledContent("Project") {
                         HStack(spacing: 6) {
                             Circle().fill(Color(flow: p.color)).frame(width: 9, height: 9)
@@ -30,7 +75,7 @@ struct CardDetailView: View {
                         }
                     }
                 }
-                let labels = (card.labels ?? []).compactMap { board.labels[$0] }
+                let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
                 if !labels.isEmpty {
                     LabeledContent("Labels") {
                         HStack(spacing: 4) { ForEach(labels) { LabelChip(label: $0) } }
@@ -46,16 +91,20 @@ struct CardDetailView: View {
 
             if let text = card.description, !text.isEmpty {
                 Section("Description") {
-                    Text(text)
-                        .textSelection(.enabled)
+                    Text(text).textSelection(.enabled)
                 }
             }
 
             if let items = card.checklist, !items.isEmpty {
                 Section("Checklist · \(items.filter(\.done).count)/\(items.count)") {
                     ForEach(items) { item in
-                        Label(item.text, systemImage: item.done ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(item.done ? .secondary : .primary)
+                        Button {
+                            Task { await toggle(item) }
+                        } label: {
+                            Label(item.text, systemImage: item.done ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(item.done ? .secondary : .primary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -73,31 +122,36 @@ struct CardDetailView: View {
                 }
             }
         }
-        .navigationTitle(card.numberText)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    ForEach(BoardColumn.allCases.filter { $0.rawValue != card.column }) { col in
-                        Button(col.title, systemImage: col.systemImage) { onMove(card, col) }
-                    }
-                } label: {
-                    Label("Move", systemImage: "arrow.right.square")
-                }
-            }
-        }
-        .task { await refresh() }
-        .refreshable { await refresh() }
-        .onChange(of: board.cards) {
-            if let newer = board.cards.first(where: { $0.id == card.id }) { card = newer }
-        }
+    }
+
+    private func updated(_ fresh: FlowCard) {
+        card = fresh
+        error = nil
+        onChange(fresh)
     }
 
     private func refresh() async {
-        guard let api = model.api, let env = model.envID else { return }
-        if let fresh = try? await api.card(env: env, card: card.id) {
-            card = fresh
-            board.replace(fresh)
+        guard let api = model.api else { return }
+        meta = await model.meta(ref.env)
+        do {
+            updated(try await api.card(env: ref.env, card: ref.id))
+        } catch {
+            model.handle(error)
+            if card == nil || (error as? FlowError)?.status == 404 { self.error = error.localizedDescription }
+        }
+    }
+
+    // Ticks one item: the whole list is sent, with ifUpdated so a change made elsewhere is not lost.
+    private func toggle(_ item: FlowCard.ChecklistItem) async {
+        guard let api = model.api, let card else { return }
+        let list = (card.checklist ?? []).map { CardPatch.ChecklistEdit(id: $0.id, text: $0.text, done: $0.id == item.id ? !$0.done : $0.done) }
+        do {
+            updated(try await api.updateCard(env: ref.env, card: card.id, CardPatch(checklist: list, ifUpdated: card.updated)))
+        } catch let e as FlowError where e.code == "card_changed" {
+            error = "This card changed somewhere else, so it was reloaded. Try again."
+            await refresh()
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }

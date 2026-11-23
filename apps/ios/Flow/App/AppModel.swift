@@ -19,6 +19,8 @@ final class AppModel {
     }
 
     var env: FlowEnv? { envs.first { $0.id == envID } }
+    // A notification or widget tap waiting to be shown (MainView takes it).
+    var route: AppRoute?
     var api: FlowAPI? { credential.map(FlowAPI.init) }
 
     init() {
@@ -33,23 +35,50 @@ final class AppModel {
         Keychain.save(credential)
         server = credential.server
         self.credential = credential
+        Task { await PushManager.shared.sync() }
     }
 
     func signOut() async {
         guard let credential else { return }
+        await PushManager.shared.forget(credential)
         Keychain.delete()
         self.credential = nil
         envs = []
         envsLoaded = false
+        InboxStore.shared.clear()
         await AuthService(server: credential.server).signOut(credential)
     }
 
     // A revoked or expired key: drop it so the sign-in screen comes back.
+    // A key from before device keys existed (device_key_required): sign in again to get one.
     func handle(_ error: Error) {
-        if let e = error as? FlowError, e.isUnauthorized {
+        if let e = error as? FlowError, e.isUnauthorized || e.code == "device_key_required" {
             Keychain.delete()
             credential = nil
         }
+    }
+
+    // Projects and labels per environment, for showing and editing cards anywhere.
+    struct EnvMeta {
+        var projects: [String: FlowProject] = [:]
+        var labels: [String: FlowLabel] = [:]
+        var sortedProjects: [FlowProject] { projects.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending } }
+        var sortedLabels: [FlowLabel] { labels.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending } }
+    }
+    private(set) var metas: [String: EnvMeta] = [:]
+
+    func setMeta(_ env: String, projects: [FlowProject], labels: [FlowLabel]) {
+        metas[env] = EnvMeta(projects: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                             labels: Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }))
+    }
+
+    func meta(_ env: String) async -> EnvMeta {
+        if let m = metas[env] { return m }
+        guard let api else { return EnvMeta() }
+        async let p = api.projects(env: env)
+        async let l = api.labels(env: env)
+        if let (projects, labels) = try? await (p, l) { setMeta(env, projects: projects, labels: labels) }
+        return metas[env] ?? EnvMeta()
     }
 
     func loadEnvs() async throws {

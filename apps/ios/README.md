@@ -1,7 +1,8 @@
 # Flow for iPhone and iPad
 
-A SwiftUI app for Flow. The DevOps board and cards are native and use the REST API (`/api/v1`). The
-mind map, timeline, AgentFlow and the 3D office are the web app in a `WKWebView`, already signed in.
+A SwiftUI app for Flow. The inbox, the DevOps board, cards (create and edit), notifications and widgets are
+native. The mind map, timeline, AgentFlow and the 3D office are the web app in a `WKWebView`, already signed
+in. What it does and the server routes it uses: [docs/ios-app.md](../../docs/ios-app.md).
 
 Requirements: Xcode 26 or newer. The app targets iOS 18 and runs on both iPhone and iPad.
 
@@ -26,7 +27,8 @@ The app adds no server routes. It uses the ones the web app already has:
    OneProfileID session in Safari both work. **Sign in with email** posts to `/api/auth/sign-in` and
    `/api/auth/two-factor`. A server in local mode needs neither.
 3. With that web session, the app makes its own API key with `POST /api/keys`: all environments,
-   read and write, valid for one year, named `Flow app · <model> <device id>`. The key is kept in the
+   read and write plus the `device` scope that `/api/app` needs, valid for one year, named
+   `Flow app · <model> <device id>`. The key is kept in the
    Keychain. Signing in again on the same device revokes that device's earlier key first. The key is
    listed, and can be revoked, in Settings › Connect on the web.
 4. The native views call `/api/v1` with that key. The web views share the website data store, so
@@ -38,19 +40,30 @@ Signing out revokes the key, ends the web session and clears the website data.
 
 | Path | What it holds |
 | --- | --- |
-| `Flow/App` | The app entry point and `AppModel` (server, credential, environments) |
-| `Flow/Services` | `FlowAPI` (REST v1), `WebBridge`, `AuthService`, `Keychain` |
-| `Flow/Model` | API models and `BoardStore` |
-| `Flow/Views` | Sign-in, board, card detail, the web canvas and settings |
-| `Config` | `Base.xcconfig`, `Info.plist` (local-network http for development) |
+| `Flow/App` | The app entry point and `AppModel` (server, credential, environments, routing) |
+| `Flow/Services` | `FlowAPI` (REST v1 and `/api/app`), `WebBridge`, `AuthService`, `Keychain`, `Push` |
+| `Flow/Model` | API models, `BoardStore`, `InboxStore` (also writes the widget snapshot, and runs the background refresh) |
+| `Flow/Views` | Inbox, board, card detail and editor, the web canvas, settings |
+| `FlowWidgets` | The WidgetKit extension: "Waiting on you" (home and lock screen) and "Doing" |
+| `Shared` | Code both targets build: the widget snapshot in the App Group `group.com.flygonlc.flow` |
+| `Config` | xcconfigs, Info.plists and entitlements (push, App Group) |
 
-The project uses Xcode's synchronized folders, so a new file under `Flow/` is part of the app without
-editing the project file.
+The project uses Xcode's synchronized folders, so a new file under `Flow/`, `FlowWidgets/` or `Shared/` is
+part of its targets without editing the project file.
+
+## Notifications
+
+Push notifications need a server with APNs set up ("Push notifications" in
+[docs/self-hosting.md](../../docs/self-hosting.md)), and a build signed by the same team with the same bundle
+id as `APNS_TOPIC`. Debug builds register as sandbox devices, Release builds as production. The simulator
+can't get real pushes, but `xcrun simctl push booted com.flygonlc.flow payload.json` shows how one looks
+once notifications are allowed.
 
 ## Testing in the simulator without tapping
 
-Debug builds read two launch arguments: `-autoSignIn YES` continues as the user who is already
-signed in (or the local-mode user), and `-startTab canvas|settings` opens that tab. Any launch
+Debug builds read three launch arguments. `-autoSignIn YES` continues as the user who is already
+signed in (or the local-mode user). `-startTab inbox|canvas|settings` opens that tab. `-openCard <env>/<id>`
+opens a card the way a notification or widget tap does. Any launch
 argument can also set the server for that launch:
 
 ```sh

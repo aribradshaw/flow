@@ -4,24 +4,19 @@ struct BoardScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
+    @Binding var path: NavigationPath
     @State private var board = BoardStore()
+    @State private var mover = CardMover()
     @State private var column: BoardColumn = .doing
     @State private var error: String?
-    @State private var gate: Gate?
-
-    struct Gate: Identifiable {
-        let id = UUID()
-        let card: FlowCard
-        let to: BoardColumn
-        let error: FlowError
-    }
+    @State private var newCardColumn: BoardColumn?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle(model.env?.name ?? "Board")
-                .navigationDestination(for: FlowCard.self) { card in
-                    CardDetailView(board: board, card: card) { card, to in requestMove(card, to) }
+                .navigationDestination(for: CardRef.self) { ref in
+                    CardDetailView(ref: ref, initial: board.cards.first { $0.id == ref.id }) { board.replace($0) }
                 }
                 .toolbar { toolbar }
                 .refreshable { await load() }
@@ -32,26 +27,26 @@ struct BoardScreen: View {
                     if board.cards.isEmpty && board.loading { ProgressView() }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                    if let message = error ?? mover.error {
+                        Label(message, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .padding(10)
                             .frame(maxWidth: .infinity)
                             .background(.red.opacity(0.15), in: .rect(cornerRadius: 10))
                             .padding(.horizontal)
-                            .onTapGesture { self.error = nil }
+                            .onTapGesture { error = nil; mover.error = nil }
                     }
                 }
-                .confirmationDialog(gateTitle, isPresented: Binding(get: { gate != nil }, set: { if !$0 { gate = nil } }), titleVisibility: .visible, presenting: gate) { g in
-                    Button(gateAction(g)) {
-                        // From UAT, Done is an approval (the web's Approve button); every other gate is a confirm.
-                        let approve = g.error.code == "confirm_done" && g.card.column == BoardColumn.uat.rawValue
-                        Task { await move(g.card, g.to, confirm: !approve, approve: approve) }
+                .cardMoveDialog(mover)
+                .sheet(item: $newCardColumn) { col in
+                    if let env = model.envID {
+                        CardEditorView(mode: .create(env: env, column: col, project: board.projectFilter)) { card in
+                            board.replace(card)
+                            column = BoardColumn(rawValue: card.column) ?? column
+                        }
                     }
-                    Button("Cancel", role: .cancel) { gate = nil }
-                } message: { g in
-                    Text(g.error.message)
                 }
+                .onAppear { mover.onMoved = { board.replace($0) } }
         }
     }
 
@@ -74,7 +69,7 @@ struct BoardScreen: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(BoardColumn.allCases) { col in
-                        ColumnView(board: board, column: col, onMove: requestMove)
+                        ColumnView(board: board, column: col, onMove: requestMove, onAdd: { newCardColumn = col })
                             .frame(width: 300)
                     }
                 }
@@ -103,10 +98,10 @@ struct BoardScreen: View {
                 }
                 List {
                     ForEach(board.cards(in: column)) { card in
-                        NavigationLink(value: card) {
+                        NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) {
                             CardRow(board: board, card: card)
                         }
-                        .contextMenu { moveMenu(card) }
+                        .contextMenu { MoveMenu(card: card) { requestMove(card, $0) } }
                     }
                 }
                 .listStyle(.plain)
@@ -132,7 +127,7 @@ struct BoardScreen: View {
                 Label("Environment", systemImage: "square.stack.3d.up")
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
             Menu {
                 Picker("Project", selection: $board.projectFilter) {
                     Text("All projects").tag(String?.none)
@@ -143,45 +138,16 @@ struct BoardScreen: View {
             } label: {
                 Label("Project", systemImage: board.projectFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             }
-        }
-    }
-
-    private func moveMenu(_ card: FlowCard) -> some View {
-        Menu("Move to") {
-            ForEach(BoardColumn.allCases.filter { $0.rawValue != card.column }) { col in
-                Button(col.title, systemImage: col.systemImage) { requestMove(card, col) }
+            Button("New card", systemImage: "plus") {
+                newCardColumn = sizeClass == .regular ? .requests : column
             }
-        }
-    }
-
-    private var gateTitle: String { gate.map { "Move \($0.card.numberText) to \($0.to.title)?" } ?? "" }
-
-    private func gateAction(_ g: Gate) -> String {
-        switch g.error.code {
-        case "confirm_done": g.card.column == BoardColumn.uat.rawValue ? "Approve" : "Move to Done"
-        case "confirm_reopen": "Reopen"
-        case "pick_developer": "Move without a developer"
-        default: "Move"
+            .disabled(model.envID == nil)
         }
     }
 
     private func requestMove(_ card: FlowCard, _ to: BoardColumn) {
-        Task { await move(card, to) }
-    }
-
-    private func move(_ card: FlowCard, _ to: BoardColumn, confirm: Bool = false, approve: Bool = false) async {
-        gate = nil
         guard let api = model.api, let env = model.envID else { return }
-        do {
-            try await board.move(api, env: env, card: card, to: to, confirm: confirm, approve: approve)
-            error = nil
-        } catch let e as FlowError where e.isGate {
-            gate = Gate(card: card, to: to, error: e)
-        } catch {
-            model.handle(error)
-            self.error = error.localizedDescription
-            if (error as? FlowError)?.code == "card_changed" { await load() }
-        }
+        Task { await mover.move(api, env: env, card: card, to: to) }
     }
 
     private func load() async {
@@ -190,6 +156,7 @@ struct BoardScreen: View {
             if model.envs.isEmpty || model.env == nil { try await model.loadEnvs() }
             guard let env = model.envID else { return }
             try await board.load(api, env: env)
+            model.setMeta(env, projects: Array(board.projects.values), labels: Array(board.labels.values))
             error = nil
         } catch is CancellationError {
         } catch let e as URLError where e.code == .cancelled {
@@ -201,20 +168,27 @@ struct BoardScreen: View {
 }
 
 private struct ColumnView: View {
+    @Environment(AppModel.self) private var model
     let board: BoardStore
     let column: BoardColumn
     let onMove: (FlowCard, BoardColumn) -> Void
+    let onAdd: () -> Void
 
     var body: some View {
         let cards = board.cards(in: column)
         VStack(alignment: .leading, spacing: 8) {
-            Label("\(column.title) · \(cards.count)", systemImage: column.systemImage)
-                .font(.headline)
-                .padding(.horizontal, 4)
+            HStack {
+                Label("\(column.title) · \(cards.count)", systemImage: column.systemImage)
+                    .font(.headline)
+                Spacer()
+                Button("Add a card to \(column.title)", systemImage: "plus", action: onAdd)
+                    .labelStyle(.iconOnly)
+            }
+            .padding(.horizontal, 4)
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(cards) { card in
-                        NavigationLink(value: card) {
+                        NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) {
                             CardRow(board: board, card: card)
                                 .padding(10)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,13 +196,7 @@ private struct ColumnView: View {
                                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
                         }
                         .buttonStyle(.plain)
-                        .contextMenu {
-                            Menu("Move to") {
-                                ForEach(BoardColumn.allCases.filter { $0.rawValue != card.column }) { col in
-                                    Button(col.title, systemImage: col.systemImage) { onMove(card, col) }
-                                }
-                            }
-                        }
+                        .contextMenu { MoveMenu(card: card) { onMove(card, $0) } }
                         .draggable(card.id)
                     }
                 }

@@ -37,18 +37,6 @@ final class BoardStore {
         loadedEnv = env
     }
 
-    // Moves a card. A board gate (confirm Done, reopen, no developer) comes back as a FlowError with
-    // isGate; the caller asks the person and calls again with confirm or approve.
-    @discardableResult
-    func move(_ api: FlowAPI, env: String, card: FlowCard, to column: BoardColumn, confirm: Bool = false, approve: Bool = false) async throws -> FlowCard {
-        var body = FlowAPI.Move(column: column.rawValue, ifUpdated: card.updated)
-        if confirm { body.confirm = true }
-        if approve { body.approve = true }
-        let moved = try await api.move(env: env, card: card.id, body)
-        replace(moved)
-        return moved
-    }
-
     func replace(_ card: FlowCard) {
         if let i = cards.firstIndex(where: { $0.id == card.id }) { cards[i] = card } else { cards.append(card) }
     }

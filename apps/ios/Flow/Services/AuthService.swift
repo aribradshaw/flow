@@ -10,7 +10,7 @@ import UIKit
 //      - or email + password (+ two-factor code), the same form the web app posts.
 //      - Local mode needs neither.
 //   2. With that session, POST /api/keys makes this device its own key (all environments, read and
-//      write, one year), which the native views use. It shows up, and can be revoked, in
+//      write, one year, plus the device scope that /api/app needs), which the native views use. It shows up, and can be revoked, in
 //      Settings › Connect on the web.
 @MainActor
 final class AuthService {
@@ -133,7 +133,7 @@ final class AuthService {
             }
         }
         let r = try await bridge.fetch(server, "/api/keys", method: "POST",
-                                       body: ["name": name, "env": "*", "scopes": ["write"], "expiresInDays": 365])
+                                       body: ["name": name, "env": "*", "scopes": ["write", "device"], "expiresInDays": 365])
         guard r.status == 201, let reply = try? r.decode(KeyReply.self) else {
             throw FlowError(status: r.status, code: nil, message: r.errorMessage)
         }
