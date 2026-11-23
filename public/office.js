@@ -35,6 +35,7 @@ import {notifyOn,toggleNotify} from './office-alerts.js';
 import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
 import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
+import {batch} from './office-batch.js';
 import {createVoice} from './office-voice.js';
 import {createDecor} from './office-decor.js';
 import {createChief} from './office-chief.js';
@@ -638,9 +639,10 @@ function buildRooms(){
     const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,slot.y||0,slot.z),facing=slot.facing;
     const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
     const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
-    // One material per room so a theme can recolour these walls without painting every room.
-    const wallMat=M.wall.clone();let wallOwned=false;
-    const wall=(x,z,w,d,h=WALL_H)=>{const mesh=part(M.box,wallMat,[x,h/2,z],[w,h,d]);mesh.userData.wall=true;if(!wallOwned){mesh.userData.own=true;wallOwned=true}g.add(mesh);boxAt(slot,x,z,w,d,h)};
+    // One material per room so a theme can recolour these walls without painting every room, and one mesh
+    // for all of them (office-batch.js): a room is a few draw calls, however many walls it has.
+    const wallMat=M.wall.clone(),shell=batch(),trim=batch();
+    const wall=(x,z,w,d,h=WALL_H)=>{shell.box(x,z,w,d,0,h,'#ffffff');boxAt(slot,x,z,w,d,h)};
     // The back wall. Where the world's own wall is behind the room (roomWalls.back false), a lining on it in
     // the room's colours, with a material of its own so the world can fade it with that wall.
     let backMat=null;
@@ -648,16 +650,18 @@ function buildRooms(){
     else wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);
     wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
     const side=(ROOM_W-DOOR_W)/2;wall(-(DOOR_W/2+side/2),ROOM_D/2,side,WALL_T);wall(DOOR_W/2+side/2,ROOM_D/2,side,WALL_T);
-    const accent=mat(fg);accent.userData.own=true;
-    if(!backMat){const stripe=part(M.box,accent,[0,BACK_WALL_H+0.03,-ROOM_D/2],[ROOM_W,0.06,WALL_T+0.04]);stripe.userData.own=true;g.add(stripe)}
+    const accent=mat(fg);
+    if(!backMat)trim.box(0,-ROOM_D/2,ROOM_W,WALL_T+0.04,BACK_WALL_H,BACK_WALL_H+0.06,'#ffffff');
     // Door posts in the member's colour mark the way in.
-    for(const x of [-DOOR_W/2,DOOR_W/2]){const post=part(M.box,accent,[x,0.75,ROOM_D/2],[0.16,1.5,0.26]);post.userData.own=true;g.add(post);boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
+    for(const x of [-DOOR_W/2,DOOR_W/2]){trim.box(x,ROOM_D/2,0.16,0.26,0,1.5,'#ffffff');boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
+    for(const [b,m] of [[shell,wallMat],[trim,accent]]){const mesh=b.mesh(m);mesh.userData={wall:b===shell,own:true,dispose:()=>mesh.geometry.dispose()};g.add(mesh)}
     S.world.add(g);
     // The name plate hangs on the front wall beside the door: below the top of the wall on screen, so it
     // never covers the room's board, which is higher and further back. It also says who is away and
     // whether agents are running, so nothing floats inside the room.
     const sign=new THREE.Object3D();sign.position.set(DOOR_W/2+side/2,0,ROOM_D/2+WALL_T/2+0.02);g.add(sign);
-    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true});
+    // Shown from across the floor, not from the far end of a long one (the overview shows them all).
+    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true,show:()=>!!S.rig?.overview||Math.hypot(c.x-S.pos.x,c.z-S.pos.z)<46});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     const entrance=new THREE.Vector3(0,0,ROOM_D/2).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     if(m.me){

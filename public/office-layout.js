@@ -25,6 +25,7 @@
 //   walls [{x, z, yaw, w, d, h, cam, kind}]   what stops people (cam: how high it stops the camera; 0 for glass
 //                                             and for the outer walls, which fade instead)
 //   props [{t, x, z, …}]                      furniture and plants, for drawing
+//   signs [{kind, text, x, y, z, w, h, facing, wall?}]   name boards in the world (hung over pods and bays, on reception's wall)
 //   lounge [{x, z, fx, fz}]                   where idle characters stand about, and what they face
 //   places() -> [{id, kind, name, x, z, heading, key?}]   somewhere to stand at each place, for "Go to…"
 //   plan()   -> {bounds, zones: [{id, kind, name, x, z, w, d, key?, color?}]}   the floor as rectangles, for a minimap
@@ -270,7 +271,7 @@ export function classicLayout(keys,{org=[]}={}){
       {id:'meeting',kind:'meeting',name:'Meeting room',x:meeting.x,z:meeting.z,w:MEETING_W,d:MEETING_D},
       {id:'lounge',kind:'lounge',name:'Lounge',x:lounge.x,z:lounge.z,w:lounge.w,d:lounge.d},
       ...rooms.map(r=>({id:'office:'+r.key,kind:'office',key:r.key,name:'Office',x:r.x,z:r.z,w:ROOM_W,d:ROOM_D})),
-      ...bays.map(b=>({id:b.id,kind:'bay',name:{nook:'Window seats',games:'Games',library:'Library',focus:'Focus booths'}[b.type],x:b.x,z:b.z,w:ROOM_W,d:ROOM_D})),
+      ...bays.map(b=>({id:b.id,kind:'bay',name:bayName[b.type],x:b.x,z:b.z,w:ROOM_W,d:ROOM_D})),
       ...placed.map(p=>({id:'pod:'+p.id,kind:'pod',name:p.name,x:p.x,z:p.z,w:p.w,d:p.d,color:p.color})),
     ]};
   }
@@ -286,11 +287,16 @@ export function classicLayout(keys,{org=[]}={}){
     out.push({x:b.x,z:b.z});
     return out.filter((p,i)=>!i||Math.hypot(p.x-out[i-1].x,p.z-out[i-1].z)>0.05).map(p=>({x:round(p.x),z:round(p.z)}));
   }
+  // Signs in the world: boards hung over each pod's head, the lounge and the open bays (read from both sides),
+  // and reception's name on its outer wall, facing the floor. {kind, text, x, y (the board's foot), z, w, h, facing}
+  const bayName={nook:'Window seats',games:'Games',library:'Library',focus:'Focus booths'};
+  // Hung above head height: read from across the floor, out of the way of the view once you are under them.
+  const hang=(text,x,z,w,o={})=>({kind:'hang',text,x:round(x),y:3.38,z:round(z),w,h:0.5,facing:0,...o});
   const signs=[
-    {x:5.4,y:2.75,z:round(zFront+4.4),text:'Reception',near:24},
-    {x:round(lounge.x),y:2.9,z:round(zFront+0.3),text:'Lounge',near:22},
-    ...bays.map(b=>({x:b.x,y:2.7,z:round(b.z-(b.wing)*(ROOM_D/2-0.3)),text:{nook:'Window seats',games:'Games',library:'Library',focus:'Focus booths'}[b.type],near:16})),
-    ...placed.map(p=>({x:round(p.x-p.w/2+0.35),y:2.45,z:round(p.north+0.35),text:p.name,near:15,pod:p.id})),
+    {kind:'wall',wall:'S',text:'Reception',x:0,y:3.2,z:round(zS-0.03),w:5.4,h:0.62,facing:Math.PI},
+    hang('Lounge',lounge.x,zFront+0.35,2.3),
+    ...bays.map(b=>hang(bayName[b.type],b.x,b.z-b.wing*(ROOM_D/2-0.35),2.9)),
+    ...placed.map(p=>hang(p.name,p.x,p.north+0.45,Math.min(3.2,p.w-0.5),{color:p.color,pod:p.id})),
   ];
   return {
     rooms,mainWall,bays,meeting,loungeZone:lounge,pods:placed,props,walls,signs,

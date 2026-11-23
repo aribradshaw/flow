@@ -1,68 +1,19 @@
 // The classic office's scenery (docs/concepts/12-office.md): the floor plan office-layout.js lays out, drawn
 // as a low-poly interior. Everything that never moves is merged into a handful of meshes with a colour per
 // vertex: the floor with its zones, the four outer walls (each fades when the camera is beyond it, so you can
-// always see yourself), the furniture and plants, all the glass, the light panels and the skyline outside.
+// always see yourself), the furniture and plants, all the glass, the light panels and the skyline outside. The
+// signs' faces are one more mesh, drawn from one texture.
 // office.js still draws the rooms' own floors and low walls (a member's colours and theme), the main board's
 // wall, people and agents.
 import * as THREE from './vendor/three/three.module.min.js';
 import {classicWorld} from './office-world-core.js';
+import {batch} from './office-batch.js';
 import {ROOM_W,ROOM_D,WALL_H,DOOR_W,MAIN_WALL_H,MAIN_WALL_T,PLAN,toWorld} from './office-layout.js';
 
 const C={concrete:'#e2e5e2',spine:'#eceeeb',stage:'#d9dee2',terrazzo:'#d6dadd',rug:'#9fb9c4',rugEdge:'#7f9dab',wood:'#d8b98c',wood2:'#cfae80',
   wall:'#f4f5f3',trim:'#3d4c56',frame:'#5b6b7a',white:'#f4f2ee',desk:'#b98d63',dark:'#27302d',screen:'#8fd3e8',pot:'#b5835a',pot2:'#e9e6df',
   leaf:'#5f9e6e',leaf2:'#74b283',teal:'#4f9fb8',mustard:'#e2b04a',core:'#e7eae8',roof:'#c7d0cc',roof2:'#d6ddda',slab:'#aab4b0',glass:'#cfe9f2'};
 
-// A batch: boxes, prisms and floor quads with a colour each, as one geometry (flat shaded: a normal per face).
-function batch(){
-  const pos=[],nor=[],col=[],c=new THREE.Color();
-  const tri=(a,b,d,n)=>{pos.push(a[0],a[1],a[2],b[0],b[1],b[2],d[0],d[1],d[2]);for(let i=0;i<3;i++){nor.push(n[0],n[1],n[2]);col.push(c.r,c.g,c.b)}};
-  const quad=(a,b,d,e,n)=>{tri(a,b,d,n);tri(a,d,e,n)};
-  const api={
-    count:()=>pos.length/9,
-    // A box standing on y0, w wide (its own x) and d deep, turned by yaw. top: another colour for its top face, or false for none.
-    box(x,z,w,d,y0,y1,color,yaw=0,{top=null,bottom=false}={}){
-      const cs=Math.cos(yaw),sn=Math.sin(yaw),hx=w/2,hz=d/2;
-      const p=(lx,lz,y)=>[x+lx*cs+lz*sn,y,z-lx*sn+lz*cs],n=(lx,lz)=>[lx*cs+lz*sn,0,-lx*sn+lz*cs];
-      c.set(color);
-      quad(p(-hx,hz,y0),p(hx,hz,y0),p(hx,hz,y1),p(-hx,hz,y1),n(0,1));quad(p(hx,-hz,y0),p(-hx,-hz,y0),p(-hx,-hz,y1),p(hx,-hz,y1),n(0,-1));
-      quad(p(hx,hz,y0),p(hx,-hz,y0),p(hx,-hz,y1),p(hx,hz,y1),n(1,0));quad(p(-hx,-hz,y0),p(-hx,hz,y0),p(-hx,hz,y1),p(-hx,-hz,y1),n(-1,0));
-      if(bottom)quad(p(-hx,-hz,y0),p(hx,-hz,y0),p(hx,hz,y0),p(-hx,hz,y0),[0,-1,0]);
-      if(top===false)return api;
-      if(top)c.set(top);
-      quad(p(-hx,hz,y1),p(hx,hz,y1),p(hx,-hz,y1),p(-hx,-hz,y1),[0,1,0]);
-      return api;
-    },
-    // A flat rectangle on the floor.
-    flat(x,z,w,d,y,color,yaw=0){
-      const cs=Math.cos(yaw),sn=Math.sin(yaw),hx=w/2,hz=d/2,p=(lx,lz)=>[x+lx*cs+lz*sn,y,z-lx*sn+lz*cs];
-      c.set(color);quad(p(-hx,hz),p(hx,hz),p(hx,-hz),p(-hx,-hz),[0,1,0]);return api;
-    },
-    // A rectangle with a border of another colour (no overlap, so nothing flickers).
-    framed(x,z,w,d,y,color,edge,bw=0.14,yaw=0){
-      const cs=Math.cos(yaw),sn=Math.sin(yaw),at=(lx,lz)=>[x+lx*cs+lz*sn,z-lx*sn+lz*cs];
-      api.flat(x,z,w-2*bw,d-2*bw,y,color,yaw);
-      for(const s of [-1,1]){const a=at(0,s*(d-bw)/2);api.flat(a[0],a[1],w,bw,y,edge,yaw);const b=at(s*(w-bw)/2,0);api.flat(b[0],b[1],bw,d-2*bw,y,edge,yaw)}
-      return api;
-    },
-    // A prism or cone standing on y0: radius r0 at the bottom, r1 at the top.
-    prism(x,z,y0,y1,r0,r1,sides,color,top=null){
-      c.set(color);
-      for(let i=0;i<sides;i++){
-        const a=i/sides*Math.PI*2,b=(i+1)/sides*Math.PI*2,m=(a+b)/2,nn=[Math.sin(m),0.35,Math.cos(m)];
-        const A=[x+Math.sin(a)*r0,y0,z+Math.cos(a)*r0],B=[x+Math.sin(b)*r0,y0,z+Math.cos(b)*r0],D=[x+Math.sin(b)*r1,y1,z+Math.cos(b)*r1],E=[x+Math.sin(a)*r1,y1,z+Math.cos(a)*r1];
-        if(r1>0)quad(A,B,D,E,nn);else tri(A,B,[x,y1,z],nn);
-      }
-      if(r1>0){c.set(top||color);for(let i=0;i<sides;i++){const a=i/sides*Math.PI*2,b=(i+1)/sides*Math.PI*2;tri([x,y1,z],[x+Math.sin(a)*r1,y1,z+Math.cos(a)*r1],[x+Math.sin(b)*r1,y1,z+Math.cos(b)*r1],[0,1,0])}}
-      return api;
-    },
-    mesh(material){
-      const g=new THREE.BufferGeometry();
-      g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-      const m=new THREE.Mesh(g,material);m.matrixAutoUpdate=false;m.updateMatrix();return m;
-    },
-  };
-  return api;
-}
 const mix=(a,b,t)=>'#'+new THREE.Color(a).lerp(new THREE.Color(b),t).getHexString();
 // The same "random" every time, from a seed.
 const rng=seed=>()=>{seed=(seed+0x6d2b79f5)>>>0;let t=seed;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return ((t^(t>>>14))>>>0)/4294967296};
@@ -74,7 +25,11 @@ function buildScenery(core){
 
   // ----- the floor and its zones -----
   floor.flat(0,(zN+zS)/2,2*HW,zS-zN,-0.02,C.concrete);
-  floor.flat(0,0,P.SPINE,2*zF,0.004,C.spine);
+  // Joints in the concrete every three metres: something to walk past.
+  {const line=mix(C.concrete,C.trim,0.09);
+    for(let x=-Math.floor((HW-0.5)/3)*3;x<HW-0.4;x+=3)floor.flat(x,(zN+zS)/2,0.05,zS-zN,-0.008,line);
+    for(let z=-Math.floor((zS-0.5)/3)*3;z<zS-0.4;z+=3)floor.flat(0,z,2*HW,0.05,-0.008,line)}
+  floor.flat(0,1.4,P.SPINE,2*zF-2.8,0.004,C.spine);   // from the stage in front of the main board to reception
   floor.framed(0,-zF-P.RECESS/2+1.4,P.CENTER-0.5,P.RECESS+2.8,0.004,C.stage,mix(C.stage,C.trim,0.25),0.1);   // in front of the main board
   floor.framed(0,zF+ROOM_D/2,P.CENTER,ROOM_D,0.004,C.terrazzo,mix(C.terrazzo,C.trim,0.2),0.1);
   floor.framed(0,zF+4.6,5.6,4,0.008,C.rug,C.rugEdge,0.2);                                                 // reception's rug
@@ -136,9 +91,6 @@ function buildScenery(core){
         solid.box(x,z,0.5,0.035,0.86,1.16,C.dark).box(x,z+south*0.02,0.44,0.012,0.89,1.13,C.screen).box(x,z,0.08,0.05,0.76,0.88,C.trim);
       }
     }
-    // The pod's sign post, at its head.
-    const sx=p.x-p.w/2+0.35,sz=p.north+0.35,tone=mix(p.color,C.trim,0.55);
-    solid.box(sx,sz,0.1,0.1,0,2.5,C.trim).box(sx+0.55,sz,1.2,0.06,2.02,2.46,tone);
   }
   for(const r of core.props){
     const yaw=r.yaw||0;
@@ -191,7 +143,7 @@ function buildScenery(core){
   function lamp(x,z){solid.box(x,z,0.02,0.02,2.45,3.6,C.frame).prism(x,z,2.12,2.45,0.24,0.07,6,C.mustard,C.mustard)}
 
   // ----- light panels overhead (they fade when the camera is above them) -----
-  const LY=3.55,panel=(x,z,w,d)=>lights.box(x,z,w,d,LY,LY+0.05,'#ffffff',0,{bottom:true});
+  const LY=3.93,panel=(x,z,w,d)=>lights.box(x,z,w,d,LY,LY+0.05,'#ffffff',0,{bottom:true});
   for(const p of core.pods)for(const t of p.tables)panel(t.x,t.z,Math.max(1.6,t.w-0.6),0.5);
   for(let z=-zF+2;z<=zF-1.9;z+=4)panel(0,z,0.5,2.2);
   for(const s of [-1,1])for(let x=-HW+4;x<=HW-4;x+=8)if(Math.abs(x)>P.SPINE)panel(x,s*(zF-P.CORRIDOR/2),2.6,0.4);
@@ -211,6 +163,15 @@ function buildScenery(core){
     // The tower this floor is in, going down.
     city.box(0,(zN+zS)/2,2*HW+2*T-0.4,zS-zN+2*T-0.4,-90,-0.7,'#c3ced8',0,{top:false});
   }
+  // ----- signs: their boards and rods here, their faces from one texture (signFaces) -----
+  for(const s of core.signs){
+    const yaw=s.facing||0;
+    if(s.kind==='hang'){
+      solid.box(s.x,s.z,s.w+0.06,0.06,s.y-0.03,s.y+s.h+0.03,C.trim,yaw,{bottom:true});
+      for(const dx of [-1,1]){const [x,z]=local(s.x,s.z,yaw,dx*(s.w/2-0.25),0);solid.box(x,z,0.025,0.025,s.y+s.h,H,C.frame,yaw)}
+    // A wall sign's board is part of its wall, and fades with it.
+    }else{const [x,z]=local(s.x,s.z,yaw,0,-0.01);(sides[s.wall]||solid).box(x,z,s.w+0.1,0.04,s.y-0.05,s.y+s.h+0.05,C.trim,yaw,{bottom:true})}
+  }
   return {floor,solid,glass,lights,city,sides};
 }
 
@@ -228,12 +189,13 @@ export function createClassicWorld({scene}){
   let core=classicWorld([]),sig='',meshes={},backs=[];
   const fade={N:1,S:1,W:1,E:1};let veilSig='';
   function rebuild(){
-    for(const m of Object.values(meshes)){group.remove(m);m.geometry.dispose()}
+    for(const m of Object.values(meshes)){group.remove(m);if(m.userData.dispose)m.userData.dispose();else m.geometry.dispose()}
     const b=buildScenery(core);meshes={};let triangles=0;
     const add=(name,bt,material)=>{const m=bt.mesh(material);m.name=name;meshes[name]=m;group.add(m);triangles+=bt.count();return m};
     add('floor',b.floor,mats.floor);add('solid',b.solid,mats.solid);add('city',b.city,mats.city);
     for(const s of 'NSWE')add(s,b.sides[s],mats[s]);
     add('glass',b.glass,mats.glass).renderOrder=2;add('lights',b.lights,mats.lights).renderOrder=3;
+    const faces=signFaces(core.signs);if(faces){faces.name='signs';meshes.signs=faces;group.add(faces);triangles+=faces.geometry.attributes.position.count/3}
     world.floors=[meshes.floor];world.stats={triangles,meshes:Object.keys(meshes).length};
   }
   const world={
@@ -261,14 +223,44 @@ export function createClassicWorld({scene}){
       if(now!==veilSig){veilSig=now;world.veiled=new Set(now?now.split('\n'):[]);world.veilRev++}
       mats.lights.opacity=Math.max(0.1,Math.min(0.92,(5.2-p.y)/1.6));
       // From high above the floor is a plan: the city under it steps back.
-      setFade(mats.city,Math.max(0.16,Math.min(1,(70-p.y)/40)));
+      setFade(mats.city,Math.max(0.07,Math.min(1,(64-p.y)/36)));
     },
-    get walls(){return core.walls},get signs(){return core.signs},get spawn(){return core.spawn},get center(){return core.center},get bounds(){return core.bounds},
+    get walls(){return core.walls},// The plan's signs are boards in the world here, so office.js has no labels to draw for them.
+    signs:[],get spawn(){return core.spawn},get center(){return core.center},get bounds(){return core.bounds},
     ground:(x,z)=>core.ground(x,z),respawn:p=>core.respawn(p),splash(){},
-    dispose(){scene.remove(hemi,sun,group);for(const m of Object.values(meshes))m.geometry.dispose();for(const m of Object.values(mats))m.dispose();scene.fog=null},
+    dispose(){scene.remove(hemi,sun,group);for(const m of Object.values(meshes)){if(m.userData.dispose)m.userData.dispose();else m.geometry.dispose()}for(const m of Object.values(mats))m.dispose();scene.fog=null},
   };
   rebuild();
   return world;
+}
+// The signs' faces: every text drawn once into one canvas, and one mesh of rectangles that show their part of it.
+// A hung board is read from both sides; a wall sign from the front.
+function signFaces(signs){
+  if(!signs.length||typeof document==='undefined')return null;
+  const PX=72,GAP=2,rows=signs.map(s=>({s,w:Math.round(s.w/s.h*PX)})),W=Math.max(...rows.map(r=>r.w)),H=rows.length*(PX+GAP);
+  const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');ctx.textBaseline='middle';ctx.textAlign='center';
+  const pos=[],uv=[];
+  rows.forEach(({s,w},i)=>{
+    const top=i*(PX+GAP),bar=s.color?Math.round(PX*0.16):0,text=String(s.text).toUpperCase();
+    ctx.fillStyle=C.trim;ctx.fillRect(0,top,w,PX);
+    if(bar){ctx.fillStyle=s.color;ctx.fillRect(0,top,bar,PX)}
+    ctx.fillStyle='#ffffff';
+    let size=Math.round(PX*0.5);
+    for(;size>16;size-=2){ctx.font=`700 ${size}px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`;if(ctx.measureText(text).width<=w-bar-PX*0.5)break}
+    ctx.fillText(text,bar+(w-bar)/2,top+PX/2+2,w-bar-PX*0.3);
+    const u1=w/W,v0=1-(top+PX)/H,v1=1-top/H;
+    for(const f of s.kind==='hang'?[s.facing||0,(s.facing||0)+Math.PI]:[s.facing||0]){
+      const nx=Math.sin(f),nz=Math.cos(f),rx=Math.cos(f),rz=-Math.sin(f),off=s.kind==='hang'?0.034:0.014,cx=s.x+nx*off,cz=s.z+nz*off,hw=s.w/2;
+      const bl=[cx-rx*hw,s.y,cz-rz*hw],br=[cx+rx*hw,s.y,cz+rz*hw],tr=[br[0],s.y+s.h,br[2]],tl=[bl[0],s.y+s.h,bl[2]];
+      pos.push(...bl,...br,...tr,...bl,...tr,...tl);uv.push(0,v0,u1,v0,u1,v1,0,v0,u1,v1,0,v1);
+    }
+  });
+  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  const mesh=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map}));mesh.matrixAutoUpdate=false;mesh.updateMatrix();
+  mesh.userData.dispose=()=>{g.dispose();map.dispose();mesh.material.dispose()};
+  return mesh;
 }
 function setFade(m,a){
   const solid=a>=0.995;
