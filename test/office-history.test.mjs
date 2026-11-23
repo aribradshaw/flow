@@ -47,6 +47,8 @@ test('records text-free replay even with nobody watching and redacts stored stat
   state.steer({by:owner,owner,source:report.source,agentId:'id-1',kind:'message',text:'DO_NOT_STORE_STEER'});
   const p={key:'m1',name:'DO_NOT_STORE_NAME',status:'DO_NOT_STORE_STATUS',x:0,y:0,z:2,heading:0,moving:true};
   await history.sample(env,p);
+  const channels=['nearby','office','direct','agent'];
+  for(const channel of channels)await history.marker(env,'message','m1',channel);
   await history.marker(env,'message','m1','DO_NOT_STORE_CHAT');
   await history.marker(env,'emote','m1','wave');
   time+=1000;await history.sample(env,{...p,x:1});
@@ -68,6 +70,7 @@ test('records text-free replay even with nobody watching and redacts stored stat
   assert.deepEqual(mine.events.filter(e=>e.wait).map(e=>e.wait),['start','end']);
   assert.deepEqual(mine.events.filter(e=>e.type==='pose').map(e=>e.x),[2]);
   assert.equal(mine.events.find(e=>e.type==='answer').decision,'allow');
+  assert.deepEqual(mine.events.filter(e=>e.type==='message'),channels.map(channel=>({type:'message',at:base,member:'m1',channel})));
   assert.deepEqual(mine.events.filter(e=>e.type==='agent-leave').map(e=>e.agent),['a1']);
   assert.ok(!redacted.events.some(e=>e.type==='card'));
   const visible=await history.page(env,{email:other},full,day,'UTC');

@@ -22,7 +22,7 @@ import {createReactions} from './office-reactions.js';
 import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
-import {attachOfficeChat,chatChannel} from './office-chat.js';
+import {attachOfficeChat,chatChannel,chatTargets} from './office-chat.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures,paceFigures} from './office-figures.js';
 import {cleanLook} from './office-look-core.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
@@ -115,7 +115,9 @@ export function openOffice(opts){
   root.querySelector('.of-world').addEventListener('change',e=>{const id=worldId(e.target.value);S.opts.setWorld?.(id);usePlace(id)});
   const office=S;
   S.composer=attachOfficeChat({form:root.querySelector('.of-say'),env:opts.env,me:()=>office.me,
-    api,show:addLine,toast:opts.toast,canSend:()=>!office.replay?.active});
+    api,show:addLine,toast:opts.toast,canSend:()=>!!office.me&&!office.replay?.active,
+    targets:()=>chatTargets({people:[...office.people.values()],live:office.live.get(office.meKey)||[],agentflow:afAgents(),meKey:office.meKey}),
+    sendDirect:(target,body)=>postJson('/api/chat/send',{office:{env:office.env,target},body})});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
   S.presence=attachOfficeStatus(S,{officeBox,refreshColliders:updateColliders});
@@ -213,7 +215,8 @@ function focusPending(){
 const status=t=>{const el=S?.root.querySelector('.of-status');if(el&&el.textContent!==t)el.textContent=t};
 
 // ---------- the network ----------
-const api=(path,body)=>fetch(`/api/office/${encodeURIComponent(S.env)}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+const api=(path,body)=>postJson(`/api/office/${encodeURIComponent(S.env)}/${path}`,body);
+const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
   .then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.error||'Something went wrong'),{code:d.code,status:r.status});return d});
 // Replace failed or stalled streams ourselves, including HTTP errors that stop native retries.
 function disconnect(restart=false){
@@ -230,6 +233,7 @@ function connect(){
     try{
       const data=JSON.parse(e.data);
       if(!liveDuringReplay(type,data))f(data);
+      if(['join','leave','agents','members','snapshot'].includes(type))S.composer.refresh();
       S.stream.received(e.lastEventId);
     }catch(err){console.error('office',type,err)}
   });
@@ -245,7 +249,8 @@ function connect(){
   on('join',p=>{if(!S.world)return;const joined=!S.people.has(p.key);upsertPerson(p);if(joined)presenceChanged(p.key)});
   on('move',p=>{if(S.world)upsertPerson(p)});
   on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
-  on('say',line=>addLine(line));
+  on('say',line=>S.composer.receive(line));
+  on('chatHint',hint=>{if(!S.replay?.active)showChatHint(hint)});
   on('emote',({key,emote})=>showEmote(key,emote));
   // Someone saved a new look (office-look-editor.js), or went back to their default (look: null).
   on('look',({key,look})=>setLook(key,look));
@@ -946,24 +951,37 @@ function addLine(l,{quiet=false}={}){
   const channel=chatChannel(l.channel||'office');
   const el=document.createElement('div');el.dataset.id=l.id;el.className='of-line'+(l.key===S.meKey?' mine':'');
   el.style.setProperty('--of-chat-color',channel?.color||'#fff');
-  el.innerHTML=`<span class="of-chat-kind">${esc(channel?.label||'Chat')}</span><b>${esc(l.name)}</b> ${esc(l.text)}`;
+  const directMode=l.channel==='direct'?(l.saved?' · Saved in Flow chat':' · Office DM: not saved'):'';
+  const audience=l.to&&l.key===S.meKey?` → ${l.to}`:'';
+  el.innerHTML=`<span class="of-chat-kind">${esc((channel?.label||'Chat')+audience+directMode)}</span><b>${esc(l.name)}</b> ${esc(l.text)}`;
   const next=S.chat[S.chat.findIndex(line=>line.id===l.id)+1];
   S.lines.insertBefore(el,[...S.lines.children].find(child=>child.dataset.id===next?.id)||null);
   if(S.lines.children.length>50)S.lines.firstChild.remove();S.lines.scrollTop=S.lines.scrollHeight;
   if(quiet)return;
-  const office=S,p=office.people.get(l.bubbleOn||l.key),obj=p?.obj||(l.bubbleOn?.isObject3D?l.bubbleOn:null);
-  if(!obj)return;
+  const p=S.people.get(l.bubbleOn||l.key),obj=p?.obj||(l.bubbleOn?.isObject3D?l.bubbleOn:null);
+  if(obj)chatBubble(obj,p,l.text,channel?.color,audience,l.channel||'office');
+}
+function showChatHint({key,channel}){
+  const p=S.people.get(key);if(!p)return;
+  // A fan-out can arrive in either order. Keep the fresh public message visible.
+  if(p.bubble?.channel==='office'&&Date.now()-p.bubble.at<750)return;
+  const text=channel==='agent'?`${p.name} is talking to an agent`:'…';
+  chatBubble(p.obj,p,text,chatChannel(channel)?.color,'',channel,true);
+}
+function chatBubble(obj,p,text,color,audience,channel,hint=false){
+  const office=S;
   const old=obj.userData.chatBubble;
   old?.el.remove();office.labelList=office.labelList.filter(x=>x!==old);
-  const b=label(obj,`<span class="of-bubble">${esc(l.text)}</span>`,{y:2.6,cls:'bubble'});
-  b.el.style.setProperty('--of-chat-color',channel?.color||'#fff');
+  const b=label(obj,`<span class="of-bubble${hint?' of-chat-hint':''}">${audience?`<small>${esc(audience)}</small>`:''}${esc(text)}</span>`,{y:2.6,cls:'bubble'});
+  b.channel=channel;b.at=Date.now();
+  if(color)b.el.style.setProperty('--of-chat-color',color);
   obj.userData.chatBubble=b;
   if(p)p.bubble=b;
   setTimeout(()=>{
     b.el.remove();office.labelList=office.labelList.filter(x=>x!==b);
     if(obj.userData.chatBubble===b)delete obj.userData.chatBubble;
     if(p?.bubble===b)p.bubble=null;
-  },Math.min(12000,3500+l.text.length*60));
+  },Math.min(12000,3500+text.length*60));
 }
 function emote(k){if(S.replay?.active)return;api('emote',{emote:k}).catch(e=>S.opts.toast?.(e.message,true))}
 function showEmote(key,k){
@@ -1096,7 +1114,7 @@ function onClick(e){
     look:openLook,
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
-    message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
+    message(){closeMenu();S.composer.directTo(key)},
     allow:()=>decide('allow'),deny:()=>decide('deny'),decorate:()=>S.decor?.toggle(),
     afInfo(){closeMenu();showAf(b.dataset.id)},
     agentDetails:()=>openAgentPanelOverlay('agent',b.dataset.id),
@@ -1226,6 +1244,7 @@ function onKey(e){
   if(S.pointer?.grabbing){e.stopPropagation();return}
   e.stopPropagation(); // the app underneath does not see office shortcuts
   if(e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.target.closest?.('.of-say,.of-chat-reply'))return;
   const k=e.key.toLowerCase(),menu=e.target.closest?.('[role=menu]');
   if(menu){
     if(k==='arrowup'||k==='arrowdown'){

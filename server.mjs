@@ -956,7 +956,7 @@ async function resolveCards(req,user,refs){
   }
   return out;
 }
-const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards});
+const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards,officeDirect:sendOfficeDirect});
 
 // ---------- environments: a user's own workspaces (list, create, rename, archive) ----------
 //   GET /api/environments            -> [{id, name, visibility, rev, updatedAt}] the user owns
@@ -1442,6 +1442,16 @@ officeHistory.start();
 // Voice and screen sharing (lib/office-rtc.mjs): WebRTC signalling over the office stream, and ICE servers (TURN from env vars).
 const officeRtcMod=await import('./lib/office-rtc.mjs');
 const officeRtc=officeRtcMod.officeRtc({hub:officeHub}),officeIce=officeRtcMod.iceConfig();
+async function sendOfficeDirect(user,{env,target},text,deliver){
+  const unavailable=()=>Object.assign(Error('Office not found'),{status:404});
+  if(core.parseOpenedEnv(env)){
+    const opened=await openedShare(env,user);
+    if(!opened?.share)throw unavailable();
+    env=opened.share.ownerEnv;
+  }
+  if(!(await officeAccessNow(env,user)).ok)throw unavailable();
+  return officeHub.direct(env,user,target,text,deliver);
+}
 // /api/office/{env}/events (SSE), history, presence, status, look, knock, admit, enter, say, emote, decorate, answer and steer (an answer, a message or a stop: lib/office.mjs), rtc (GET: ICE servers;
 // POST: voice signalling, lib/office-rtc.mjs; never logged), and /api/office/alerts (SSE, per person):
 // the app's page only, signed in (local mode too).

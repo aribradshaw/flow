@@ -140,9 +140,9 @@ test('OneProfileID answers are reduced to known fields',()=>{
 
 // ---------- routes, with a fake OneProfileID ----------
 const ID1='0b9e7c4e-2f7a-4c1e-9a33-5b1d2c3e4f50',ID2='1c8d6b3a-1e69-4b0d-8a22-4a0c1b2d3e4f';
-function harness({mode='opid',user={id:'u-ana',email:'ana@example.test',name:'Ana'},answer}={}){
+function harness({mode='opid',user={id:'u-ana',email:'ana@example.test',name:'Ana'},answer,officeDirect}={}){
   const calls=[];
-  const routes=chatRoutes({mode,userFor:async(req,{touch})=>{calls.push(['userFor',touch]);return typeof user==='function'?user(req):user},
+  const routes=chatRoutes({mode,officeDirect,userFor:async(req,{touch})=>{calls.push(['userFor',touch]);return typeof user==='function'?user(req):user},
     call:async(req,method,args)=>{calls.push([method,args,req.headers.cookie||'']);return answer?answer(method,args):{ok:true,status:200,payload:{},cookies:[]}},
     out:l=>l,trusted:req=>req.headers.origin!=='https://evil.example.test',
     readJson:(req,res,done)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{let v;try{v=JSON.parse(b)}catch{res.writeHead(400);res.end('{}');return}done(v)})},
@@ -250,5 +250,28 @@ test('routes: not friends, rate limits and outages come back as clean errors',as
     r=await h.go('POST','/api/chat/send',{username:'bo-example',body:'hi'});assert.equal(r.status,429);assert.equal(r.data.retryAfter,42);
     r=await h.go('POST','/api/chat/read',{username:'bo-example'});assert.equal(r.status,503);assert.match(r.data.error,/Can't reach/);
     r=await h.go('GET','/api/chat/friends');assert.equal(r.status,200);assert.deepEqual(r.data,{friends:[]});
+  }finally{h.close()}
+});
+
+test('office Direct routes through the usual OneProfileID send only for a verified recipient handle',async()=>{
+  const office={env:'office-one',target:'mabcdefghijkl'},body='Message for a friend';
+  let response={ok:true,status:201,cookies:[]},recipient={username:'bo-example'};
+  const h=harness({answer:()=>response,officeDirect:async (user,dest,text,deliver)=>{
+    assert.equal(user.id,'u-ana');
+    assert.deepEqual(dest,office);
+    return {ok:true,saved:await deliver(recipient,text)};
+  }});
+  try{
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:true});
+    assert.deepEqual(h.calls.at(-1),['sendMessage',['bo-example',body],'oneprofileid.session_token=t-ana']);
+    response={ok:false,status:403,payload:{code:'not_friends'}};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    response={ok:false,status:503};
+    assert.equal((await h.go('POST','/api/chat/send',{office,body})).status,503);
+    assert.equal((await h.go('POST','/api/chat/send',{office,body,username:'somebody-else'})).status,400);
+    const calls=h.calls.filter(c=>c[0]==='sendMessage').length;
+    recipient={name:'Bo'};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    assert.equal(h.calls.filter(c=>c[0]==='sendMessage').length,calls);
   }finally{h.close()}
 });
