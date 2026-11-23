@@ -216,7 +216,8 @@ function banded(ys, ringAt, colorAbove) {
 
 function buildHead(B, L, K, lod) {
   const sides = lod ? 8 : 16, M = lod ? 5 : 10, skin = K.skin, rows = [];
-  const beardTint = L.beard === 'stubble' ? mix(skin, mul(K.hair, 0.7), 0.34) : null;
+  // Stubble is a shadow of the skin itself, only tinted by the hair, so dyed hair does not smear the jaw.
+  const beardTint = L.beard === 'stubble' ? mix(skin, mix(mul(skin, 0.42), mul(K.hair, 0.6), 0.3), 0.36) : null;
   for (let j = 1; j < M; j++) {
     const t = -Math.cos(Math.PI * j / M), row = [];
     for (let k = 0; k < sides; k++) {
@@ -240,7 +241,7 @@ function buildFace(B, L, K, lod) {
   const eyeInk = mix(col(L.eyeColor), INK, 0.7), lash = mix(mul(skin, 0.25), INK, 0.7);
   const eye = (s, bone) => {
     const cx = s * EX, cy = EY;
-    if (lod) { fan(B, HEAD, ell(cx, cy, 0.026, 0.034, 4), eyeInk, bone, 0.012); return; }
+    if (lod) { fan(B, HEAD, ell(cx, cy, 0.025, 0.034, 6), eyeInk, bone, 0.012); return; }
     if (L.eyes === 'almond') {
       fan(B, HEAD, ell(cx, cy, 0.034, 0.0255, 10, 1.8), WHITE, bone, 0.006);
       fan(B, HEAD, ell(cx, cy - 0.0005, 0.0235, 0.0245, 10), mix(col(L.eyeColor), INK, 0.12), bone, 0.008);
@@ -254,13 +255,14 @@ function buildFace(B, L, K, lod) {
       strip(B, HEAD, [[[cx - 0.031, top + 0.004], [cx - 0.031, top - 0.002]], [[cx, top + 0.006], [cx, top - 0.001]], [[cx + 0.031, top + 0.004], [cx + 0.031, top - 0.002]]], lash, bone, 0.0095);
     } else {
       const round = L.eyes === 'round';
-      fan(B, HEAD, ell(cx, cy, round ? 0.03 : 0.0245, round ? 0.03 : 0.036, 14), eyeInk, bone, 0.007);
+      fan(B, HEAD, ell(cx, cy, round ? 0.03 : 0.0245, round ? 0.03 : 0.036, 16), eyeInk, bone, 0.007);
     }
     // One highlight, on the same side of both eyes.
-    fan(B, HEAD, ell(cx + 0.008, cy + (L.eyes === 'sleepy' ? -0.002 : 0.012), 0.0085, 0.0085, 7), WHITE, bone, 0.0115);
+    fan(B, HEAD, ell(cx + 0.008, cy + (L.eyes === 'sleepy' ? -0.002 : 0.012), 0.0085, 0.0085, 8), WHITE, bone, 0.0115);
   };
   eye(1, BI.eyeL); eye(-1, BI.eyeR);
-  if (lod) return;
+  // Far away the face is two eyes and a line of a mouth.
+  if (lod) { strip(B, HEAD, [[[-0.032, MY + 0.006], [-0.03, MY - 0.004]], [[0.032, MY + 0.006], [0.03, MY - 0.004]]], mix(mul(K.skin, 0.4), col('#6e2420'), 0.4), BI.mouth, 0.012); return; }
   // Closed, smiling eyes for joy: hidden until an expression shows them.
   for (const s of [1, -1]) {
     const arc = []; for (let i = 0; i <= 6; i++) { const a = Math.PI * (0.86 - 0.72 * i / 6), cx = s * EX, cy = EY - 0.014; arc.push([[cx + Math.cos(a) * 0.031, cy + Math.sin(a) * 0.031], [cx + Math.cos(a) * 0.021, cy + Math.sin(a) * 0.021]]); }

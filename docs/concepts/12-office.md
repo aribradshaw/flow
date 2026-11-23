@@ -53,7 +53,7 @@ Open **?** in the office header for the control list and the option to turn off 
 | Pan | Drag with two fingers |
 | Recenter | Middle-click or press **F** |
 | Top-down overview | Press **O** or select the overview button |
-| Edit your look | Press **L**, select the shirt button, click yourself, or press **E** at the mirror in your room |
+| Edit your look | Press **L**, select the shirt button, click yourself, or press **E** at the mirror in your room or on yourself |
 | Gamepad | Left stick to walk, right stick to orbit, **A** to jump, **B** or **X** to sprint |
 | Mute / unmute | **M**, or the mic button in the voice bar |
 | Push to talk | Hold **V** (turn it on in the voice bar's settings) |
@@ -122,7 +122,7 @@ The yacht's decks are terraced and never stacked, so each spot has exactly one f
 
 ## Your look
 
-Press **L**, use the shirt button in the header, click your own avatar, or walk up to the mirror by the door of your room and press **E**. The editor fills the screen, with you on a turntable: drag to turn, scroll or pinch to zoom in to your face. Walking pauses while it is open.
+Press **L**, use the shirt button in the header, click your own avatar, or walk up to the mirror by the door of your room and press **E**. Standing still for a moment with nothing else in reach offers **E** on yourself too. The editor fills the screen, with you on a turntable: drag to turn, scroll or pinch to zoom in to your face. Walking pauses while it is open.
 
 Each tab is one part of you, with every choice shown as a small picture of you wearing it:
 

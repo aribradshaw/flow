@@ -138,7 +138,7 @@ export function defaultLook(key) {
     blush: hashOf(key + '\nblush') % 3 === 0,
     hair: weighted(key, 'hair', [['short', 4], ['sidepart', 4], ['curly', 3], ['long', 3], ['bob', 3], ['ponytail', 2], ['bun', 2], ['afro', 2], ['buzz', 2], ['braids', 2], ['mohawk', 1], ['bald', 1]]),
     hairColor,
-    hat: weighted(key, 'hat', [['none', 16], ['cap', 2], ['beanie', 2], ['bucket', 1], ['headphones', 2]]),
+    hat: weighted(key, 'hat', [['none', 22], ['cap', 2], ['beanie', 1], ['bucket', 1], ['headphones', 1]]),
     hatColor: pickOf(key, 'hatColor', CLOTH_COLORS),
     top, topColor,
     pattern: weighted(key, 'pattern', [['none', 6], ['stripes', 2], ['block', 1], ['band', 1], ['badge', 2]]),

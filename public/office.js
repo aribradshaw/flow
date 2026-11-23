@@ -93,7 +93,7 @@ export function openOffice(opts){
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
         <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd>
         <dt>Decorate</dt><dd>Inside your room: place props, R to rotate, Delete to remove, Esc to leave</dd>
-        <dt>Your look</dt><dd>L, the shirt button, the mirror in your room, or click yourself</dd></dl>
+        <dt>Your look</dt><dd>L, the shirt button, the mirror in your room, or E (or a click) on yourself</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
@@ -913,6 +913,10 @@ function upsertPerson(p,self=false){
     const tag=label(obj,S.presence?S.presence.nameTag({name:p.name,image:p.image,self,bg,fg,key:p.key,presence:{status:'available',text:''}}):`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
     a={key:p.key,name:p.name,image:p.image||'',colors:[bg,fg],obj,figure,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     tagHeight(a);
+    // E on yourself: offered for a few seconds once you stand still, and only when nothing else is in reach.
+    if(self)S.interact?.register({id:'self-look',object3D:obj,self:true,radius:0.8,height:2.5,priority:-6,label:'Edit your look',
+      enabled:()=>{const still=performance.now()-(S.stillSince||0);return still>2500&&still<11000&&!S.lookEditor},
+      onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
         if(!S.people.has(p.key))return false;
@@ -1304,6 +1308,7 @@ function frame(dt,t,delta){
     controller.reset(r,r.heading);S.target=S.follow=null;S.input.clear();player=controller.advance(0,{...input,x:0,z:0},S.colliders,S.place.terrain);
   }
   S.presence?.afterMove(player);
+  if(player.speed>0.05||!player.grounded||paused)S.stillSince=now;
   S.pos.set(player.x,player.y,player.z);
   // The deck I stand on (or last stood on, in the air), for the camera.
   const deck=S.place.ground(player.x,player.z);if(deck!==null&&player.grounded)S.floor+=(Math.min(deck,player.y)-S.floor)*Math.min(1,dt*8);
