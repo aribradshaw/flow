@@ -83,6 +83,24 @@ export function blocksOf(items){
   return out;
 }
 
+// The agent panel's short transcript (user, assistant, tool) as a chat. Messages stay. A run of tool calls
+// becomes one line ("Ran 2 commands and looked at 1 thing"); the commands themselves are the tooltip.
+export function chatBlocks(lines){
+  const out=[]; let work=null;
+  for(const line of lines||[]){
+    if(!line||(line.role!=='user'&&line.role!=='assistant'&&line.role!=='tool'))continue;
+    if(line.role==='user'||line.role==='assistant'){work=null;out.push({type:line.role,text:String(line.text||''),at:line.at||''});continue}
+    if(!work){work={type:'work',lines:[]};out.push(work)}
+    work.lines.push(line);
+  }
+  for(const b of out)if(b.type==='work'){
+    const titles=b.lines.map(l=>String(l.text||'').split('\n')[0].trim()).filter(Boolean);
+    b.summary=workSummary(titles.map(title=>({role:'tool',title})));
+    b.tip=titles.slice(0,6).map(t=>t.length>90?t.slice(0,89)+'…':t).join(' · ');
+  }
+  return out;
+}
+
 const keyOf=x=>x.id??JSON.stringify([x.role,x.at,x.title,x.text]);
 // older and newer: oldest first. Items in both (by id) are taken from newer.
 export function mergeItems(older,newer){

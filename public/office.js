@@ -22,6 +22,7 @@ import {createReactions} from './office-reactions.js';
 import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
+import {agentGlance} from './office-panel-core.js';
 import {attachOfficeChat,chatChannel,chatTargets} from './office-chat.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures,paceFigures} from './office-figures.js';
 import {cleanLook} from './office-look-core.js';
@@ -1358,22 +1359,21 @@ function refreshPanel(){
     const a=agentOf(p.member,p.id),owner=S.members.find(m=>m.key===p.member);
     if(!a){html=`<div class="of-ph"><b>Agent</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div><div class="of-pb"><p class="of-note">It stopped reporting.</p></div>`}
     else{
-      const v=VENDOR[a.vendor]||VENDOR.other,ans=S.answers.get(a.id),doing=a.status==='waiting'?'':shownKind(a)[1];
-      const head=`<div class="of-ph"><span class="of-dot" style="background:${v.color}"></span><b>${esc(a.private?'Private project':a.title||v.name)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>`;
-      if(a.private)html=head+`<div class="of-pb">${row('Agent',v.name)}${row('Status',STATUS[a.status])}${row('Doing',doing)}${row('Belongs to',owner?.name)}${a.children?.length?row('Subagents',String(a.children.length)):''}
-        <p class="of-note">Its details are private: it works in a repo outside the projects you can see here.</p></div>`;
-      else{
-        let prompt='';
-        if(a.pending&&!(ans?.requestId===a.pending.requestId&&ans.result?.ok)){
-          const can=a.mine&&a.pending.can?.length;
-          prompt=`<div class="of-prompt"><div class="of-pk">${a.pending.kind==='question'?'Question':'Permission prompt'}</div><pre>${esc(a.pending.summary||'')}</pre>
-            ${can&&(ans?.requestId!==a.pending.requestId||ans.state==='failed')?`<div class="of-btns">${a.pending.can.includes('allow')?`<button type="button" class="txt primary" data-of="allow">${icon('check',13)}Allow</button>`:''}${a.pending.can.includes('deny')?`<button type="button" class="txt" data-of="deny">${icon('ban',13)}Deny</button>`:''}</div>`:''}
-            ${!can?`<p class="of-note">${a.mine?'Answer it where it runs.':`Waiting on ${esc(owner?.name||'its owner')}.`}</p>`:''}</div>`;
-        }
-        const res=answerHtml(ans,a);
-        html=head+`<div class="of-pb">${row('Status',STATUS[a.status])}${row('Model',a.model?`${v.name} · ${a.model}`:v.name)}${row('Where',a.hostLabel||a.host)}${row('Repo',a.repo?.slug||a.repo?.name)}${row('Project',(a.projects||[]).join(', '))}
-          ${row('Desk',deskOf(a))}${row('Card',a.seat?.card?`#${a.seat.card.number} ${a.seat.card.title}`:'')}${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}${a.mine?'<div class="of-steer-slot"></div>':''}</div>`;
+      const v=VENDOR[a.vendor]||VENDOR.other,ans=S.answers.get(a.id);
+      let prompt='';
+      if(!a.private&&a.pending&&!(ans?.requestId===a.pending.requestId&&ans.result?.ok)){
+        const can=a.mine&&a.pending.can?.length;
+        prompt=`<div class="of-prompt"><div class="of-pk">${a.pending.kind==='question'?'Question':'Needs a yes'}</div><pre>${esc(a.pending.summary||'')}</pre>
+          ${can&&(ans?.requestId!==a.pending.requestId||ans.state==='failed')?`<div class="of-btns">${a.pending.can.includes('allow')?`<button type="button" class="txt primary" data-of="allow">${icon('check',13)}Allow</button>`:''}${a.pending.can.includes('deny')?`<button type="button" class="txt" data-of="deny">${icon('ban',13)}Deny</button>`:''}</div>`:''}
+          ${!can?`<p class="of-note">${a.mine?'Answer it where it runs.':`Waiting on ${esc(owner?.name||'its owner')}.`}</p>`:''}</div>`;
       }
+      const card=a.seat?.card,same=S.env===S.opts.current&&S.opts.overlays?.card,cards=same?store.db?.devops?.cards||[]:[];
+      const hit=card&&(cards.find(c=>c.number===card.number&&c.title===card.title)||cards.find(c=>c.number===card.number));
+      html=agentGlance({private:!!a.private,title:a.title||v.name,status:a.status,statusLabel:STATUS[a.status],
+        model:a.model?`${v.name} · ${a.model}`:v.name,host:a.hostLabel||a.host,repo:a.repo?.slug||a.repo?.name,
+        project:(a.projects||[]).join(', '),desk:deskOf(a),cardNumber:card?.number,cardTitle:card?.title,cardId:hit?.id,
+        subs:a.children?.length?String(a.children.length):'',subsTip:a.children?.map(c=>c.title||VENDOR[c.vendor]?.name).filter(Boolean).join(', ')||'Also running',
+        owner:owner?.name,mine:!!a.mine,prompt,result:a.private?'':answerHtml(ans,a),steer:!!a.mine});
     }
   }
   S.steer.before(S.panel);
@@ -1381,6 +1381,7 @@ function refreshPanel(){
   // Your own agent: its transcript, a message box and Stop (office-steer.js), kept across redraws.
   if(p.type==='agent'){const a=agentOf(p.member,p.id);if(a)S.steer.attach(S.panel.querySelector('.of-steer-slot'),a)}
   for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
+  for(const b of S.panel.querySelectorAll('[data-agent-card]'))b.addEventListener('click',()=>openOverlay('card',b.dataset.agentCard));
 }
 // ---------- Allow / Deny: one state flow ----------
 // Click: "Allowing…" or "Denying…" at once, and the mascot nods (and works) or shakes. The reporter's result
