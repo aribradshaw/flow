@@ -4604,10 +4604,10 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; model: switch its next turn to text, a provider:model id (the Chief of Staff picker); history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `model`, `history`. |
 | `actions[].requestId` | string |  | answer only. |
 | `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
-| `actions[].text` | string |  | message only: what its owner wrote. |
+| `actions[].text` | string |  | message: what its owner wrote. model: provider:model, e.g. cursor_personal:grok-4.7. |
 | `actions[].before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
@@ -4657,7 +4657,8 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
-| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn), "stop" (interrupt its running turn) and "history" (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
+| `agents[].modelId` | string |  | The model its next turn uses, provider:model (cursor_personal:grok-4.7). The Chief of Staff reports it so the office picker can show the current choice. Its owner only. |
+| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn), "stop" (interrupt its running turn), "model" (switch its next turn to another model) and "history" (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
 | `agents[].live` | object | null |  | What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes. |
 | `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `agents[].role` | string |  | conductor: this agent is its owner's Chief of Staff, a long-lived thread that takes their messages from the office, routes work to AgentFlow agents and answers questions. The office draws it as their companion. Always private to everyone but its owner (others see only that it is one, and its status), whatever its repo. Report at most one per person; list "message" in can. One of `conductor`. |
@@ -4790,7 +4791,7 @@ Wait for answers to your agents' prompts
 
 `GET /api/v1/office/actions` · scope `write` · MCP tool `office_actions_wait`
 
-Long-poll for the actions taken in the 3D office on this source's agents by their owner: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). kind answer is Allow / Deny on pending.requestId (a missing kind is answer); message is text to send as a new user turn; stop interrupts its running turn (both only for agents whose can lists them). Each action is delivered once (here or in the office.agents.report answer). Check the agent is still the same and still yours, carry it out, then send the result with office.actions.result.
+Long-poll for the actions taken in the 3D office on this source's agents by their owner: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). kind answer is Allow / Deny on pending.requestId (a missing kind is answer); message is text to send as a new user turn; stop interrupts its running turn; model switches its next turn to text (provider:model). Each only for agents whose can lists that kind. Each action is delivered once (here or in the office.agents.report answer). Check the agent is still the same and still yours, carry it out, then send the result with office.actions.result.
 
 **Input**
 
@@ -4807,10 +4808,10 @@ Long-poll for the actions taken in the 3D office on this source's agents by thei
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; model: switch its next turn to text, a provider:model id (the Chief of Staff picker); history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `model`, `history`. |
 | `actions[].requestId` | string |  | answer only. |
 | `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
-| `actions[].text` | string |  | message only: what its owner wrote. |
+| `actions[].text` | string |  | message: what its owner wrote. model: provider:model, e.g. cursor_personal:grok-4.7. |
 | `actions[].before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
@@ -4892,10 +4893,10 @@ The reporter carried out (or could not carry out) an action from office.actions.
 | `action.id` | string | yes |  |
 | `action.agentId` | string | yes |  |
 | `action.source` | string |  |  |
-| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
+| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; model: switch its next turn to text, a provider:model id (the Chief of Staff picker); history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `model`, `history`. |
 | `action.requestId` | string |  | answer only. |
 | `action.decision` | enum |  | answer only. One of `allow`, `deny`. |
-| `action.text` | string |  | message only: what its owner wrote. |
+| `action.text` | string |  | message: what its owner wrote. model: provider:model, e.g. cursor_personal:grok-4.7. |
 | `action.before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `action.at` | string | yes |  |
 | `action.result` | object |  |  |
