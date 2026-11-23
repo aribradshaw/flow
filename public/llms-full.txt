@@ -511,7 +511,7 @@ Agents belong to a person, not to an environment: they show in the office of eve
 
 | Viewer | Sees |
 |---|---|
-| The agent's owner | Everything, plus Allow / Deny, its transcript, and Send to agent and Stop (and a conductor's replies) |
+| The agent's owner | Everything, plus Allow / Deny, its transcript, its live steps, and Send to agent and Stop (and a conductor's replies) |
 | Someone who can see the Flow project the agent's repo belongs to | Everything except the buttons and the transcript: title, model, machine, repo, project, activity, subagents and the prompt |
 | Anyone else | Only the mascot, the vendor and running / waiting / idle, labelled **Private project** |
 
@@ -600,9 +600,19 @@ Anything can report agents the same way, such as a home-server dashboard. Authen
 - `PUT /api/v1/office/agents` (`office.agents.report`) with `{source, at, agents:[…]}`. Each agent: `id` (stable within the source), `title`, `vendor` (`claude`, `codex`, `gemini`, `deepseek`, `grok` or `other`; with `other` the mascot is picked from the model when it names one), `model`, `status` (`running`, `waiting` or `idle`), `activity`, `activityKind` (optional, see [Activity kinds](#activity-kinds)), `host`, `hostLabel`, `repo` (`{name, remote}` or `null`), `children` (subagents: `id`, `title`, `vendor`, `model`, `status`, `activityKind`), `pending` (`null`, or `{requestId, kind: approval | question, summary, can: ["allow","deny"]}`) `agentflow` (optional, `{agent: "<AgentFlow agent id or name>", card: <card number or id>}`: the AgentFlow agent and card it works on, which seat it at that agent's desk; see [Seats](#seats)) `can` (optional, `["message","stop"]`: what the owner may do from the office besides Allow / Deny; list only what this reporter can carry out, `[]` or none for agents that can only be steered where they run) and `transcript` (optional, `[{role: user | assistant | tool, text, at}]`, oldest first: the last 12 are kept, each `text` up to 400 characters, other roles dropped; shown only to the owner, and masked again on the server) and `usage` (optional, `{tokens, costUsd}` for the reporter’s local day. Each field is independently optional and must be finite and nonnegative. Someone who cannot see the agent does not receive it), `role` (optional, `"conductor"` for the person's [Chief of Staff](#chief-of-staff); a conductor is private to everyone but its owner, whatever its repo: they see only that it is one, and its status) and `reply` (optional, a conductor's latest reply, `{text, at, cards}`: `text` up to 600 characters, `cards` up to 12 card numbers; owner only, like the transcript, and masked again on the server). Each source replaces only its own agents; up to 200 agents and 20 children each are kept, long strings are cut, and credentials in a remote are dropped. The answer is `{actions:[…]}`: the actions for this source not yet delivered (see the next item).
 - `GET /api/v1/office/actions?source=…&wait=25` (`office.actions.wait`): a long-poll that answers as soon as an answer is queued, or with an empty list after `wait` seconds (up to 30). Each action is delivered once and has a `kind`: `answer` is Allow / Deny, `{id, agentId, kind: "answer", requestId, decision, at}` (treat a missing `kind` as `answer`: servers before this change sent none); `message` is `{id, agentId, kind: "message", text, at}`, up to 2000 characters to send to the agent as a new user turn; `stop` is `{id, agentId, kind: "stop", at}`, to interrupt its running turn. Messages and stops come only from the agent's owner, only for agents whose `can` lists them, and at most 3 messages in a row per agent (then one every 10 seconds), 2 stops (then one every 30 seconds) and 10 of either per person (then one every 6 seconds). Before carrying one out, check it is still the same agent on your side.
 - `POST /api/v1/office/actions/{id}` (`office.actions.result`) with `{ok, message}`: how carrying it out went. The agent's owner sees the message right away, in the panel and as a notice. Keep it short and never echo a message's text; log messages and stops on your side without their text.
-- `GET /api/v1/office/agents` (`office.agents.list`): your agents as Flow holds them.
+- `GET /api/v1/office/agents` (`office.agents.list`): your agents as Flow holds them, with each source's thread index (`threads`).
+- `POST /api/v1/office/live` (`office.live.report`) with `{source, agents:[{id, live}]}`: what agents are doing between reports. See the next section.
 
 A source that has not reported for 90 seconds is gone, and its agents leave the office. An answer is accepted only from the agent's owner, and only while that agent is waiting on that same `requestId`; carry it out only after checking the request is still open on your side. The same operations are MCP tools (`office_agents_report`, …) and CLI commands (`flow office agents report`).
+
+#### Live steps, threads and history
+
+These are for the owner only, always: Flow sends them to that person's own signed-in office pages and never to anyone else, an API key's stream included. Reporters mask them before sending, and Flow masks them again.
+
+- **`live`** on an agent (in a report, and in between with `office.live.report` as it changes): `{phase, text, steps, at}`. `phase` is `thinking` (reasoning), `tool` (a tool call or command) or `writing` (its reply). `text` is the latest reasoning snippet, tool call summary (`Read lib/auth.mjs`, `Run: npm test`) or partial reply, up to 600 characters. `steps` are its last steps, oldest first, up to 8 of `{kind, text, at}` (each text up to 200 characters). It is dropped while the agent is idle. `office.live.report` takes up to 30 updates in a burst, then 8 a second per source: debounce yours (the bridge waits about 150 ms after a change). Updates are kept in memory only; the next report carries `live` too. `live: null` clears it.
+- **`threads`** on a report: the person's recent threads on that source, as their T3 sidebar shows them: `{items, counts: {snoozed, settled}, can}`. Each item is `{id, title, project, state, updatedAt, branch, unread}`: `id` is the thread's agent id when it runs, so a working thread and its live agent are the same; `state` is `working`, `waiting`, `woke`, `done`, `snoozed` or `settled`. Up to 150 items. `counts` are the totals, which can be more than the items listed. `can` lists what the office may ask of any thread in it: `message` (a new user turn, on idle threads too) and `history`. Send `threads` when it changes and now and then: a report without it keeps the last one, `null` clears it.
+- **`history` actions.** When the owner opens a thread, `office.actions.wait` delivers `{id, agentId, kind: "history", before?, at}` for a thread in the index (or a live agent whose `can` lists `history`). Answer with `office.actions.result` and `data: {items, before, more}`: a page of the conversation, oldest first, up to 60 items and 64 KB. Each item has a `role` (`user`, `assistant`, `reasoning` or `tool`), `text` (up to 4000 characters), and optionally `title` (a reasoning summary or a tool call such as `Run: npm test`), `detail` (a tool's short result, up to 600 characters), `status` and `at`. `before` is your cursor for the page before this one (sent back as `before` when the owner scrolls up), and `more` says there is one. A page too large is cut harder (texts to 1000, then 300 characters) and otherwise refused with 413. Flow passes the page to the owner's open office and does not store it. History requests are limited to 6 per thread in a burst (then one every 2 seconds) and 20 per person (then one a second).
+- **Messages to any thread.** A `message` action can be for any thread in the source's index, not only a live agent: send it to that thread (T3's `t3 thread send` starts a turn on an idle thread). Check that the thread is still there first. `stop` stays for live agents whose `can` lists it.
 
 #### Activity kinds
 
@@ -5323,6 +5333,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
 | `at` | string |  | When the reporter read its agents (ISO time). |
 | `agents` | any[] | yes |  |
+| `threads` | any |  | Your recent threads on this source, as your T3 sidebar shows them, for you only: never sent to anyone else. Send it when it changes (and now and then); a report without it keeps the last one, null clears it. |
 
 **Output**
 
@@ -5332,10 +5343,11 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
 | `actions[].requestId` | string |  | answer only. |
 | `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
 | `actions[].text` | string |  | message only: what its owner wrote. |
+| `actions[].before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 | `accepted` | integer |  | How many agents were kept. |
@@ -5384,7 +5396,8 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
-| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn) and "stop" (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
+| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn), "stop" (interrupt its running turn) and "history" (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
+| `agents[].live` | object | null |  | What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes. |
 | `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `agents[].role` | string |  | conductor: this agent is its owner's Chief of Staff, a long-lived thread that takes their messages from the office, routes work to AgentFlow agents and answers questions. The office draws it as their companion. Always private to everyone but its owner (others see only that it is one, and its status), whatever its repo. Report at most one per person; list "message" in can. One of `conductor`. |
 | `agents[].reply` | object | null |  | A conductor's latest reply, for its owner only (like transcript; masked again on the server): what the office shows in its bubble and log. |
@@ -5393,6 +5406,11 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `sources[].source` | string | yes |  |
 | `sources[].at` | string | yes |  |
 | `sources[].agents` | integer | yes |  |
+| `threads` | object[] | yes | Each source's thread index (office.agents.report threads), with its source. |
+| `threads[].items` | object[] |  | Up to 150, newest first. |
+| `threads[].counts` | object |  | How many threads are snoozed and settled in all (the index may list only recent ones). |
+| `threads[].can` | string[] |  | What the office may ask of any thread in it: message (a new user turn, idle threads too) and history (a page of its conversation). |
+| `threads[].at` | string |  |  |
 
 **Example: Yours**
 
@@ -5462,7 +5480,46 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
       "at": "2026-10-29T17:00:00.000Z",
       "agents": 1
     }
-  ]
+  ],
+  "threads": []
+}
+```
+
+### `office.live.report`
+
+Stream what your agents are doing
+
+`POST /api/v1/office/live` · scope `write` · MCP tool `office_live_report`
+
+Between reports, as it changes: each agent's live field (its latest reasoning, tool call or partial reply, and its last steps) for agents in this source's current report. Only you, their owner, ever see it, in your own office. live null clears it; idle agents and unknown ids are skipped. Up to 30 in a burst, then 8 a second per source: debounce on your side (about 150 ms). Kept in memory only: the next office.agents.report carries it too.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
+| `agents` | object[] | yes |  |
+| `agents[].id` | string |  |  |
+| `agents[].live` | any |  | What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `accepted` | integer | yes | How many agents' live fields changed. |
+
+**Example: Thinking**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/office/live" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}'
+```
+
+```json
+{
+  "accepted": 1
 }
 ```
 
@@ -5489,10 +5546,11 @@ Long-poll for the actions taken in the 3D office on this source's agents by thei
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
 | `actions[].requestId` | string |  | answer only. |
 | `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
 | `actions[].text` | string |  | message only: what its owner wrote. |
+| `actions[].before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 
@@ -5563,6 +5621,7 @@ The reporter carried out (or could not carry out) an action from office.actions.
 | `id` | string | yes | The action id (act_…). |
 | `ok` | boolean | yes |  |
 | `message` | string |  | e.g. "Approved in T3". |
+| `data` | object | null |  | history only: the page, {items, before, more}, oldest first. Each item: role (user, assistant, reasoning or tool), text (up to 4000 characters), title (a tool call or reasoning summary, up to 200), detail (a tool's short result, up to 600), status, at, turn. Up to 60 items and 64 KB; masked again. before: the cursor for the page before this one; more: there is one. Delivered to the owner's open office and never stored. |
 
 **Output**
 
@@ -5572,10 +5631,11 @@ The reporter carried out (or could not carry out) an action from office.actions.
 | `action.id` | string | yes |  |
 | `action.agentId` | string | yes |  |
 | `action.source` | string |  |  |
-| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread's conversation as the result's data. Treat a missing kind as answer. One of `answer`, `message`, `stop`, `history`. |
 | `action.requestId` | string |  | answer only. |
 | `action.decision` | enum |  | answer only. One of `allow`, `deny`. |
 | `action.text` | string |  | message only: what its owner wrote. |
+| `action.before` | string |  | history only: the cursor from the last page (its before); missing for the newest page. |
 | `action.at` | string | yes |  |
 | `action.result` | object |  |  |
 

@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (57)
+## Operations (58)
 
 ### Environments
 
@@ -146,6 +146,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `office.agents.report` | `office_agents_report` | `PUT /api/v1/office/agents` | write | Report your live coding agents |
 | `office.agents.list` | `office_agents_list` | `GET /api/v1/office/agents` | read | List your reported agents |
+| `office.live.report` | `office_live_report` | `POST /api/v1/office/live` | write | Stream what your agents are doing |
 | `office.actions.wait` | `office_actions_wait` | `GET /api/v1/office/actions` | write | Wait for answers to your agents' prompts |
 | `office.actions.result` | `office_actions_result` | `POST /api/v1/office/actions/{id}` | write | Say how an answer went |
 
@@ -769,6 +770,19 @@ flow office agents list
 
 curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Thinking
+
+MCP: call `office_live_report` with `{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}`
+
+```sh
+flow office live report --input '{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/office/live" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}'
 ```
 
 ### An answer

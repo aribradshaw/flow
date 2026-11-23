@@ -114,6 +114,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 
 - [office.agents.report](/docs/office.html#op-office-agents-report): `PUT /api/v1/office/agents` (write). Report your live coding agents
 - [office.agents.list](/docs/office.html#op-office-agents-list): `GET /api/v1/office/agents` (read). List your reported agents
+- [office.live.report](/docs/office.html#op-office-live-report): `POST /api/v1/office/live` (write). Stream what your agents are doing
 - [office.actions.wait](/docs/office.html#op-office-actions-wait): `GET /api/v1/office/actions` (write). Wait for answers to your agents' prompts
 - [office.actions.result](/docs/office.html#op-office-actions-result): `POST /api/v1/office/actions/{id}` (write). Say how an answer went
 

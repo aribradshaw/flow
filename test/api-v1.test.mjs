@@ -97,7 +97,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.update','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny',
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.live.report','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny',
     'shares.list','shares.preview','shares.create','shares.update','shares.revoke','shares.incoming','shares.requests.list','shares.requests.create','shares.requests.decide'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
@@ -628,6 +628,19 @@ test('projects carry repos; the office operations report agents, long-poll answe
   assert.equal((await op('office.actions.result',{id:a.id,ok:true,message:'Approved'},{key:'flow_bob'})).status,404,'only the owner reports a result');
   r=await op('office.actions.result',{id:a.id,ok:true,message:'Approved'});assert.equal(r.body.action.result.message,'Approved');
   assert.equal((await op('office.actions.wait',{source:'bridge:test',wait:31})).body.code,'invalid_input');
+  // Live steps between reports, the thread index, and a history page carried back as a result's data.
+  const running={...agent,id:'t3:b',status:'running',pending:null,can:['message','history']};
+  r=await op('office.agents.report',{source:'bridge:test',agents:[running],threads:{items:[{id:'t3:b',title:'Fix login',project:'Lantern',state:'working'},{id:'t3:idle',title:'Plan',state:'done'}],counts:{snoozed:1,settled:4},can:['message','history']}});
+  assert.equal(r.status,200);
+  r=await op('office.live.report',{source:'bridge:test',agents:[{id:'t3:b',live:{phase:'tool',text:'Run: npm test',steps:[{kind:'tool',text:'Run: npm test'}]}}]});
+  assert.equal(r.status,200,JSON.stringify(r.body));assert.deepEqual(r.body,{accepted:1});
+  r=await op('office.agents.list',{});
+  assert.equal(r.body.agents[0].live.text,'Run: npm test');assert.deepEqual(r.body.threads.map(t=>[t.source,t.items.length,t.counts.settled]),[['bridge:test',2,4]]);
+  assert.equal((await op('office.live.report',{source:'bridge:test',agents:[]},{key:'flow_ro'})).status,403,'streaming needs write');
+  const h=office.history({by:OWNER.email,owner:OWNER.email,source:'bridge:test',agentId:'t3:idle'});
+  assert.equal((await op('office.actions.wait',{source:'bridge:test'})).body.actions[0].kind,'history');
+  r=await op('office.actions.result',{id:h.id,ok:true,message:'1 item',data:{items:[{role:'user',text:'Plan the launch'}],before:null,more:false}});
+  assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.action.kind,'history');assert.equal(r.body.action.data,undefined);
 });
 
 test('share additions: owners list, approve and deny proposals; others cannot',async()=>{

@@ -5,10 +5,10 @@
 </head><body>
 <header class="top"><a class="brand" href="index.html">Flygon Flow <span>docs</span></a><span class="sp"></span>
 <input id="q" type="search" placeholder="Search docs and operations" aria-label="Search docs and operations" autocomplete="off"><a class="txt" href="../llms.txt">llms.txt</a><a class="txt" href="../">Open app</a></header>
-<div class="wrap"><nav class="side" aria-label="Docs"><a href="index.html">Overview</a><h2>Concepts</h2><a href="index.html#environments">Environments</a><a href="index.html#mindmap-charts">MindMap (charts)</a><a href="index.html#timeline">Timeline</a><a href="index.html#devops-board-and-gates">DevOps board and gates</a><a href="index.html#agent-inbox">Agent inbox</a><a href="index.html#sync">Sync</a><a href="index.html#sharing">Sharing</a><a href="index.html#versioning">Versioning</a><a href="index.html#agentflow">AgentFlow</a><a href="index.html#oneprofileid-photos">OneProfileID photos</a><a href="index.html#chat">Chat</a><a href="index.html#combined-view">Combined view</a><a href="index.html#3d-office">3D office</a><a href="index.html#avatars">Avatars</a><h2>API</h2><a href="envs.html">Environments <span class="n">2</span></a><a href="charts.html">MindMap charts <span class="n">1</span></a><a href="nodes.html">Nodes <span class="n">5</span></a><a href="edges.html">Edges <span class="n">4</span></a><a href="projects.html">Projects <span class="n">3</span></a><a href="timeline.html">Timeline <span class="n">4</span></a><a href="cards.html">DevOps cards <span class="n">7</span></a><a href="labels.html">Labels <span class="n">2</span></a><a href="agents.html">AgentFlow agents <span class="n">8</span></a><a href="workflows.html">AgentFlow workflows <span class="n">4</span></a><a href="search.html">Search <span class="n">1</span></a><a href="sharing.html">Sharing <span class="n">12</span></a><a href="office.html" aria-current="page">3D office <span class="n">4</span></a></nav>
-<main id="main"><ol id="results" hidden></ol><div id="content"><h1>3D office</h1><ul class="toc"><li><a href="#op-office-agents-report"><code>office.agents.report</code></a> Report your live coding agents</li><li><a href="#op-office-agents-list"><code>office.agents.list</code></a> List your reported agents</li><li><a href="#op-office-actions-wait"><code>office.actions.wait</code></a> Wait for answers to your agents&#39; prompts</li><li><a href="#op-office-actions-result"><code>office.actions.result</code></a> Say how an answer went</li></ul><section class="op" id="op-office-agents-report"><h3><code>office.agents.report</code> <span class="scope s-write">write</span></h3>
+<div class="wrap"><nav class="side" aria-label="Docs"><a href="index.html">Overview</a><h2>Concepts</h2><a href="index.html#environments">Environments</a><a href="index.html#mindmap-charts">MindMap (charts)</a><a href="index.html#timeline">Timeline</a><a href="index.html#devops-board-and-gates">DevOps board and gates</a><a href="index.html#agent-inbox">Agent inbox</a><a href="index.html#sync">Sync</a><a href="index.html#sharing">Sharing</a><a href="index.html#versioning">Versioning</a><a href="index.html#agentflow">AgentFlow</a><a href="index.html#oneprofileid-photos">OneProfileID photos</a><a href="index.html#chat">Chat</a><a href="index.html#combined-view">Combined view</a><a href="index.html#3d-office">3D office</a><a href="index.html#avatars">Avatars</a><h2>API</h2><a href="envs.html">Environments <span class="n">2</span></a><a href="charts.html">MindMap charts <span class="n">1</span></a><a href="nodes.html">Nodes <span class="n">5</span></a><a href="edges.html">Edges <span class="n">4</span></a><a href="projects.html">Projects <span class="n">3</span></a><a href="timeline.html">Timeline <span class="n">4</span></a><a href="cards.html">DevOps cards <span class="n">7</span></a><a href="labels.html">Labels <span class="n">2</span></a><a href="agents.html">AgentFlow agents <span class="n">8</span></a><a href="workflows.html">AgentFlow workflows <span class="n">4</span></a><a href="search.html">Search <span class="n">1</span></a><a href="sharing.html">Sharing <span class="n">12</span></a><a href="office.html" aria-current="page">3D office <span class="n">5</span></a></nav>
+<main id="main"><ol id="results" hidden></ol><div id="content"><h1>3D office</h1><ul class="toc"><li><a href="#op-office-agents-report"><code>office.agents.report</code></a> Report your live coding agents</li><li><a href="#op-office-agents-list"><code>office.agents.list</code></a> List your reported agents</li><li><a href="#op-office-live-report"><code>office.live.report</code></a> Stream what your agents are doing</li><li><a href="#op-office-actions-wait"><code>office.actions.wait</code></a> Wait for answers to your agents&#39; prompts</li><li><a href="#op-office-actions-result"><code>office.actions.result</code></a> Say how an answer went</li></ul><section class="op" id="op-office-agents-report"><h3><code>office.agents.report</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-put">PUT</span> <code>/api/v1/office/agents</code> <span class="muted">MCP <code>office_agents_report</code></span></p>
-<p class="summary">Report your live coding agents</p><p>A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key&#39;s owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent&#39;s card (agentflow, or a title such as &quot;[Flow] Builder: #12 …&quot;), at that agent&#39;s desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent&#39;s details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as &quot;Private project&quot;. An optional usage object ({tokens, costUsd} for the reporter’s local day) contributes to that person&#39;s room meter when the viewer can see the agent. The office bridge sends measured usage and estimates cost at API list prices. Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the actions from the office that this source has not been sent yet (also served by office.actions.wait): Allow / Deny answers, and messages and stops for agents that list them in can.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>source</code></td><td>string</td><td><span class="req">required</span></td><td>The reporter, e.g. &quot;bridge:laptop&quot;. Each source replaces only its own agents.</td></tr><tr><td><code>at</code></td><td>string</td><td></td><td>When the reporter read its agents (ISO time).</td></tr><tr><td><code>agents</code></td><td>any[]</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Report your live coding agents</p><p>A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key&#39;s owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent&#39;s card (agentflow, or a title such as &quot;[Flow] Builder: #12 …&quot;), at that agent&#39;s desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent&#39;s details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as &quot;Private project&quot;. An optional usage object ({tokens, costUsd} for the reporter’s local day) contributes to that person&#39;s room meter when the viewer can see the agent. The office bridge sends measured usage and estimates cost at API list prices. Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the actions from the office that this source has not been sent yet (also served by office.actions.wait): Allow / Deny answers, and messages and stops for agents that list them in can.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>source</code></td><td>string</td><td><span class="req">required</span></td><td>The reporter, e.g. &quot;bridge:laptop&quot;. Each source replaces only its own agents.</td></tr><tr><td><code>at</code></td><td>string</td><td></td><td>When the reporter read its agents (ISO time).</td></tr><tr><td><code>agents</code></td><td>any[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>threads</code></td><td>any</td><td></td><td>Your recent threads on this source, as your T3 sidebar shows them, for you only: never sent to anyone else. Send it when it changes (and now and then); a report without it keeps the last one, null clears it.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;source&quot;: {
@@ -110,7 +110,33 @@
           },
           &quot;can&quot;: {
             &quot;items&quot;: {},
-            &quot;description&quot;: &quot;What its owner may do from the office besides Allow / Deny: \&quot;message\&quot; (send it a message as a new user turn) and \&quot;stop\&quot; (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.&quot;
+            &quot;description&quot;: &quot;What its owner may do from the office besides Allow / Deny: \&quot;message\&quot; (send it a message as a new user turn), \&quot;stop\&quot; (interrupt its running turn) and \&quot;history\&quot; (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.&quot;
+          },
+          &quot;live&quot;: {
+            &quot;description&quot;: &quot;What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes.&quot;,
+            &quot;properties&quot;: {
+              &quot;phase&quot;: {
+                &quot;description&quot;: &quot;thinking (reasoning), tool (a tool call or command) or writing (its reply).&quot;
+              },
+              &quot;text&quot;: {
+                &quot;description&quot;: &quot;The latest reasoning snippet, tool call summary (\&quot;Read lib/auth.mjs\&quot;, \&quot;Run: npm test\&quot;) or partial reply (up to 600 characters).&quot;
+              },
+              &quot;steps&quot;: {
+                &quot;description&quot;: &quot;Its last steps, oldest first (up to 8; each text up to 200 characters).&quot;,
+                &quot;items&quot;: {
+                  &quot;properties&quot;: {
+                    &quot;kind&quot;: {},
+                    &quot;text&quot;: {},
+                    &quot;at&quot;: {
+                      &quot;description&quot;: &quot;When (ISO time).&quot;
+                    }
+                  }
+                }
+              },
+              &quot;at&quot;: {
+                &quot;description&quot;: &quot;When it was read (ISO time).&quot;
+              }
+            }
           },
           &quot;transcript&quot;: {
             &quot;description&quot;: &quot;The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again.&quot;,
@@ -161,13 +187,56 @@
           }
         }
       }
+    },
+    &quot;threads&quot;: {
+      &quot;description&quot;: &quot;Your recent threads on this source, as your T3 sidebar shows them, for you only: never sent to anyone else. Send it when it changes (and now and then); a report without it keeps the last one, null clears it.&quot;,
+      &quot;properties&quot;: {
+        &quot;items&quot;: {
+          &quot;description&quot;: &quot;Up to 150, newest first.&quot;,
+          &quot;items&quot;: {
+            &quot;properties&quot;: {
+              &quot;id&quot;: {
+                &quot;description&quot;: &quot;The thread, as its agent id when it runs (so a working thread is the same as its live agent).&quot;
+              },
+              &quot;title&quot;: {},
+              &quot;project&quot;: {
+                &quot;description&quot;: &quot;The T3 project&#39;s name.&quot;
+              },
+              &quot;state&quot;: {
+                &quot;description&quot;: &quot;working (a turn is running), waiting (on you: an approval or a question), woke (back from a snooze), done (its last turn finished), snoozed or settled.&quot;
+              },
+              &quot;updatedAt&quot;: {},
+              &quot;branch&quot;: {},
+              &quot;unread&quot;: {
+                &quot;description&quot;: &quot;Its last turn finished after you last looked at it.&quot;
+              }
+            }
+          }
+        },
+        &quot;counts&quot;: {
+          &quot;description&quot;: &quot;How many threads are snoozed and settled in all (the index may list only recent ones).&quot;,
+          &quot;properties&quot;: {
+            &quot;snoozed&quot;: {
+              &quot;minimum&quot;: 0
+            },
+            &quot;settled&quot;: {
+              &quot;minimum&quot;: 0
+            }
+          }
+        },
+        &quot;can&quot;: {
+          &quot;items&quot;: {},
+          &quot;description&quot;: &quot;What the office may ask of any thread in it: message (a new user turn, idle threads too) and history (a page of its conversation).&quot;
+        },
+        &quot;at&quot;: {}
+      }
     }
   },
   &quot;required&quot;: [
     &quot;source&quot;,
     &quot;agents&quot;
   ]
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>actions</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>actions[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>.</td></tr><tr><td><code>actions[].requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>actions[].decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>actions[].text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>actions[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].result</code></td><td>object</td><td></td><td></td></tr><tr><td><code>accepted</code></td><td>integer</td><td></td><td>How many agents were kept.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>actions</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>actions[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>, <code>history</code>.</td></tr><tr><td><code>actions[].requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>actions[].decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>actions[].text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>actions[].before</code></td><td>string</td><td></td><td>history only: the cursor from the last page (its before); missing for the newest page.</td></tr><tr><td><code>actions[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].result</code></td><td>object</td><td></td><td></td></tr><tr><td><code>accepted</code></td><td>integer</td><td></td><td>How many agents were kept.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;actions&quot;: {
@@ -188,9 +257,10 @@
             &quot;enum&quot;: [
               &quot;answer&quot;,
               &quot;message&quot;,
-              &quot;stop&quot;
+              &quot;stop&quot;,
+              &quot;history&quot;
             ],
-            &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer.&quot;
+            &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer.&quot;
           },
           &quot;requestId&quot;: {
             &quot;type&quot;: &quot;string&quot;,
@@ -207,6 +277,11 @@
             &quot;type&quot;: &quot;string&quot;,
             &quot;maxLength&quot;: 2000,
             &quot;description&quot;: &quot;message only: what its owner wrote.&quot;
+          },
+          &quot;before&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 200,
+            &quot;description&quot;: &quot;history only: the cursor from the last page (its before); missing for the newest page.&quot;
           },
           &quot;at&quot;: {
             &quot;type&quot;: &quot;string&quot;
@@ -261,7 +336,7 @@
   &quot;properties&quot;: {},
   &quot;required&quot;: [],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>agents</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agents[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable and unique within the source, e.g. &quot;laptop:t3:thread-abc&quot;.</td></tr><tr><td><code>agents[].title</code></td><td>string</td><td></td><td>What it is working on (up to 200 characters).</td></tr><tr><td><code>agents[].vendor</code></td><td>string</td><td></td><td>Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one).</td></tr><tr><td><code>agents[].model</code></td><td>string</td><td></td><td>Display name, e.g. &quot;Opus 5.5&quot;.</td></tr><tr><td><code>agents[].status</code></td><td>string</td><td></td><td>running (working), waiting (on its person: a permission prompt or a question) or idle.</td></tr><tr><td><code>agents[].activity</code></td><td>string</td><td></td><td>What it is doing right now, e.g. &quot;Running tests&quot; or &quot;Edit lib/auth.mjs&quot;.</td></tr><tr><td><code>agents[].activityKind</code></td><td>string</td><td></td><td>What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as &quot;Running tests&quot;); an idle agent is always idle. Shown for private agents too. One of <code>edit</code>, <code>read</code>, <code>search</code>, <code>run</code>, <code>test</code>, <code>think</code>, <code>web</code>, <code>idle</code>.</td></tr><tr><td><code>agents[].host</code></td><td>string</td><td></td><td>The machine, e.g. &quot;laptop&quot;.</td></tr><tr><td><code>agents[].hostLabel</code></td><td>string</td><td></td><td>How to show where it runs, e.g. &quot;laptop · T3&quot;.</td></tr><tr><td><code>agents[].repo</code></td><td>object | null</td><td></td><td>The repository it works in: matched against projects&#39; repos to decide who may see the details.</td></tr><tr><td><code>agents[].children</code></td><td>object[]</td><td></td><td>Its subagents (up to 20 kept).</td></tr><tr><td><code>agents[].pending</code></td><td>object | null</td><td></td><td>What it waits on (only kept while status is waiting).</td></tr><tr><td><code>agents[].agentflow</code></td><td>object | null</td><td></td><td>The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent&#39;s desk in the office&#39;s common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: &quot;[Flow] &lt;Agent&gt;: #&lt;n&gt; …&quot; (the agent runner&#39;s threads), or &quot;#&lt;n&gt;&quot; for a card delegated to exactly one agent.</td></tr><tr><td><code>agents[].can</code></td><td>string[]</td><td></td><td>What its owner may do from the office besides Allow / Deny: &quot;message&quot; (send it a message as a new user turn) and &quot;stop&quot; (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.</td></tr><tr><td><code>agents[].transcript</code></td><td>object[]</td><td></td><td>The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again.</td></tr><tr><td><code>agents[].role</code></td><td>string</td><td></td><td>conductor: this agent is its owner&#39;s Chief of Staff, a long-lived thread that takes their messages from the office, routes work to AgentFlow agents and answers questions. The office draws it as their companion. Always private to everyone but its owner (others see only that it is one, and its status), whatever its repo. Report at most one per person; list &quot;message&quot; in can. One of <code>conductor</code>.</td></tr><tr><td><code>agents[].reply</code></td><td>object | null</td><td></td><td>A conductor&#39;s latest reply, for its owner only (like transcript; masked again on the server): what the office shows in its bubble and log.</td></tr><tr><td><code>agents[].usage</code></td><td>object | null</td><td></td><td>Optional model use for today, as the reporter measured it. Omit the object when you do not measure use: the office meter then shows a dash. The office bridge does not send this yet. Someone who cannot see the agent does not receive it (they still see running or waiting).</td></tr><tr><td><code>sources</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].source</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].agents</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>agents</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agents[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable and unique within the source, e.g. &quot;laptop:t3:thread-abc&quot;.</td></tr><tr><td><code>agents[].title</code></td><td>string</td><td></td><td>What it is working on (up to 200 characters).</td></tr><tr><td><code>agents[].vendor</code></td><td>string</td><td></td><td>Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one).</td></tr><tr><td><code>agents[].model</code></td><td>string</td><td></td><td>Display name, e.g. &quot;Opus 5.5&quot;.</td></tr><tr><td><code>agents[].status</code></td><td>string</td><td></td><td>running (working), waiting (on its person: a permission prompt or a question) or idle.</td></tr><tr><td><code>agents[].activity</code></td><td>string</td><td></td><td>What it is doing right now, e.g. &quot;Running tests&quot; or &quot;Edit lib/auth.mjs&quot;.</td></tr><tr><td><code>agents[].activityKind</code></td><td>string</td><td></td><td>What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as &quot;Running tests&quot;); an idle agent is always idle. Shown for private agents too. One of <code>edit</code>, <code>read</code>, <code>search</code>, <code>run</code>, <code>test</code>, <code>think</code>, <code>web</code>, <code>idle</code>.</td></tr><tr><td><code>agents[].host</code></td><td>string</td><td></td><td>The machine, e.g. &quot;laptop&quot;.</td></tr><tr><td><code>agents[].hostLabel</code></td><td>string</td><td></td><td>How to show where it runs, e.g. &quot;laptop · T3&quot;.</td></tr><tr><td><code>agents[].repo</code></td><td>object | null</td><td></td><td>The repository it works in: matched against projects&#39; repos to decide who may see the details.</td></tr><tr><td><code>agents[].children</code></td><td>object[]</td><td></td><td>Its subagents (up to 20 kept).</td></tr><tr><td><code>agents[].pending</code></td><td>object | null</td><td></td><td>What it waits on (only kept while status is waiting).</td></tr><tr><td><code>agents[].agentflow</code></td><td>object | null</td><td></td><td>The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent&#39;s desk in the office&#39;s common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: &quot;[Flow] &lt;Agent&gt;: #&lt;n&gt; …&quot; (the agent runner&#39;s threads), or &quot;#&lt;n&gt;&quot; for a card delegated to exactly one agent.</td></tr><tr><td><code>agents[].can</code></td><td>string[]</td><td></td><td>What its owner may do from the office besides Allow / Deny: &quot;message&quot; (send it a message as a new user turn), &quot;stop&quot; (interrupt its running turn) and &quot;history&quot; (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.</td></tr><tr><td><code>agents[].live</code></td><td>object | null</td><td></td><td>What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes.</td></tr><tr><td><code>agents[].transcript</code></td><td>object[]</td><td></td><td>The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again.</td></tr><tr><td><code>agents[].role</code></td><td>string</td><td></td><td>conductor: this agent is its owner&#39;s Chief of Staff, a long-lived thread that takes their messages from the office, routes work to AgentFlow agents and answers questions. The office draws it as their companion. Always private to everyone but its owner (others see only that it is one, and its status), whatever its repo. Report at most one per person; list &quot;message&quot; in can. One of <code>conductor</code>.</td></tr><tr><td><code>agents[].reply</code></td><td>object | null</td><td></td><td>A conductor&#39;s latest reply, for its owner only (like transcript; masked again on the server): what the office shows in its bubble and log.</td></tr><tr><td><code>agents[].usage</code></td><td>object | null</td><td></td><td>Optional model use for today, as the reporter measured it. Omit the object when you do not measure use: the office meter then shows a dash. The office bridge does not send this yet. Someone who cannot see the agent does not receive it (they still see running or waiting).</td></tr><tr><td><code>sources</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].source</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].agents</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>threads</code></td><td>object[]</td><td><span class="req">required</span></td><td>Each source&#39;s thread index (office.agents.report threads), with its source.</td></tr><tr><td><code>threads[].items</code></td><td>object[]</td><td></td><td>Up to 150, newest first.</td></tr><tr><td><code>threads[].counts</code></td><td>object</td><td></td><td>How many threads are snoozed and settled in all (the index may list only recent ones).</td></tr><tr><td><code>threads[].can</code></td><td>string[]</td><td></td><td>What the office may ask of any thread in it: message (a new user turn, idle threads too) and history (a page of its conversation).</td></tr><tr><td><code>threads[].at</code></td><td>string</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;agents&quot;: {
@@ -426,7 +501,57 @@
             &quot;items&quot;: {
               &quot;type&quot;: &quot;string&quot;
             },
-            &quot;description&quot;: &quot;What its owner may do from the office besides Allow / Deny: \&quot;message\&quot; (send it a message as a new user turn) and \&quot;stop\&quot; (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.&quot;
+            &quot;description&quot;: &quot;What its owner may do from the office besides Allow / Deny: \&quot;message\&quot; (send it a message as a new user turn), \&quot;stop\&quot; (interrupt its running turn) and \&quot;history\&quot; (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs.&quot;
+          },
+          &quot;live&quot;: {
+            &quot;type&quot;: [
+              &quot;object&quot;,
+              &quot;null&quot;
+            ],
+            &quot;description&quot;: &quot;What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes.&quot;,
+            &quot;properties&quot;: {
+              &quot;phase&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;enum&quot;: [
+                  &quot;thinking&quot;,
+                  &quot;tool&quot;,
+                  &quot;writing&quot;
+                ],
+                &quot;description&quot;: &quot;thinking (reasoning), tool (a tool call or command) or writing (its reply).&quot;
+              },
+              &quot;text&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;The latest reasoning snippet, tool call summary (\&quot;Read lib/auth.mjs\&quot;, \&quot;Run: npm test\&quot;) or partial reply (up to 600 characters).&quot;
+              },
+              &quot;steps&quot;: {
+                &quot;type&quot;: &quot;array&quot;,
+                &quot;description&quot;: &quot;Its last steps, oldest first (up to 8; each text up to 200 characters).&quot;,
+                &quot;items&quot;: {
+                  &quot;type&quot;: &quot;object&quot;,
+                  &quot;properties&quot;: {
+                    &quot;kind&quot;: {
+                      &quot;type&quot;: &quot;string&quot;,
+                      &quot;enum&quot;: [
+                        &quot;thinking&quot;,
+                        &quot;tool&quot;,
+                        &quot;writing&quot;
+                      ]
+                    },
+                    &quot;text&quot;: {
+                      &quot;type&quot;: &quot;string&quot;
+                    },
+                    &quot;at&quot;: {
+                      &quot;type&quot;: &quot;string&quot;,
+                      &quot;description&quot;: &quot;When (ISO time).&quot;
+                    }
+                  }
+                }
+              },
+              &quot;at&quot;: {
+                &quot;type&quot;: &quot;string&quot;,
+                &quot;description&quot;: &quot;When it was read (ISO time).&quot;
+              }
+            }
           },
           &quot;transcript&quot;: {
             &quot;type&quot;: &quot;array&quot;,
@@ -523,11 +648,96 @@
           &quot;agents&quot;
         ]
       }
+    },
+    &quot;threads&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;description&quot;: &quot;Each source&#39;s thread index (office.agents.report threads), with its source.&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;description&quot;: &quot;Your recent threads on this source, as your T3 sidebar shows them, for you only: never sent to anyone else. Send it when it changes (and now and then); a report without it keeps the last one, null clears it.&quot;,
+        &quot;properties&quot;: {
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;description&quot;: &quot;Up to 150, newest first.&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;object&quot;,
+              &quot;required&quot;: [
+                &quot;id&quot;,
+                &quot;state&quot;
+              ],
+              &quot;properties&quot;: {
+                &quot;id&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;description&quot;: &quot;The thread, as its agent id when it runs (so a working thread is the same as its live agent).&quot;
+                },
+                &quot;title&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;project&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;description&quot;: &quot;The T3 project&#39;s name.&quot;
+                },
+                &quot;state&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;enum&quot;: [
+                    &quot;working&quot;,
+                    &quot;waiting&quot;,
+                    &quot;woke&quot;,
+                    &quot;done&quot;,
+                    &quot;snoozed&quot;,
+                    &quot;settled&quot;
+                  ],
+                  &quot;description&quot;: &quot;working (a turn is running), waiting (on you: an approval or a question), woke (back from a snooze), done (its last turn finished), snoozed or settled.&quot;
+                },
+                &quot;updatedAt&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;branch&quot;: {
+                  &quot;type&quot;: &quot;string&quot;
+                },
+                &quot;unread&quot;: {
+                  &quot;type&quot;: &quot;boolean&quot;,
+                  &quot;description&quot;: &quot;Its last turn finished after you last looked at it.&quot;
+                }
+              }
+            }
+          },
+          &quot;counts&quot;: {
+            &quot;type&quot;: &quot;object&quot;,
+            &quot;description&quot;: &quot;How many threads are snoozed and settled in all (the index may list only recent ones).&quot;,
+            &quot;properties&quot;: {
+              &quot;snoozed&quot;: {
+                &quot;type&quot;: &quot;integer&quot;,
+                &quot;minimum&quot;: 0
+              },
+              &quot;settled&quot;: {
+                &quot;type&quot;: &quot;integer&quot;,
+                &quot;minimum&quot;: 0
+              }
+            }
+          },
+          &quot;can&quot;: {
+            &quot;type&quot;: &quot;array&quot;,
+            &quot;items&quot;: {
+              &quot;type&quot;: &quot;string&quot;,
+              &quot;enum&quot;: [
+                &quot;message&quot;,
+                &quot;history&quot;
+              ]
+            },
+            &quot;description&quot;: &quot;What the office may ask of any thread in it: message (a new user turn, idle threads too) and history (a page of its conversation).&quot;
+          },
+          &quot;at&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
     }
   },
   &quot;required&quot;: [
     &quot;agents&quot;,
-    &quot;sources&quot;
+    &quot;sources&quot;,
+    &quot;threads&quot;
   ]
 }</code></pre></details><h4>Example: Yours</h4><pre><code>curl -sS -X GET &quot;$FLOW_URL/api/v1/office/agents&quot; \
   -H &quot;Authorization: Bearer $FLOW_API_KEY&quot;</code></pre><pre class="out"><code>{
@@ -590,7 +800,78 @@
       &quot;at&quot;: &quot;2026-10-29T17:00:00.000Z&quot;,
       &quot;agents&quot;: 1
     }
+  ],
+  &quot;threads&quot;: []
+}</code></pre></section>
+<section class="op" id="op-office-live-report"><h3><code>office.live.report</code> <span class="scope s-write">write</span></h3>
+<p class="route"><span class="m m-post">POST</span> <code>/api/v1/office/live</code> <span class="muted">MCP <code>office_live_report</code></span></p>
+<p class="summary">Stream what your agents are doing</p><p>Between reports, as it changes: each agent&#39;s live field (its latest reasoning, tool call or partial reply, and its last steps) for agents in this source&#39;s current report. Only you, their owner, ever see it, in your own office. live null clears it; idle agents and unknown ids are skipped. Up to 30 in a burst, then 8 a second per source: debounce on your side (about 150 ms). Kept in memory only: the next office.agents.report carries it too.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>source</code></td><td>string</td><td><span class="req">required</span></td><td>The reporter, e.g. &quot;bridge:laptop&quot;. Each source replaces only its own agents.</td></tr><tr><td><code>agents</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agents[].id</code></td><td>string</td><td></td><td></td></tr><tr><td><code>agents[].live</code></td><td>any</td><td></td><td>What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;source&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 60,
+      &quot;description&quot;: &quot;The reporter, e.g. \&quot;bridge:laptop\&quot;. Each source replaces only its own agents.&quot;
+    },
+    &quot;agents&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {
+          &quot;id&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;live&quot;: {
+            &quot;description&quot;: &quot;What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes.&quot;,
+            &quot;properties&quot;: {
+              &quot;phase&quot;: {
+                &quot;description&quot;: &quot;thinking (reasoning), tool (a tool call or command) or writing (its reply).&quot;
+              },
+              &quot;text&quot;: {
+                &quot;description&quot;: &quot;The latest reasoning snippet, tool call summary (\&quot;Read lib/auth.mjs\&quot;, \&quot;Run: npm test\&quot;) or partial reply (up to 600 characters).&quot;
+              },
+              &quot;steps&quot;: {
+                &quot;description&quot;: &quot;Its last steps, oldest first (up to 8; each text up to 200 characters).&quot;,
+                &quot;items&quot;: {
+                  &quot;properties&quot;: {
+                    &quot;kind&quot;: {},
+                    &quot;text&quot;: {},
+                    &quot;at&quot;: {
+                      &quot;description&quot;: &quot;When (ISO time).&quot;
+                    }
+                  }
+                }
+              },
+              &quot;at&quot;: {
+                &quot;description&quot;: &quot;When it was read (ISO time).&quot;
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  &quot;required&quot;: [
+    &quot;source&quot;,
+    &quot;agents&quot;
   ]
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>accepted</code></td><td>integer</td><td><span class="req">required</span></td><td>How many agents&#39; live fields changed.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;accepted&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;description&quot;: &quot;How many agents&#39; live fields changed.&quot;
+    }
+  },
+  &quot;required&quot;: [
+    &quot;accepted&quot;
+  ]
+}</code></pre></details><h4>Example: Thinking</h4><pre><code>curl -sS -X POST &quot;$FLOW_URL/api/v1/office/live&quot; \
+  -H &quot;Authorization: Bearer $FLOW_API_KEY&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  -d &#39;{&quot;source&quot;:&quot;bridge:laptop&quot;,&quot;agents&quot;:[{&quot;id&quot;:&quot;laptop:t3:thread-abc&quot;,&quot;live&quot;:{&quot;phase&quot;:&quot;tool&quot;,&quot;text&quot;:&quot;Run: npm test&quot;,&quot;steps&quot;:[{&quot;kind&quot;:&quot;thinking&quot;,&quot;text&quot;:&quot;Checking the redirect&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;},{&quot;kind&quot;:&quot;tool&quot;,&quot;text&quot;:&quot;Run: npm test&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;}]}}]}&#39;</code></pre><pre class="out"><code>{
+  &quot;accepted&quot;: 1
 }</code></pre></section>
 <section class="op" id="op-office-actions-wait"><h3><code>office.actions.wait</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-get">GET</span> <code>/api/v1/office/actions</code> <span class="muted">MCP <code>office_actions_wait</code></span></p>
@@ -615,7 +896,7 @@
     &quot;source&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>actions</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>actions[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>.</td></tr><tr><td><code>actions[].requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>actions[].decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>actions[].text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>actions[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].result</code></td><td>object</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>actions</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>actions[].kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>, <code>history</code>.</td></tr><tr><td><code>actions[].requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>actions[].decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>actions[].text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>actions[].before</code></td><td>string</td><td></td><td>history only: the cursor from the last page (its before); missing for the newest page.</td></tr><tr><td><code>actions[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>actions[].result</code></td><td>object</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;actions&quot;: {
@@ -636,9 +917,10 @@
             &quot;enum&quot;: [
               &quot;answer&quot;,
               &quot;message&quot;,
-              &quot;stop&quot;
+              &quot;stop&quot;,
+              &quot;history&quot;
             ],
-            &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer.&quot;
+            &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer.&quot;
           },
           &quot;requestId&quot;: {
             &quot;type&quot;: &quot;string&quot;,
@@ -655,6 +937,11 @@
             &quot;type&quot;: &quot;string&quot;,
             &quot;maxLength&quot;: 2000,
             &quot;description&quot;: &quot;message only: what its owner wrote.&quot;
+          },
+          &quot;before&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;maxLength&quot;: 200,
+            &quot;description&quot;: &quot;history only: the cursor from the last page (its before); missing for the newest page.&quot;
           },
           &quot;at&quot;: {
             &quot;type&quot;: &quot;string&quot;
@@ -726,7 +1013,7 @@
 }</code></pre></section>
 <section class="op" id="op-office-actions-result"><h3><code>office.actions.result</code> <span class="scope s-write">write</span></h3>
 <p class="route"><span class="m m-post">POST</span> <code>/api/v1/office/actions/{id}</code> <span class="muted">MCP <code>office_actions_result</code></span></p>
-<p class="summary">Say how an answer went</p><p>The reporter carried out (or could not carry out) an action from office.actions.wait: the agent&#39;s owner sees the message in the office right away. Keep it short, and never echo a message&#39;s text.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>id</code></td><td>string</td><td><span class="req">required</span></td><td>The action id (act_…).</td></tr><tr><td><code>ok</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>message</code></td><td>string</td><td></td><td>e.g. &quot;Approved in T3&quot;.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+<p class="summary">Say how an answer went</p><p>The reporter carried out (or could not carry out) an action from office.actions.wait: the agent&#39;s owner sees the message in the office right away. Keep it short, and never echo a message&#39;s text.</p><h4>Input</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>id</code></td><td>string</td><td><span class="req">required</span></td><td>The action id (act_…).</td></tr><tr><td><code>ok</code></td><td>boolean</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>message</code></td><td>string</td><td></td><td>e.g. &quot;Approved in T3&quot;.</td></tr><tr><td><code>data</code></td><td>object | null</td><td></td><td>history only: the page, {items, before, more}, oldest first. Each item: role (user, assistant, reasoning or tool), text (up to 4000 characters), title (a tool call or reasoning summary, up to 200), detail (a tool&#39;s short result, up to 600), status, at, turn. Up to 60 items and 64 KB; masked again. before: the cursor for the page before this one; more: there is one. Delivered to the owner&#39;s open office and never stored.</td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;id&quot;: {
@@ -742,6 +1029,30 @@
       &quot;type&quot;: &quot;string&quot;,
       &quot;maxLength&quot;: 300,
       &quot;description&quot;: &quot;e.g. \&quot;Approved in T3\&quot;.&quot;
+    },
+    &quot;data&quot;: {
+      &quot;type&quot;: [
+        &quot;object&quot;,
+        &quot;null&quot;
+      ],
+      &quot;description&quot;: &quot;history only: the page, {items, before, more}, oldest first. Each item: role (user, assistant, reasoning or tool), text (up to 4000 characters), title (a tool call or reasoning summary, up to 200), detail (a tool&#39;s short result, up to 600), status, at, turn. Up to 60 items and 64 KB; masked again. before: the cursor for the page before this one; more: there is one. Delivered to the owner&#39;s open office and never stored.&quot;,
+      &quot;properties&quot;: {
+        &quot;items&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;object&quot;
+          }
+        },
+        &quot;before&quot;: {
+          &quot;type&quot;: [
+            &quot;string&quot;,
+            &quot;null&quot;
+          ]
+        },
+        &quot;more&quot;: {
+          &quot;type&quot;: &quot;boolean&quot;
+        }
+      }
     }
   },
   &quot;required&quot;: [
@@ -749,7 +1060,7 @@
     &quot;ok&quot;
   ],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>action</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>action.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>.</td></tr><tr><td><code>action.requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>action.decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>action.text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>action.at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.result</code></td><td>object</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>action</code></td><td>object</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.id</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.agentId</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.source</code></td><td>string</td><td></td><td></td></tr><tr><td><code>action.kind</code></td><td>enum</td><td><span class="req">required</span></td><td>answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer. One of <code>answer</code>, <code>message</code>, <code>stop</code>, <code>history</code>.</td></tr><tr><td><code>action.requestId</code></td><td>string</td><td></td><td>answer only.</td></tr><tr><td><code>action.decision</code></td><td>enum</td><td></td><td>answer only. One of <code>allow</code>, <code>deny</code>.</td></tr><tr><td><code>action.text</code></td><td>string</td><td></td><td>message only: what its owner wrote.</td></tr><tr><td><code>action.before</code></td><td>string</td><td></td><td>history only: the cursor from the last page (its before); missing for the newest page.</td></tr><tr><td><code>action.at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>action.result</code></td><td>object</td><td></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;action&quot;: {
@@ -768,9 +1079,10 @@
           &quot;enum&quot;: [
             &quot;answer&quot;,
             &quot;message&quot;,
-            &quot;stop&quot;
+            &quot;stop&quot;,
+            &quot;history&quot;
           ],
-          &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer.&quot;
+          &quot;description&quot;: &quot;answer: Allow / Deny (requestId, decision); message: send text as a new user turn (to a live agent, or to any thread in your threads index, idle ones too); stop: interrupt its running turn; history: send back a page of the thread&#39;s conversation as the result&#39;s data. Treat a missing kind as answer.&quot;
         },
         &quot;requestId&quot;: {
           &quot;type&quot;: &quot;string&quot;,
@@ -787,6 +1099,11 @@
           &quot;type&quot;: &quot;string&quot;,
           &quot;maxLength&quot;: 2000,
           &quot;description&quot;: &quot;message only: what its owner wrote.&quot;
+        },
+        &quot;before&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;maxLength&quot;: 200,
+          &quot;description&quot;: &quot;history only: the cursor from the last page (its before); missing for the newest page.&quot;
         },
         &quot;at&quot;: {
           &quot;type&quot;: &quot;string&quot;
@@ -841,6 +1158,6 @@
     }
   }
 }</code></pre></section></div></main></div>
-<script type="application/json" id="search-index">[{"t":"Environments","k":"Concept","u":"index.html#environments","s":"An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it."},{"t":"MindMap (charts)","k":"Concept","u":"index.html#mindmap-charts","s":"The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**."},{"t":"Timeline","k":"Concept","u":"index.html#timeline","s":"The timeline holds dated **items** that are tagged with **projects**."},{"t":"DevOps board and gates","k":"Concept","u":"index.html#devops-board-and-gates","s":"The DevOps board is a card board."},{"t":"Agent inbox","k":"Concept","u":"index.html#agent-inbox","s":"Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox."},{"t":"Sync","k":"Concept","u":"index.html#sync","s":"The server is the source of truth."},{"t":"Sharing","k":"Concept","u":"index.html#sharing","s":"The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment."},{"t":"Versioning","k":"Concept","u":"index.html#versioning","s":"Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers."},{"t":"AgentFlow","k":"Concept","u":"index.html#agentflow","s":"AgentFlow is an org chart for agentic work."},{"t":"OneProfileID photos","k":"Concept","u":"index.html#oneprofileid-photos","s":"When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card."},{"t":"Chat","k":"Concept","u":"index.html#chat","s":"With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards."},{"t":"Combined view","k":"Concept","u":"index.html#combined-view","s":"The DevOps board and the Timeline can show several of your environments at once."},{"t":"3D office","k":"Concept","u":"index.html#3d-office","s":"The 3D office is a small virtual office for one environment, where you can see your team and the coding agents they have running right now."},{"t":"Avatars","k":"Concept","u":"index.html#avatars","s":"Your avatar is the character you build in the [3D office](#3d-office): one per account, the same in every office you are in, shared environments included."},{"t":"envs.list","k":"GET /api/v1/envs","u":"envs.html#op-envs-list","s":"List environments"},{"t":"envs.get","k":"GET /api/v1/envs/{env}","u":"envs.html#op-envs-get","s":"Get an environment"},{"t":"charts.list","k":"GET /api/v1/envs/{env}/charts","u":"charts.html#op-charts-list","s":"List charts"},{"t":"nodes.list","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-list","s":"List nodes"},{"t":"nodes.get","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-get","s":"Get a node"},{"t":"nodes.create","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-create","s":"Create a node"},{"t":"nodes.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-update","s":"Update a node"},{"t":"nodes.move","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move","u":"nodes.html#op-nodes-move","s":"Move a node"},{"t":"edges.list","k":"GET /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-list","s":"List edges"},{"t":"edges.create","k":"POST /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-create","s":"Create an edge"},{"t":"edges.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-update","s":"Update an edge"},{"t":"edges.delete","k":"DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-delete","s":"Delete an edge"},{"t":"projects.list","k":"GET /api/v1/envs/{env}/projects","u":"projects.html#op-projects-list","s":"List projects"},{"t":"projects.create","k":"POST /api/v1/envs/{env}/projects","u":"projects.html#op-projects-create","s":"Create a project"},{"t":"projects.update","k":"PATCH /api/v1/envs/{env}/projects/{project}","u":"projects.html#op-projects-update","s":"Update a project"},{"t":"items.list","k":"GET /api/v1/envs/{env}/items","u":"timeline.html#op-items-list","s":"List timeline items"},{"t":"items.get","k":"GET /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-get","s":"Get a timeline item"},{"t":"items.create","k":"POST /api/v1/envs/{env}/items","u":"timeline.html#op-items-create","s":"Create a timeline item"},{"t":"items.update","k":"PATCH /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-update","s":"Update a timeline item"},{"t":"cards.list","k":"GET /api/v1/envs/{env}/cards","u":"cards.html#op-cards-list","s":"List DevOps cards"},{"t":"cards.get","k":"GET /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-get","s":"Get a DevOps card"},{"t":"cards.create","k":"POST /api/v1/envs/{env}/cards","u":"cards.html#op-cards-create","s":"Create a DevOps card"},{"t":"cards.update","k":"PATCH /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-update","s":"Update a DevOps card"},{"t":"cards.move","k":"POST /api/v1/envs/{env}/cards/{card}/move","u":"cards.html#op-cards-move","s":"Move a DevOps card"},{"t":"cards.deleted","k":"GET /api/v1/envs/{env}/deleted-cards","u":"cards.html#op-cards-deleted","s":"List recently deleted cards"},{"t":"cards.restore","k":"POST /api/v1/envs/{env}/deleted-cards/{entry}/restore","u":"cards.html#op-cards-restore","s":"Restore a deleted card"},{"t":"labels.list","k":"GET /api/v1/envs/{env}/labels","u":"labels.html#op-labels-list","s":"List DevOps labels"},{"t":"labels.create","k":"POST /api/v1/envs/{env}/labels","u":"labels.html#op-labels-create","s":"Create a DevOps label"},{"t":"agents.list","k":"GET /api/v1/envs/{env}/agents","u":"agents.html#op-agents-list","s":"List AgentFlow agents"},{"t":"agents.get","k":"GET /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-get","s":"Get an AgentFlow agent and its brief"},{"t":"agents.work","k":"GET /api/v1/envs/{env}/agents/{agent}/work","u":"agents.html#op-agents-work","s":"Get an agent's work queue"},{"t":"agents.create","k":"POST /api/v1/envs/{env}/agents","u":"agents.html#op-agents-create","s":"Create an AgentFlow agent"},{"t":"agents.update","k":"PATCH /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-update","s":"Update an AgentFlow agent"},{"t":"agents.delete","k":"DELETE /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-delete","s":"Delete an AgentFlow agent"},{"t":"runners.list","k":"GET /api/v1/envs/{env}/runners","u":"agents.html#op-runners-list","s":"List AgentFlow runners"},{"t":"runners.report","k":"POST /api/v1/envs/{env}/runners/{runner}","u":"agents.html#op-runners-report","s":"Report a runner and its models"},{"t":"workflows.list","k":"GET /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-list","s":"List AgentFlow workflows"},{"t":"workflows.get","k":"GET /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-get","s":"Get an AgentFlow workflow and its brief"},{"t":"workflows.create","k":"POST /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-create","s":"Create an AgentFlow workflow"},{"t":"workflows.update","k":"PATCH /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-update","s":"Update an AgentFlow workflow"},{"t":"search","k":"GET /api/v1/envs/{env}/search","u":"search.html#op-search","s":"Search an environment"},{"t":"shares.list","k":"GET /api/v1/envs/{env}/shares","u":"sharing.html#op-shares-list","s":"List shares of an environment"},{"t":"shares.preview","k":"POST /api/v1/envs/{env}/shares/preview","u":"sharing.html#op-shares-preview","s":"Preview what a share would show"},{"t":"shares.create","k":"POST /api/v1/envs/{env}/shares","u":"sharing.html#op-shares-create","s":"Share part of an environment with someone"},{"t":"shares.update","k":"PATCH /api/v1/shares/{share}","u":"sharing.html#op-shares-update","s":"Change a share's permission"},{"t":"shares.revoke","k":"DELETE /api/v1/shares/{share}","u":"sharing.html#op-shares-revoke","s":"Revoke a share"},{"t":"shares.incoming","k":"GET /api/v1/shares/incoming","u":"sharing.html#op-shares-incoming","s":"List shares with you"},{"t":"shares.requests.list","k":"GET /api/v1/share-requests","u":"sharing.html#op-shares-requests-list","s":"List re-share requests"},{"t":"shares.requests.create","k":"POST /api/v1/shares/{share}/requests","u":"sharing.html#op-shares-requests-create","s":"Ask the owner to share it on"},{"t":"shares.requests.decide","k":"POST /api/v1/share-requests/{request}","u":"sharing.html#op-shares-requests-decide","s":"Approve or deny a re-share request"},{"t":"proposals.list","k":"GET /api/v1/envs/{env}/proposals","u":"sharing.html#op-proposals-list","s":"List share additions"},{"t":"proposals.approve","k":"POST /api/v1/envs/{env}/proposals/{proposal}/approve","u":"sharing.html#op-proposals-approve","s":"Approve a share addition"},{"t":"proposals.deny","k":"POST /api/v1/envs/{env}/proposals/{proposal}/deny","u":"sharing.html#op-proposals-deny","s":"Deny a share addition"},{"t":"office.agents.report","k":"PUT /api/v1/office/agents","u":"office.html#op-office-agents-report","s":"Report your live coding agents"},{"t":"office.agents.list","k":"GET /api/v1/office/agents","u":"office.html#op-office-agents-list","s":"List your reported agents"},{"t":"office.actions.wait","k":"GET /api/v1/office/actions","u":"office.html#op-office-actions-wait","s":"Wait for answers to your agents' prompts"},{"t":"office.actions.result","k":"POST /api/v1/office/actions/{id}","u":"office.html#op-office-actions-result","s":"Say how an answer went"}]</script>
+<script type="application/json" id="search-index">[{"t":"Environments","k":"Concept","u":"index.html#environments","s":"An **environment** is one workspace: its charts, projects, timeline and DevOps board, plus a record of who owns it."},{"t":"MindMap (charts)","k":"Concept","u":"index.html#mindmap-charts","s":"The app's **MindMap** tab is a free-form canvas of **cards** joined by **edges**."},{"t":"Timeline","k":"Concept","u":"index.html#timeline","s":"The timeline holds dated **items** that are tagged with **projects**."},{"t":"DevOps board and gates","k":"Concept","u":"index.html#devops-board-and-gates","s":"The DevOps board is a card board."},{"t":"Agent inbox","k":"Concept","u":"index.html#agent-inbox","s":"Agents can add or update projects, labels, timeline items and cards by dropping a JSON **patch** into the inbox."},{"t":"Sync","k":"Concept","u":"index.html#sync","s":"The server is the source of truth."},{"t":"Sharing","k":"Concept","u":"index.html#sharing","s":"The owner of an environment can share part of it with another Flow user, by email: a person and everything below them, hand-picked cards, a project, a DevOps label, or the whole environment."},{"t":"Versioning","k":"Concept","u":"index.html#versioning","s":"Flygon Flow uses [Bradshaw Versioning](https://github.com/aribradshaw/devlog/blob/main/docs/bradshaw-versioning.md) numbers."},{"t":"AgentFlow","k":"Concept","u":"index.html#agentflow","s":"AgentFlow is an org chart for agentic work."},{"t":"OneProfileID photos","k":"Concept","u":"index.html#oneprofileid-photos","s":"When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card."},{"t":"Chat","k":"Concept","u":"index.html#chat","s":"With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards."},{"t":"Combined view","k":"Concept","u":"index.html#combined-view","s":"The DevOps board and the Timeline can show several of your environments at once."},{"t":"3D office","k":"Concept","u":"index.html#3d-office","s":"The 3D office is a small virtual office for one environment, where you can see your team and the coding agents they have running right now."},{"t":"Avatars","k":"Concept","u":"index.html#avatars","s":"Your avatar is the character you build in the [3D office](#3d-office): one per account, the same in every office you are in, shared environments included."},{"t":"envs.list","k":"GET /api/v1/envs","u":"envs.html#op-envs-list","s":"List environments"},{"t":"envs.get","k":"GET /api/v1/envs/{env}","u":"envs.html#op-envs-get","s":"Get an environment"},{"t":"charts.list","k":"GET /api/v1/envs/{env}/charts","u":"charts.html#op-charts-list","s":"List charts"},{"t":"nodes.list","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-list","s":"List nodes"},{"t":"nodes.get","k":"GET /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-get","s":"Get a node"},{"t":"nodes.create","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes","u":"nodes.html#op-nodes-create","s":"Create a node"},{"t":"nodes.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/nodes/{node}","u":"nodes.html#op-nodes-update","s":"Update a node"},{"t":"nodes.move","k":"POST /api/v1/envs/{env}/charts/{chart}/nodes/{node}/move","u":"nodes.html#op-nodes-move","s":"Move a node"},{"t":"edges.list","k":"GET /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-list","s":"List edges"},{"t":"edges.create","k":"POST /api/v1/envs/{env}/charts/{chart}/edges","u":"edges.html#op-edges-create","s":"Create an edge"},{"t":"edges.update","k":"PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-update","s":"Update an edge"},{"t":"edges.delete","k":"DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}","u":"edges.html#op-edges-delete","s":"Delete an edge"},{"t":"projects.list","k":"GET /api/v1/envs/{env}/projects","u":"projects.html#op-projects-list","s":"List projects"},{"t":"projects.create","k":"POST /api/v1/envs/{env}/projects","u":"projects.html#op-projects-create","s":"Create a project"},{"t":"projects.update","k":"PATCH /api/v1/envs/{env}/projects/{project}","u":"projects.html#op-projects-update","s":"Update a project"},{"t":"items.list","k":"GET /api/v1/envs/{env}/items","u":"timeline.html#op-items-list","s":"List timeline items"},{"t":"items.get","k":"GET /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-get","s":"Get a timeline item"},{"t":"items.create","k":"POST /api/v1/envs/{env}/items","u":"timeline.html#op-items-create","s":"Create a timeline item"},{"t":"items.update","k":"PATCH /api/v1/envs/{env}/items/{item}","u":"timeline.html#op-items-update","s":"Update a timeline item"},{"t":"cards.list","k":"GET /api/v1/envs/{env}/cards","u":"cards.html#op-cards-list","s":"List DevOps cards"},{"t":"cards.get","k":"GET /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-get","s":"Get a DevOps card"},{"t":"cards.create","k":"POST /api/v1/envs/{env}/cards","u":"cards.html#op-cards-create","s":"Create a DevOps card"},{"t":"cards.update","k":"PATCH /api/v1/envs/{env}/cards/{card}","u":"cards.html#op-cards-update","s":"Update a DevOps card"},{"t":"cards.move","k":"POST /api/v1/envs/{env}/cards/{card}/move","u":"cards.html#op-cards-move","s":"Move a DevOps card"},{"t":"cards.deleted","k":"GET /api/v1/envs/{env}/deleted-cards","u":"cards.html#op-cards-deleted","s":"List recently deleted cards"},{"t":"cards.restore","k":"POST /api/v1/envs/{env}/deleted-cards/{entry}/restore","u":"cards.html#op-cards-restore","s":"Restore a deleted card"},{"t":"labels.list","k":"GET /api/v1/envs/{env}/labels","u":"labels.html#op-labels-list","s":"List DevOps labels"},{"t":"labels.create","k":"POST /api/v1/envs/{env}/labels","u":"labels.html#op-labels-create","s":"Create a DevOps label"},{"t":"agents.list","k":"GET /api/v1/envs/{env}/agents","u":"agents.html#op-agents-list","s":"List AgentFlow agents"},{"t":"agents.get","k":"GET /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-get","s":"Get an AgentFlow agent and its brief"},{"t":"agents.work","k":"GET /api/v1/envs/{env}/agents/{agent}/work","u":"agents.html#op-agents-work","s":"Get an agent's work queue"},{"t":"agents.create","k":"POST /api/v1/envs/{env}/agents","u":"agents.html#op-agents-create","s":"Create an AgentFlow agent"},{"t":"agents.update","k":"PATCH /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-update","s":"Update an AgentFlow agent"},{"t":"agents.delete","k":"DELETE /api/v1/envs/{env}/agents/{agent}","u":"agents.html#op-agents-delete","s":"Delete an AgentFlow agent"},{"t":"runners.list","k":"GET /api/v1/envs/{env}/runners","u":"agents.html#op-runners-list","s":"List AgentFlow runners"},{"t":"runners.report","k":"POST /api/v1/envs/{env}/runners/{runner}","u":"agents.html#op-runners-report","s":"Report a runner and its models"},{"t":"workflows.list","k":"GET /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-list","s":"List AgentFlow workflows"},{"t":"workflows.get","k":"GET /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-get","s":"Get an AgentFlow workflow and its brief"},{"t":"workflows.create","k":"POST /api/v1/envs/{env}/workflows","u":"workflows.html#op-workflows-create","s":"Create an AgentFlow workflow"},{"t":"workflows.update","k":"PATCH /api/v1/envs/{env}/workflows/{workflow}","u":"workflows.html#op-workflows-update","s":"Update an AgentFlow workflow"},{"t":"search","k":"GET /api/v1/envs/{env}/search","u":"search.html#op-search","s":"Search an environment"},{"t":"shares.list","k":"GET /api/v1/envs/{env}/shares","u":"sharing.html#op-shares-list","s":"List shares of an environment"},{"t":"shares.preview","k":"POST /api/v1/envs/{env}/shares/preview","u":"sharing.html#op-shares-preview","s":"Preview what a share would show"},{"t":"shares.create","k":"POST /api/v1/envs/{env}/shares","u":"sharing.html#op-shares-create","s":"Share part of an environment with someone"},{"t":"shares.update","k":"PATCH /api/v1/shares/{share}","u":"sharing.html#op-shares-update","s":"Change a share's permission"},{"t":"shares.revoke","k":"DELETE /api/v1/shares/{share}","u":"sharing.html#op-shares-revoke","s":"Revoke a share"},{"t":"shares.incoming","k":"GET /api/v1/shares/incoming","u":"sharing.html#op-shares-incoming","s":"List shares with you"},{"t":"shares.requests.list","k":"GET /api/v1/share-requests","u":"sharing.html#op-shares-requests-list","s":"List re-share requests"},{"t":"shares.requests.create","k":"POST /api/v1/shares/{share}/requests","u":"sharing.html#op-shares-requests-create","s":"Ask the owner to share it on"},{"t":"shares.requests.decide","k":"POST /api/v1/share-requests/{request}","u":"sharing.html#op-shares-requests-decide","s":"Approve or deny a re-share request"},{"t":"proposals.list","k":"GET /api/v1/envs/{env}/proposals","u":"sharing.html#op-proposals-list","s":"List share additions"},{"t":"proposals.approve","k":"POST /api/v1/envs/{env}/proposals/{proposal}/approve","u":"sharing.html#op-proposals-approve","s":"Approve a share addition"},{"t":"proposals.deny","k":"POST /api/v1/envs/{env}/proposals/{proposal}/deny","u":"sharing.html#op-proposals-deny","s":"Deny a share addition"},{"t":"office.agents.report","k":"PUT /api/v1/office/agents","u":"office.html#op-office-agents-report","s":"Report your live coding agents"},{"t":"office.agents.list","k":"GET /api/v1/office/agents","u":"office.html#op-office-agents-list","s":"List your reported agents"},{"t":"office.live.report","k":"POST /api/v1/office/live","u":"office.html#op-office-live-report","s":"Stream what your agents are doing"},{"t":"office.actions.wait","k":"GET /api/v1/office/actions","u":"office.html#op-office-actions-wait","s":"Wait for answers to your agents' prompts"},{"t":"office.actions.result","k":"POST /api/v1/office/actions/{id}","u":"office.html#op-office-actions-result","s":"Say how an answer went"}]</script>
 <script src="docs.js"></script>
 </body></html>
