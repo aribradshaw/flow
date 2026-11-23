@@ -160,7 +160,7 @@ export function threadAlive(db, threadId) {
 const resultText = v => typeof v === 'string' ? v : v && typeof v === 'object' ? JSON.stringify(v) : '';
 function historyItem(row) {
   const data = parseJson(row.payload_json), at = when(data.startedAt, data.updatedAt, row.updated_at);
-  const base = {...(at ? {at} : {}), ...(row.run_id ? {turn: String(row.run_id).slice(0, 80)} : {})};
+  const base = {id: String(row.ordinal), ...(at ? {at} : {}), ...(row.run_id ? {turn: String(row.run_id).slice(0, 80)} : {})};
   switch (row.type) {
     case 'user_message': { const text = String(data.text ?? '').trim(); return text ? {role: 'user', text: transcriptText(text, 4000), ...base} : null; }
     case 'assistant_message': { const text = String(data.text ?? '').trim(); return text ? {role: 'assistant', text: transcriptText(text, 4000), ...base} : null; }

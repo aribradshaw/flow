@@ -4882,7 +4882,7 @@ The reporter carried out (or could not carry out) an action from office.actions.
 | `id` | string | yes | The action id (act_…). |
 | `ok` | boolean | yes |  |
 | `message` | string |  | e.g. "Approved in T3". |
-| `data` | object | null |  | history only: the page, {items, before, more}, oldest first. Each item: role (user, assistant, reasoning or tool), text (up to 4000 characters), title (a tool call or reasoning summary, up to 200), detail (a tool's short result, up to 600), status, at, turn. Up to 60 items and 64 KB; masked again. before: the cursor for the page before this one; more: there is one. Delivered to the owner's open office and never stored. |
+| `data` | object | null |  | history only: the page, {items, before, more}, oldest first. Each item: id (stable within the thread, up to 80 characters, so pages merge), role (user, assistant, reasoning or tool), text (up to 4000 characters), title (a tool call or reasoning summary, up to 200), detail (a tool's short result, up to 600), status, at, turn. Up to 60 items and 64 KB; masked again. before: the cursor for the page before this one; more: there is one. Delivered to the owner's open office and never stored. |
 
 **Output**
 

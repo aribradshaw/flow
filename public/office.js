@@ -39,6 +39,7 @@ import {batch} from './office-batch.js';
 import {createVoice} from './office-voice.js';
 import {createDecor} from './office-decor.js';
 import {createChief} from './office-chief.js';
+import {createThreads} from './office-threads.js';
 import {cutaway,aimCutaway} from './office-cutaway.js';
 import {createTravel} from './office-travel.js';
 import {planRoute} from './office-travel-core.js';
@@ -103,6 +104,7 @@ export function openOffice(opts){
         <dt>DevOps board</dt><dd>The main board is your DevOps board. Press E at it, or click it, to work on it as in the DevOps tab; Esc returns.</dd>
         <dt>Room boards</dt><dd>Walk up to a room's whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
         <dt>Meters</dt><dd>Walk up to a room or office meter and press E</dd>
+        <dt>Threads</dt><dd>Y or the list button: your T3 threads. Click one to open it; Esc closes it</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
         <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd>
@@ -135,6 +137,9 @@ export function openOffice(opts){
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
   S.presence=attachOfficeStatus(S,{officeBox,refreshColliders:updateColliders});
+  // Your T3 threads (office-threads.js): the sidebar (Y) and a thread chat that slides down from the top.
+  S.threads=createThreads({root,meKey:()=>office.meKey,live:()=>office.live,post:body=>api('steer',body),toast:(m,bad)=>office.opts.toast?.(m,bad),
+    highlight:id=>{office.threadHl=id||null},show:id=>showMine(id),decide:(a,d)=>decideFor(a,d),answerOf:id=>office.answers.get(id)});
   S.replay=attachOfficeReplay(root,{env:S.env,scene:replayScene,live:restoreLiveScene,clear:clearReplayScene,
     names:key=>key===S.meKey?'You':S.members.find(m=>m.key===key)?.name||'Guest',
     react:e=>{if(e.type==='emote')showEmote(e.member,e.emote);else S.reactions?.react(e.member+'|'+e.agent,e.decision)}});
@@ -152,7 +157,7 @@ export function closeOffice(){
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   // Each part closes on its own (voice first: every call ends, the mic and a shared screen are released), so one
   // that fails cannot leave the office on screen.
-  for(const close of [()=>s.travel?.dispose(),()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.chief?.dispose(),()=>s.npc?.dispose()])
+  for(const close of [()=>s.travel?.dispose(),()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.chief?.dispose(),()=>s.threads?.dispose(),()=>s.npc?.dispose()])
     try{close()}catch(e){console.error('office close',e)}
   clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();const all=[];s.scene?.traverse(o=>all.push(o));for(const o of all)o.userData.dispose?.();disposeFigures();disposeMascots();s.renderer?.dispose();for(const o of all){o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()}}catch{}
@@ -269,13 +274,23 @@ function connect(){
   // Someone saved a new look (office-look-editor.js), or went back to their default (look: null).
   on('look',({key,look})=>setLook(key,look));
   on('rtc',d=>S.voice?.event(d)); // voice signalling (office-voice.js, lib/office-rtc.mjs)
-  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}S.chief?.update();S.chief?.agents(member,agents);refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
+  // What your agents are doing this moment, between reports (owner only): merged into your own live agents.
+  on('live',({source,agents})=>{
+    const list=S.live.get(S.meKey);if(!list)return;
+    const next=list.map(a=>{const u=a.source===source&&agents.find(x=>x.id===a.id);if(!u)return a;const {live:_,...rest}=a;return u.live?{...rest,live:u.live}:rest});
+    S.live.set(S.meKey,next);S.chief?.agents(S.meKey,next);S.threads?.changed();
+    if(S.panelFor?.type==='agent'&&S.panelFor.member===S.meKey&&agents.some(x=>x.id===S.panelFor.id))refreshPanel();
+  });
+  on('threads',one=>S.threads?.threads(one));
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey){answersSeen(agents);S.threads?.changed()}if(S.world){buildDesks(member);seatsChanged()}S.chief?.update();S.chief?.agents(member,agents);refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
   on('meters',d=>{S.sparks=d.sparks||{};S.meters?.invalidate()});
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   on('decor',row=>{if(S.world)S.decor?.remote(row)});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
-  on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
+  on('action',a=>{if(a.kind==='history')return;if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
   on('result',a=>{
+    if(a.kind==='history'){S.threads?.result(a);return} // a page of a thread (office-threads.js), never an answer
+    S.threads?.result(a);
     const isSteer=S.steer.isSteer(a);
     if(isSteer)S.steer.track(a,'done');else answerResult(a);
     if(S.replay?.active)S.presence?.toast(a.result?.message||(a.result?.ok?'Done':'Agent action failed'),!a.result?.ok);
@@ -418,6 +433,7 @@ function snapshot(d){
   S.serverWorld=d.env?.world;if(S.world)usePlace(wantedWorld());
   for(const key of new Set([...S.looks.keys(),...Object.keys(d.looks||{})]))setLook(key,d.looks?.[key]||null);
   updateSources(d.yourSources||[]);
+  S.threads?.snapshot(d.threads||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();S.meters?.invalidate();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
@@ -1297,6 +1313,15 @@ function openAgentPanelOverlay(kind,id){
   openOverlay(kind,S.opts.agentRecordId?.(id)||id);
 }
 function agentOf(member,id){return (S.live.get(member)||[]).find(a=>a.id===id)}
+// "Show in office" from your threads: walk to that agent of yours and open its panel.
+function showMine(id){
+  const a=agentOf(S.meKey,id);if(!a)return;
+  const obj=S.clickables.find(c=>c.userData?.kind==='agent'&&c.userData.member===S.meKey&&c.userData.id===id);
+  if(obj){const p=new THREE.Vector3();obj.getWorldPosition(p);const d=new THREE.Vector3(S.pos.x-p.x,0,S.pos.z-p.z);if(d.lengthSq()<1e-6)d.set(0,0,1);d.normalize().multiplyScalar(1.6);
+    S.follow=null;S.target=new THREE.Vector3(p.x+d.x,0,p.z+d.z)}
+  S.threadHl=id;S.threads?.closeThread();showAgent(S.meKey,id);
+  setTimeout(()=>{if(S?.threadHl===id)S.threadHl=null},4000);
+}
 function showAgent(member,id){S.panelFor={type:'agent',member,id};refreshPanel()}
 function showAf(id){S.panelFor={type:'af',id};refreshPanel()}
 // The AgentFlow agent whose desk a session sits at, by name.
@@ -1362,8 +1387,10 @@ function refreshPanel(){
 // in 20 s: "Still waiting on <host>…".
 const ANSWER_SLOW=20000,ANSWER_DONE_MS=3000;
 const reactKey=id=>S.meKey+'|'+id;
-function decide(decision){
-  const p=S.panelFor,a=p&&agentOf(p.member,p.id);if(!a?.pending||!a.mine)return;
+function decide(decision){const p=S.panelFor;decideFor(p&&agentOf(p.member,p.id),decision)}
+// Allow / Deny for one of your agents (its panel, or its thread in office-threads.js).
+function decideFor(a,decision){
+  if(!a?.pending||!a.mine)return;
   S.answers.set(a.id,{agentId:a.id,requestId:a.pending.requestId,decision,state:'sent',at:Date.now(),host:a.hostLabel||a.host||''});
   S.reactions?.react(reactKey(a.id),decision);answerTicker();refreshPanel();
   api('answer',{source:a.source,agentId:a.id,requestId:a.pending.requestId,decision})
@@ -1414,6 +1441,7 @@ function onKey(e){
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.composer?.escape(e.target))return;
+    if(S.threads?.escape(e.target))return;
     if(S.travel?.escape())return;
     if(S.decor?.escape())return;
     if(S.interact?.closeOpen())return;
@@ -1442,6 +1470,7 @@ function onKey(e){
   }
   if(e.code==='Space'&&e.target.closest?.('button,a'))return;
   if(S.presence?.onKey(e))return;
+  if(S.threads?.key(e))return; // Y: your threads
   if(S.voice?.keyDown(e)){e.preventDefault();return} // M mute, hold V to talk
   if(S.input.keyDown(e.code,performance.now(),e.repeat,S.controller.jump)){e.preventDefault();return}
   if(k==='e'){e.preventDefault();if(!e.repeat&&!S.replay?.active)S.interact?.trigger();return}
@@ -1593,8 +1622,12 @@ function frame(dt,t,delta){
 const NAME_TAG=/\b(af|agent|person)\b/,PLAN_TAG=/\b(sign|table)\b/;
 function placeLabels(){
   const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3(),target=S.interact?.current()?.object3D,over=!!S.rig?.overview;
+  const hl=S.threadHl;
   for(const l of S.labelList){
-    l.obj.getWorldPosition(p);const far=(l.near&&!(over&&PLAN_TAG.test(l.cls))&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show())||(target===l.obj&&NAME_TAG.test(l.cls));p.y+=l.y;p.project(S.camera);
+    // A thread hovered in your threads sidebar (office-threads.js): its agent's name tag shows, lit, wherever you are.
+    const lit=!!hl&&l.obj.userData?.kind==='agent'&&l.obj.userData.member===S.meKey&&l.obj.userData.id===hl&&l===l.obj.userData.tag;
+    if(lit!==!!l.lit){l.lit=lit;l.el.classList.toggle('of-hl',lit)}
+    l.obj.getWorldPosition(p);const far=!lit&&((l.near&&!(over&&PLAN_TAG.test(l.cls))&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show())||(target===l.obj&&NAME_TAG.test(l.cls)));p.y+=l.y;p.project(S.camera);
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}

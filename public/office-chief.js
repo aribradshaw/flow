@@ -18,6 +18,7 @@
 import {icon} from './icons.js';
 import {officeChat} from './office-chat.js';
 import {CHIEF_NAME,chiefChannel,chiefFigures,conductorOf,createMentions,esc,replyHtml,replySig,waitingOnYou} from './office-chief-core.js';
+import {chiefBubble} from './office-threads-core.js';
 
 const ON_IT='Chief is on it…',PENDING_MS=5*60e3,BUBBLE_MS=12000,MENTION_MS=8000;
 const time=at=>{const d=new Date(at);return Number.isFinite(d.getTime())?d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):''};
@@ -44,7 +45,7 @@ export function createChief(o){
   function dropBubble(){if(bubble){o.unlabel(bubble.l);bubble=null}}
   function say(html,{ms=BUBBLE_MS,kind='reply'}={}){
     dropBubble();const key=myFigure(),obj=objOf(key);
-    bubble={html,kind,key,until:ms?Date.now()+ms:Infinity,l:obj?o.label(obj,`<span class="of-cos-say">${html}</span>`,{y:heightOf(key),cls:'cos-bubble'}):null};
+    bubble={html,kind,key,until:ms?Date.now()+ms:Infinity,l:obj?o.label(obj,`<span class="of-cos-say${kind==='live'?' live':''}">${html}</span>`,{y:heightOf(key),cls:'cos-bubble'}):null};
   }
   // Labels go with their object: a figure that was rebuilt (the org laid out again) gets the bubble back.
   function keepBubble(){
@@ -53,7 +54,7 @@ export function createChief(o){
     const key=myFigure(),obj=objOf(key);
     if(bubble.l&&bubble.l.obj===obj&&o.labelAlive?.(bubble.l)!==false)return;
     if(bubble.l)o.unlabel(bubble.l);
-    bubble.key=key;bubble.l=obj?o.label(obj,`<span class="of-cos-say">${bubble.html}</span>`,{y:heightOf(key),cls:'cos-bubble'}):null;
+    bubble.key=key;bubble.l=obj?o.label(obj,`<span class="of-cos-say${bubble.kind==='live'?' live':''}">${bubble.html}</span>`,{y:heightOf(key),cls:'cos-bubble'}):null;
   }
   // Everyone else's Chief: "…" while it works, never what it says.
   function keepDots(){
@@ -103,6 +104,14 @@ export function createChief(o){
       say(linked(c.reply.text));log('Chief',c.reply.text,{cards:c.reply.cards||[]});
     }
     if(pending&&Date.now()-pending.at>PENDING_MS){pending=null;if(bubble?.kind==='pending')dropBubble()}
+    // While it works: what it is thinking or doing ("Thinking: checking UAT cards…"), over it in place of "on it", until
+    // its reply. Its live steps come to you only (lib/office.mjs), like its reply.
+    const now=c?.status==='running'&&c.live?chiefBubble(c.live):'';
+    if(now&&(!bubble||bubble.kind==='pending'||bubble.kind==='live')){
+      const html=esc(now);
+      if(bubble?.kind==='live'&&bubble.l){if(bubble.html!==html){bubble.html=html;bubble.l.el.innerHTML=`<span class="of-cos-say live">${html}</span>`}}
+      else say(html,{ms:0,kind:'live'});
+    }else if(!now&&bubble?.kind==='live')dropBubble();
     // One line when one of your agents starts waiting on you, unless you are in Do not disturb.
     if(c){
       const line=mentions.observe(list,{quiet:o.isQuiet(o.meKey()),nameOf:o.afName});
@@ -133,7 +142,7 @@ export function createChief(o){
     const c=mine(),me=o.meKey();
     const head=`<div class="of-ph"><span class="of-dot" style="background:#d4a017"></span><b>${esc(CHIEF_NAME)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>`;
     if(!c)return head+`<div class="of-pb"><p class="of-note">No Chief of Staff is reporting for you. Run <code>flow office bridge</code> on a computer with T3 Code: it keeps one Chief of Staff thread there for you.</p></div>`;
-    const state=pending?ON_IT:c.status==='running'?'Working…':c.status==='waiting'?'Waiting for you in T3 Code':'Listening';
+    const state=c.status==='running'&&c.live?chiefBubble(c.live):pending?ON_IT:c.status==='running'?'Working…':c.status==='waiting'?'Waiting for you in T3 Code':'Listening';
     const waits=waitingOnYou({agents:o.live().get(me)||[],cards:o.cards(),refs:o.refs(),name:o.myName(),nameOf:o.afName});
     const waitHtml=waits.length?`<ul class="of-cos-wait">${waits.slice(0,8).map(w=>w.kind==='agent'
       ?`<li><button type="button" class="txt" data-cos-agent="${esc(w.id)}">${esc(w.title)}</button><span>${esc(w.detail)}</span></li>`

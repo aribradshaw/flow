@@ -12,6 +12,7 @@
 // that is moved into each new panel, never rebuilt: the draft and the caret survive the redraws.
 import {icon} from './icons.js';
 import {esc} from './ui.js';
+import {liveLine} from './office-threads-core.js';
 
 export const MESSAGE_MAX=2000;
 const ROLE={user:'You',assistant:'Agent',tool:'Tool'};
@@ -48,6 +49,10 @@ export function createSteer({post,toast=()=>{}}){
     b.el.querySelector('.of-steps').innerHTML=l.map(x=>stepHtml(x,a.host)).join('');
     const tx=b.el.querySelector('.of-tx-wrap');
     if(tx){const sig=JSON.stringify(a.transcript||[]);if(sig!==b.sig){const end=tx.scrollHeight-tx.scrollTop-tx.clientHeight<24||!b.sig;b.sig=sig;tx.innerHTML=transcriptHtml(a.transcript);if(end)tx.scrollTop=tx.scrollHeight}}
+    // What it is doing this moment (its live steps: owner only), like T3's thread view.
+    const now=b.el.querySelector('.of-now'),live=a.status!=='idle'&&a.live;
+    now.hidden=!live;
+    if(live){const html=`<div class="of-pk">Now</div><div class="of-now-line">${esc(liveLine(live))}</div>${live.phase!=='tool'&&live.text?`<div class="of-now-text">${esc(live.text)}</div>`:''}${live.steps?.length>1?`<ol class="of-now-steps">${live.steps.slice(-5,-1).map(x=>`<li>${esc(x.text)}</li>`).join('')}</ol>`:''}`;if(now.innerHTML!==html)now.innerHTML=html}
     const can=a.can||[],stop=b.el.querySelector('.of-stop');
     b.el.querySelector('.of-msg').hidden=!can.includes('message');
     const stopping=l.some(x=>x.kind==='stop'&&(x.state==='pending'||x.state==='sent'));
@@ -70,7 +75,7 @@ export function createSteer({post,toast=()=>{}}){
   function box(a){
     let b=boxes.get(a.id);if(b)return b;
     const el=document.createElement('div');el.className='of-steer';
-    el.innerHTML=`<div class="of-pk">Transcript</div><div class="of-tx-wrap" tabindex="0" aria-label="Transcript, newest last"></div>
+    el.innerHTML=`<div class="of-now" hidden aria-live="polite"></div><div class="of-pk">Transcript</div><div class="of-tx-wrap" tabindex="0" aria-label="Transcript, newest last"></div>
       <form class="of-msg"><label class="of-pk" for="of-steer-${esc(a.id)}">Send to agent</label>
         <textarea id="of-steer-${esc(a.id)}" rows="2" maxlength="${MESSAGE_MAX}" placeholder="Message your agent… (Enter to send, Shift+Enter for a new line)" autocomplete="off"></textarea>
         <div class="of-msg-row"><span class="of-count" aria-live="polite"></span><button type="submit" class="txt primary" data-steer="send">${icon('send',13)}Send</button></div></form>
@@ -90,7 +95,7 @@ export function createSteer({post,toast=()=>{}}){
     before(panel){const el=document.activeElement;const b=[...boxes.values()].find(x=>x.el.contains(el));focus=b&&panel.contains(b.el)?{id:b.agent.id,input:el===b.input,start:b.input.selectionStart,end:b.input.selectionEnd,el}:null},
     attach(slot,a){
       if(!slot)return;
-      if(!a.mine||(!a.transcript&&!a.can?.length)){slot.remove();return}
+      if(!a.mine||(!a.transcript&&!a.can?.length&&!a.live)){slot.remove();return}
       const b=box(a);b.agent=a;slot.replaceWith(b.el);paint(b);
       if(focus?.id===a.id){if(focus.input){b.input.focus({preventScroll:true});b.input.setSelectionRange(focus.start,focus.end)}else if(b.el.contains(focus.el))focus.el.focus({preventScroll:true})}
       focus=null;
