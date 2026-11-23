@@ -25,7 +25,7 @@ const TABS = [
 ];
 // How an option's picture is framed: [target height, distance, yaw].
 const THUMB_VIEW = {build: [0.92, 4.1, 0.35], height: [0.92, 4.4, 0.35], eyes: [1.52, 0.95, 0], brows: [1.54, 0.95, 0], nose: [1.5, 1.0, 0.55], mouth: [1.47, 0.95, 0],
-  beard: [1.47, 1.3, 0.35], glasses: [1.52, 1.25, 0.35], hair: [1.53, 1.5, 0.5], hat: [1.57, 1.55, 0.5], top: [1.1, 2.3, 0.35], pattern: [1.1, 2.1, 0.2], bottoms: [0.52, 2.6, 0.35], shoes: [0.12, 1.25, 0.7]};
+  beard: [1.47, 1.3, 0.35], glasses: [1.52, 1.25, 0.35], hair: [1.56, 1.75, 0.5], hat: [1.6, 1.75, 0.5], top: [1.1, 2.3, 0.35], pattern: [1.1, 2.1, 0.2], bottoms: [0.52, 2.6, 0.35], shoes: [0.12, 1.25, 0.7]};
 const THUMB = 144;
 
 export function openLookEditor({key, name = 'You', look, host = document.body, save, toast = () => {}, onClose = () => {}}) {
@@ -192,6 +192,8 @@ export function openLookEditor({key, name = 'You', look, host = document.body, s
     for (const el of panel.querySelectorAll('input[type=checkbox][data-field]')) el.checked = !!current[el.dataset.field];
     for (const el of panel.querySelectorAll('input[type=color][data-field]')) { const f = el.dataset.field; if (document.activeElement !== el) el.value = current[f]; el.parentElement.style.setProperty('--c', current[f]); el.parentElement.classList.toggle('on', !LOOK_SWATCHES[f].includes(current[f])); }
     $('[data-look=undo]').disabled = !history.length;
+    $('[data-look=save]').disabled = saving || sameLook(current, start);
+    disarm();
     const st = figure.userData.stats();
     $('.of-look-debug').textContent = `${st.tris} triangles · ${st.lodTris} far · 1 draw call · ${st.bones} bones`;
     paintThumbs();
@@ -229,20 +231,22 @@ export function openLookEditor({key, name = 'You', look, host = document.body, s
     change({...current, [el.dataset.field]: c}, {step: false});
   });
   panel.addEventListener('change', e => { if (e.target.matches?.('input[type=color]')) dragging = null; });
+  // closest() would walk on up past the dialog into the app's own markup: only what is inside counts.
+  const inside = (e, sel) => { const el = e.target.closest?.(sel); return el && dialog.contains(el) ? el : null; };
   dialog.addEventListener('click', e => {
-    const t = e.target.closest('[data-tab]'); if (t) { setTab(t.dataset.tab); return; }
-    const m = e.target.closest('[data-move]'); if (m) { setMode(m.dataset.move); return; }
-    const a = e.target.closest('[data-look]')?.dataset.look; if (!a) return;
+    const t = inside(e, '[data-tab]'); if (t) { setTab(t.dataset.tab); return; }
+    const m = inside(e, '[data-move]'); if (m) { setMode(m.dataset.move); return; }
+    const a = inside(e, '[data-look]')?.dataset.look; if (!a) return;
     if (a === 'random') change(randomLook());
     else if (a === 'undo') { if (history.length) { current = history.pop(); renderPanel(); refresh(); } }
     else if (a === 'reset') change(base);
-    else if (a === 'cancel') close();
+    else if (a === 'cancel') leave();
     else if (a === 'save') commit();
   });
   dialog.addEventListener('keydown', e => {
     e.stopPropagation(); // the office underneath does not see the editor's keys
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !e.target.matches?.('input[type=text]')) { e.preventDefault(); $('[data-look=undo]').click(); return; }
-    const t = e.target.closest?.('[role=tab]');
+    const t = inside(e, '[role=tab]');
     if (t && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End')) {
       e.preventDefault();
       const i = TABS.indexOf(tab), n = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : (i + (e.key === 'ArrowLeft' ? -1 : 1) + TABS.length) % TABS.length;
@@ -250,9 +254,20 @@ export function openLookEditor({key, name = 'You', look, host = document.body, s
     }
   });
   dialog.addEventListener('keyup', e => e.stopPropagation());
-  dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+  dialog.addEventListener('cancel', e => { e.preventDefault(); leave(); });
   dialog.addEventListener('close', () => close());
+  // The office closes it without asking (it is going away itself).
 
+  // Leaving with unsaved changes takes a second press: Cancel turns into Discard changes for a few seconds.
+  let armed = 0;
+  const cancelBtn = $('[data-look=cancel]');
+  function disarm() { clearTimeout(armed); armed = 0; cancelBtn.textContent = 'Cancel'; cancelBtn.classList.remove('warn'); }
+  function leave() {
+    if (saving) return;
+    if (sameLook(current, start) || armed) { close(); return; }
+    cancelBtn.textContent = 'Discard changes'; cancelBtn.classList.add('warn'); cancelBtn.focus();
+    armed = setTimeout(disarm, 4000);
+  }
   async function commit() {
     if (saving) return;
     if (sameLook(current, start)) { close(); return; }
@@ -262,7 +277,7 @@ export function openLookEditor({key, name = 'You', look, host = document.body, s
   }
   function close() {
     if (closed) return; closed = true;
-    cancelAnimationFrame(raf); resize.disconnect();
+    clearTimeout(armed); cancelAnimationFrame(raf); resize.disconnect();
     figure.userData.dispose(); model.userData.dispose(); floor.geometry.dispose(); floor.material.dispose(); blob.geometry.dispose(); blob.material.dispose();
     for (const bmp of thumbs.values()) bmp.close?.();
     thumbs.clear(); renderer?.dispose(); renderer?.forceContextLoss?.();

@@ -140,7 +140,7 @@ Each tab is one part of you, with every choice shown as a small picture of you w
 
 Your look belongs to you, not to one office: it follows you into every office you are in, and it is saved on the server (in Postgres, or under `BACKUP_DIR`), so it survives a restart. Only you can change it. The server accepts only the listed choices and plain colours, and keeps colours from being pure black or pure white so a face stays readable.
 
-People blink, look around and shift their weight while they stand, swing their arms when they walk or run, and each emote has its own face: a wink with the thumbs up, closed smiling eyes with a clap, a blush with the heart.
+People blink, look around, shift their weight and fidget while they stand, swing their arms when they walk or run, and move their mouth while their speech bubble shows. Each emote has its own face: a wink with the thumbs up, closed smiling eyes with a clap, a blush with the heart.
 
 ## Who sees what
 

@@ -242,3 +242,42 @@ test('a saved look reaches everyone in the office at once, and the next snapshot
     assert.ok(limited > 0);
   } finally { for (const s of open) s.close(); hub.close(); await new Promise(ok => server.close(ok)); }
 });
+
+// The real server in local single-user mode: POST /api/office/{env}/look is same-origin only, strict, and
+// what it saves is in the next snapshot, also after a restart.
+test('the server route: same-origin, strict, and a saved look survives a restart', async () => {
+  const {spawn} = await import('node:child_process');
+  const ROOT = new URL('..', import.meta.url).pathname, dir = mkdtempSync(join(tmpdir(), 'ff-look-srv-'));
+  const start = async () => {
+    const app = spawn(process.execPath, ['server.mjs'], {cwd: ROOT, env: {...process.env, FLOW_SYNC_URL: '', FLOW_SYNC_TOKEN: '', DATABASE_URL: '', PORT: '0', ORG_CHART_VERIFY: '1',
+      OPID_BASE_URL: '', OPID_APP_ID: '', OPID_APP_SECRET: '', OPID_APP_ORIGIN: '', BACKUP_DIR: join(dir, 'backups'), SAVES_DIR: join(dir, 'saves'), INBOX_DIR: join(dir, 'inbox')}});
+    let err = ''; app.stderr.on('data', d => err += d);
+    const base = await new Promise((resolve, reject) => { let out = ''; app.stdout.on('data', c => { out += c; const url = /Flygon Flow: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)?.[1]; if (url) resolve(url); }); app.once('exit', () => reject(Error('server did not start: ' + err))); });
+    return {app, base};
+  };
+  const post = (base, path, body, headers = {}) => fetch(base + path, {method: 'POST', headers: {'content-type': 'application/json', ...headers}, body: JSON.stringify(body)}).then(async r => ({status: r.status, data: await r.json().catch(() => null)}));
+  let run = await start();
+  try {
+    let s = sse(run.base + '/api/office/default-workspace/events'); await s.ready;
+    const snap = await s.next('snapshot'), key = snap.me.key;
+    assert.deepEqual(snap.looks, {});
+    const mine = {...defaultLook(key), hair: 'braids', hat: 'beanie', hatColor: '#c8553d'};
+    assert.equal((await post(run.base, '/api/office/default-workspace/look', {look: mine}, {origin: 'https://evil.example'})).status, 403, 'other sites cannot call it');
+    assert.equal((await post(run.base, '/api/office/nowhere-env/look', {look: mine})).status, 404);
+    let r = await post(run.base, '/api/office/default-workspace/look', {look: {...mine, top: 'cape'}});
+    assert.deepEqual([r.status, r.data.code], [400, 'invalid_input']);
+    r = await post(run.base, '/api/office/default-workspace/look', {look: {...mine, skin: '#000000', extra: 'x'}});
+    assert.equal(r.status, 200); assert.equal(r.data.look.skin, clampColor('skin', '#000000')); assert.ok(!('extra' in r.data.look));
+    const saved = r.data.look;
+    assert.deepEqual(await s.next('look'), {key, look: saved});
+    s.close(); run.app.kill(); await new Promise(ok => run.app.once('exit', ok));
+    // A new process reads it back from disk.
+    run = await start();
+    s = sse(run.base + '/api/office/default-workspace/events'); await s.ready;
+    assert.deepEqual((await s.next('snapshot')).looks, {[key]: saved});
+    r = await post(run.base, '/api/office/default-workspace/look', {look: null});
+    assert.deepEqual([r.status, r.data.look], [200, null]);
+    assert.deepEqual(await s.next('look'), {key, look: null});
+    s.close();
+  } finally { run.app.kill(); setTimeout(() => { try { rmSync(dir, {recursive: true, force: true}); } catch { /* still closing */ } }, 300); }
+});

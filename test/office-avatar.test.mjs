@@ -56,6 +56,9 @@ test('one person is one skinned mesh per level of detail, on one shared material
   a.userData.forceLod(1); assert.deepEqual(ma.map(m => m.visible), [false, true]);
   a.userData.forceLod(0); assert.deepEqual(ma.map(m => m.visible), [true, false]);
   const s = a.userData.stats();
+  assert.ok(s.height > 1.6 && s.height < 2.3, 'the top of the head, hair or hat: ' + s.height);
+  const tall = createAvatar({...defaultLook('ann'), height: 'tall', hat: 'captain'}), small = createAvatar({...defaultLook('ann'), height: 'short', hat: 'none', hair: 'bald'});
+  assert.ok(tall.userData.stats().height > small.userData.stats().height + 0.15); tall.userData.dispose(); small.userData.dispose();
   assert.equal(s.tris, ma[0].geometry.index.count / 3); assert.equal(s.lodTris, ma[1].geometry.index.count / 3);
   assert.ok(s.bones <= 24);
   for (const f of [a, b, dim]) f.userData.dispose();
@@ -153,19 +156,31 @@ test('the update API other modules drive: speed, grounded, jumping and emote, pl
       assert.ok(rig.b.joy.scale.x < 0.1 && rig.b.eyeL.scale.x > 0.9, kind + ' ends');
     }
   } finally { performance.now = real; }
+  // While they talk the mouth moves, and it rests again afterwards.
+  settle({talking: true});
+  assert.ok(rig.b.mouthO.scale.x > 0.4 && rig.b.mouth.scale.x < 0.1, 'talking opens the mouth');
+  const flaps = new Set(); for (let i = 0; i < 30; i++) { fig.userData.update(60 + i / 30, {talking: true}); flaps.add(rig.b.mouthO.scale.y.toFixed(2)); }
+  assert.ok(flaps.size > 5, 'and it flaps');
+  settle({});
+  assert.ok(rig.b.mouthO.scale.x < 0.05 && rig.b.mouth.scale.x > 0.9);
+  // Standing still for a while, they fidget: the pose leaves the plain idle now and then, and comes back.
+  let moved = 0; const still = [];
+  for (let i = 0; i < 60 * 60; i++) { fig.userData.update(400 + i / 60, {}); if (i % 30 === 0) still.push(Math.abs(rig.b.foreL.rotation.x) + Math.abs(rig.b.armL.rotation.x) + Math.abs(rig.b.footL.rotation.x)); }
+  for (const v of still) if (v > 0.6) moved++;
+  assert.ok(moved > 0 && moved < still.length / 2, `a fidget now and then (${moved} of ${still.length} samples)`);
   // Eyes blink on their own within a few seconds.
   let shut = false;
-  for (let i = 0; i < 60 * 12 && !shut; i++) { fig.userData.update(100 + i / 60, {}); shut = rig.b.eyeL.scale.y < 0.3; }
+  for (let i = 0; i < 60 * 12 && !shut; i++) { fig.userData.update(500 + i / 60, {}); shut = rig.b.eyeL.scale.y < 0.3; }
   assert.ok(shut, 'a blink');
   // The older entry point is the same function, and odd input is survivable.
   assert.equal(animateHuman, animateAvatar);
-  animateHuman(null, 0, {}); animateHuman(rig, 200); fig.userData.update(201, {speed: NaN, emote: {kind: 'dance', at: 0}});
+  animateHuman(null, 0, {}); animateHuman(rig, 600); fig.userData.update(601, {speed: NaN, emote: {kind: 'dance', at: 0}});
   for (const n of Object.keys(rig.b)) for (const v of [...rig.b[n].position.toArray(), ...rig.b[n].scale.toArray()]) assert.ok(Number.isFinite(v), n + ' stays finite');
   // A new look rebuilds in place and keeps the same rig object for whoever holds it.
   const before = fig.userData.stats().tris;
   fig.userData.setLook({...lookFor('ann'), hair: 'bald', hat: 'none', beard: 'none'});
   assert.equal(fig.userData.rig, rig); assert.ok(fig.userData.stats().tris < before || lookFor('ann').hair === 'bald');
   assert.equal(meshes(fig).length, 2, 'the old meshes are gone');
-  fig.userData.update(300, {speed: 5.2});
+  fig.userData.update(700, {speed: 5.2});
   fig.userData.dispose();
 });

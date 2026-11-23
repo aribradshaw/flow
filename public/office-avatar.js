@@ -9,7 +9,7 @@
 //   const person=createAvatar(look,{dim})     -> THREE.Group, about 1.75 tall, facing +z, feet at y=0
 //   person.userData.update(t,state)            once per frame (animateAvatar)
 //   person.userData.setLook(look)              rebuild in place for a new look
-//   person.userData.stats()                    {tris, lodTris, bones}
+//   person.userData.stats()                    {tris, lodTris, bones, height: the top of their head, hair or hat}
 //   person.userData.dispose()
 //   avatarStats(look)                          the same numbers without keeping a mesh (tests, the editor)
 import * as THREE from './vendor/three/three.module.min.js';
@@ -155,7 +155,7 @@ const TOPS = {
 function dimsOf(look) {
   const d = BUILDS[look.build] || BUILDS.regular;
   // The body's half width and half depth at each height: [y, rx, rz].
-  const body = [[0.805, 0.13 * d.hip, 0.1 * d.dp], [0.85, 0.172 * d.hip, 0.122 * d.dp], [0.9, 0.18 * d.hip, 0.128 * d.dp], [0.96, 0.17 * d.wa, 0.123 * d.dp],
+  const body = [[0.805, 0.12 * d.hip, 0.08 * d.dp], [0.85, 0.172 * d.hip, 0.104 * d.dp], [0.9, 0.18 * d.hip, 0.122 * d.dp], [0.96, 0.17 * d.wa, 0.123 * d.dp],
     [1.03, 0.166 * d.wa, 0.122 * d.dp], [1.12, 0.174 * (d.wa + d.ch) / 2, 0.128 * d.dp], [1.22, 0.188 * d.ch, 0.134 * d.dp], [1.3, 0.182 * d.ch, 0.124 * d.dp],
     [1.345, 0.126 * d.ch, 0.092], [1.385, 0.064, 0.062]];
   const bodyAt = y => {
@@ -267,7 +267,7 @@ function buildFace(B, L, K, lod) {
     strip(B, HEAD, arc, eyeInk, BI.joy, 0.008);
   }
   // Eyebrows.
-  const browC = L.hair === 'bald' && L.beard === 'none' ? mul(skin, dark ? 0.45 : 0.5) : mix(mul(K.hair, lum(K.hair) > 0.35 ? 0.7 : 0.85), INK, lum(K.hair) < 0.05 && dark ? 0.4 : 0.1);
+  const browC = L.hair === 'bald' && L.beard === 'none' ? mul(skin, dark ? 0.45 : 0.5) : mix(mul(K.hair, lum(K.hair) > 0.5 ? 0.52 : lum(K.hair) > 0.3 ? 0.66 : 0.85), INK, lum(K.hair) < 0.05 && dark ? 0.4 : 0.1);
   const BROW = {soft: [0.007, 0.0095, 0, 0.6], straight: [0, 0.009, -0.001, 0.85], arched: [0.015, 0.0075, 0.004, 0.55], thick: [0.005, 0.0145, 0, 0.8]}[L.brows];
   for (const s of [1, -1]) {
     const pts = [];
@@ -348,10 +348,10 @@ const HAIR = {
   short: {vol: 0.024, crown: 0.012, tf: 0.5, ts: -0.02, tb: -0.5, tuft: [0.015, 0.13, 0.05, 0.08, -0.12]},
   buzz: {vol: 0.01, tf: 0.56, ts: 0.1, tb: -0.42, scalp: 0.3},
   sidepart: {vol: 0.027, crown: 0.01, tf: 0.48, ts: -0.06, tb: -0.52, sweep: 0.2, lean: 0.012, tuft: [0.05, 0.14, 0.05, 0.085, -0.3]},
-  curly: {vol: 0.05, tf: 0.5, ts: -0.14, tb: -0.52, rows: 8, round: [0.218, 0.2, 0.218, 0.03, -0.012, 0.2, 1.2, 2.05]},
+  curly: {vol: 0.05, tf: 0.5, ts: -0.14, tb: -0.52, rows: 8, round: [0.218, 0.2, 0.218, 0.03, -0.012, 0.13, 1.2, 2.05]},
   afro: {vol: 0.105, tf: 0.47, ts: -0.12, tb: -0.5, rows: 9, round: [0.268, 0.252, 0.264, 0.045, -0.02, 0.085, 1.3, 2.25]},
   long: {vol: 0.026, tf: 0.5, ts: -0.1, tb: -0.1, sweep: 0.16, drape: {from: 0.38, side: 1.37, back: 1.2, flare: 0.05, curl: 0.12}, rows: 9},
-  bob: {vol: 0.032, tf: 0.3, ts: -0.1, tb: -0.1, wave: 0.03, drape: {from: 0.5, side: 1.435, back: 1.42, flare: 0.04, curl: 0.4}, rows: 8},
+  bob: {vol: 0.032, tf: 0.3, ts: -0.1, tb: -0.1, wave: 0.012, drape: {from: 0.5, side: 1.435, back: 1.42, flare: 0.04, curl: 0.4}, rows: 8},
   ponytail: {vol: 0.017, tf: 0.55, ts: 0.0, tb: -0.46, tail: true},
   bun: {vol: 0.017, tf: 0.55, ts: 0.0, tb: -0.46, bun: true},
   braids: {vol: 0.021, tf: 0.5, ts: -0.1, tb: -0.5, braids: true},
@@ -365,7 +365,7 @@ function hairlineOf(S, a) {
   const f = Math.sin(a), sd = Math.cos(a);
   let t = f >= 0 ? lerp(S.ts, S.tf, smooth(f) ** 0.8) : lerp(S.ts, S.tb, smooth(-f));
   if (S.sweep) t -= S.sweep * sd * Math.max(0, f);
-  if (S.wave) t += S.wave * Math.sin(a * 7) * Math.max(0, f);
+  if (S.wave) t += S.wave * Math.sin(a * 4) * Math.max(0, f);
   return t;
 }
 function buildHair(B, L, K, lod) {
@@ -568,7 +568,7 @@ function buildTorso(B, L, K, D, lod) {
   if (L.top === 'hoodie') {
     // The hood bunched behind the neck, the pocket and the drawstrings.
     ball(B, [0, 1.372, -0.085], [0.1, 0.05, 0.075], mul(top, 0.9), [BI.spine], {sides: 8, stacks: 4});
-    fan(B, S, [[-0.095, 1.0], [0.095, 1.0], [0.07, 1.1], [-0.07, 1.1]], mul(top, 0.86), sp, 0.004);
+    strip(B, S, [-1, -0.6, -0.2, 0.2, 0.6, 1].map(u => [[u * 0.072, 1.1], [u * 0.098, 1.0]]), mul(top, 0.86), sp, 0.004);
     for (const s of [1, -1]) strip(B, S, [[[s * 0.036 - 0.005, 1.34], [s * 0.036 - 0.005, 1.225]], [[s * 0.036 + 0.005, 1.34], [s * 0.036 + 0.005, 1.225]]], K.cord, sp, 0.005);
   }
   if (L.top === 'sweater') loft(B, [{y: 1.36, rx: 0.07, rz: 0.066, c: K.rib, b: spine}, {y: 1.395, rx: 0.068, rz: 0.064, c: K.rib, b: spine}, {y: 1.415, rx: 0.058, rz: 0.055, c: mul(K.rib, 0.9), b: [BI.head, 0.4, BI.spine]}], {sides: 8});
@@ -683,7 +683,8 @@ function buildOnce(look, lod) {
   g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(B.SW, 4));
   g.setIndex(B.I);
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.95, 0), 1.4);
-  return {geometry: g, tris: B.tris, dims: D};
+  let crown = 0; for (let i = 1; i < B.P.length; i += 3) if (B.P[i] > crown) crown = B.P[i];
+  return {geometry: g, tris: B.tris, dims: D, top: crown * D.scale};
 }
 export function avatarStats(look) {
   const L = cleanLook(look), hi = buildGeometry(L, false), lo = buildGeometry(L, true), out = {tris: hi.tris, lodTris: lo.tris, bones: BONES.length};
@@ -747,7 +748,7 @@ export function createAvatar(look, {dim = false, lodDistance = null} = {}) {
     inner.add(lod); root.add(inner);
     parts?.dispose();
     if (lodDistance === null) live.add(lod);
-    parts = {inner, lod, full, light, skeleton, tris: hi.tris, lodTris: lo.tris, dispose() { inner.removeFromParent(); live.delete(lod); hi.geometry.dispose(); lo.geometry.dispose(); skeleton.dispose(); }};
+    parts = {inner, lod, full, light, skeleton, tris: hi.tris, lodTris: lo.tris, height: hi.top, dispose() { inner.removeFromParent(); live.delete(lod); hi.geometry.dispose(); lo.geometry.dispose(); skeleton.dispose(); }};
     Object.assign(rig, {b: bones, bind: Object.fromEntries(BONES.map(n => [n, bones[n].position.clone()])), look: L, scale: D.scale,
       // The first figures' rig, for anything that still reaches for these pivots.
       body: bones.hips, torso: bones.spine, head: bones.head, armL: bones.armL, armR: bones.armR, legL: bones.legL, legR: bones.legR});
@@ -759,7 +760,7 @@ export function createAvatar(look, {dim = false, lodDistance = null} = {}) {
     update: (t, st) => animateAvatar(rig, t, st),
     setLook: build,
     look: () => rig.look,
-    stats: () => ({tris: parts.tris, lodTris: parts.lodTris, bones: BONES.length}),
+    stats: () => ({tris: parts.tris, lodTris: parts.lodTris, bones: BONES.length, height: parts.height}),
     // level: 0 full, 1 light, null by distance.
     forceLod(level) { parts.lod.autoUpdate = level === null; if (level !== null) { parts.full.visible = level === 0; parts.light.visible = level === 1; } },
     dispose() { parts?.dispose(); parts = null; },
@@ -771,7 +772,7 @@ export function createAvatar(look, {dim = false, lodDistance = null} = {}) {
 const EMOTE_MS = 1700, WALK = 5.2, RUN = 8.5;
 let people = 0;
 const newState = () => ({born: people++, t: 0, go: 0, run: 0, air: 0, ph: 0, seed: 0, blinkAt: 0, blink: 0, lookAt: 0, yaw: 0, pitch: 0, yawTo: 0, pitchTo: 0, shiftAt: 0, shift: 0, shiftTo: 0,
-  joy: 0, open: 0, brow: 0, wink: 0, blush: 0, grin: 0, tail: 0, tailV: 0});
+  joy: 0, open: 0, brow: 0, wink: 0, blush: 0, grin: 0, talk: 0, tail: 0, tailV: 0, fidgetAt: 0, fidget: '', fidgetT: 9});
 // update(t, state) each frame. state (all optional):
 //   speed (units/s; or moving:true for a walk)   a walk that blends into a run; 0 is idle, with fidgets
 //   grounded, jumping                            the jump pose while off the ground
@@ -781,8 +782,9 @@ const newState = () => ({born: people++, t: 0, go: 0, run: 0, air: 0, ph: 0, see
 //                                                advances it as it walks (office-npc.js) is followed as the stride
 //   expression: 'joy' | 'wink' | 'smile'         hold a face without an emote
 //   gaze: {yaw, pitch}                           turn the head towards something (radians, relative)
+//   talking: true                                the mouth moves, as while their speech bubble shows
 //   snap: true                                   settle at once instead of easing (a still picture)
-export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0, grounded = true, jumping = false, emote = null, phase = 0, cycle = NaN, expression = '', gaze = null, snap = false} = {}) {
+export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0, grounded = true, jumping = false, emote = null, phase = 0, cycle = NaN, expression = '', gaze = null, talking = false, snap = false} = {}) {
   const b = rig?.b; if (!b || !Number.isFinite(t)) return;
   if (!Number.isFinite(speed)) speed = 0;
   const s = rig.s, dt = clamp(t - s.t, 0, 0.1); s.t = t;
@@ -827,6 +829,18 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
   // Standing with the weight on one leg bends the other knee.
   if (sh > 0) { legR -= 0.14 * sh; shinR += 0.3 * sh; footR -= 0.12 * sh; } else { legL += 0.14 * sh; shinL -= 0.3 * sh; footL += 0.12 * sh; }
 
+  // --- a fidget now and then: a glance at the wrist, a stretch of the shoulders, a rock on the heels ---
+  if (!s.fidgetAt) s.fidgetAt = t + 6 + noise(s.seed, 8) * 10;
+  if (t > s.fidgetAt && idle > 0.95 && !emote) { s.fidget = ['watch', 'roll', 'rock'][Math.floor(noise(s.seed + 9, t) * 3) % 3]; s.fidgetT = 0; s.fidgetAt = t + 9 + noise(s.seed + 10, t) * 14; }
+  s.fidgetT += dt;
+  const FID = {watch: 2.0, roll: 1.5, rock: 1.6}[s.fidget] || 0;
+  if (s.fidgetT < FID && idle > 0.5) {
+    const u = s.fidgetT / FID, e = smooth(u / 0.22) * smooth((1 - u) / 0.25) * idle;
+    if (s.fidget === 'watch') { armLx = lerp(armLx, -0.5, e); armLz = lerp(armLz, -0.12, e); foreLx = lerp(foreLx, -1.5, e); foreLz = lerp(foreLz, -0.5, e); headX += 0.3 * e; headY += -0.22 * e; }
+    else if (s.fidget === 'roll') { const w = Math.sin(u * Math.PI * 2); spineX -= 0.07 * e; armLz += 0.12 * e * (0.5 + 0.5 * w); armRz -= 0.12 * e * (0.5 + 0.5 * w); armLx += 0.25 * e * w; armRx += 0.25 * e * w; headX -= 0.12 * e; }
+    else { const w = Math.sin(u * Math.PI * 3); hipY += 0.022 * e * Math.max(0, w); footL += 0.2 * e * Math.max(0, w); footR += 0.2 * e * Math.max(0, w); spineX += 0.03 * e * w; armLx -= 0.08 * e * w; armRx -= 0.08 * e * w; }
+  }
+
   // --- in the air ---
   const j = s.air;
   if (j > 0.001) {
@@ -850,7 +864,7 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
       foreLx = to(foreLx, -0.85); foreRx = to(foreRx, -0.85); foreLz = to(foreLz, -(0.5 + 0.22 * c)); foreRz = to(foreRz, 0.5 + 0.22 * c);
       hipY += e * 0.012 * c; joy = e; open = e; brow = e;
     } else if (k === 'thumbs') {
-      armRx = to(armRx, -1.15); armRz = to(armRz, -0.22); foreRx = to(foreRx, -0.55 - 0.08 * Math.sin(et * 9)); headZr = to(headZr, 0.08);
+      armRx = to(armRx, -0.7); armRz = to(armRz, -0.34); foreRx = to(foreRx, -1.42 - 0.1 * Math.sin(et * 9)); headZr = to(headZr, 0.08); spineY = to(spineY, 0.12);
       wink = e; grin = e; brow = e * 0.7;
     } else if (k === 'heart') {
       // Both hands on the heart, swaying.
@@ -870,8 +884,12 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
   b.eyeL.scale.set(eyes, eyes * tiny(1 - 0.92 * lid), eyes); b.eyeR.scale.set(eyes, eyes * tiny(1 - 0.92 * Math.max(lid, s.wink)), eyes);
   b.eyeL.position.x = rig.bind.eyeL.x + glance; b.eyeR.position.x = rig.bind.eyeR.x + glance;
   b.joy.scale.setScalar(tiny(s.joy));
-  const m = tiny(1 - s.open) * (1 + 0.28 * s.grin);
-  b.mouth.scale.set(m, m, m); b.mouthO.scale.setScalar(tiny(s.open)); b.blush.scale.setScalar(tiny(s.blush));
+  // Talking: the open mouth flaps, small and quick.
+  s.talk += ((talking ? 1 : 0) - s.talk) * ease(1, 12);
+  const say = s.talk * (1 - s.open), flap = 0.2 + 0.5 * Math.abs(Math.sin(t * 11.3 + s.seed)) * (0.55 + 0.45 * Math.sin(t * 3.9 + s.seed));
+  const m = tiny((1 - s.open) * (1 - say)) * (1 + 0.28 * s.grin);
+  b.mouth.scale.set(m, m, m); b.blush.scale.setScalar(tiny(s.blush));
+  if (say > 0.01) b.mouthO.scale.set(tiny(0.62 * say), tiny(flap * say), tiny(say)); else b.mouthO.scale.setScalar(tiny(s.open));
   b.browL.position.y = rig.bind.browL.y + 0.014 * s.brow; b.browR.position.y = rig.bind.browR.y + 0.014 * s.brow - 0.006 * s.wink;
 
   // --- hair that swings: a spring that lags behind the body ---

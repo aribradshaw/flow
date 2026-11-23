@@ -318,3 +318,5 @@
 @media (prefers-reduced-motion:reduce){.of-board-veil{transition:none}}
 /* The app's floating UI (menus, pickers, tooltips, a lifted card, toasts) stays above the office. */
 body.office-open .cm,body.office-open .picker,body.office-open .tip,body.office-open .drag-clone,body.office-open #toast{z-index:1000}
+.of-look-top .txt.warn{border-color:#d4534a;color:#b23a32}
+.of-look-top .txt:disabled{opacity:.5;cursor:default}

@@ -632,8 +632,9 @@ function buildRooms(){
       const mx=ROOM_W/2-0.42,mz=ROOM_D/2-1.9,mirror=new THREE.Group();mirror.position.set(mx,0,mz);mirror.rotation.y=-Math.PI/2;
       mirror.add(part(M.box,M.trim,[0,1.02,-0.03],[0.86,1.9,0.06]),part(M.box,M.glass,[0,1.04,0.006],[0.72,1.72,0.02]),part(M.box,M.trim,[0,0.04,0],[0.7,0.08,0.36]));
       g.add(mirror);boxAt(slot,mx,mz,0.36,0.86,1.9);
-      const at=toWorld(slot,mx-0.7,mz);
-      S.interact?.register({id:'mirror',position:()=>({x:at.x,y:0,z:at.z}),radius:1.7,height:2.15,priority:1,label:'Edit your look',onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
+      // Anchored on the mirror itself (you cannot stand inside it), and ahead of the room's meter when you face it.
+      const at=toWorld(slot,mx,mz);
+      S.interact?.register({id:'mirror',position:()=>({x:at.x,y:0,z:at.z}),radius:2.1,height:2.15,priority:2,label:'Edit your look',onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
     }
     S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
@@ -873,13 +874,15 @@ function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(s
 // ---------- people ----------
 // A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
 function makeAvatar(key){return makeHuman(lookOf(key),{shadow:false})}
+// A name tag sits just above the top of the head, hair or hat.
+const tagHeight=p=>{p.tag.y=Math.max(2.05,p.figure.userData.stats().height+0.24)};
 // What someone looks like: the look they saved (office-look-core.js), else the default for their key.
 const lookOf=key=>S.looks.get(key)||lookFor(key);
 function setLook(key,look){
   const next=look?cleanLook(look,{key}):null,was=S.looks.get(key)||null;
   if(JSON.stringify(next)===JSON.stringify(was))return;
   if(next)S.looks.set(key,next);else S.looks.delete(key);
-  S.people.get(key)?.figure.userData.setLook(lookOf(key));
+  const p=S.people.get(key);if(p){p.figure.userData.setLook(lookOf(key));tagHeight(p)}
   for(const f of S.afPeople||[])if(f.userData.member===key)f.userData.setLook(lookOf(key));
 }
 // The look editor (office-look-editor.js): a dialog over the office, so walking pauses like under any overlay.
@@ -906,6 +909,7 @@ function upsertPerson(p,self=false){
     const [bg,fg]=memberColor(p.key);
     const tag=label(obj,S.presence?S.presence.nameTag({name:p.name,image:p.image,self,bg,fg,key:p.key,presence:{status:'available',text:''}}):`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
     a={key:p.key,name:p.name,image:p.image||'',colors:[bg,fg],obj,figure,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
+    tagHeight(a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
         if(!S.people.has(p.key))return false;
@@ -1313,7 +1317,7 @@ function frame(dt,t,delta){
     p.pose.rotation.x=motion.flip|| (motion.jumping?-0.17:stride*(0.05+run*0.13));
     p.pose.rotation.z=motion.grounded?Math.sin(p.phase)*stride*0.02:0;
     p.shade.position.y=0.02-o.position.y;
-    animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9,cycle:p.phase});
+    animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9,cycle:p.phase,talking:!!p.bubble});
   }
   if(!S.npc)for(const f of S.afPeople||[])animateHuman(f.userData.rig,animation.t,{phase:(f.id%7)*0.9});
   // Agents: running bob and type, waiting hop and glow, idle still; subagents circle.
