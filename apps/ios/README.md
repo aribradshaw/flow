@@ -59,6 +59,23 @@ id as `APNS_TOPIC`. Debug builds register as sandbox devices, Release builds as 
 can't get real pushes, but `xcrun simctl push booted com.flygonlc.flow payload.json` shows how one looks
 once notifications are allowed.
 
+## TestFlight
+
+1. Put your team in `Config/Local.xcconfig` (`DEVELOPMENT_TEAM = …`).
+2. Raise `CURRENT_PROJECT_VERSION` in `Config/Shared.xcconfig` (every upload needs a new build number), and
+   `MARKETING_VERSION` for a new version.
+3. Archive, with automatic signing registering the bundle ids, the App Group and push:
+
+   ```sh
+   xcodebuild -project Flow.xcodeproj -scheme Flow -configuration Release -destination 'generic/platform=iOS' \
+     -archivePath build/Flow.xcarchive -allowProvisioningUpdates archive
+   ```
+
+4. Copy the archive into `~/Library/Developer/Xcode/Archives/<date>/`, open it (Xcode's Organizer), and choose
+   Distribute App › TestFlight Internal Only. The first upload also creates the app in App Store Connect.
+
+`ITSAppUsesNonExemptEncryption` is `NO` (the app only uses HTTPS), so builds don't wait on export compliance.
+
 ## Testing in the simulator without tapping
 
 Debug builds read three launch arguments. `-autoSignIn YES` continues as the user who is already
