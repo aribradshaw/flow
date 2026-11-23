@@ -61,7 +61,8 @@ try{
     c.moveCard(d,b.id,'done');
     const f=x=>c.filterCards(db0,x).map(y=>y.title).sort().join();
     assert(f({q:'#1'})==='Fix login'&&f({q:'1'})==='Fix login'&&f({q:'ship'})==='Ship site'&&f({hideDone:true})==='Fix login,Loose'&&f({projects:['none']})==='Loose'&&f({projects:['pa','pb']})==='Fix login,Ship site'
-      &&f({assignee:'p1'})==='Fix login'&&f({entity:'e1'})==='Fix login,Ship site'&&f({label:'l-urgent'})==='','core: filters (search, hide Done, projects, no project, assignee, entity, label)');
+      &&f({assignee:'p1'})==='Fix login'&&f({entity:'e1'})==='Fix login,Ship site'&&f({label:'l-urgent'})===''
+      &&f({notAssignee:'p1'})==='Loose,Ship site'&&f({notProjects:['none']})==='Fix login,Ship site'&&f({entity:'e1',notAssignee:'p1'})==='Ship site'&&f({notEntity:'e1'})==='Loose','core: filters (search, hide Done, projects, no project, assignee, entity, label, exclude)');
     assert(c.dueTone({due:'2026-01-01',column:'doing'},'2026-01-02')==='overdue'&&c.dueTone({due:'2026-01-04',column:'doing'},'2026-01-02')==='soon'&&c.dueTone({due:'2026-02-03',column:'doing'},'2026-01-02')===''&&c.dueTone({due:'2026-01-01',column:'done'},'2026-01-02')==='','core: due dates are overdue or due soon (two days)');
     assert(c.openCardsFor(db0,{person:'p1'}).length===1&&c.openCardsFor(db0,{entity:'e1'}).length===1,'core: open-card counts for a person and an entity');
   }

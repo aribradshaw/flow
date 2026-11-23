@@ -20,13 +20,16 @@ import {combinedLegend,combinedMeta,envName} from './combined.js';
 const UIKEY='flygon-flow-devops-ui',MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ITEM_KINDS={feature:'Feature',milestone:'Milestone',release:'Release',deadline:'Deadline',project:'Project',phase:'Phase',event:'Event'};
 const LINK_ICONS={pr:'pr',commit:'commit',url:'link'},ROLE_ICONS={developer:'terminal',tester:'checkSq',requester:'inbox'};
-const FILTERS=()=>({projects:[],entity:'',assignees:[],agents:[],labels:[],q:'',hideDone:false});
+const FILTER_LISTS=['projects','notProjects','entities','notEntities','assignees','notAssignees','agents','notAgents','labels','notLabels'];
+const FILTERS=()=>({projects:[],notProjects:[],entities:[],notEntities:[],assignees:[],notAssignees:[],agents:[],notAgents:[],labels:[],notLabels:[],q:'',hideDone:false});
 let ui=FILTERS();
 try{const saved=JSON.parse(localStorage.getItem(UIKEY))||{};
-  // Earlier versions stored a single assignee / label.
-  if(saved.assignee&&!saved.assignees)saved.assignees=[saved.assignee];if(saved.label&&!saved.labels)saved.labels=[saved.label];delete saved.assignee;delete saved.label;
+  // Earlier versions stored a single assignee / label, and one included entity.
+  if(saved.assignee&&!saved.assignees)saved.assignees=[saved.assignee];if(saved.label&&!saved.labels)saved.labels=[saved.label];
+  if(saved.entity&&!saved.entities?.length)saved.entities=[saved.entity];
+  delete saved.assignee;delete saved.label;delete saved.entity;
   Object.assign(ui,saved)}catch{}
-for(const k of ['projects','assignees','agents','labels'])if(!Array.isArray(ui[k]))ui[k]=[];
+for(const k of FILTER_LISTS)if(!Array.isArray(ui[k]))ui[k]=[];
 // Paging: each column renders its first 20 cards, "Load more" adds 20. Reset whenever filters change.
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
@@ -311,10 +314,12 @@ export function headerHtml(){
   return `<span class="meta" data-tip="${all} card${all===1?'':'s'} · ${open} open">${open} open · ${all}</span>`;
 }
 function sanitize(){
-  ui.projects=ui.projects.filter(p=>p==='none'||project(p));
-  if(ui.entity&&!nodeById(ui.entity))ui.entity='';
-  ui.assignees=ui.assignees.filter(nodeById);ui.labels=ui.labels.filter(label);
-  ui.agents=ui.agents.filter(id=>db().agentflow?.agents.some(a=>a.id===id));
+  const known=id=>!!nodeById(id),agent=id=>!!db().agentflow?.agents.some(a=>a.id===id);
+  ui.projects=ui.projects.filter(p=>p==='none'||project(p));ui.notProjects=ui.notProjects.filter(p=>p==='none'||project(p));
+  ui.entities=ui.entities.filter(known);ui.notEntities=ui.notEntities.filter(known);
+  ui.assignees=ui.assignees.filter(known);ui.notAssignees=ui.notAssignees.filter(known);
+  ui.labels=ui.labels.filter(label);ui.notLabels=ui.notLabels.filter(label);
+  ui.agents=ui.agents.filter(agent);ui.notAgents=ui.notAgents.filter(agent);
 }
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
@@ -322,22 +327,24 @@ const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:
 const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,...(!c&&isForeign(p.id)?{sub:envName(envOf(p))}:{}),avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
 // A linked card takes its owner's labels (the ones of its share); they are read-only everywhere.
 const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||(isForeign(l.id)||isForeign(c.id)?sameSource(l,c):!linkOf(c)||sameSource(l,c)))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name+(c?'':fromEnv(l)),group:name,pill:{bg,fg}}}));
-const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
+const entityItems=()=>nodesOf(['entity','area']).filter(e=>ui.entities.includes(e.id)||ui.notEntities.includes(e.id)||entityProjects(db(),e.id).length).map(e=>({value:e.id,label:e.name,...(isForeign(e.id)?{sub:envName(envOf(e))}:{})}));
+// [include key, exclude key, items, menu name]. A value is include, exclude, or off.
+const FILTER_PICKERS={'dv-projects':['projects','notProjects',projectItems,'Projects'],'dv-entities':['entities','notEntities',entityItems,'Entities'],'dv-assignees':['assignees','notAssignees',personItems,'Assignees'],'dv-agents':['agents','notAgents',()=>agentItems(),'Agents'],'dv-labels':['labels','notLabels',labelItems,'Labels']};
 function openFilter(b){
-  const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
-  openPicker(b,{items:items(),selected:ui[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){ui[k]=v;keepUi();render()}});
+  const [inc,exc,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!inc)return;
+  openPicker(b,{items:items(),selected:ui[inc],excluded:ui[exc],cycle:true,label,placeholder:`Search ${label.toLowerCase()}`,onChange(v,x){ui[inc]=v;ui[exc]=x||[];keepUi();render()}});
 }
-const filtersOn=()=>!!(ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone);
+const filtersOn=()=>FILTER_LISTS.some(k=>ui[k].length)||!!ui.q||ui.hideDone;
+const filterBtn=(key,label,items,tip)=>pickerButton(key,label,items(),ui[FILTER_PICKERS[key][0]],{excluded:ui[FILTER_PICKERS[key][1]],tip});
 // cards: the filtered cards. The count is the awake ones; snoozed ones get their own clock beside it.
 function toolbar(cards){
   const active=filtersOn(),now=Date.now(),zz=cards.filter(c=>isSnoozed(c,now)),n=cards.length-zz.length;
-  const ents=nodesOf(['entity','area']).filter(e=>e.id===ui.entity||entityProjects(db(),e.id).length);
   return `<div class="tl-bar dv-bar">
-    ${pickerButton('dv-projects','Projects',projectItems(),ui.projects,{tip:'Filter by project'})}
-    <select data-dsel="entity" data-tip="Entity · cards in the projects under it" aria-label="Filter by entity">${opt('','All entities',ui.entity)}${ents.map(e=>opt(e.id,e.name,ui.entity)).join('')}</select>
-    ${pickerButton('dv-assignees','Assignees',personItems(),ui.assignees,{tip:'Filter by assignee'})}
-    ${db().agentflow?.agents.length?pickerButton('dv-agents','Agents',agentItems(),ui.agents,{tip:'Filter by AgentFlow agent: cards delegated to it'}):''}
-    ${pickerButton('dv-labels','Labels',labelItems(),ui.labels,{tip:'Filter by label'})}
+    ${filterBtn('dv-projects','Projects',projectItems,'Filter by project. Click a choice again to exclude it.')}
+    ${filterBtn('dv-entities','Entities',entityItems,'Filter by entity: cards in the projects under it. Click a choice again to exclude it.')}
+    ${filterBtn('dv-assignees','Assignees',personItems,'Filter by assignee. Click a choice again to exclude it.')}
+    ${db().agentflow?.agents.length?filterBtn('dv-agents','Agents',()=>agentItems(),'Filter by AgentFlow agent: cards delegated to it. Click a choice again to exclude it.'):''}
+    ${filterBtn('dv-labels','Labels',labelItems,'Filter by label. Click a choice again to exclude it.')}
     <input id="dv-q" type="search" placeholder="Search # or title" value="${esc(ui.q)}" aria-label="Search cards by number or title">
     ${ib('check',ui.hideDone?'Show Done':'Hide Done',{cls:ui.hideDone?'on':'',attrs:'data-dv="hideDone"'})}
     <span class="dv-count">${n} card${n===1?'':'s'}</span>${boardSnoozeToggle(zz)}
@@ -444,7 +451,7 @@ function action(name,b){
 // A new card inherits the active filters so it stays visible.
 function addCard(column){
   // New cards go to this environment: filters on another (combined) environment's records are not inherited.
-  const proj=ui.projects.find(p=>p!=='none'&&!isForeign(p))||(ui.entity&&entityProjects(db(),ui.entity).find(p=>!isForeign(p.id))?.id)||'';
+  const proj=ui.projects.find(p=>p!=='none'&&!isForeign(p))||ui.entities.map(id=>entityProjects(db(),id).find(p=>!isForeign(p.id))?.id).find(Boolean)||'';
   ui.q='';keepUi();let made=null;
   change(()=>{const c=newCard(dv(),{column,project:proj,labels:ui.labels.filter(l=>!isForeign(l)),assignees:ui.assignees.filter(n=>!isForeign(n)).map(node=>({node,role:'requester'}))});made=c.id;if(!lender)selected=c.id;
     if(ui.agents.length&&delegate(db().agentflow,c.id,ui.agents)){ui.agents=[];keepUi()}});
@@ -571,7 +578,7 @@ function openDeleted(from){
 // Opened from the chart (a person or entity) or the timeline (a linked card).
 // agent: that agent's work queue (open cards delegated to it), from AgentFlow.
 export function focus({person,entity,agent,cardId}={}){
-  if(person||entity){ui={...FILTERS(),entity:entity||'',assignees:person?[person]:[],hideDone:true};keepUi()}
+  if(person||entity){ui={...FILTERS(),entities:entity?[entity]:[],assignees:person?[person]:[],hideDone:true};keepUi()}
   else if(agent){ui={...FILTERS(),agents:[agent],hideDone:true};keepUi()}
   if(cardId&&card(cardId)){
     selected=cardId;reveal=true;

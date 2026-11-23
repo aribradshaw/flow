@@ -272,6 +272,8 @@ test('the DevOps board filters cards by delegated agent',async()=>{
   assert.deepEqual(filterCards(db,{agents:[a.id]}).map(c=>c.id),['k3']);
   assert.deepEqual(filterCards(db,{agents:[a.id,b.id]}).map(c=>c.id),['k1','k3']);
   assert.equal(filterCards(db,{agents:[]}).length,3);
+  assert.deepEqual(filterCards(db,{notAgents:[a.id]}).map(c=>c.id),['k1','k2']);
+  assert.deepEqual(filterCards(db,{agents:[a.id,b.id],notAgent:a.id}).map(c=>c.id),['k1']);
 });
 
 test('duplicating a workflow: a copy right after it, with new ids for it and its steps',()=>{
