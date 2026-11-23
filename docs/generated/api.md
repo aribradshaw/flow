@@ -3422,7 +3422,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents` | object[] | yes |  |
 | `agents[].id` | string | yes | Stable and unique within the source, e.g. "laptop:t3:thread-abc". |
 | `agents[].title` | string |  | What it is working on (up to 200 characters). |
-| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini or other. |
+| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one). |
 | `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
 | `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
 | `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests". |

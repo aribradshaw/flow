@@ -17,9 +17,9 @@ const call=async(method,path,body,headers={})=>{
   let data=null;try{data=await r.json()}catch{}return {status:r.status,data};
 };
 const api=(method,path,body)=>call(method,path,body,{authorization:'Bearer '+key});
-function sse(path){
+function sse(path,headers={}){
   const events=[];let buf='',res;
-  const ready=new Promise((ok,no)=>{const req=http.get(base+path,r=>{res=r;r.setEncoding('utf8');r.on('data',c=>{buf+=c;let i;while((i=buf.indexOf('\n\n'))>=0){const b=buf.slice(0,i);buf=buf.slice(i+2);
+  const ready=new Promise((ok,no)=>{const req=http.get(base+path,{headers},r=>{res=r;r.setEncoding('utf8');r.on('data',c=>{buf+=c;let i;while((i=buf.indexOf('\n\n'))>=0){const b=buf.slice(0,i);buf=buf.slice(i+2);
     const type=/^event: (.+)$/m.exec(b)?.[1],data=/^data: (.+)$/m.exec(b)?.[1];if(type)events.push({type,data:JSON.parse(data)})}});ok(r)});req.on('error',no)});
   const next=async(type,ms=3000)=>{for(const end=Date.now()+ms;Date.now()<end;){const i=events.findIndex(e=>e.type===type);if(i>=0)return events.splice(i,1)[0].data;await new Promise(r=>setTimeout(r,15))}throw Error('no '+type+' event')};
   return {ready,next,close:()=>res?.destroy()};
@@ -76,6 +76,9 @@ test('local mode: the office opens for the local user with their reported agents
   // The reporter's update reaches the open office.
   await api('PUT','/api/v1/office/agents',{source:'bridge:test',agents:[{id:'t3:1',title:'Fix login',vendor:'claude',status:'running',activity:'Running tests'}]});
   assert.equal((await s.next('agents')).agents[0].activity,'Running tests');
+  // A dashboard can watch the stream with an API key for the environment (read scope); a bad key is refused.
+  assert.equal((await call('GET','/api/office/default-workspace/events',undefined,{authorization:'Bearer flow_test_nope'})).status,401);
+  const k=sse('/api/office/default-workspace/events',{authorization:'Bearer '+key});await k.ready;assert.equal((await k.next('snapshot')).live[snap.me.key][0].title,'Fix login');k.close();
   // MCP has the same operations.
   r=await fetch(base+'/mcp',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+key},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}).then(x=>x.json());
   assert.ok(['office_agents_report','office_actions_wait','office_actions_result'].every(n=>r.result.tools.some(t=>t.name===n)));

@@ -1286,7 +1286,10 @@ async function apiAuth(req){
 // ---------- 3D office (lib/office.mjs, docs/concepts/12-office.md) ----------
 // In memory, in this process: Flow runs as one server instance, so this one process holds every office.
 // Members of an environment: its owner, its members, and everyone with an active share into it.
-const officeMod=await import('./lib/office.mjs');
+const officeMod=await import('./lib/office.mjs'),afCore=await import('./public/agentflow-core.js');
+// The key behind members' and agents' opaque ids, kept beside the backups so avatars keep their looks across restarts.
+const officeSecret=(()=>{const f=join(fileURLToPath(backupRoot),'_office-secret');try{const v=readFileSync(f,'utf8').trim();if(v.length>=32)return v}catch{}
+  const v=randomUUID()+randomUUID();try{mkdirSync(fileURLToPath(backupRoot),{recursive:true});writeFileSync(f,v,{mode:0o600})}catch{}return v})();
 const officeState=officeMod.officeState();
 const officeLimit=memoryRateLimit({perMinute:600});
 const personName=async email=>(await users.get(email).catch(()=>null))?.name||(auth.mode==='local'&&sameEmail(email,auth.localUser?.email)?auth.localUser.name:'')||String(email).split('@')[0];
@@ -1295,12 +1298,21 @@ async function officeEnv(envId){
   const owner=String(w?.owner||e?.ownerEmail||'').toLowerCase();
   const recipients=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt).map(s=>s.recipientEmail);
   const emails=[...new Set([owner,...(e?.members||[]),...(data?.environment?.members||[]),...recipients].map(x=>String(x||'').toLowerCase()).filter(Boolean))];
-  return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,
-    members:await Promise.all(emails.map(async email=>({email,name:await personName(email)}))),
+  const members=await Promise.all(emails.map(async email=>{const u=await users.get(email).catch(()=>null);return {email,name:u?.name||await personName(email),lastSeen:u?.lastSeen||''}}));
+  return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,members,
     projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
-    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[]})),
+    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[],
+      ...(a.kind==='human'?{memberEmail:humanMember(a,data,members)}:{})})),
     // For seats (lib/office-seats.mjs): which card a live session works on, and each agent's queue.
     cards:(data?.devops?.cards||[]).map(c=>({id:c.id,number:c.number,title:c.title,column:c.column,moved:c.moved||'',project:c.project||'',due:c.due||'',snoozedUntil:c.snoozedUntil||''}))};
+}
+// The member a human AgentFlow agent is (as AgentFlow shows its face): its supervisor's person card's email, else
+// the email of the one person card with its name, else the member whose account has its name.
+function humanMember(a,data,members){
+  const emails=new Set(members.map(m=>m.email)),people=afCore.peopleOf(data),mail=p=>{const e=String(p?.email||'').toLowerCase();return emails.has(e)?e:''};
+  const sup=people.find(p=>p.id===a.supervisor);if(sup)return mail(sup);
+  const named=afCore.personNamed(people,a.name);if(named?.email)return mail(named);
+  const hits=members.filter(m=>afCore.sameName(m.name,a.name));return hits.length===1?hits[0].email:'';
 }
 // Who may enter an environment's office, and which of its projects they see: everyone who can read it
 // sees all of them; a share's recipient sees the projects in their shares' scopes (all for a whole-environment share).
@@ -1320,14 +1332,18 @@ async function officeAccess(envId,user){
   if(hit&&Date.now()-hit.at<15000)return hit.access;
   const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
 }
-const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv}});
+const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv},secret:officeSecret});
 // /api/office/{env}/events (SSE), presence, say, emote, answer: the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
   const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
-  if(!trusted(req)){res.writeHead(403);res.end();return true}
-  const user=await requireUser(req,res);if(!user)return true;
+  // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
+  const keyed=m[2]==='events'&&!!req.headers.authorization;
+  if(!keyed&&!trusted(req)){res.writeHead(403);res.end();return true}
+  let user;
+  if(keyed){const a=await apiAuth(req);if(!a||!a.scopes.some(x=>x==='read'||x==='write'||x==='admin')||(a.user.key&&!keyAllows(a.user.key,'read',m[1]))){json(res,401,{error:'Invalid or expired API key'});return true}user={...a.user,name:(await personName(a.user.email))}}
+  else{user=await requireUser(req,res);if(!user)return true}
   const [,envId,what]=m,access=await officeAccess(envId,user);
   if(!access.ok){json(res,404,{error:'Not found'});return true}
   if(what==='events'){

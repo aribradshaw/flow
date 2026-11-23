@@ -34,6 +34,7 @@ test('reports are validated and capped: unknown values fall back, strings are cu
   assert.equal(r.source.length,60);assert.ok(Date.parse(r.at));
   assert.deepEqual(r.agents.map(a=>a.id),['a','w']);
   const [a,w]=r.agents;
+  assert.equal(cleanReport({source:'s',agents:[{id:'d',vendor:'other',model:'DeepSeek V4'},{id:'g',vendor:'xai'},{id:'q',model:'qwen3'}]}).agents.map(x=>x.vendor).join(),'deepseek,grok,other');
   assert.equal(a.title.length,200);assert.equal(a.vendor,'codex');assert.equal(a.status,'idle');assert.equal(a.activity,'line break');
   assert.equal(a.children.length,MAX_CHILDREN);assert.equal(a.pending,null,'pending only while waiting');
   assert.ok(!JSON.stringify(a).includes('ghp_secret'));assert.equal(a.repo.remote,'https://github.com/acme/flow.git');
@@ -114,7 +115,7 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
   const st=officeState({now:()=>time,staleMs:1000});
   const users={ann:{email:'ann@example.test',name:'Ann'},bo:{email:'bo@example.test',name:'Bo'},cy:{email:'cy@example.test',name:'Cy'}};
   const ctx={id:'env1',name:'Studio',ownerEmail:users.ann.email,members:Object.values(users).map(u=>({email:u.email,name:u.name})),
-    projects:[{id:'p-flow',name:'Flow',repos:['acme/flow']},{id:'p-site',name:'Site',repos:['site']}],agents:[{id:'af1',name:'Researcher',kind:'agent',reportsTo:'',projects:[]},{id:'af2',name:'Site bot',kind:'agent',reportsTo:'',projects:['p-site']}]};
+    projects:[{id:'p-flow',name:'Flow',repos:['acme/flow']},{id:'p-site',name:'Site',repos:['site']}],agents:[{id:'af0',name:'Ann',kind:'human',reportsTo:'',projects:[],memberEmail:'ann@example.test'},{id:'af1',name:'Researcher',kind:'agent',reportsTo:'',projects:[]},{id:'af2',name:'Site bot',kind:'agent',reportsTo:'',projects:['p-site']}]};
   // Bo's share covers Flow; Cy's covers Site only.
   const access={ann:{ok:true,all:true,projectIds:new Set()},bo:{ok:true,all:false,projectIds:new Set(['p-flow'])},cy:{ok:true,all:false,projectIds:new Set(['p-site'])}};
   const hub=officeHub({state:st,context:{env:async()=>ctx},heartbeatMs:60e3});
@@ -141,7 +142,8 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     assert.ok(!bo.events.some(e=>e.type==='yourSources'));
 
     assert.equal(sa.members.length,3);assert.ok(sa.members.find(m=>m.key===annKey).owner);assert.ok(!JSON.stringify(sa).includes('@example.test'),'no emails reach the browser');
-    assert.deepEqual(sa.agentflow.map(a=>a.name),['Researcher','Site bot']);
+    assert.deepEqual(sa.agentflow.map(a=>a.name),['Ann','Researcher','Site bot']);
+    assert.equal(sa.agentflow[0].member,annKey,'a human agent that is a member carries their key, never their email');assert.equal(sa.agentflow[1].member,'');
     assert.deepEqual(sb.agentflow,[],'a project share shows only the AgentFlow agents of its projects');assert.deepEqual(sc.agentflow.map(a=>a.name),['Site bot']);
     assert.deepEqual(sb.live[annKey][0].projects,['Flow']);assert.deepEqual(sa.live[annKey][0].projects,['Flow']);
     assert.deepEqual(sa.live[annKey].map(a=>[a.title,a.mine,a.pending?.can]),[['Fix the login bug',true,['allow','deny']],['Side project',true,undefined]]);
