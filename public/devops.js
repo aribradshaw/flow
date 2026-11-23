@@ -31,6 +31,7 @@ for(const k of ['projects','assignees','agents','labels'])if(!Array.isArray(ui[k
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
 let selected=null,sortable=null,pop=null,pending=null,reveal=false,painted=false,rerender=()=>{},openItem=()=>{},openAgent=()=>{},toast=()=>{};
+let paintLinkPrompt=()=>{};
 // Chat (chat.js): chat.on() while it is available; chat.send(card id) attaches a card to a message.
 let chat={on:()=>false,send:()=>{}};
 const edited=new WeakSet();
@@ -168,6 +169,7 @@ function sortItems(col){
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
 export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;chat=opts.chat||chat;
+  paintLinkPrompt=opts.paintLinkPrompt||paintLinkPrompt;
   const el=$('#devopsView');
   el.addEventListener('click',e=>{
     const pick=e.target.closest('[data-pick]');if(pick){finishPick(pick.dataset.pick);return}
@@ -412,7 +414,13 @@ export function render(){
   const cards=filterCards(db(),ui);
   cardAgents=new Map();for(const a of db().agentflow?.agents||[])for(const id of a.cards)cardAgents.set(id,[...(cardAgents.get(id)||[]),a]);
   // Cards that stay glide to their new place; added ones fade in, removed ones fade out.
-  flipList(el,'.dcard',c=>c.dataset.card,()=>{el.innerHTML=toolbar(cards)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'')});
+  const prompt=el.querySelector('.opid-prompt')||document.createElement('aside');
+  prompt.className='opid-prompt';
+  flipList(el,'.dcard',c=>c.dataset.card,()=>{
+    el.innerHTML=toolbar(cards)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'');
+    el.querySelector('.dv-scroll').before(prompt);
+    paintLinkPrompt(prompt);
+  });
   const sc=el.querySelector('.dv-scroll');
   if(keep){[sc.scrollLeft,sc.scrollTop]=keep;for(const c of el.querySelectorAll('[data-dcol]'))c.querySelector('.dcol-b').scrollTop=keep[2].get(c.dataset.dcol)||0}
   if(reveal){reveal=false;el.querySelector('.dcard.sel')?.scrollIntoView({block:'nearest',inline:'center'})}

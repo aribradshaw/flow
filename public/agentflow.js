@@ -44,9 +44,9 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');return `<span class="pill" style="background:${bg};color:${fg}">${esc(names[s]||s)}</span>`};
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
-let officeOverlays,officeModule;
+let officeOverlays,officeModule,paintLinkPrompt;
 export function mount(opts){
-  officeOverlays=opts.officeOverlays;
+  officeOverlays=opts.officeOverlays;paintLinkPrompt=opts.paintLinkPrompt;
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
@@ -553,6 +553,7 @@ function action(name,b){
 export const openOfficeLink=({focus='',cardId}={})=>openOffice({focus,cardId,link:true});
 export const officeHistory=state=>officeModule?.officeHistory(state);
 export const officeOpen=()=>officeModule?.officeOpen();
+export const closeOffice=()=>officeModule?.closeOffice();
 async function openOffice(link={}){
   if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
   let m;try{m=officeModule=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
@@ -571,7 +572,7 @@ async function openOffice(link={}){
   m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
     agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
     ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
-    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,openEnv:openSharedBoard,
+    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,openEnv:openSharedBoard,paintLinkPrompt,
     // The office's world (Office or Yacht) is this environment's to choose; a shared one shows its owner's choice.
     ...(o?{}:{world:()=>af().office?.world,setWorld:world=>change(()=>{if(world==='classic')delete af().office;else af().office={world}})}),
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});

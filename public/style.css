@@ -334,6 +334,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 
 /* DevOps board */
 #devopsView{min-width:0;overflow:hidden;background:#fff}
+.opid-prompt{flex:none;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;padding:7px 10px;color:var(--ink);background:#f4f8f5;border-bottom:1px solid var(--line);font-size:12px}
+.opid-prompt:empty{display:none}
+.opid-prompt-copy strong{margin-right:4px}
+.opid-prompt-avatar-note{display:block;color:var(--muted)}
+.opid-prompt-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
+.opid-prompt-actions select{max-width:100%}
+.opid-prompt-avatar{text-decoration:underline;text-underline-offset:2px}
 .dv-bar{flex-wrap:wrap;gap:4px 6px;height:auto;min-height:40px;padding:6px 10px}
 .dv-bar select{max-width:150px;font-size:12px}
 #dv-q{width:150px;height:26px;font-size:12px}

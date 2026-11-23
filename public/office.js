@@ -70,6 +70,7 @@ export function openOffice(opts){
       <aside class="of-connect-callout" hidden><strong>Your agents aren’t connected yet</strong>
         <button type="button" class="txt primary" data-of="connect">Connect your agents</button>
       </aside>
+      <aside class="opid-prompt"></aside>
     </div>
     <div class="of-dock">
       <div class="of-log" aria-label="Chat"><div class="of-lines" role="log" aria-live="polite"></div></div>
@@ -106,6 +107,7 @@ export function openOffice(opts){
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),looks:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
+  opts.paintLinkPrompt?.(S.stage.querySelector('.opid-prompt'));
   // Browser automation only (navigator.webdriver): end-to-end checks can place the avatar and read the office.
   if(navigator.webdriver)globalThis.__flowOffice={state:()=>S,place:(x,z,heading=0)=>{S.pos.set(x,0,z);S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading)}};
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
@@ -1281,7 +1283,7 @@ function onKey(e){
   if(S.pointer?.grabbing){e.stopPropagation();return}
   e.stopPropagation(); // the app underneath does not see office shortcuts
   if(e.ctrlKey||e.metaKey||e.altKey)return;
-  if(e.target.closest?.('.of-say,.of-chat-reply'))return;
+  if(e.target.closest?.('.of-say,.of-chat-reply,.opid-prompt'))return;
   const k=e.key.toLowerCase(),menu=e.target.closest?.('[role=menu]');
   if(menu){
     if(k==='arrowup'||k==='arrowdown'){

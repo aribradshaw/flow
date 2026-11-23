@@ -108,13 +108,18 @@ function refreshPhotos(){
 // regains focus, and after the office's look editor saves (the 'flow:avatar' event). With "Use my avatar
 // instead of my photo" on, its portrait is the session photo everywhere (ui.js setSessionPortrait).
 let avatarState=null,portraitStamp='',avatarLoading=null;
+export const canUseCustomPortrait=()=>!!avatarState?.custom&&!avatarState.usePortrait;
 function applyAvatar(next){
   if(!next||typeof next!=='object'||!next.avatar)return;
+  const canUse=canUseCustomPortrait();
   avatarState=next;
-  const stamp=next.usePortrait?JSON.stringify(next.avatar):'';if(stamp===portraitStamp)return;
-  portraitStamp=stamp;setSessionPortrait(stamp?renderAvatarPortrait(next.avatar,{as:'svg'}):'');
-  refreshPhotos();
+  const stamp=next.usePortrait?JSON.stringify(next.avatar):'';
+  if(stamp!==portraitStamp){
+    portraitStamp=stamp;setSessionPortrait(stamp?renderAvatarPortrait(next.avatar,{as:'svg'}):'');
+    refreshPhotos();
+  }
   const box=dlg?.querySelector('[data-avatar]');if(box)box.outerHTML=avatarSection();
+  if(canUse!==canUseCustomPortrait())dispatchEvent(new Event('flow:portrait-option'));
 }
 function loadAvatar(){
   if(!ready||!user()||avatarLoading)return avatarLoading;
@@ -130,13 +135,16 @@ function avatarSection(){
     <p class="acct-muted">${a?.custom?'':'You have not made one yet, so this is the one picked for you. '}Make it yours in the 3D office: press <kbd>L</kbd> there. With this on, it shows where your photo does (name tags, card assignees, AgentFlow and the account menu), for the people who can see your photo today.</p>
     <p data-avatar-status role="status" aria-live="polite"></p></div>`;
 }
+export async function setAvatarPortrait(on){
+  const r=await fetch('/api/me/avatar',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({usePortrait:on})});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Could not save that.');
+  applyAvatar(d);
+}
 async function setUsePortrait(panel,on){
   const status=panel.querySelector('[data-avatar-status]'),box=panel.querySelector('[data-avatar-use]');
   if(box)box.disabled=true;if(status)status.textContent='Saving…';
   try{
-    const r=await fetch('/api/me/avatar',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({usePortrait:on})});
-    const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Could not save that.');
-    applyAvatar(d);
+    await setAvatarPortrait(on);
     const s=dlg?.querySelector('[data-avatar-status]');if(s)s.textContent=on?'Your avatar shows instead of your photo.':'Your photo shows again.';
   }catch(e){if(status)status.textContent=e.message||'Could not save that.';if(box){box.checked=!on;box.disabled=false}}
 }

@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice,isMe,opidLink} from './ui.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice,opidLink} from './ui.js';
 import {store,chart,change,checkpoint,commit,snapshot,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
@@ -9,15 +9,16 @@ import {peopleOf} from './agentflow-core.js';
 import {swap,busy,unskeletonize,panel,panelReset,popOut,fadeIn} from './motion.js';
 import {TABS,parseHash,hashFor,clampRatio,openSplit,closePane,clickTab,revealTab,cleanSplit,NARROW,DIVIDER} from './split-core.js';
 import {logoMark} from './logo-mark.js';
-import {accountHtml,sessionUser,signInMode,sessionKnown} from './account.js';
+import {accountHtml,sessionUser,signInMode,sessionKnown,canUseCustomPortrait,setAvatarPortrait} from './account.js';
 import {startOpidPhotos,photosMaybe,linkCard} from './opid-photos.js';
+import {findLinkPrompt,matchesLinkEmail} from './opid-prompt-core.js';
 import {startInbox} from './inbox.js';
 import {startSync,synced,currentEnv,switchEnvironment} from './sync.js';
 import {startChat,sendRecord,chatAvailable,chatRendered} from './chat.js';
 import {localTarget,refFromSearch,validRef} from './chat-core.js';
 import {loadDevlog} from './devlog.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {onPrefs,syncPrefs} from './prefs.js';
+import {getPref,setPref,onPrefs,syncPrefs} from './prefs.js';
 import {startOfficeAlerts} from './office-alerts.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
@@ -521,15 +522,86 @@ function opidHtml(n,l){
   const link=opidLink(n);
   if(link==='me')return `<p class="pp-note opid-note">Linked to your OneProfileID. This card shows your current account photo from OneProfileID.</p>${reach?`<div class="opid-acts">${btn('opidUnlink','Unlink from my OneProfileID')}</div>`:''}`;
   if(link==='other')return `<p class="pp-note opid-note">Linked to this person's OneProfileID. The photo comes from their account and updates when they change it.</p>${edit?`<div class="opid-acts">${btn('opidUnlink','Unlink')}</div>`:''}`;
-  return reach&&isMe(n)&&n.email&&!l?.stub?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
+  return reach&&matchesLinkEmail(n,sessionUser()?.email)&&!l?.stub&&!l?.pending?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
 }
 async function setOpidLink(id,link){
   if(linking)return;linking=true;renderInspector();
+  paintLinkPrompts();
   const r=await linkCard(id,link);
   linking=false;renderInspector();
+  paintLinkPrompts();
   if(!r.ok){toast(r.error,true);return}
   fadeIn([...$('#inspector').querySelectorAll('.opid-note,.opid-acts')]);
   toast(link?'Linked to your OneProfileID':'Unlinked from OneProfileID');
+}
+
+const LINK_DISMISS_PREF='photoLinkDismissed',LINK_DISMISS_MS=7*864e5;
+let linkPromptReady=false,savingPortrait=false;
+const promptMarkup=new WeakMap();
+function linkPromptContext(){
+  const user=sessionUser(),db=store.db,env=db.environment?.id;
+  if(!linkPromptReady||signInMode()!=='opid'||!user?.id||!env)return null;
+  if(!db.opened&&db.environment.ownerEmail?.toLowerCase()!==user.email?.toLowerCase())return null;
+  const key=JSON.stringify([user.id,env]);
+  if(Number(getPref(LINK_DISMISS_PREF)?.[key])+LINK_DISMISS_MS>Date.now())return null;
+  const prompt=findLinkPrompt(db,user);
+  return prompt&&{...prompt,key};
+}
+function paintLinkPrompt(host){
+  if(!host)return;
+  const p=linkPromptContext();
+  let html='';
+  if(p){
+    const card=p.cards[0],mismatch=p.kind==='mismatch',multiple=p.cards.length>1,link=p.kind==='link';
+    const title=mismatch?`Is ${esc(card.name)} you?`:'Show your photo on boards?';
+    const detail=mismatch?`The email on ${multiple?'these cards is':'this card is'} different from your sign-in. Ask the owner to update it${p.cards.some(c=>!c.shared)?', or update it yourself if you can edit the card':''}.`
+      :link?`Your card <b>${esc(card.name)}</b> isn’t linked to your account.`:'Several person cards match your email. Choose which card to open.';
+    const avatar=canUseCustomPortrait(),disabled=linking||savingPortrait?' disabled':'';
+    html=`<div class="opid-prompt-copy"><strong>${title}</strong> <span>${detail}</span>${link&&avatar?'<span class="opid-prompt-avatar-note">Linking with your avatar also changes your account portrait.</span>':''}</div>
+      <div class="opid-prompt-actions">
+        ${multiple?`<select data-native aria-label="Choose a person card"><option value="">Choose a card…</option>${p.cards.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} · ${esc(c.chart)}</option>`).join('')}</select>`:''}
+        <button type="button" class="txt${link?' primary':''}" data-link-prompt="${link?'link':'open'}"${multiple?' disabled':disabled}>${link?'Link my card':mismatch?'Open card':'Open my card'}</button>
+        ${avatar?`<button type="button" class="txt opid-prompt-avatar" data-link-prompt="avatar"${disabled}>Use my avatar instead</button>`:''}
+        <button type="button" class="txt" data-link-prompt="dismiss"${disabled}>Not now</button>
+      </div>`;
+  }
+  const prev=promptMarkup.get(host),sameContext=prev?.key===p?.key;
+  if(sameContext&&prev?.html===html)return;
+  const selection=sameContext?host.querySelector('select')?.value:'';
+  promptMarkup.set(host,{key:p?.key,html});host.innerHTML=html;
+  const picker=host.querySelector('select');
+  if(picker){
+    const open=host.querySelector('[data-link-prompt="open"]');
+    picker.value=p.cards.some(c=>c.id===selection)?selection:'';
+    picker.onchange=()=>{open.disabled=!picker.value};
+    open.disabled=!picker.value;
+  }
+  host.onclick=async e=>{
+    const action=e.target.closest('[data-link-prompt]')?.dataset.linkPrompt;
+    if(!action||!p||linkPromptContext()?.key!==p.key)return;
+    const card=picker?p.cards.find(c=>c.id===picker.value):p.cards[0];
+    if(action==='dismiss'){
+      const now=Date.now(),all=Object.fromEntries(Object.entries(getPref(LINK_DISMISS_PREF)||{}).filter(([,at])=>Number(at)+LINK_DISMISS_MS>now));
+      setPref(LINK_DISMISS_PREF,{...all,[p.key]:now},{immediate:true});
+    }else if(action==='open'&&card){
+      af.closeOffice();openNode(card.id);
+    }else if(action==='link'){
+      await setOpidLink(card.id,true);
+    }else if(action==='avatar'){
+      if(p.kind!=='link'){af.closeOffice();window.flowSettings.open('account');return}
+      savingPortrait=true;paintLinkPrompts();
+      try{
+        await setAvatarPortrait(true);
+        const next=linkPromptContext();
+        if(next?.key===p.key&&next.cards.some(c=>c.id===card.id)&&next.kind!=='mismatch')await setOpidLink(card.id,true);
+      }catch(err){toast(err.message,true)}
+      finally{savingPortrait=false;paintLinkPrompts()}
+    }
+  };
+}
+function paintLinkPrompts(){
+  if(isOpen('devops')||dv.boardLent())paintLinkPrompt($('#devopsView .opid-prompt'));
+  paintLinkPrompt($('.of-stage > .opid-prompt'));
 }
 function photoHtml(n,shared){
   const src=personPhoto(n),link=opidLink(n),mine=!link&&!n.image&&!!src,me=sessionUser();
@@ -723,6 +795,7 @@ function render(){
   // The 3D office's main whiteboard is the DevOps board itself (devops.js lendBoard): it stays live there.
   if(dv.boardLent()&&!openTabs().includes('devops'))dv.render();
   renderInspector();dv.renderHostedCards();tl.renderHostedEditors();photosMaybe();chatRendered();
+  paintLinkPrompt($('.of-stage > .opid-prompt'));
   // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
   const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}
   firstRun({store,replaceDb,envId:currentEnv(),signedIn:!!sessionUser()});
@@ -748,11 +821,12 @@ setPeopleSource(()=>peopleOf(store.db||{}));
 startOpidPhotos({db:()=>store.db,render:()=>render()});
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());
+window.addEventListener('flow:portrait-option',paintLinkPrompts);
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
 tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
-dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
+dv.mount({rerender:render,paintLinkPrompt,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
 // AgentFlow agents and workflows link to cards and timeline items.
-af.mount({rerender:render,toast,officeOverlays:{
+af.mount({rerender:render,toast,paintLinkPrompt,officeOverlays:{
   card:dv.openCardModal,item:tl.openItemModal,projects:tl.openProjectsModal,agent:af.openAgentModal,queue:af.openQueueModal,
   leaveForAgent:id=>toAgentflow(()=>af.focus({agentId:id})),
 },openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
@@ -783,8 +857,11 @@ async function openRef(ref,open=null){
   }
   if(!id){toast(NOT_HERE,true);return}
   if(ref.kind==='card'){toDevops(()=>dv.focus({cardId:id}));return}
+  openNode(id);
+}
+function openNode(id){
   const c=store.db.charts.find(x=>x.nodes.some(n=>n.id===id));if(!c){toast(NOT_HERE,true);return}
-  if(isSplit()&&!isOpen('chart'))reveal('chart');else if(!isOpen('chart')){history.pushState(null,'',location.pathname);setTab('chart')}
+  if(isSplit())reveal('chart');else if(!isOpen('chart')){history.pushState(null,'',location.pathname);setTab('chart')}
   if(store.db.active!==c.id){store.db.active=c.id;save()}
   selected=id;connecting=false;source=null;render();
   // Centre the card once the MindMap is laid out (a tab change may still be animating).
@@ -837,5 +914,6 @@ startChat({openLink:openRef,toast});
 
 initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();openOfficeLink();
 // Rebinding a shortcut re-renders, so tooltips show the new keys.
-onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}});syncPrefs();
+onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}else if(k===LINK_DISMISS_PREF)paintLinkPrompts()});
+Promise.all([synced(),syncPrefs()]).then(()=>{linkPromptReady=true;paintLinkPrompts()});
 document.body.removeAttribute('aria-busy');

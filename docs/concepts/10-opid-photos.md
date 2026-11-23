@@ -9,3 +9,7 @@ When Flow runs with OneProfileID sign-in, a person card can show that person's c
 - **Who is shown.** A linked photo is looked up only for people who have opened that environment with OneProfileID, as its owner or through a share, and who still have access. OneProfileID applies its own rules as well. Photos are fetched when Flow opens and when its window regains focus, cached for a minute, and never saved into the workspace or its history.
 - **Who sees the link.** Only the environment's owner sees which account a card is linked to. Share recipients and other readers see that a card is linked, and see their own link. The link is stored as `opidUser` (the OneProfileID account id) on the person card.
 - **The server enforces it.** On every save (the app, the API, the CLI and MCP) a new or changed `opidUser` is kept only when it is the saving person's own OneProfileID account id; anything else is refused and the previous value stays. A duplicated card is never linked. API keys and the owner token can keep or remove links but never add one. In local single-user mode there is nothing to link.
+
+## Prompt to link
+
+DevOps and the 3D office can suggest **Link my card** when a person card in the current environment has your sign-in email. If several cards match, choose one to open. If only your name matches a card with a different email, open it to see which card needs updating. If you made a custom avatar, you can choose it as your account portrait. **Not now** hides the prompt for your account in that environment for a week. You choose whether to link.

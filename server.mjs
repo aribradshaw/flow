@@ -328,7 +328,7 @@ async function project(envId,user,data){
   const own=stripLinked(data);let d=structuredClone(own);const sig=[],meta=[],conflicts=[],since=new Date(Date.now()-CONFLICT_MS).toISOString();
   for(const {share:s,home} of user.token?[]:await attachedShares(envId,user)){
     const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
-    const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),pending});
+    const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),viewerName:user.name,pending});
     d=core.applyProjection(d,p);seenBy(s.ownerEnv,user);
     // Decided in the last week (the browser tells the recipient once): approved, denied.
     const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
@@ -381,7 +381,7 @@ const shareNow=async s=>{const cur=await shares.get(s.id).catch(()=>null);return
 // What an opened environment serves: {data, shared (a signature, as for placed shares), conflicts, rev (the owner's)}.
 async function openedView(envId,user,{share:s,home}){
   const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
-  const p=core.openedProjection(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),pending});
+  const p=core.openedProjection(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),viewerName:user.name,pending});
   const name=home.name||home.data.environment?.name||'',data=core.openedDb(p,{name});
   const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
     .map(x=>({id:x.id,status:x.status,at:x.decidedAt,titles:core.proposalPreview(inScope(home.data,s),x).map(r=>r.title).slice(0,5)}));
@@ -870,10 +870,15 @@ async function opidApi(req,res){
     if(hit&&Date.now()-hit.at<PHOTO_TTL){json(res,200,hit.photos);return true}
     let photos={};
     try{
-      const w=await workspaces.get(envId);
-      if(w?.data&&!w.archivedAt){
-        const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
-        if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await attachedShares(envId,user):[]}));
+      if(core.parseOpenedEnv(envId)){
+        const opened=await openedShare(envId,user);
+        if(opened?.share)photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,shared:[opened]}));
+      }else{
+        const w=await workspaces.get(envId);
+        if(w?.data&&!w.archivedAt){
+          const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
+          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await attachedShares(envId,user):[]}));
+        }
       }
     }catch(err){console.error('opid photos failed',err?.message);photos={}}
     photoCache.set(key,{at:Date.now(),photos});
@@ -885,17 +890,27 @@ async function opidApi(req,res){
       if(!me)return json(res,400,{error:'Sign in with OneProfileID to link a card to your account.'});
       const envId=b?.env,nodeId=b?.nodeId;
       if(!ENV_ID.test(String(envId||''))||typeof nodeId!=='string'||!nodeId||nodeId.length>300||typeof b.link!=='boolean')return json(res,400,{error:'Expected {env, nodeId, link}'});
-      const w=await workspaces.get(envId);
-      if(!w?.data||w.archivedAt||!sameEmail(w.owner,user.email))return json(res,404,{error:'Not found'});
-      // A shared card (sh.<share>.<id>) is linked in its owner's workspace, if the share is placed here.
-      const p=core.parseLinkedId(nodeId);let share=null,target={env:envId,id:nodeId};
-      if(p){
-        const a=(await attachedShares(envId,user)).find(x=>x.share.id===p.shareId);
-        if(!a||!core.resolveScope(a.home.data,a.share).nodeIds.includes(p.id))return json(res,404,{error:'Not found'});
-        share=a.share;target={env:share.ownerEnv,id:p.id};
+      const p=core.parseLinkedId(nodeId),virtual=core.parseOpenedEnv(envId);
+      let share=null;
+      if(virtual){
+        const opened=await openedShare(envId,user);
+        if(!opened?.share||p?.shareId!==virtual)return json(res,404,{error:'Not found'});
+        share=opened.share;
+      }else{
+        const w=await workspaces.get(envId);
+        if(!w?.data||w.archivedAt||!sameEmail(w.owner,user.email))return json(res,404,{error:'Not found'});
+        if(p){
+          share=(await attachedShares(envId,user)).find(x=>x.share.id===p.shareId)?.share;
+          if(!share)return json(res,404,{error:'Not found'});
+        }
       }
+      const target={env:share?.ownerEnv||envId,id:p?.id||nodeId};
       for(let attempt=0;attempt<3;attempt++){
         const home=await workspaces.get(target.env);if(!home?.data||home.archivedAt)return json(res,404,{error:'Not found'});
+        if(share){
+          share=await shareNow(share);
+          if(!share||!core.resolveScope(home.data,share).nodeIds.includes(target.id))return json(res,404,{error:'Not found'});
+        }
         const data=structuredClone(home.data),n=findNode(data,target.id);
         if(!n||n.type!=='person')return json(res,404,{error:'Not found'});
         const cur=validOpidUser(n.opidUser)?n.opidUser:'';

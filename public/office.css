@@ -95,6 +95,10 @@
 /* Agent bridge setup */
 .of-connect-callout{position:absolute;z-index:2;top:14px;left:14px;display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;max-width:calc(100% - 28px);padding:9px 10px 9px 13px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 3px 12px #17261c17;font-size:13px}
 .of-connect-callout[hidden],.of-connect [hidden],.of-connect-link[hidden]{display:none}
+.of-stage > .opid-prompt{position:absolute;z-index:2;top:14px;right:14px;width:min(365px,calc(100% - 28px));box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 3px 12px #17261c17}
+.of-stage > .opid-prompt strong{display:block;margin-bottom:2px}
+.of-board-focus .of-stage > .opid-prompt,.of-replaying .of-stage > .opid-prompt{display:none}
+@media(max-width:720px){.of-stage > .opid-prompt{top:66px}}
 .of-connect-link{white-space:nowrap}
 .of-connect{width:min(650px,calc(100% - 24px));max-height:calc(100% - 24px);padding:0;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 70px #15211945}
 .of-connect::backdrop{background:#14231c66}
