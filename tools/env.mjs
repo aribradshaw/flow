@@ -25,10 +25,14 @@ import {merge3,same,size} from '../public/sync-core.js';
 
 try{process.loadEnvFile(fileURLToPath(new URL('../.env',import.meta.url)))}catch{}
 const [cmd,...rest]=process.argv.slice(2);
-const opt=k=>{const i=rest.indexOf('--'+k);return i>=0?rest[i+1]:undefined},flag=k=>rest.includes('--'+k);
+const opt=k=>{const i=rest.indexOf('--'+k),v=i>=0?rest[i+1]:undefined;return v===undefined||v.startsWith('--')?undefined:v},flag=k=>rest.includes('--'+k);
 const fail=m=>{console.error(m);process.exit(1)};
 const token=process.env.FLOW_SYNC_TOKEN||'';
-const env=opt('env')||'default-workspace';
+// push without --env goes to the environment the file was pulled from (its environment.id), not to
+// default-workspace: a forgotten --env must never overwrite another environment.
+const fileEnv=cmd==='push'&&opt('from')?(()=>{try{const id=JSON.parse(readFileSync(opt('from'),'utf8'))?.environment?.id;return typeof id==='string'?id:''}catch{return ''}})():'';
+const env=opt('env')||fileEnv||'default-workspace';
+if(cmd==='push'&&opt('env')&&fileEnv&&opt('env')!==fileEnv)console.error(`Note: ${opt('from')} was pulled from ${fileEnv}; pushing it to ${opt('env')} as you asked.`);
 if(!/^[A-Za-z0-9-]{1,64}$/.test(env))fail('--env: an environment id');
 if(token.length<32)fail('Set FLOW_SYNC_TOKEN (at least 32 characters) in the environment or .env');
 const base=(cmd==='pull'?opt('from'):opt('to'))?.replace(/\/+$/,'');
