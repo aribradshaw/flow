@@ -3,7 +3,7 @@
 // Geometries and materials are shared (one material per colour), and the org is drawn with one
 // InstancedMesh per part, so forty agents cost a handful of draw calls. A person is one draw call.
 import * as THREE from './vendor/three/three.module.min.js';
-import {createAvatar,animateAvatar,disposeAvatars} from './office-avatar.js';
+import {createAvatar,animateAvatar,disposeAvatars,paceAvatars} from './office-avatar.js';
 import {defaultLook,hashOf} from './office-look-core.js';
 
 const ROBOT=['#5fa8d3','#7cb980','#e9a23b','#c86b5c','#8f7cc3','#4fb3a5','#d97fa0','#9aa63a'];
@@ -34,6 +34,8 @@ export function makeHuman(look,{dim=false,shadow=true}={}){
 }
 // animateHuman(rig, t, state): the same as figure.userData.update(t, state), for callers that keep the rig.
 export const animateHuman=animateAvatar;
+// Once per drawn frame, with its length in seconds: on a slow device people further off use their light meshes.
+export const paceFigures=paceAvatars;
 
 // ---------- the AgentFlow org: robots, team tables, automations (instanced) ----------
 // items: [{id, kind:'agent'|'team'|'automation', x, z, dim}] -> {group, pick(object, instanceId) -> id,

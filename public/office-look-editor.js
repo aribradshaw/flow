@@ -16,16 +16,16 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '
 // Tabs: which fields each shows, and where the preview looks while it is open ([target height, distance]).
 const TABS = [
   {id: 'body', label: 'Body', fields: ['skin', 'build', 'height'], view: [0.92, 4.3]},
-  {id: 'face', label: 'Face', fields: ['eyes', 'eyeColor', 'brows', 'nose', 'mouth', 'beard', 'glasses', 'freckles', 'blush'], view: [1.5, 1.55]},
-  {id: 'hair', label: 'Hair', fields: ['hair', 'hairColor'], view: [1.5, 1.9]},
-  {id: 'hat', label: 'Hat', fields: ['hat', 'hatColor'], view: [1.52, 1.9]},
+  {id: 'face', label: 'Face', fields: ['eyes', 'eyeColor', 'brows', 'nose', 'mouth', 'beard', 'glasses', 'freckles', 'blush'], view: [1.5, 2.1]},
+  {id: 'hair', label: 'Hair', fields: ['hair', 'hairColor'], view: [1.52, 2.5]},
+  {id: 'hat', label: 'Hat', fields: ['hat', 'hatColor'], view: [1.56, 2.5]},
   {id: 'top', label: 'Top', fields: ['top', 'topColor', 'pattern', 'accent'], view: [1.12, 2.5]},
   {id: 'bottoms', label: 'Bottoms', fields: ['bottoms', 'bottomsColor'], view: [0.55, 2.8]},
   {id: 'shoes', label: 'Shoes', fields: ['shoes', 'shoesColor'], view: [0.28, 2.2]},
 ];
 // How an option's picture is framed: [target height, distance, yaw].
-const THUMB_VIEW = {build: [0.92, 4.1, 0.35], height: [0.92, 4.4, 0.35], eyes: [1.52, 1.05, 0], brows: [1.54, 1.05, 0], nose: [1.5, 1.05, 0.5], mouth: [1.47, 1.05, 0],
-  beard: [1.47, 1.3, 0.35], glasses: [1.52, 1.25, 0.35], hair: [1.52, 1.75, 0.5], hat: [1.55, 1.8, 0.5], top: [1.1, 2.3, 0.35], pattern: [1.1, 2.1, 0.2], bottoms: [0.52, 2.6, 0.35], shoes: [0.12, 1.25, 0.7]};
+const THUMB_VIEW = {build: [0.92, 4.1, 0.35], height: [0.92, 4.4, 0.35], eyes: [1.52, 0.95, 0], brows: [1.54, 0.95, 0], nose: [1.5, 1.0, 0.55], mouth: [1.47, 0.95, 0],
+  beard: [1.47, 1.3, 0.35], glasses: [1.52, 1.25, 0.35], hair: [1.53, 1.5, 0.5], hat: [1.57, 1.55, 0.5], top: [1.1, 2.3, 0.35], pattern: [1.1, 2.1, 0.2], bottoms: [0.52, 2.6, 0.35], shoes: [0.12, 1.25, 0.7]};
 const THUMB = 144;
 
 export function openLookEditor({key, name = 'You', look, host = document.body, save, toast = () => {}, onClose = () => {}}) {

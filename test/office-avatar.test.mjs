@@ -2,7 +2,7 @@
 // triangle budget, the mesh is sound, and the animation hook other modules call keeps working.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createAvatar, animateAvatar, avatarStats, TRI_BUDGET, LOD_TRI_BUDGET, LOD_DISTANCE} from '../public/office-avatar.js';
+import {createAvatar, animateAvatar, avatarStats, avatarLodDistance, setAvatarLodDistance, paceAvatars, disposeAvatars, TRI_BUDGET, LOD_TRI_BUDGET, LOD_DISTANCE} from '../public/office-avatar.js';
 import {makeHuman, animateHuman, lookFor, hashOf} from '../public/office-figures.js';
 import {LOOK_OPTIONS, defaultLook, randomLook} from '../public/office-look-core.js';
 
@@ -59,6 +59,30 @@ test('one person is one skinned mesh per level of detail, on one shared material
   assert.equal(s.tris, ma[0].geometry.index.count / 3); assert.equal(s.lodTris, ma[1].geometry.index.count / 3);
   assert.ok(s.bones <= 24);
   for (const f of [a, b, dim]) f.userData.dispose();
+});
+
+test('on a slow device the full mesh is drawn less far, and comes back when frames are quick again', () => {
+  disposeAvatars();
+  const a = createAvatar(defaultLook('ann')), fixed = createAvatar(defaultLook('bo'), {lodDistance: 15});
+  const far = f => { let lod = null; f.traverse(o => { if (o.isLOD) lod = o; }); return lod.levels[1].distance; };
+  assert.equal(avatarLodDistance(), LOD_DISTANCE); assert.equal(far(a), 15);
+  for (let i = 0; i < 80; i++) paceAvatars(1 / 60);
+  assert.equal(far(a), 15, 'a quick device keeps full detail');
+  paceAvatars(3); paceAvatars(NaN); paceAvatars(-1);
+  assert.equal(far(a), 15, 'a stall or a hidden tab is not a slow device');
+  for (let i = 0; i < 110; i++) paceAvatars(1 / 25);
+  assert.equal(far(a), 9, 'about two seconds of long frames');
+  for (let i = 0; i < 400; i++) paceAvatars(1 / 25);
+  assert.equal(far(a), 4, 'and nearer still if that was not enough');
+  for (let i = 0; i < 2000; i++) paceAvatars(1 / 25);
+  assert.equal(far(a), 4, 'never below a few metres: whoever you stand next to stays detailed');
+  assert.equal(far(fixed), 15, 'a figure with its own distance (the editor) is left alone');
+  const late = createAvatar(defaultLook('cy')); assert.equal(far(late), 4, 'someone who arrives now starts there');
+  for (let i = 0; i < 3000; i++) paceAvatars(1 / 60);
+  assert.equal(far(a), 15); assert.equal(far(late), 15);
+  for (const f of [a, fixed, late]) f.userData.dispose();
+  setAvatarLodDistance(99); assert.equal(avatarLodDistance(), LOD_DISTANCE);
+  disposeAvatars();
 });
 
 test('every mesh is sound: finite positions, unit normals, weights that sum to one, indices in range', () => {

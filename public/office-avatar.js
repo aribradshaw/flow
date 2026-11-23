@@ -137,10 +137,10 @@ const HEAD = {z: headZ, n: (x, y) => headN(x, y, headZ(x, y))};
 const EX = 0.073, EY = HY - 0.014, MY = HY - 0.112, NY = HY - 0.064;
 
 const BUILDS = {
-  slim: {ch: 0.93, wa: 0.9, hip: 0.94, dp: 0.92, limb: 0.9},
+  slim: {ch: 0.89, wa: 0.84, hip: 0.9, dp: 0.88, limb: 0.87},
   regular: {ch: 1, wa: 1, hip: 1, dp: 1, limb: 1},
-  broad: {ch: 1.14, wa: 1.07, hip: 1.03, dp: 1.07, limb: 1.13},
-  soft: {ch: 1.06, wa: 1.25, hip: 1.14, dp: 1.24, limb: 1.1},
+  broad: {ch: 1.2, wa: 1.1, hip: 1.04, dp: 1.1, limb: 1.18},
+  soft: {ch: 1.08, wa: 1.32, hip: 1.2, dp: 1.3, limb: 1.14},
 };
 const HEIGHTS = {short: 0.94, medium: 1, tall: 1.055};
 // How much a top adds to the body under it, and where its sleeves and hem end.
@@ -155,7 +155,7 @@ const TOPS = {
 function dimsOf(look) {
   const d = BUILDS[look.build] || BUILDS.regular;
   // The body's half width and half depth at each height: [y, rx, rz].
-  const body = [[0.805, 0.145 * d.hip, 0.105 * d.dp], [0.85, 0.184 * d.hip, 0.126 * d.dp], [0.9, 0.19 * d.hip, 0.132 * d.dp], [0.96, 0.172 * d.wa, 0.124 * d.dp],
+  const body = [[0.805, 0.13 * d.hip, 0.1 * d.dp], [0.85, 0.172 * d.hip, 0.122 * d.dp], [0.9, 0.18 * d.hip, 0.128 * d.dp], [0.96, 0.17 * d.wa, 0.123 * d.dp],
     [1.03, 0.166 * d.wa, 0.122 * d.dp], [1.12, 0.174 * (d.wa + d.ch) / 2, 0.128 * d.dp], [1.22, 0.188 * d.ch, 0.134 * d.dp], [1.3, 0.182 * d.ch, 0.124 * d.dp],
     [1.345, 0.126 * d.ch, 0.092], [1.385, 0.064, 0.062]];
   const bodyAt = y => {
@@ -163,7 +163,7 @@ function dimsOf(look) {
     for (let i = 1; i < body.length; i++) if (y <= body[i][0]) { const a = body[i - 1], b = body[i], t = (y - a[0]) / (b[0] - a[0]); return [y, lerp(a[1], b[1], t), lerp(a[2], b[2], t)]; }
     return body.at(-1);
   };
-  return {...d, body, bodyAt, armX: 0.182 * d.ch + 0.026, legX: 0.094 * d.hip, scale: HEIGHTS[look.height] || 1, top: TOPS[look.top] || TOPS.tee};
+  return {...d, body, bodyAt, armX: 0.182 * d.ch + 0.018, legX: 0.094 * d.hip, scale: HEIGHTS[look.height] || 1, top: TOPS[look.top] || TOPS.tee};
 }
 const TE = 2.3; // the torso is a little boxier than the head
 function torsoSurface(D, add) {
@@ -242,11 +242,11 @@ function buildFace(B, L, K, lod) {
     const cx = s * EX, cy = EY;
     if (lod) { fan(B, HEAD, ell(cx, cy, 0.026, 0.034, 4), eyeInk, bone, 0.012); return; }
     if (L.eyes === 'almond') {
-      fan(B, HEAD, ell(cx, cy, 0.036, 0.0235, 10, 1.7), WHITE, bone, 0.006);
-      fan(B, HEAD, ell(cx, cy - 0.001, 0.0215, 0.0225, 8), mul(col(L.eyeColor), 1.2), bone, 0.008);
-      fan(B, HEAD, ell(cx, cy - 0.001, 0.0115, 0.012, 6), INK, bone, 0.0095);
+      fan(B, HEAD, ell(cx, cy, 0.034, 0.0255, 10, 1.8), WHITE, bone, 0.006);
+      fan(B, HEAD, ell(cx, cy - 0.0005, 0.0235, 0.0245, 10), mix(col(L.eyeColor), INK, 0.12), bone, 0.008);
+      fan(B, HEAD, ell(cx, cy - 0.0005, 0.0135, 0.014, 8), INK, bone, 0.0095);
       // The upper lid.
-      const lid = []; for (let i = 0; i <= 6; i++) { const a = Math.PI - i / 6 * Math.PI, x = cx + spow(Math.cos(a), 2 / 1.7) * 0.038, y = cy + spow(Math.sin(a), 2 / 1.7) * 0.0245; lid.push([[x, y + 0.005], [x, y - 0.0035]]); }
+      const lid = []; for (let i = 0; i <= 6; i++) { const a = Math.PI - i / 6 * Math.PI, x = cx + spow(Math.cos(a), 2 / 1.8) * 0.036, y = cy + spow(Math.sin(a), 2 / 1.8) * 0.0265; lid.push([[x, y + 0.006], [x, y - 0.004]]); }
       strip(B, HEAD, lid, lash, bone, 0.0105);
     } else if (L.eyes === 'sleepy') {
       const top = cy + 0.008;
@@ -308,7 +308,7 @@ function buildFace(B, L, K, lod) {
   }
   // Facial hair.
   const hairC = K.hair, mz = headZ(0, MY + 0.025);
-  const stache = big => { for (const s of [1, -1]) ball(B, [0, 0, 0], big ? [0.031, 0.013, 0.014] : [0.025, 0.011, 0.012], mul(hairC, 0.95), [BI.head], {sides: 5, stacks: 3, m: new THREE.Matrix4().makeRotationZ(s * -0.22).setPosition(s * (big ? 0.026 : 0.022), MY + 0.027, mz + 0.004)}); };
+  const stache = big => { for (const s of [1, -1]) ball(B, [0, 0, 0], big ? [0.033, 0.014, 0.015] : [0.026, 0.012, 0.013], mul(hairC, lum(hairC) > 0.3 ? 0.66 : 0.85), [BI.head], {sides: 5, stacks: 3, m: new THREE.Matrix4().makeRotationZ(s * -0.22).setPosition(s * (big ? 0.026 : 0.022), MY + 0.027, mz + 0.004)}); };
   if (L.beard === 'mustache') stache(true);
   if (L.beard === 'goatee' || L.beard === 'full') {
     stache(false);
@@ -348,8 +348,8 @@ const HAIR = {
   short: {vol: 0.024, crown: 0.012, tf: 0.5, ts: -0.02, tb: -0.5, tuft: [0.015, 0.13, 0.05, 0.08, -0.12]},
   buzz: {vol: 0.01, tf: 0.56, ts: 0.1, tb: -0.42, scalp: 0.3},
   sidepart: {vol: 0.027, crown: 0.01, tf: 0.48, ts: -0.06, tb: -0.52, sweep: 0.2, lean: 0.012, tuft: [0.05, 0.14, 0.05, 0.085, -0.3]},
-  curly: {vol: 0.05, tf: 0.5, ts: -0.14, tb: -0.56, bump: 0.02, curls: 7},
-  afro: {vol: 0.105, tf: 0.47, ts: -0.12, tb: -0.5, bump: 0.012, rows: 9, round: 1},
+  curly: {vol: 0.05, tf: 0.5, ts: -0.14, tb: -0.52, rows: 8, round: [0.218, 0.2, 0.218, 0.03, -0.012, 0.2, 1.2, 2.05]},
+  afro: {vol: 0.105, tf: 0.47, ts: -0.12, tb: -0.5, rows: 9, round: [0.268, 0.252, 0.264, 0.045, -0.02, 0.085, 1.3, 2.25]},
   long: {vol: 0.026, tf: 0.5, ts: -0.1, tb: -0.1, sweep: 0.16, drape: {from: 0.38, side: 1.37, back: 1.2, flare: 0.05, curl: 0.12}, rows: 9},
   bob: {vol: 0.032, tf: 0.3, ts: -0.1, tb: -0.1, wave: 0.03, drape: {from: 0.5, side: 1.435, back: 1.42, flare: 0.04, curl: 0.4}, rows: 8},
   ponytail: {vol: 0.017, tf: 0.55, ts: 0.0, tb: -0.46, tail: true},
@@ -383,8 +383,10 @@ function buildHair(B, L, K, lod) {
       const under = t => hat !== null && t > hatLine(a, hat) - 0.04;
       if (S.round) {
         // A ball of hair round the head: the face looks out of its lower front.
-        const phi = u * lerp(1.3, 2.25, smooth(0.5 - f * 0.5)), rr = (1 + 0.07 * (noise(k * 1.3, Math.round(u * R) * 2.1) - 0.5)) * (hat !== null && Math.cos(phi) > 0.25 ? 0.72 : 1);
-        p = [Math.sin(phi) * Math.cos(a) * 0.265 * rr, HY + 0.045 + Math.cos(phi) * 0.25 * rr, -0.02 + Math.sin(phi) * Math.sin(a) * 0.262 * rr];
+        const [rx, ry, rz, cy, cz, lump, front, back] = S.round, phi = u * lerp(front, back, smooth(0.5 - f * 0.5));
+        // Lumps: every other point of the ball stands out a little, so it catches the light in clumps.
+        const j = Math.round(u * R), rr = (1 + lump * (((k + j) % 2 ? 0.5 : -0.5) + 0.5 * (noise(k * 1.3, j * 2.1) - 0.5))) * (hat !== null && Math.cos(phi) > 0.25 ? 0.72 : 1);
+        p = [Math.sin(phi) * Math.cos(a) * rx * rr, HY + cy + Math.cos(phi) * ry * rr, cz + Math.sin(phi) * Math.sin(a) * rz * rr];
       } else if (u <= uh || !dLen) {
         const q = dLen ? u / uh : u, t = Math.cos(Math.acos(clamp(tH, -1, 1)) * q);
         off = vol * (dLen ? 1 : 0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, q * 1.08)));
@@ -407,16 +409,12 @@ function buildHair(B, L, K, lod) {
   }
   const shell = [cols, ...rows.slice(1).reverse()];
   shell[1].cut = false;
-  grid(B, shell, {poleT: {p: S.round ? [0, HY + 0.045 + 0.25 * (hat !== null ? 0.72 : 1), -0.02] : headPoint(Math.PI / 2, 1, hat !== null ? 0.004 : vol * 0.55 + (S.crown || 0)), c: mul(base, 1.07), b: [BI.head]}});
+  grid(B, shell, {poleT: {p: S.round ? [0, HY + S.round[3] + S.round[1] * (hat !== null ? 0.72 : 1), S.round[4]] : headPoint(Math.PI / 2, 1, hat !== null ? 0.004 : vol * 0.55 + (S.crown || 0)), c: mul(base, 1.07), b: [BI.head]}});
   if (hat !== null && !S.tail && !S.braids) return; // a hat covers whatever stands on top
   const q = lod ? {sides: 5, stacks: 3} : {sides: 6, stacks: 4};
   if (S.tuft && hat === null) {
     const [x, up, fwd, len, tilt] = S.tuft, m = new THREE.Matrix4().makeRotationZ(tilt).setPosition(x, HY + RY * 0.86, fwd);
     ball(B, [0, 0, 0], [up, 0.05, len], mul(hc, 1.06), [BI.head], {...q, sides: lod ? 5 : 8, m});
-  }
-  if (S.curls && hat === null && !lod) for (let i = 0; i < S.curls; i++) {
-    const a = Math.PI / 2 + (i / S.curls) * Math.PI * 2 + 0.45, t = 0.55 - 0.35 * noise(i, 9) - (Math.sin(a) < 0 ? 0.3 : 0), p = headPoint(a, t, vol), r = 0.062 + 0.014 * noise(i, 4);
-    ball(B, p, [r, r * 0.9, r], mul(hc, 0.98 + 0.08 * noise(i, 6)), [BI.head], {sides: trim ? 6 : 7, stacks: 3});
   }
   if (S.bun && hat === null) {
     ball(B, [0, HY + 0.165, -0.115], [0.078, 0.07, 0.078], mul(hc, 1.03), [BI.head], {...q, sides: lod ? 5 : 8});
@@ -457,7 +455,7 @@ function buildHat(B, L, K, lod) {
   const A = lod ? 8 : 16, hc = K.hat, head = [BI.head], S = HAIR[L.hair];
   if (L.hat === 'headphones') {
     // A band over the top (clear of the hair) and a cup on each ear.
-    const top = (S ? Math.max(S.vol, 0.014) + (S.crown || 0) + (S.bump || 0) + (S.tuft ? 0.03 : 0) + (S.crest ? 0.09 : 0) + (S.bun ? 0.0 : 0) : 0) + 0.012, side = (S ? S.vol * (S.round ? 1 : 0.8) : 0) + 0.01;
+    const top = (S ? (S.round ? S.round[1] + S.round[3] - RY + 0.01 : Math.max(S.vol, 0.014) + (S.crown || 0) + (S.tuft ? 0.03 : 0) + (S.crest ? 0.09 : 0)) : 0) + 0.012, side = (S ? (S.round ? S.round[0] - RX : S.vol * 0.8) : 0) + 0.01;
     const N = lod ? 3 : 7, rows = [], rx = RX + side, ry = RY + top, cy = HY - 0.02, band = col('#2c2f36');
     for (let i = 0; i <= N; i++) {
       const ph = Math.PI * i / N, c = Math.cos(ph), s = Math.sin(ph), x = c * rx, y = cy + s * (ry + 0.02), ox = c * 0.012, oy = s * 0.012;
@@ -532,7 +530,7 @@ function buildTorso(B, L, K, D, lod) {
   const ring = (y, c, extra = 0, b = null) => { const [, rx, rz] = D.bodyAt(y); return {y, rx: rx + extra, rz: rz + extra, e: TE, c, b: b || (y < 0.9 ? hips : y < 1.02 ? [BI.spine, smooth((y - 0.9) / 0.12), BI.hips] : spine)}; };
   // The hips, in the colour of the bottoms.
   const pc = K.bottoms;
-  loft(B, (lod ? [0.805, 0.9, 0.99] : [0.805, 0.85, 0.92, 0.995]).map(y => ring(y, y > 0.95 ? mul(pc, 0.9) : pc, 0.004, y < 0.97 ? hips : null)), {sides, e: TE, capB: 0.02, capT: 0});
+  loft(B, (lod ? [0.805, 0.9, 0.99] : [0.805, 0.85, 0.92, 0.995]).map(y => ring(y, y > 0.95 ? mul(pc, 0.9) : pc, 0.004, y < 0.97 ? hips : null)), {sides, e: TE, capB: 0.012, capT: 0});
   // The top, from its hem to the neck, with its pattern as bands.
   const stripe = L.pattern === 'stripes', block = L.pattern === 'block', band = L.pattern === 'band';
   const colorAbove = y => {
@@ -569,7 +567,7 @@ function buildTorso(B, L, K, D, lod) {
   }
   if (L.top === 'hoodie') {
     // The hood bunched behind the neck, the pocket and the drawstrings.
-    ball(B, [0, 1.385, -0.07], [0.135, 0.052, 0.09], mul(top, 0.9), [BI.spine], {sides: 8, stacks: 4});
+    ball(B, [0, 1.372, -0.085], [0.1, 0.05, 0.075], mul(top, 0.9), [BI.spine], {sides: 8, stacks: 4});
     fan(B, S, [[-0.095, 1.0], [0.095, 1.0], [0.07, 1.1], [-0.07, 1.1]], mul(top, 0.86), sp, 0.004);
     for (const s of [1, -1]) strip(B, S, [[[s * 0.036 - 0.005, 1.34], [s * 0.036 - 0.005, 1.225]], [[s * 0.036 + 0.005, 1.34], [s * 0.036 + 0.005, 1.225]]], K.cord, sp, 0.005);
   }
@@ -581,7 +579,7 @@ function buildTorso(B, L, K, D, lod) {
 
 function buildArms(B, L, K, D, lod) {
   const sides = lod ? (trim ? 4 : 5) : trim ? 6 : 8, T = D.top, l = D.limb;
-  const R = [[0.865, 0.046], [0.93, 0.05], [1.01, 0.054], [ELBOW_Y, 0.056], [1.08, 0.058], [1.16, 0.062], [1.25, 0.066], [1.3, 0.064], [1.335, 0.046]];
+  const R = [[0.865, 0.046], [0.93, 0.05], [1.01, 0.054], [ELBOW_Y, 0.056], [1.08, 0.058], [1.16, 0.061], [1.25, 0.062], [1.3, 0.057], [1.335, 0.038]];
   const rAt = y => { for (let i = 1; i < R.length; i++) if (y <= R[i][0]) return lerp(R[i - 1][1], R[i][1], (y - R[i - 1][0]) / (R[i][0] - R[i - 1][0])); return R.at(-1)[1]; };
   const long = T.sleeve !== null && T.sleeve < 1, cuff = long && L.top !== 'blazer' ? K.rib : null;
   const colorAbove = y => {
@@ -647,14 +645,14 @@ function buildShoes(B, L, K, D, lod) {
     // The upper: half tubes from heel to toe, [z, half width, height].
     const prof = lod ? [[-0.08, 0.046, 0.08], [0.0, 0.06, 0.092], [0.11, 0.058, 0.055], [0.178, 0.034, 0.034]]
       : low ? [[-0.084, 0.036, 0.054], [-0.05, 0.054, 0.07], [0.0, 0.058, 0.068], [0.068, 0.06, 0.055], [0.13, 0.056, 0.044], [0.178, 0.036, 0.032]]
-        : [[-0.088, 0.04, 0.066], [-0.056, 0.056, 0.094], [0.0, 0.06, 0.1], [0.056, 0.061, 0.076], [0.118, 0.06, 0.057], [0.178, 0.04, 0.04]];
+        : [[-0.088, 0.04, 0.066], [-0.056, 0.056, 0.094], [0.0, 0.06, 0.1], [0.056, 0.062, 0.078], [0.122, 0.061, 0.062], [0.172, 0.047, 0.047]];
     const sandal = L.shoes === 'sandals', strapAt = z => z > -0.01 && z < 0.03 || z > 0.1 && z < 0.14;
     const rings = [];
     prof.forEach(([z, w, h], i) => {
-      const base = soleH - 0.004, c = sandal ? (strapAt(z) ? sc : K.skinBody) : i === prof.length - 1 || i === prof.length - 2 && L.shoes === 'sneakers' ? mix(sc, WHITE, L.shoes === 'sneakers' ? 0.75 : 0) : sc;
+      const base = soleH - 0.004, c = sandal ? (strapAt(z) ? sc : K.skinBody) : i === prof.length - 1 && L.shoes === 'sneakers' ? mix(sc, WHITE, 0.45) : sc;
       rings.push({y: z, x, z: -base, rx: w, rz: h - base, c, b: foot});
     });
-    loft(B, rings, {sides: lod ? 3 : 5, arc: [Math.PI, Math.PI * 2], m: rot, capT: 0.012, capB: 0.01});
+    loft(B, rings, {sides: lod ? 3 : 5, arc: [Math.PI, Math.PI * 2], m: rot, capT: 0.02, capB: 0.012});
     if (lod) continue;
     // The sole: the foot's outline, a little wider than the upper.
     const outline = a => 1 - 0.2 * Math.max(0, -Math.sin(a));
@@ -703,17 +701,33 @@ function materialOf(dim) {
     m = new THREE.MeshLambertMaterial({vertexColors: true, side: THREE.DoubleSide, ...(dim ? {transparent: true, opacity: 0.45, forceSinglePass: true} : {})});
     m.onBeforeCompile = shader => {
       shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>',
-        'float flowRim = pow(1.0 - saturate(dot(normalize(vViewPosition), normal)), 3.0);\n\toutgoingLight += (diffuseColor.rgb * 0.5 + vec3(0.06)) * flowRim;\n\t#include <opaque_fragment>');
+        'float flowRim = pow(1.0 - saturate(dot(normalize(vViewPosition), normal)), 2.4);\n\toutgoingLight *= mix(0.78, 1.0, smoothstep(-0.8, 0.15, normal.y));\n\toutgoingLight += (diffuseColor.rgb * 0.62 + vec3(0.07)) * flowRim * smoothstep(-0.3, 0.4, normal.y);\n\t#include <opaque_fragment>');
     };
-    m.customProgramCacheKey = () => 'flow-avatar-rim';
+    m.customProgramCacheKey = () => 'flow-avatar-rim-3';
     materials.set(dim, m);
   }
   return m;
 }
-export function disposeAvatars() { for (const m of materials.values()) m.dispose(); materials.clear(); }
+export function disposeAvatars() { for (const m of materials.values()) m.dispose(); materials.clear(); live.clear(); farFrom = LOD_DISTANCE; }
+// How far the full mesh is drawn, for everyone at once. The office brings it in when frames run long
+// (a slow tablet), so a crowd falls back to the light meshes before it drops frames.
+const live = new Set();
+let farFrom = LOD_DISTANCE;
+export const avatarLodDistance = () => farFrom;
+export function setAvatarLodDistance(d) { farFrom = clamp(d, 0.5, LOD_DISTANCE); for (const lod of live) lod.levels[1].distance = farFrom; }
+// frameSeconds: this frame's length. Call once per drawn frame; returns the distance in use.
+const pace = {slow: 0, fast: 0, avg: 1 / 60};
+export function paceAvatars(frameSeconds) {
+  if (!(frameSeconds > 0) || frameSeconds > 0.25) return farFrom; // a hidden tab or a stall is not a slow device
+  pace.avg += (frameSeconds - pace.avg) * 0.05;
+  pace.slow = pace.avg > 0.024 ? pace.slow + 1 : 0; pace.fast = pace.avg < 0.0175 ? pace.fast + 1 : 0;
+  if (pace.slow > 90 && farFrom > 4) { setAvatarLodDistance(farFrom > 9 ? 9 : 4); pace.slow = 0; }
+  else if (pace.fast > 600 && farFrom < LOD_DISTANCE) { setAvatarLodDistance(farFrom < 9 ? 9 : LOD_DISTANCE); pace.fast = 0; }
+  return farFrom;
+}
 
 // ---------- a person ----------
-export function createAvatar(look, {dim = false, lodDistance = LOD_DISTANCE} = {}) {
+export function createAvatar(look, {dim = false, lodDistance = null} = {}) {
   const root = new THREE.Group(), rig = {b: null, bind: null, s: newState(), look: null};
   let parts = null;
   function build(next) {
@@ -729,10 +743,11 @@ export function createAvatar(look, {dim = false, lodDistance = LOD_DISTANCE} = {
     const skeleton = new THREE.Skeleton(list), bindMatrix = inner.matrixWorld.clone(), material = materialOf(dim);
     const mesh = g => { const m = new THREE.SkinnedMesh(g, material); m.bind(skeleton, bindMatrix); m.raycast = () => {}; m.boundingSphere = g.boundingSphere.clone(); m.frustumCulled = true; return m; };
     const lod = new THREE.LOD(), full = mesh(hi.geometry), light = mesh(lo.geometry);
-    lod.addLevel(full, 0); lod.addLevel(light, lodDistance, 0.08);
+    lod.addLevel(full, 0); lod.addLevel(light, lodDistance ?? farFrom, 0.08);
     inner.add(lod); root.add(inner);
     parts?.dispose();
-    parts = {inner, lod, full, light, skeleton, tris: hi.tris, lodTris: lo.tris, dispose() { inner.removeFromParent(); hi.geometry.dispose(); lo.geometry.dispose(); skeleton.dispose(); }};
+    if (lodDistance === null) live.add(lod);
+    parts = {inner, lod, full, light, skeleton, tris: hi.tris, lodTris: lo.tris, dispose() { inner.removeFromParent(); live.delete(lod); hi.geometry.dispose(); lo.geometry.dispose(); skeleton.dispose(); }};
     Object.assign(rig, {b: bones, bind: Object.fromEntries(BONES.map(n => [n, bones[n].position.clone()])), look: L, scale: D.scale,
       // The first figures' rig, for anything that still reaches for these pivots.
       body: bones.hips, torso: bones.spine, head: bones.head, armL: bones.armL, armR: bones.armR, legL: bones.legL, legR: bones.legR});
@@ -801,7 +816,7 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
   let footL = 0.7 * (-legL - shinL) + g * (0.38 * Math.max(0, -sp) * (1 - swingL) - 0.26 * Math.max(0, sp)), footR = 0.7 * (-legR - shinR) + g * (0.38 * Math.max(0, sp) * (1 - swingR) - 0.26 * Math.max(0, -sp));
   const B_ = lerp(0.5, 0.95, r) * g;
   let armLx = B_ * sp + 0.03 * idle * Math.sin(t * 0.9 + phase), armRx = -B_ * sp - 0.03 * idle * Math.sin(t * 0.9 + phase + 1);
-  let armLz = 0.12 + 0.04 * r * g + 0.012 * br * idle, armRz = -armLz;
+  let armLz = 0.13 + 0.05 * idle + 0.04 * r * g + 0.012 * br * idle, armRz = -armLz;
   let foreLx = -(lerp(0.22, 1.45, r) * g + 0.35 * g * Math.max(0, -sp) + 0.22 * idle), foreRx = -(lerp(0.22, 1.45, r) * g + 0.35 * g * Math.max(0, sp) + 0.22 * idle);
   let foreLz = 0, foreRz = 0, armLy = 0, armRy = 0;
   let hipY = lerp(0.02, 0.045, r) * g * Math.cos(2 * ph) + 0.004 * br * idle, hipX = 0.02 * sh;
@@ -872,6 +887,7 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
   b.head.rotation.set(headX, headY, headZr);
   b.armL.rotation.set(armLx, armLy, armLz); b.armR.rotation.set(armRx, armRy, armRz);
   b.foreL.rotation.set(foreLx, 0, foreLz); b.foreR.rotation.set(foreRx, 0, foreRz);
-  b.legL.rotation.set(legL, 0, legLz); b.legR.rotation.set(legR, 0, legRz);
+  const toes = 0.13 * idle + 0.03;
+  b.legL.rotation.set(legL, toes, legLz); b.legR.rotation.set(legR, -toes, legRz);
   b.shinL.rotation.x = shinL; b.shinR.rotation.x = shinR; b.footL.rotation.x = footL; b.footR.rotation.x = footR;
 }

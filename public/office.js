@@ -21,7 +21,7 @@ import {createReactions} from './office-reactions.js';
 import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
-import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
+import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures,paceFigures} from './office-figures.js';
 import {cleanLook} from './office-look-core.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
@@ -1312,7 +1312,7 @@ function frame(dt,t,delta){
   if(!replay)S.boards?.frame(S.labelList);
   S.meters?.frame();
   // The look editor covers the office: nothing to draw under it.
-  if(!S.lookEditor)S.renderer.render(S.scene,S.camera);
+  if(!S.lookEditor){S.renderer.render(S.scene,S.camera);if(!document.hidden)paceFigures(delta)}
   if(!replay)S.interact?.update();
   S.voice?.frame(dt);
   placeLabels();
