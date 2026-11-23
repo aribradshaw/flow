@@ -9,6 +9,8 @@ import {join} from 'node:path';
 import {officeHub, officeState} from '../lib/office.mjs';
 import {officeStorage} from '../lib/office-storage.mjs';
 import {createLookBook} from '../lib/office-look.mjs';
+import {avatarStore} from '../lib/avatars.mjs';
+import {specFromLook} from '../public/avatar-spec.js';
 import {cleanLook as wardrobe} from '../public/office-decor-core.js';
 import {LOOK_VERSION, LOOK_OPTIONS, LOOK_FIELDS, LOOK_COLORS, LOOK_TOGGLES, LOOK_SWATCHES, LOOK_LABELS, COLOR_LIMITS, cleanLook, clampColor, defaultLook,
   migrateLook, randomLook, sameLook, lookLabel, parseHex, hashOf} from '../public/office-look-core.js';
@@ -148,28 +150,36 @@ test('random looks are valid, and sameLook compares the fields', () => {
   assert.ok(!sameLook(a, null));
 });
 
-test('the look book: a save is strict, the default is stored as nothing, and stored looks are read once', async () => {
-  const rows = new Map(), calls = [];
-  const storage = {looks: async keys => { calls.push(keys); return keys.filter(k => rows.has(k)).map(k => ({member: k, data: rows.get(k)})); }, look: async (k, v) => { if (v) rows.set(k, v); else rows.delete(k); }};
-  // An older stored look still draws.
-  rows.set('mOld', {skin: '#c08259', hair: '#1c1c1c', shirt: '#3d6fb6', pants: '#2d3a4a', style: 3});
-  const book = createLookBook({storage});
-  await book.load(['mOld', 'mNew']); await book.load(['mOld', 'mNew', 'mOld']);
-  assert.deepEqual(calls, [['mOld', 'mNew']], 'each key is read once');
-  assert.equal(book.get('mOld').hair, 'buzz'); assert.equal(book.get('mNew'), null);
-  assert.deepEqual(Object.keys(book.forSnapshot(['mOld', 'mNew', 'mGone'])), ['mOld']);
-  const mine = {...defaultLook('mNew'), hair: 'mohawk', hairColor: '#3f6fd1'};
-  let r = book.set('mNew', mine); await r.write;
-  assert.deepEqual(r.look, mine); assert.deepEqual(rows.get('mNew'), mine); assert.deepEqual(book.get('mNew'), mine);
-  assert.throws(() => book.set('mNew', {...mine, hat: 'crown'}), {status: 400});
-  assert.deepEqual(book.get('mNew'), mine, 'a refused save changes nothing');
-  r = book.set('mNew', defaultLook('mNew')); await r.write;
-  assert.equal(r.look, null, 'saving the default is having none'); assert.ok(!rows.has('mNew'));
-  r = book.set('mOld', null); await r.write;
-  assert.equal(book.get('mOld'), null); assert.ok(!rows.has('mOld'));
-  // No storage: memory only.
-  const mem = createLookBook();
-  await mem.load(['a']); assert.equal(mem.set('a', mine).write, undefined); assert.deepEqual(mem.get('a'), cleanLook(mine, {key: 'a'}));
+test('the look book: a save is strict, goes to the account, the default is stored as nothing, and avatars are read once', async () => {
+  const legacy = new Map(), calls = [];
+  // An older stored look (from before accounts had avatars) still draws: the account store migrates it.
+  legacy.set('old@example.test', [{data: {skin: '#c08259', hair: '#1c1c1c', shirt: '#3d6fb6', pants: '#2d3a4a', style: 3}, updated: 5}]);
+  const seedOf = email => 'm' + email.split('@')[0];
+  const store = avatarStore({dir: null, seedOf, legacy: async email => legacy.get(email) || []});
+  const avatars = {...store, many: async emails => { calls.push(emails); return store.many(emails); }};
+  const book = createLookBook({avatars});
+  const old = {key: 'mold', email: 'old@example.test'}, neu = {key: 'mnew', email: 'new@example.test'};
+  await book.load([old, neu]); await book.load([old, neu, old]);
+  assert.deepEqual(calls, [['old@example.test', 'new@example.test']], 'each person is read once');
+  assert.equal(book.get('mold').hair, 'buzz'); assert.equal(book.get('mnew'), null);
+  assert.deepEqual(Object.keys(book.forSnapshot(['mold', 'mnew', 'mgone'])), ['mold']);
+  const mine = {...defaultLook('mnew'), hair: 'mohawk', hairColor: '#3f6fd1'};
+  let r = await book.set(neu, mine);
+  assert.deepEqual(r.look, mine); assert.deepEqual(book.get('mnew'), mine);
+  assert.equal((await store.get('new@example.test')).avatar.hair.style, 'mohawk', 'saved to the account as a spec');
+  await assert.rejects(book.set(neu, {...mine, hat: 'crown'}), {status: 400});
+  assert.deepEqual(book.get('mnew'), mine, 'a refused save changes nothing');
+  r = await book.set(neu, defaultLook('mnew'));
+  assert.equal(r.look, null, 'saving the default is having none'); assert.equal((await store.get('new@example.test')).custom, false);
+  r = await book.set(old, null);
+  assert.equal(book.get('mold'), null); assert.equal((await store.get('old@example.test')).custom, false);
+  // A save keeps what the stored spec carries beyond this version.
+  await store.save('new@example.test', {...specFromLook(mine, {seed: 'mnew'}), future: {glow: true}, face: {...specFromLook(mine, {seed: 'mnew'}).face, sparkle: 2}});
+  const fresh = createLookBook({avatars: store});
+  await fresh.load([neu]);
+  await fresh.set(neu, {...mine, hat: 'beanie'});
+  const kept = (await store.get('new@example.test')).avatar;
+  assert.deepEqual([kept.hat.style, kept.future, kept.face.sparkle], ['beanie', {glow: true}, 2]);
 });
 
 test('file storage keeps looks across a restart', async () => {
@@ -179,7 +189,10 @@ test('file storage keeps looks across a restart', async () => {
     const look = {...defaultLook('m1'), hat: 'captain'};
     await s.look('m1', look); await s.look('m2', defaultLook('zz'));
     s = await officeStorage({dir, secret: 's'});
-    assert.deepEqual(await s.looks(['m1', 'm3']), [{member: 'm1', data: look}]);
+    assert.deepEqual((await s.looks(['m1', 'm3'])).map(r => [r.member, r.data]), [['m1', look]]);
+    // What the account store migrates: the per-person look, with when it was saved.
+    const legacy = await s.legacyLooks('m1');
+    assert.equal(legacy.length, 1); assert.deepEqual(legacy[0].data, look); assert.ok(legacy[0].updated > 0);
     await s.look('m1', null);
     s = await officeStorage({dir, secret: 's'});
     assert.deepEqual((await s.looks(['m1', 'm2'])).map(r => r.member), ['m2']);
@@ -203,10 +216,11 @@ test('a saved look reaches everyone in the office at once, and the next snapshot
     env2: {id: 'env2', name: 'Other', ownerEmail: users.cy.email, members: [users.cy, users.ann].map(u => ({...u})), projects: [], agents: []},
     env3: {id: 'env3', name: 'Elsewhere', ownerEmail: users.cy.email, members: [{...users.cy}], projects: [], agents: []},
   };
-  const access = {ok: true, all: true, projectIds: new Set()}, stored = new Map();
-  const storage = {secret: 's', room: async () => ({chat: [], status: []}), status: async () => {}, say: async () => [],
-    looks: async keys => keys.filter(k => stored.has(k)).map(k => ({member: k, data: stored.get(k)})), look: async (k, v) => { if (v) stored.set(k, v); else stored.delete(k); }};
-  const hub = officeHub({state: officeState(), context: {env: async id => ctxs[id]}, heartbeatMs: 60e3, storage});
+  const access = {ok: true, all: true, projectIds: new Set()};
+  const storage = {secret: 's', room: async () => ({chat: [], status: []}), status: async () => {}, say: async () => []};
+  let hub;
+  const avatars = avatarStore({dir: null, seedOf: email => hub.memberKey(email)});
+  hub = officeHub({state: officeState(), context: {env: async id => ctxs[id]}, heartbeatMs: 60e3, storage, avatars});
   const server = http.createServer(async (req, res) => { const u = new URL(req.url, 'http://x'); await hub.connect(u.searchParams.get('env'), users[u.searchParams.get('as')], access, req, res); });
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
   const url = (who, env) => `http://127.0.0.1:${server.address().port}/events?as=${who}&env=${env}`, open = [];
@@ -222,7 +236,7 @@ test('a saved look reaches everyone in the office at once, and the next snapshot
     await assert.rejects(hub.setLook('env3', users.ann, {look: mine}), {status: 409, code: 'not_connected'});
     const out = await hub.setLook('env1', users.ann, {look: {...mine, junk: 1}});
     assert.deepEqual(out, {ok: true, key: annKey, look: mine});
-    assert.deepEqual(stored.get(annKey), mine);
+    assert.deepEqual((await avatars.get(users.ann.email)).avatar, specFromLook(mine, {seed: annKey}), 'saved to her account');
     for (const s of [ann, bo, cy2]) assert.deepEqual(await s.next('look'), {key: annKey, look: mine}, 'every office she is a member of hears');
     await new Promise(r => setTimeout(r, 60));
     assert.ok(!cy3.events.some(e => e.type === 'look'), 'an office she is not in does not');
@@ -230,12 +244,16 @@ test('a saved look reaches everyone in the office at once, and the next snapshot
     // A later visitor sees it in the snapshot; so does a fresh server reading storage.
     const [, sb2] = await join('bo', 'env1');
     assert.deepEqual(sb2.looks, {[annKey]: mine});
-    const hub2 = officeHub({state: officeState(), context: {env: async id => ctxs[id]}, heartbeatMs: 60e3, storage, secret: Buffer.from('other')});
-    hub2.close();
+    // The same account saved from Settings (PUT /api/me/avatar) reaches the open offices too.
+    const fromSettings = await avatars.save(users.ann.email, {...specFromLook(mine, {seed: annKey}), hat: {style: 'cap', color: '#3d6fb6'}});
+    await hub.avatarChanged(users.ann.email, fromSettings);
+    for (const s of [ann, bo, cy2]) assert.equal((await s.next('look')).look.hat, 'cap');
+    await new Promise(r => setTimeout(r, 60));
+    assert.ok(!cy3.events.some(e => e.type === 'look'));
     // Back to the default: stored as nothing, announced as null.
     assert.equal((await hub.setLook('env1', users.ann, {look: null})).look, null);
     assert.deepEqual(await bo.next('look'), {key: annKey, look: null});
-    assert.ok(!stored.has(annKey));
+    assert.equal((await avatars.get(users.ann.email)).custom, false);
     // Saves are rate limited per person.
     let limited = 0;
     for (let i = 0; i < 20; i++) await hub.setLook('env1', users.ann, {look: {...mine, blush: i % 2 === 0}}).catch(e => { if (e.status === 429) limited++; else throw e; });

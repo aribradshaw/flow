@@ -25,6 +25,7 @@ import {createSteer} from './office-steer.js';
 import {attachOfficeChat,chatChannel,chatTargets} from './office-chat.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures,paceFigures} from './office-figures.js';
 import {cleanLook} from './office-look-core.js';
+import {lookFromSpec,specFromLook} from './avatar-spec.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
@@ -894,6 +895,13 @@ function setLook(key,look){
   const p=S.people.get(key);if(p){p.figure.userData.setLook(lookOf(key));tagHeight(p)}
   for(const f of S.afPeople||[])if(f.userData.member===key)f.userData.setLook(lookOf(key));
 }
+// Your look is your account's avatar (docs/concepts/13-avatars.md): saved there, so every office shows it. The
+// spec it came from is read first, so fields this version does not know survive the save.
+async function saveAvatar(key,look){
+  const me=(path,init)=>fetch('/api/me/avatar',{cache:'no-store',...init}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.error||'Your look could not be saved'),{code:d.code,status:r.status});return d});
+  const base=look?(await me()).avatar:null;
+  return me('',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatar:look?specFromLook(look,{seed:key,base}):null})});
+}
 // The look editor (office-look-editor.js): a dialog over the office, so walking pauses like under any overlay.
 async function openLook(){
   const office=S;if(!office?.meKey||office.lookEditor||office.lookOpening)return;
@@ -902,7 +910,7 @@ async function openLook(){
   office.lookOpening=false;if(S!==office||office.lookEditor)return;
   const opener=document.activeElement,key=office.meKey;
   const editor=mod.openLookEditor({key,name:office.people.get(key)?.name||office.me?.name||'You',look:lookOf(key),host:office.root,toast:office.opts.toast,
-    save:look=>api('look',{look}).then(d=>{if(S===office)setLook(key,d.look)}),
+    save:look=>saveAvatar(key,look).then(d=>{if(S===office)setLook(key,d.custom?lookFromSpec(d.avatar,key):null)}),
     onClose(){if(office.lookEditor===editor)office.lookEditor=null;if(S===office)(opener?.isConnected&&office.root.contains(opener)?opener:office.root).focus({preventScroll:true})}});
   office.lookEditor=editor;
 }

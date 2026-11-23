@@ -33,6 +33,7 @@ const {inviteStore,validEmail,SCHEMA:INVITE_SCHEMA}=await import('./lib/invites.
 // Guardrails (lib/limits.mjs): per-person caps, persistent rate windows; people who signed in (lib/users.mjs).
 const limitsMod=await import('./lib/limits.mjs');
 const {userStore,accessRequestStore,SCHEMA:USER_SCHEMA,REQUEST_SCHEMA}=await import('./lib/users.mjs');
+const {avatarStore,SCHEMA:AVATAR_SCHEMA}=await import('./lib/avatars.mjs');
 const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
@@ -108,7 +109,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA,...REVOCATION_SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...AVATAR_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA,...REVOCATION_SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -1435,7 +1436,11 @@ async function historyEnvironments(email){
   if(historyRooms.size>=2000)historyRooms.clear();
   historyRooms.set(email,{at:Date.now(),contexts:visible});return visible;
 }
-const officeHub=officeMod.officeHub({history:()=>officeHistory,state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
+// One avatar per account (lib/avatars.mjs, docs/concepts/13-avatars.md). Its default is seeded by the office
+// member key; looks saved before accounts had avatars are migrated on first read.
+const avatars=avatarStore({dir:fileURLToPath(backupRoot),db:()=>cloud(),seedOf:email=>officeHub.memberKey(email),
+  legacy:email=>officeStorage.legacyLooks?.(officeHub.memberKey(email))??[]});
+const officeHub=officeMod.officeHub({history:()=>officeHistory,state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,avatars,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
 officeHistory=createOfficeHistory({store:officeHistoryStore,state:officeState,environments:historyEnvironments,context:officeEnv,
   memberKey:officeHub.memberKey,agentKey:officeHub.agentKey,onError:historyError});
 officeHistory.start();
@@ -1511,6 +1516,57 @@ async function officeApi(req,res){
   });
   return true;
 }
+// ---------- account avatars (lib/avatars.mjs, docs/concepts/13-avatars.md) ----------
+// GET /api/me/avatar                    -> {key, avatar, custom, usePortrait, updated, source}
+// PUT /api/me/avatar {avatar?, usePortrait?}   avatar: a spec (public/avatar-spec.js) or null for the default
+// GET /api/avatar/<member key or OneProfileID id>?env=<id>   -> {key, avatar, custom}: someone the viewer
+//     already sees in that environment (its office members: owner, members, share recipients). Never by email.
+// The page only, signed in (local mode too): no API keys, no owner token. Bodies are capped.
+const AVATAR_BODY_MAX=4096,MEMBER_KEY=/^m[A-Za-z0-9_-]{12}$/,avatarLimit=memoryRateLimit({perMinute:30});
+const myAvatar=(user,v)=>({key:officeHub.memberKey(user.email),avatar:v.avatar,custom:v.custom,usePortrait:v.usePortrait,updated:v.updated,source:v.source});
+async function avatarApi(req,res){
+  const u=new URL(req.url,'http://x'),mine=u.pathname==='/api/me/avatar',other=/^\/api\/avatar\/([^/]{1,300})$/.exec(u.pathname);
+  if(!mine&&!other)return false;
+  if(!trusted(req)||req.headers.authorization){res.writeHead(403);res.end();return true}
+  const user=await requireUser(req,res);if(!user)return true;
+  if(user.token||user.key){json(res,401,{error:'Sign in to continue'});return true}
+  res.setHeader('Cache-Control','private, no-store');
+  if(other){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    let id='';try{id=decodeURIComponent(other[1])}catch{}
+    if(id.includes('@')||!(MEMBER_KEY.test(id)||validOpidUser(id))){json(res,400,{error:'Ask for a person by their member key',code:'invalid_key'});return true}
+    let envId=u.searchParams.get('env')||'';
+    if(!ENV_ID.test(envId)){json(res,400,{error:'env is required',code:'invalid_input'});return true}
+    if(core.parseOpenedEnv(envId)){const o=await openedShare(envId,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
+    const access=await officeAccessNow(envId,user);if(!access.ok){json(res,404,{error:'Not found'});return true}
+    const ctx=await officeEnv(envId);let who=ctx.members.find(m=>officeHub.memberKey(m.email)===id);
+    if(!who&&validOpidUser(id))for(const m of ctx.members)if((await users.get(m.email).catch(()=>null))?.opidId===id){who=m;break}
+    if(!who){json(res,404,{error:'Not found'});return true}
+    const v=await avatars.get(who.email);
+    json(res,200,{key:officeHub.memberKey(who.email),avatar:v.avatar,custom:v.custom});return true;
+  }
+  if(req.method==='GET'){json(res,200,myAvatar(user,await avatars.get(user.email)));return true}
+  if(req.method!=='PUT'){res.writeHead(405,{Allow:'GET, PUT'});res.end();return true}
+  if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return true}
+  if(Number(req.headers['content-length']||0)>AVATAR_BODY_MAX){req.resume();json(res,413,{error:'An avatar is at most 2 KB',code:'avatar_too_large'});return true}
+  const body=await new Promise(done=>{let b='',n=0;req.on('data',c=>{n+=c.length;if(n>AVATAR_BODY_MAX){done(null);req.destroy();return}b+=c});req.on('end',()=>done(b));req.on('error',()=>done(null))});
+  if(body===null){if(!res.headersSent)json(res,413,{error:'An avatar is at most 2 KB',code:'avatar_too_large'});return true}
+  let b;try{b=JSON.parse(body)}catch{json(res,400,{error:'Invalid JSON'});return true}
+  try{
+    if(!b||typeof b!=='object'||Array.isArray(b)||!('avatar' in b||'usePortrait' in b)||Object.keys(b).some(k=>k!=='avatar'&&k!=='usePortrait'))
+      throw Object.assign(Error('Send {avatar} (a spec or null) and/or {usePortrait}'),{status:400,code:'invalid_input'});
+    if('usePortrait' in b&&typeof b.usePortrait!=='boolean')throw Object.assign(Error('usePortrait must be true or false'),{status:400,code:'invalid_input'});
+    if(!avatarLimit({user,operation:{scope:'write'}}).ok)throw Object.assign(Error('Slow down a little'),{status:429,code:'rate_limited'});
+    let v=null;
+    if('avatar' in b){v=await avatars.save(user.email,b.avatar);await officeHub.avatarChanged(user.email,v).catch(()=>{})}
+    if('usePortrait' in b)v=await avatars.setUsePortrait(user.email,b.usePortrait);
+    avatarsChanged(user.email);
+    json(res,200,myAvatar(user,v));
+  }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('avatar:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
+  return true;
+}
+// Someone's avatar or their portrait choice changed: cached photo lookups that may carry it are dropped.
+function avatarsChanged(){photoCache.clear()}
 const apiRateLimit=a=>a.operation?.tags?.includes('office')?officeLimit(a):apiLimit(a);
 // Share additions for the API and MCP (proposals.*): never for the owner token.
 const apiProposals={list:(envId,user,o)=>user.token?[]:proposalsFor(envId,user,o),decide:(id,user,approve,env)=>user.token?{status:404,body:{error:'Not found',code:'proposal_not_found'}}:decideShareProposal(id,user,approve,env)};
@@ -1640,7 +1696,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res)||await appApi(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await officeApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await officeApi(req,res)||await avatarApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}

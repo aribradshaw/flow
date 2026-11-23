@@ -14,6 +14,7 @@
 //   avatarStats(look)                          the same numbers without keeping a mesh (tests, the editor)
 import * as THREE from './vendor/three/three.module.min.js';
 import {cleanLook} from './office-look-core.js';
+import {registerAvatar3D} from './avatar.js';
 
 export const LOD_DISTANCE = 15;
 export const TRI_BUDGET = 2500, LOD_TRI_BUDGET = 600;
@@ -911,3 +912,6 @@ export function animateAvatar(rig, t, {moving = false, speed = moving ? WALK : 0
   b.legL.rotation.set(legL, toes, legLz); b.legR.rotation.set(legR, -toes, legRz);
   b.shinL.rotation.x = shinL; b.shinR.rotation.x = shinR; b.footL.rotation.x = footL; b.footR.rotation.x = footR;
 }
+
+// renderAvatar3D(THREE, spec) in avatar.js builds people with this builder (docs/concepts/13-avatars.md).
+registerAvatar3D(THREE, (look, opts) => createAvatar(look, opts));
