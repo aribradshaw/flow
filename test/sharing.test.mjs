@@ -12,7 +12,7 @@ import net from 'node:net';
 import {lockedChanges,resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
   createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
   shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView} from '../lib/sharing-core.mjs';
-import {fieldBase,clashes,withHeld} from '../public/sync-core.js';
+import {fieldBase,clashes,withHeld,linkedFields,noteEdits,settleEdits} from '../public/sync-core.js';
 import {shareStore,SCHEMA,migrate} from '../lib/shares.mjs';
 
 const OWNER='owner@example.test',BO='bo@example.test',KIM='kim@example.test';
@@ -414,6 +414,26 @@ describe('conflicts (card #61): last write wins, the loser is told',()=>{
     assert.deepEqual(clashes(base,local,remote),{card:{'k-cb':{title:'Ad copy'}}});
     assert.deepEqual(clashes(base,local,renamed(owner(),'Mine')),{},'the same change is no clash');
     assert.deepEqual(withHeld({card:{'k-cb':{title:'Theirs'}}},{card:{'k-cb':{title:'Ad copy'}}}),{card:{'k-cb':{title:'Ad copy'}}},'a held field keeps its older base');
+  });
+  test('sync-core: noteEdits keeps the edits a user made to linked records, never what a copy merely holds',()=>{
+    const k=(id,f={})=>({id,title:'T',column:'requests',points:null,...f}),db=cards=>({charts:[{id:'c',nodes:[],edges:[]}],devops:{cards}});
+    const mine=db([k('k-own')]),stale=db([k('sh.s.k1'),k('sh.s.k2')]);
+    assert.deepEqual(linkedFields(mine),{},'own records are not shared');
+    const seen=linkedFields(stale);
+    stale.devops.cards[0].column='doing';
+    assert.deepEqual(seen.card['sh.s.k1'].column,'requests','a snapshot is a copy, not the records themselves');
+    let e=noteEdits(null,seen,stale);
+    assert.deepEqual(e,{card:{'sh.s.k1':{column:'requests'}}},'one edit, with the value it started from');
+    const next=linkedFields(stale);stale.devops.cards[0].column='uat';stale.devops.cards[1].points=2;
+    e=noteEdits(e,next,stale);
+    assert.deepEqual(e,{card:{'sh.s.k1':{column:'requests'},'sh.s.k2':{points:null}}},'a second change keeps the first base');
+    const back=linkedFields(stale);stale.devops.cards[0].column='requests';
+    e=noteEdits(e,back,stale);
+    assert.deepEqual(e,{card:{'sh.s.k2':{points:null}}},'changed back: no longer an edit');
+    // After a save: an unchanged field is done; one edited again meanwhile starts from what was sent.
+    const sent=structuredClone(stale);stale.devops.cards[1].points=5;
+    assert.deepEqual(settleEdits({card:{'sh.s.k2':{points:null}}},{card:{'sh.s.k2':{points:null}}},sent,sent),{});
+    assert.deepEqual(settleEdits({card:{'sh.s.k2':{points:null}}},{card:{'sh.s.k2':{points:null}}},sent,stale),{card:{'sh.s.k2':{points:2}}});
   });
 });
 

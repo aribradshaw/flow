@@ -83,6 +83,47 @@ export function clashes(base,local,remote){
   }
   return out;
 }
+// Linked copies of shared records (ids sh.<share>.<id>): the shared fields as a copy holds them,
+// {kind:{id:{field:value}}} (deep copies, so later in-place edits of the copy do not change them).
+const isLinked=id=>typeof id==='string'&&id.startsWith('sh.');
+export function linkedFields(d){
+  const out={},R=recordsOf(d);
+  for(const kind of Object.keys(SHARED_FIELDS))for(const x of R[kind])if(isLinked(x?.id)){
+    const o=(out[kind]??={})[x.id]={};for(const f of SHARED_FIELDS[kind])o[f]=x[f]===undefined?null:structuredClone(x[f]);
+  }
+  return out;
+}
+// The user's own edits of linked records, the only changes a save sends back to their owners
+// (docs/sharing.md): edits ({kind:{id:{field:value before the first edit}}}) plus what changed from
+// before (linkedFields of the copy just before one local change) to after (the copy now). A field
+// changed back to where it started drops out. Copies taken from the server (or merged) never add to it,
+// so a copy that is only out of date (an old tab, a browser that could not store its latest copy)
+// can never pass its old values off as edits.
+export function noteEdits(edits,before,after){
+  const out=structuredClone(edits||{}),now=linkedFields(after);
+  for(const [kind,recs] of Object.entries(now))for(const [id,fields] of Object.entries(recs)){
+    const was=before?.[kind]?.[id];if(!was)continue;
+    for(const [f,v] of Object.entries(fields)){
+      if(same(was[f],v))continue;
+      const e=out[kind]?.[id];
+      if(e&&f in e){if(same(e[f],v))drop(out,kind,id,f)}
+      else ((out[kind]??={})[id]??={})[f]=was[f]??null;
+    }
+  }
+  return out;
+}
+const drop=(edits,kind,id,f)=>{const e=edits[kind][id];delete e[f];if(!Object.keys(e).length)delete edits[kind][id];if(!Object.keys(edits[kind]).length)delete edits[kind]};
+// After a save carried sentEdits (with the copy sent, sentDb): what is still unsent in edits. A field
+// unchanged since is done; one edited again meanwhile now starts from the value that was sent.
+export function settleEdits(edits,sentEdits,sentDb,nowDb){
+  const out=structuredClone(edits||{}),S=linkedFields(sentDb),N=linkedFields(nowDb);
+  for(const [kind,recs] of Object.entries(sentEdits||{}))for(const [id,fields] of Object.entries(recs||{}))for(const f of Object.keys(fields||{})){
+    const e=out[kind]?.[id];if(!e||!(f in e))continue;
+    const sent=S[kind]?.[id]?.[f],now=N[kind]?.[id]?.[f];
+    if(same(sent,now))drop(out,kind,id,f);else e[f]=sent??null;
+  }
+  return out;
+}
 // fieldBase with held clashes laid over it (a held field keeps its older base).
 export function withHeld(base,held){
   const out=structuredClone(base||{});

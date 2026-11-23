@@ -134,12 +134,14 @@ test("Bo's workspace: Marsh and Campfire Studio linked, Kestrel Group and Quill 
 });
 
 test('edits sync both ways per permission; stubs and layout stay with their owner',async()=>{
-  let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data,rev=r.data.rev;
+  const {fieldBase}=await import('../public/sync-core.js');
+  let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data,rev=r.data.rev,served=structuredClone(d);
   const marsh=linked(d).find(n=>n.name==='Marsh Holdings LLC'),stub=linked(d).find(n=>n.name==='Kestrel Group');
   marsh.name='Marsh Holdings';marsh.x=2000;stub.name='Hacked';
   // Bo's own card and a private edge to the linked Marsh.
   const mine=d.charts.find(c=>c.nodes.includes(marsh));mine.nodes.push(N('bo-own','Bo Side LLC','entity',0,0));mine.edges.push({id:'bo-edge',from:'bo-own',to:marsh.id,type:'ownership',percent:'10'});
-  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:rev,data:d});assert.equal(r.status,200,JSON.stringify(r.data));
+  // The browser sends the edits its user made (sync-core noteEdits), here the same as fieldBase of what was served.
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:rev,data:d,sharedEdits:fieldBase(served,d)});assert.equal(r.status,200,JSON.stringify(r.data));
   const home=(await owner('GET','/api/workspace?env=default-workspace')).data.data,hn=home.charts[0].nodes;
   assert.equal(hn.find(n=>n.id==='marsh').name,'Marsh Holdings','an edit-permission rename reaches the owner');
   assert.equal(hn.find(n=>n.id==='marsh').x,656,"Bo's layout is his own");
@@ -164,8 +166,8 @@ test('view permission: Bo edits are dropped; comments need comment permission',a
   assert.equal((await bo('PATCH',`/api/shares/${shareId}`,{permission:'view'})).status,404,'Bo cannot change his own permission');
   assert.equal((await owner('PATCH',`/api/shares/${shareId}`,{permission:'view'})).data.share.permission,'view');
   let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data;
-  linked(d).find(n=>n.name==='Campfire Studio').name='Renamed by Bo';
-  assert.equal((await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d})).status,200);
+  const n=linked(d).find(n=>n.name==='Campfire Studio');n.name='Renamed by Bo';
+  assert.equal((await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{node:{[n.id]:{name:'Campfire Studio'}}}})).status,200);
   assert.ok((await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].nodes.some(n=>n.name==='Campfire Studio'));
   assert.equal((await bo('POST',`/api/shares/${shareId}/comments`,{kind:'node',id:'campaign',comment:'hi'})).status,403);
   await owner('PATCH',`/api/shares/${shareId}`,{permission:'comment'});
@@ -312,7 +314,7 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['bo','campaign']},permission:'edit'})).data.share;
   assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
   const L=id=>`sh.${s.id}.${id}`,card=d=>d.devops.cards.find(c=>c.id===L('k-ad')),home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data;
-  const save=async(r,d)=>{const x=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,fieldBase:fieldBase(r.data.data,d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
+  const save=async(r,d)=>{const x=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:fieldBase(r.data.data,d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
 
   // Bo sees in-scope people and the share's members; Cleo (outside the scope) stays hidden.
   let r=await bo('GET','/api/workspace?env='+boEnv);
@@ -389,5 +391,59 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   assert.equal((await v1('POST','/projects',{name:'Bo own project'})).status,201);
   x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{project:'Bo own project'});
   assert.equal(x.status,403,'a shared card keeps its project: '+JSON.stringify(x.data));
+  await owner('DELETE',`/api/shares/${s.id}`);
+});
+
+// Nov 2026: a recipient's browser held a copy of a whole-environment share that was older than what it
+// had read, and its save put old columns, points, due dates and descriptions back on 43 of the owner's
+// cards. Only the fields the recipient changed (sharedEdits) may reach the owner.
+test('a stale copy of shared cards never reverts the owner; real edits and conflicts still go through',async()=>{
+  const {fieldBase}=await import('../public/sync-core.js');
+  const now=new Date().toISOString(),K=n=>`k-st${n}`;
+  const blank=n=>({id:K(n),number:200+n,title:'Stale test '+n,description:'',column:'requests',project:'',labels:[],points:null,actual:null,due:'',assignees:[],checklist:[],links:[],item:'',created:now,updated:now,moved:now});
+  let a=(await owner('GET','/api/workspace?env=default-workspace')).data;
+  a.data.devops={...a.data.devops,cards:[...a.data.devops.cards,...Array.from({length:24},(_,i)=>blank(i))]};
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:a.rev,data:a.data})).status,200);
+  const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'environment'},permission:'edit'})).data.share;
+  assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
+  const L=id=>`sh.${s.id}.${id}`,home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data;
+  const own=async n=>(await home()).data.devops.cards.find(c=>c.id===K(n));
+
+  // Bo's browser reads the cards at rev N.
+  const old=(await bo('GET','/api/workspace?env='+boEnv)).data;
+  // The owner (or an agent) moves them on: done, points, a due date, a new description.
+  a=await home();
+  for(const c of a.data.devops.cards)if(c.id.startsWith('k-st')){c.column='done';c.points=3;c.actual=2;c.due='2026-12-01';c.description='Agent notes'}
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:a.rev,data:a.data})).status,200);
+  // Bo's browser reads again, but its stored copy is still the old one and it saves that (what a tab
+  // running the older sync sent: the stale copy, with a fieldBase taken against the newer read).
+  const fresh=(await bo('GET','/api/workspace?env='+boEnv)).data;
+  let r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:fresh.rev,data:old.data,fieldBase:fieldBase(fresh.data,old.data)});
+  assert.equal(r.status,200,JSON.stringify(r.data));
+  let k=await own(3);
+  assert.deepEqual([k.column,k.points,k.actual,k.due,k.description],['done',3,2,'2026-12-01','Agent notes'],'an untouched stale copy changes nothing on the owner');
+  // Nor when the stale copy comes with sharedEdits that list nothing.
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:old.data,sharedEdits:{},fieldBase:fieldBase(fresh.data,old.data)});
+  assert.equal(r.status,200);k=await own(3);assert.equal(k.column,'done');
+  assert.ok(!(await bo('GET',`/api/shares/${s.id}/history?kind=card&id=${K(3)}`)).data.history.some(e=>e.by===BO),'and writes no history');
+
+  // A real edit from that same stale copy: only the field Bo changed is written; the rest stays.
+  let d=structuredClone(old.data);d.devops.cards.find(c=>c.id===L(K(5))).title='Bo renamed';
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:{[L(K(5))]:{title:'Stale test 5'}}}});
+  assert.equal(r.status,200);k=await own(5);
+  assert.deepEqual([k.title,k.column,k.points,k.due,k.description],['Bo renamed','done',3,'2026-12-01','Agent notes']);
+  // Bo changes a field the owner changed since he read it: last write wins, and the owner is told.
+  d=structuredClone(old.data);d.devops.cards.find(c=>c.id===L(K(6))).column='doing';
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:{[L(K(6))]:{column:'requests'}}}});
+  assert.equal(r.status,200);assert.equal((await own(6)).column,'doing');
+  const lost=(await home()).conflicts.find(c=>c.id===K(6)&&c.field==='column');
+  assert.deepEqual(lost&&[lost.by,lost.previous,lost.value],[BO,'done','doing'],'the conflict is recorded for the owner');
+
+  // A save claiming edits on 20 or more shared cards at once is refused (no client edits like that).
+  d=structuredClone(old.data);const many={};
+  for(let i=0;i<24;i++){const c=d.devops.cards.find(x=>x.id===L(K(i)));c.column='blocked';many[c.id]={column:'requests'}}
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:many}});
+  assert.equal(r.status,200);
+  assert.deepEqual([(await own(10)).column,(await own(6)).column],['done','doing'],'a bulk rewrite of shared cards is refused');
   await owner('DELETE',`/api/shares/${s.id}`);
 });

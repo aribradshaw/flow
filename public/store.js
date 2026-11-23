@@ -76,7 +76,9 @@ function normalize(db){
 
 // fresh: this browser had no saved workspace (sync then takes the server's copy).
 // onSaved: called after every local change (sync.js uploads it); adoptRemote() does not call it.
-export const store={db:null,undo:[],redo:[],fresh:true,onChange(){},onStatus(){},onSaved(){}};
+// lost: this browser could not store its last copy (too big), so it started without one.
+export const store={db:null,undo:[],redo:[],fresh:true,lost:false,onChange(){},onStatus(){},onSaved(){}};
+try{store.lost=localStorage.getItem(KEY+'-lost')==='1'}catch{}
 {
   // A fresh browser starts its own private workspace; the server assigns the owner on first save.
   const s=seed();store.db={active:s.id,charts:[s],environment:{id:uid(),name:'My workspace',ownerEmail:'',visibility:'private',members:[]}};
@@ -108,7 +110,13 @@ export function save(opts){saveLocal();store.onSaved(opts)}
 // Browser storage + disk backup only (no server upload): used when adopting the server's copy.
 function saveLocal(){
   const body=JSON.stringify(store.db);
-  try{localStorage.setItem(KEY,body);store.onStatus('saving','Saved in browser · backing up to disk…')}catch{store.onStatus('warn','Browser save failed · backing up to disk…')}
+  try{localStorage.setItem(KEY,body);localStorage.removeItem(KEY+'-lost');store.onStatus('saving','Saved in browser · backing up to disk…')}
+  catch{
+    // Too big for this browser's storage: the older copy there goes too, or the next start would take it
+    // for this browser's workspace (sync then reads the server's copy instead).
+    try{localStorage.removeItem(KEY);localStorage.setItem(KEY+'-lost','1')}catch{}
+    store.onStatus('warn','Browser save failed · backing up to disk…');
+  }
   backupPending=body;clearTimeout(backupTimer);backupTimer=setTimeout(flushBackup,400);
 }
 window.addEventListener('pagehide',()=>{if(backupPending)fetch('/api/backups/'+backupId,{method:'PUT',headers:{'Content-Type':'application/json'},body:backupPending,keepalive:true}).catch(()=>{})});

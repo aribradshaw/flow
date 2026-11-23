@@ -342,17 +342,26 @@ async function project(envId,user,data){
   return {data:d,shared:sig.join(','),conflicts:conflicts.filter(c=>{const k=[c.kind,c.id,c.field,c.at].join('|');return !seen.has(k)&&seen.add(k)})};
 }
 const SCOPE_KEY={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
+// {kind:{id:{field:value}}} from a request body (fieldBase, sharedEdits), keeping only that shape; null if none.
+const plain=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+function fieldMap(v){
+  if(!plain(v))return null;const out={};
+  for(const kind of Object.keys(SCOPE_KEY))if(plain(v[kind]))for(const [id,f] of Object.entries(v[kind]))if(plain(f))(out[kind]??={})[id]=f;
+  return out;
+}
 // A recipient saved their workspace: layout of linked cards becomes placements, and field edits their
 // share permits go to the owner's workspace (with history). Anything else is dropped (it comes back on
-// the next read). base: the browser's fieldBase (what its copy held before each change), so a stale copy
-// never overwrites the owner, and an edit that overwrote someone's unseen change records them as `over`.
+// the next read). base: the fields the recipient changed, each with the value it had before (the browser's
+// sharedEdits, or for /api/v1 and /mcp a fieldBase from what the read served). Only those are written, so
+// a stale copy never overwrites the owner, and an edit that overwrote someone's unseen change records
+// them as `over`. A save that changes many records at once is refused (bulkWrite).
 async function applyRecipientSave(envId,user,data,base){
   for(const {share:s} of await attachedShares(envId,user)){
     const members=await membersOf(s);
     for(let attempt=0;attempt<3;attempt++){
       const home=await workspaces.get(s.ownerEnv);if(!home?.data)break;
       const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
-      const {placements,edits}=core.extractRecipientChanges(p,data,base);
+      const {placements,edits}=core.extractRecipientChanges(p,data,base||{});
       if(attempt===0)await shares.place(s.id,envId,placements);
       const patch=[],hist=[];
       for(const e of edits){
@@ -365,6 +374,7 @@ async function applyRecipientSave(envId,user,data,base){
         }
       }
       if(!patch.length)break;
+      if(bulkWrite(hist)){console.error('share write-back refused: too many records in one save',JSON.stringify({share:s.id,env:envId,records:new Set(hist.map(h=>h.recordId)).size,fields:hist.length}));break}
       const out=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:core.applyOwnerPatch(home.data,patch),by:user.email,owner:home.owner,visibility:home.visibility,name:home.name});
       if(out.refused)break;
       if(out.conflict)continue;
@@ -372,6 +382,11 @@ async function applyRecipientSave(envId,user,data,base){
     }
   }
 }
+// A last guard against a copy that is only out of date: the browser sends the edits it saw its user make
+// (one card at a time on the board), so one save that changes shared fields on BULK_RECORDS or more
+// records is a client putting back an old copy (Nov 2026: 60 fields on 43 cards), not edits. Refused.
+const BULK_RECORDS=20;
+const bulkWrite=hist=>new Set(hist.filter(h=>h.field!=='comment').map(h=>h.kind+'|'+h.recordId)).size>=BULK_RECORDS;
 // The owner saved an environment that has shares: changes to shared records become field history (so
 // recipients see who changed what), and one that overwrote a recipient's unseen change records them as
 // `over` (they get a notice on that field).
@@ -494,11 +509,15 @@ async function workspace(req,res){
         if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code,limit:true});return}
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
         envs.claim(data,{email:owner});
-        // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
-        const base=body.fieldBase&&typeof body.fieldBase==='object'&&!Array.isArray(body.fieldBase)?body.fieldBase:null;
+        // What the browser's copy held before each change (sync-core fieldBase): tells the owner's edits from
+        // a merge that kept a value they never saw (conflict notices).
+        const base=fieldMap(body.fieldBase);
         await recordOwnerChanges(envId,user,stored,data,base).catch(e=>console.error('share history failed',e?.message));
-        // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
-        if(!user.token)await applyRecipientSave(envId,user,body.data,base).catch(e=>console.error('share write-back failed',e?.message));
+        // Placements, and the edits of linked records this user actually made (sync-core noteEdits; after the
+        // save, so a 409 changes nothing). Never the difference between the copy sent and the owner's: a
+        // copy can be out of date (an old tab, a browser that could not store its latest copy), and a tab
+        // running older code sends no sharedEdits, so its copy changes nothing on the owner's side.
+        if(!user.token)await applyRecipientSave(envId,user,body.data,fieldMap(body.sharedEdits)||{}).catch(e=>console.error('share write-back failed',e?.message));
         const v=user.token?{shared:''}:await withShares(envId,user,data);
         // Cards removed other than by Delete: the browser says where to restore them (DevOps › Recently deleted).
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
