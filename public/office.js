@@ -243,7 +243,7 @@ function snapshot(d){
   if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
   S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.portalList=d.portals||[];
   updateSources(d.yourSources||[]);
-  updateRooms(d.members,d.agentflow);if(S.world)buildDoors();
+  updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
@@ -340,7 +340,7 @@ function initScene(){
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
     toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
   const openCard=id=>openOverlay('card',id);
-  S.boards=createOfficeBoards({env:S.env,envName:S.opts.offices.find(o=>o.id===S.env)?.name,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
+  S.boards=createOfficeBoards({env:S.env,envName:()=>{const name=office.opts.offices.find(o=>o.id===office.env)?.name||'This office';return office.portalList?.length?`This office ▸ ${name}`:name},world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
       return kind==='agent'&&entry.cls?.includes('agent')?agentOf(member,id)?.seat?.card:null;
@@ -701,7 +701,9 @@ function pick(e){
 function buildDoors(){
   if(!S?.world)return;if(S.doorGroup)clear(S.doorGroup);
   const rooms=[...S.rooms.values()],ring=rooms.length?Math.hypot(rooms[0].center.x,rooms[0].center.z):(S.commonR||10)+7;
-  const d=buildDoors3d(doorSpots(S.portalList,{rooms,ringRadius:ring}));S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
+  // The main board's wall holds a slot in the ring too: doors go in the gaps either side of it.
+  const wall=S.worldLayout?.mainWall,taken=wall?[...rooms,{center:{x:wall.x,z:wall.z}}]:rooms;
+  const d=buildDoors3d(doorSpots(S.portalList,{rooms:taken,ringRadius:ring}));S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
   for(const sp of d.spots){S.clickables.push(sp.hit);label(sp.anchor,`<button type="button" class="of-tag of-portal" data-door="${esc(sp.portal.env)}"><b>${esc(sp.portal.label)}</b>${sp.portal.sub?`<small>${esc(sp.portal.sub)}</small>`:''}</button>`,{y:3.25,cls:'portal click'})}
 }
 const buildDoors3d=spots=>doorMeshes(THREE,spots,{box:M.box,mat});
@@ -933,10 +935,12 @@ function frame(dt,t){
   S.interact?.update();
   placeLabels();
 }
+// The E prompt names what it targets, so that thing's own name tag steps aside while it is targeted.
+const NAME_TAG=/\b(af|agent|person)\b/;
 function placeLabels(){
-  const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3();
+  const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3(),target=S.interact?.current()?.object3D;
   for(const l of S.labelList){
-    l.obj.getWorldPosition(p);const far=(l.near&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show());p.y+=l.y;p.project(S.camera);
+    l.obj.getWorldPosition(p);const far=(l.near&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show())||(target===l.obj&&NAME_TAG.test(l.cls));p.y+=l.y;p.project(S.camera);
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}

@@ -101,10 +101,12 @@ function drawFar({ctx,W,H,view}){
   });
 }
 function drawNear(board){
-  const {ctx,W,H,view}=board,u=view.main?1.25:1;
+  const {ctx,W,H,view}=board,u=view.main?1.3:1.1;
   const pad=10*u,gap=6*u,laneTop=36*u,headH=27*u,tileH=47*u,moreH=21*u;
-  paintText(ctx,view.title,pad+2*u,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.62);
-  paintText(ctx,view.subtitle,W-pad-2*u,pad+16*u,`600 ${12*u}px system-ui`,SUB,W*0.34,'right');
+  // The main board's title is centred: it reads as the room's headline, and clears corner UI on screen.
+  if(view.main)paintText(ctx,view.title,W/2,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.5,'center');
+  else paintText(ctx,view.title,pad+2*u,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.62);
+  paintText(ctx,view.subtitle,W-pad-2*u,pad+16*u,`600 ${12*u}px system-ui`,SUB,view.main?W*0.22:W*0.34,'right');
   const capacity=Math.max(1,Math.floor((H-laneTop-pad-headH-6*u+gap)/(tileH+gap)));
   const weights=view.lanes.map(l=>l.total?1:0.5),sum=weights.reduce((a,b)=>a+b,0)||1;
   const span=W-2*pad-gap*(view.lanes.length-1);
@@ -147,9 +149,10 @@ function drawNear(board){
 
 // ---------- the boards ----------
 // opts: {env, envName, world (the group boards hang in), camera, position() (the viewer's feet),
-//        agents() (AgentFlow agents with their card queues), openCard(id), seatCard(label) (the card a seated
+//        envName() (the main board's title: the office's environment), agents() (AgentFlow agents with their
+//        card queues), openCard(id), seatCard(label) (the card a seated
 //        session works on, for its name tag)}
-export function createOfficeBoards({env,envName='',world,camera,position,agents,openCard,seatCard}){
+export function createOfficeBoards({env,envName=()=>'',world,camera,position,agents,openCard,seatCard}){
   let dirty=true,wake=null,carrying=new Map(),visibleNumbers=new Set();
   const boards=new Map(),badges=new Map();
   const unsubscribe=subscribeWorkspace(()=>{dirty=true});
@@ -179,7 +182,7 @@ export function createOfficeBoards({env,envName='',world,camera,position,agents,
       const lanes=boardLanes(visible,{columns:member?ROOM_COLUMNS:MAIN_COLUMNS,member,limit:LIMIT,now});
       const open=lanes.filter(l=>l.id!=='done').reduce((n,l)=>n+l.total,0),done=lanes.find(l=>l.id==='done')?.total||0;
       board.view={main:!member,
-        title:member?member.name:`${envName||'This office'} · DevOps`,
+        title:member?member.name:`${envName()||'This office'} · DevOps`,
         subtitle:member?`${open} open ${open===1?'card':'cards'}`:`${open} open · ${done} done lately`,
         lanes:lanes.map(l=>({id:l.id,column:names.get(l.id)||l.id,name:LANE_NAMES[l.id]||names.get(l.id)||l.id,total:l.total,tiles:l.cards.map(tile)}))};
     }
