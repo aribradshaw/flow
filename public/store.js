@@ -111,7 +111,16 @@ async function flushBackup(){
   catch{if(!backupPending)backupPending=body;store.onStatus('warn','Saved in browser · disk backup failed, retrying');clearTimeout(backupTimer);backupTimer=setTimeout(flushBackup,5000);backupBusy=false;return}
   backupBusy=false;if(backupPending)flushBackup();
 }
-export function save(opts){saveLocal();store.onSaved(opts)}
+let saveSequence=0;
+export function save(opts){saveSequence++;saveLocal();store.onSaved(opts)}
+// A contextual Undo is valid while its change is still the latest local save.
+export function latestUndo(){
+  const sequence=saveSequence,env=store.db.environment?.id;
+  return ()=>{
+    if(saveSequence!==sequence||store.db.environment?.id!==env||!store.undo.length)return false;
+    step(-1);return true;
+  };
+}
 // Browser storage + disk backup only (no server upload): used when adopting the server's copy.
 function saveLocal(){
   const body=JSON.stringify(store.db);

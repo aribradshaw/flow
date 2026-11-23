@@ -1283,18 +1283,19 @@ function humanMember(a,data,members){
 async function officeAccessNow(envId,user){
   const w=await workspaces.get(envId).catch(()=>null);if(w?.archivedAt)return {ok:false};
   const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[]}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
-  if(canRead(e,user))return {ok:true,all:true,projectIds:new Set()};
+  const full=canRead(e,user);
+  if(sameEmail(e.ownerEmail,user.email))return {ok:true,all:true,projectIds:new Set()};
   const active=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt);
   const mine=active.filter(s=>sameEmail(s.recipientEmail,user.email));
-  if(!mine.length||!w?.data)return {ok:false};
+  if(!mine.length||!w?.data)return {ok:full,all:full,projectIds:new Set()};
   const d=normalizeDb(structuredClone(stripLinked(w.data))),projectIds=new Set(),cardIds=new Set(),scopes=[];
-  let all=false;
+  let all=full;
   for(const s of mine){
     const scope=core.resolveScope(d,s);
     if(s.scope?.kind==='environment')all=true;
     for(const id of scope.projectIds)projectIds.add(id);
     for(const id of scope.cardIds)cardIds.add(id);
-    scopes.push({id:s.id,nodeIds:new Set(scope.nodeIds)});
+    scopes.push({id:s.id,nodeIds:new Set(scope.nodeIds),cardIds:new Set(scope.cardIds)});
   }
   return {ok:true,all,projectIds,cardIds,scopes};
 }

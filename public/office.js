@@ -9,7 +9,9 @@ import {icon} from './icons.js';
 import {esc} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
-import {createOfficeBoards} from './office-boards.js';
+import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
+import {officeMemberRefs} from './office-boards-core.js';
+import {store} from './store.js';
 import {openBridgeDialog} from './office-connect.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
@@ -58,7 +60,7 @@ export function openOffice(opts){
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B/X to sprint</dd>
-        <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card</dd>
+        <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
     </aside>
@@ -83,7 +85,7 @@ export function closeOffice(){
   if(!S)return;const s=S;S=null;
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
-  s.boards?.dispose();
+  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
@@ -213,9 +215,14 @@ function initScene(){
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
   const office=S;
-  S.boards=createOfficeBoards({env:S.env,world:S.world,stage:S.stage,camera,position:()=>office.pos,agents:afAgents,
-    openCard:id=>{closeOffice();office.opts.openCard?.(id)}});
-  S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,
+  const openCard=id=>{if(store.db.devops.cards.some(c=>c.id===id)){closeOffice();office.opts.openCard?.(id)}};
+  S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
+    seatCard:entry=>{
+      const {kind,member,id}=entry.obj.userData;
+      return kind==='agent'&&entry.cls?.includes('agent')?agentOf(member,id)?.seat?.card:null;
+    }});
+  S.cardDrag=createOfficeCardDrag({root:S.root,env:S.env,local:()=>S.env===S.opts.current,hitAt,targetAt:cardTargetAt,openCard});
+  S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:S.cardDrag.grab,
     hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);frame(Math.min(.05,S.clock.getDelta()),S.clock.elapsedTime)};loop();
 }
@@ -235,7 +242,7 @@ function toggleControls(){
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
 function clear(group){S.world.remove(group);group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
-function label(obj,html,{y=1.6,cls='',near=0,show=null}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,near,show};S.labelList.push(l);return l}
+function label(obj,html,{y=1.6,cls='',near=0,show=null}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show};S.labelList.push(l);return l}
 
 // ---------- rooms ----------
 function layout(n){
@@ -261,7 +268,7 @@ function buildRooms(){
     const stripe=part(M.box,mat(fg),[0,1.12,-ROOM_D/2],[ROOM_W,0.06,0.24]);stripe.userData.own=true;g.add(stripe);
     S.world.add(g);
     const sign=new THREE.Object3D();sign.position.set(3.4,0,ROOM_D/2);g.add(sign);
-    const tag=label(sign,`<span class="of-room" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:1.45,cls:'room'});
+    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:1.45,cls:'room'});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:null,boxes:[],floorMat,bg,tag});roomLook(m.key);
     buildDesks(m.key,false);
@@ -355,7 +362,7 @@ function upsertPerson(p,self=false){
     obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
     if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
     const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
-    const tag=label(obj,`<span class="of-name${self?' me':''}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
+    const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
     a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
   }
   if(!self&&Number.isFinite(p.x)){
@@ -404,6 +411,42 @@ function hitAt(e){
     let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
   const g=S.ray.intersectObject(S.ground)[0];
   return board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point}:g?{kind:'',point:g.point}:null;
+}
+function cardTargetAt(e){
+  const bounds=S.stage.getBoundingClientRect();
+  if(e.clientX<bounds.left||e.clientX>bounds.right||e.clientY<bounds.top||e.clientY>bounds.bottom)return null;
+  const person=key=>{
+    const member=S.members.find(m=>m.key===key);
+    if(member)return {type:'person',refs:officeMemberRefs(store.db,member),name:member.name};
+  };
+  const agent=id=>{
+    const a=afOf(id);
+    if(a)return {type:'agent',id,name:a.name};
+  };
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  const name=el?.closest('[data-af-id],[data-office-person],[data-agent][data-member]');
+  if(name){
+    const box=name.getBoundingClientRect();
+    const target=name.dataset.officePerson?person(name.dataset.officePerson):agent(name.dataset.afId||
+      agentOf(name.dataset.member,name.dataset.agent)?.seat?.agent);
+    if(target)return {...target,x:box.left+box.width/2,y:box.top};
+  }
+  if(el!==S.renderer.domElement&&!el?.closest('.of-labels'))return null;
+  const hit=hitAt(e);
+  if(hit?.board?.column&&hit.board.near)return {type:'column',id:hit.board.column.id,name:hit.board.column.name};
+  if(hit?.kind==='af')return agent(hit.id);
+  if(hit?.kind==='person')return person(hit.obj.userData.key);
+  if(hit?.kind==='agent'){
+    const {member,id}=hit.obj.userData;
+    const seated=agentOf(member,id)?.seat?.agent;
+    return seated?agent(seated):person(member);
+  }
+  if(!hit?.point)return null;
+  for(const [key,room] of S.rooms){
+    const pos=room.group.worldToLocal(hit.point.clone());
+    if(Math.abs(pos.x)<=ROOM_W/2&&Math.abs(pos.z)<=ROOM_D/2)return person(key);
+  }
+  return null;
 }
 function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
@@ -486,11 +529,13 @@ function onKey(e){
   if(S.bridge?.dialog.open){e.stopPropagation();return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
+    if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
     if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
     closeOffice();return;
   }
   if(isTyping(e.target))return;
+  if(S.pointer?.grabbing){e.stopPropagation();return}
   e.stopPropagation(); // the app underneath does not see office shortcuts
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   const k=e.key.toLowerCase(),menu=e.target.closest?.('[role=menu]');
@@ -518,7 +563,7 @@ function onKey(e){
 function onKeyUp(e){
   if(S?.input.keyUp(e.code)&&!isTyping(e.target))e.stopPropagation();
 }
-function clearKeys(){S?.input.clear();S?.controller.clearJump()}
+function clearKeys(){S?.input.clear();S?.controller.clearJump();S?.pointer?.cancelGrab()}
 
 // Buffer roughly one presence interval and interpolate the three coordinates together.
 function remoteMotion(p, now){
@@ -539,7 +584,7 @@ function remoteMotion(p, now){
 
 function frame(dt,t){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
-  const editing=S.bridge?.dialog.open||isTyping(document.activeElement);
+  const editing=S.bridge?.dialog.open||S.pointer.grabbing||isTyping(document.activeElement);
   const pads=editing?[]:navigator.getGamepads?.()||[];
   const gamepad=Array.prototype.find.call(pads,pad=>pad?.connected&&pad.mapping==='standard');
   const input=S.input.sample(gamepad,controller.jump);
@@ -591,7 +636,7 @@ function frame(dt,t){
   }
   pulseMascots(t);
   S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
-    {held:S.pointer.orbiting||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
+    {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
   S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);

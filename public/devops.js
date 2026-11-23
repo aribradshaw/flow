@@ -47,9 +47,12 @@ function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n
 const people=()=>nodesOf(['person']);
 // Members of shares (docs/sharing.md) are assigned as '@<email>': on a linked card, the share's members;
 // on one's own shared card, the recipients it is shared with (db.shareMembers, from the server).
-const workspaceMembers=()=>[...new Set([db().environment?.ownerEmail,...db().environment?.members||[]].filter(Boolean))]
-  .filter(email=>!people().some(p=>!linkOf(p)&&p.email?.toLowerCase()===email.toLowerCase()))
-  .map(email=>({id:'@'+email.toLowerCase(),name:email,type:'person'}));
+function workspaceMembers(){
+  const env=db().environment;
+  const seen=new Set(people().filter(p=>!linkOf(p)&&p.email).map(p=>p.email.toLowerCase()));
+  const emails=[env?.ownerEmail,...(env?.members||[])].filter(Boolean).map(e=>e.toLowerCase());
+  return [...new Set(emails)].filter(email=>!seen.has(email)).map(email=>({id:'@'+email,name:email,type:'person'}));
+}
 const memberList=()=>{const m=new Map();for(const x of [...workspaceMembers(),...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
 export const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
 // Who can be assigned to a card. A linked card: the person cards of its share and the share's members,

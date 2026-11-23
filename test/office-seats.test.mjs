@@ -100,8 +100,13 @@ test('seated sessions are redacted per viewer: the owner sees all; others need t
   // Bo's share covers Flow (Builder's project); Cy's covers Site; Dee sees Flow but only card c11 (a label share).
   c.members.push({email:'dee@example.test',name:'Dee'});
   const users={ann:{email:'ann@example.test',name:'Ann'},bo:{email:'bo@example.test',name:'Bo'},cy:{email:'cy@example.test',name:'Cy'},dee:{email:'dee@example.test',name:'Dee'}};
-  const access={ann:{ok:true,all:true,projectIds:new Set()},bo:{ok:true,all:false,projectIds:new Set(['p-flow'])},cy:{ok:true,all:false,projectIds:new Set(['p-site'])},
-    dee:{ok:true,all:false,projectIds:new Set(['p-flow']),cardIds:new Set(['c11'])}};
+  const scope=(id,ids)=>({id,nodeIds:new Set(),cardIds:new Set(ids)});
+  const access={
+    ann:{ok:true,all:true,projectIds:new Set()},
+    bo:{ok:true,all:false,projectIds:new Set(['p-flow']),scopes:[scope('bo-share',['c1','c11'])]},
+    cy:{ok:true,all:false,projectIds:new Set(['p-site']),scopes:[scope('cy-share',['c9','c10'])]},
+    dee:{ok:true,all:false,projectIds:new Set(['p-flow']),cardIds:new Set(['c11']),scopes:[scope('dee-share',['c11'])]},
+  };
   const hub=officeHub({state:st,context:{env:async()=>c},heartbeatMs:60e3,now:()=>NOW});
   const server=http.createServer(async(req,res)=>{const u=new URL(req.url,'http://x'),who=u.searchParams.get('as');
     if(u.pathname==='/events'&&users[who]){await hub.connect('env1',users[who],access[who],req,res);return}res.writeHead(404);res.end()});
@@ -119,11 +124,12 @@ test('seated sessions are redacted per viewer: the owner sees all; others need t
     // Ann (owner): every seat, with its card.
     assert.deepEqual(live(sa).map(a=>a.seat),[{agent:'af-build',card:{number:1,title:'Login bug',column:'doing'}},{agent:'af-rev',card:{number:10,title:'Shared card',column:'requests'}},{agent:'',card:{number:11,title:'Nobody',column:'requests'}}]);
     assert.deepEqual(sa.agentflow.find(a=>a.id==='af-build').desk.queue.map(c=>c.number),[1,2,5,3,4]);
-    // Delegated card ids reach a viewer only for cards that viewer can see (wall boards use them).
-    const ids=s=>s.agentflow.flatMap(a=>a.cards||[]);
-    assert.ok(ids(sa).includes('c9')&&ids(sa).includes('c1'),'the owner gets every delegated card id');
-    assert.ok(ids(sb).includes('c1')&&!ids(sb).some(id=>id==='c9'||id==='c10'),'Bo gets Flow card ids only, never Site ones');
-    assert.ok(ids(sc).includes('c9')&&!ids(sc).includes('c1'),'Cy gets Site card ids only');
+    // Local boards read the store. Remote boards join only the recipient's scoped projected ids.
+    const ids=s=>s.agentflow.flatMap(a=>a.boardCards);
+    assert.deepEqual(ids(sa),[],'the owner already has the queues in their workspace');
+    assert.deepEqual(ids(sb),['sh.bo-share.c1'],'Bo only gets projected card ids in his scope');
+    assert.deepEqual(ids(sc),['sh.cy-share.c9','sh.cy-share.c10'],'Cy only gets projected Site cards');
+    assert.deepEqual(ids(sd),[],'Dee cannot see the cards delegated to Builder');
     // Bo sees Flow: Builder's session in full at its desk; the Reviewer session (agent and card outside his share)
     // is redacted although its repo is in Flow; #11 is in Flow, so linked.
     assert.deepEqual(live(sb).map(a=>a.private?'private':a.seat),[{agent:'af-build',card:{number:1,title:'Login bug',column:'doing'}},'private',{agent:'',card:{number:11,title:'Nobody',column:'requests'}}]);

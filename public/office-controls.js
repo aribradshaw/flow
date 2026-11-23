@@ -134,7 +134,8 @@ export function createOfficeCamera(camera) {
   };
 }
 
-export function bindOfficePointer(canvas, rig, {pick, hover, recenter}) {
+export function bindOfficePointer(canvas, rig, {pick, hover, recenter, grab}) {
+  let held=null;
   const pointers = new Map();
   let moved = false;
   const pair = () => {
@@ -142,6 +143,15 @@ export function bindOfficePointer(canvas, rig, {pick, hover, recenter}) {
     return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, gap: Math.hypot(a.x - b.x, a.y - b.y)};
   };
   canvas.addEventListener('pointerdown', e => {
+    if(held)return;
+    if(!pointers.size&&e.button===0&&e.pointerType!=='touch'&&!e.altKey){
+      const interaction=grab?.(e);
+      if(interaction){
+        held={id:e.pointerId,interaction};
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();return;
+      }
+    }
     if (e.button > 2 || (pointers.size && e.pointerType !== 'touch') || pointers.size >= 2) return;
     if (!pointers.size) moved = false;
     else moved = true;
@@ -152,6 +162,7 @@ export function bindOfficePointer(canvas, rig, {pick, hover, recenter}) {
     if (orbit && !touch) e.preventDefault();
   });
   canvas.addEventListener('pointermove', e => {
+    if(held){if(held.id===e.pointerId)held.interaction.move(e);return}
     const p = pointers.get(e.pointerId);
     if (!p) { if (e.pointerType === 'mouse') hover(e); return; }
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
@@ -167,22 +178,35 @@ export function bindOfficePointer(canvas, rig, {pick, hover, recenter}) {
     } else if (p.orbit) rig.rotate(-dx * 0.007, dy * 0.006);
   });
   canvas.addEventListener('pointerup', e => {
+    if(held?.id===e.pointerId){
+      const {interaction}=held;held=null;interaction.end(e);return;
+    }
     const p = pointers.get(e.pointerId);
     pointers.delete(e.pointerId);
     if (!p || moved || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= 5) return;
     if (p.pick) pick(e);
     if (p.middle) recenter();
   });
+  const cancelGrab=()=>{
+    if(!held)return false;
+    const {id,interaction}=held;held=null;interaction.cancel();
+    if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);
+    return true;
+  };
   for (const event of ['pointercancel', 'lostpointercapture']) {
-    canvas.addEventListener(event, e => pointers.delete(e.pointerId));
+    canvas.addEventListener(event, e => {
+      pointers.delete(e.pointerId);
+      if(held?.id===e.pointerId)cancelGrab();
+    });
   }
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
+    if(held)return;
     const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1;
     rig.zoomBy(Math.exp(e.deltaY * units * 0.0012));
   }, {passive:false});
-  return {get orbiting() { return [...pointers.values()].some(p => p.orbit); }};
+  return {cancelGrab,get grabbing(){return !!held},get orbiting() { return [...pointers.values()].some(p => p.orbit); }};
 }
 
 export const WALK_SPEED = 5.2;
