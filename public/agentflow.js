@@ -554,9 +554,10 @@ async function openOffice(link={}){
   let m;try{m=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
   const env=currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
   const offices=[{id:env,name:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
-  // A share's recipient most likely means the team's office: the shared one opens unless they last picked another.
+  // The office you last picked opens; otherwise this environment's own office, unless it has no AgentFlow
+  // agents and a shared office is placed here (a share recipient most likely means the team's office).
   const KEY='flygon-flow-office:'+env;let pick='';try{pick=localStorage.getItem(KEY)||''}catch{}
-  const first=offices.some(o=>o.id===pick)?pick:offices[1]?.id||env;
+  const first=offices.some(o=>o.id===pick)?pick:af().agents.length?env:offices[1]?.id||env;
   const u=sessionUser();
   m.openOffice({env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
     openProjects,openCard,
