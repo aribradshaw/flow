@@ -3365,7 +3365,7 @@ Report your live coding agents
 
 `PUT /api/v1/office/agents` · scope `write` · MCP tool `office_agents_report`
 
-A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
+A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
 
 **Input**
 
@@ -3395,7 +3395,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]}}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12}}]}'
 ```
 
 ```json
@@ -3431,6 +3431,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].repo` | object | null |  | The repository it works in: matched against projects' repos to decide who may see the details. |
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
+| `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
 | `sources` | object[] | yes |  |
 | `sources[].source` | string | yes |  |
 | `sources[].at` | string | yes |  |
@@ -3468,6 +3469,10 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
           "allow",
           "deny"
         ]
+      },
+      "agentflow": {
+        "agent": "Builder",
+        "card": 12
       },
       "source": "bridge:laptop"
     }

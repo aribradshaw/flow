@@ -8,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {test} from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {promisify} from 'node:util';
-import {makePayload, normalizeRemote, runBridge, createRepoResolver} from '../tools/office-bridge.mjs';
+import {makePayload, normalizeRemote, runBridge, createRepoResolver, agentflowOf} from '../tools/office-bridge.mjs';
 import {createClaudeScanner} from '../tools/office-bridge-claude.mjs';
 import {createT3Responder, readT3} from '../tools/office-bridge-t3.mjs';
 
@@ -305,4 +305,17 @@ test('report errors back off and authorization errors wait longer', async t => {
     },
   });
   assert.deepEqual(waits, [3000, 6000, 120000]);
+});
+
+test('agent runner threads are tagged with their AgentFlow agent and card', async () => {
+  assert.deepEqual(agentflowOf('[Flow] Builder: #12 Fix the login bug'), {agent: 'Builder', card: 12});
+  assert.deepEqual(agentflowOf('[Flow] Ops: Infra: #9 Rotate keys'), {agent: 'Ops: Infra', card: 9});
+  for (const title of ['Fix #12', '[Flow] Pick a model for #12', '', undefined]) assert.equal(agentflowOf(title), null, String(title));
+  const t3 = new Map([
+    ['run', {id: 'run', title: '[Flow] Builder: #12 Fix the login bug', model: 'claude-opus-5-5', status: 'running'}],
+    ['own', {id: 'own', title: 'Look at #12 myself', model: 'claude-opus-5-5', status: 'running'}],
+  ]);
+  const payload = await makePayload({source, host, now: 0, t3, claude: [], resolveRepo: async () => null});
+  assert.deepEqual(payload.agents.map(a => a.agentflow), [{agent: 'Builder', card: 12}, undefined],
+    'a plain "#12" is left for the server to read');
 });

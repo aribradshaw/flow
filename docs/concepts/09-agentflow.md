@@ -136,6 +136,10 @@ flow agents work --input '{"agent":"Researcher","columns":["doing","requests"]}'
 
 The runner only calls out to Flow and never needs to be reachable itself, so it works from a home server behind a router.
 
+### Seats in the 3D office
+
+In the [3D office](#3d-office), each AgentFlow agent has a desk in the common area: the agent is the job, and a live coding session working on one of its cards is the one doing it, seated at its desk. The reference runner names its T3 threads `[Flow] <Agent>: #<n> <card title>`, which is enough for the office to seat them. Any other runner or reporter can say it outright with `agentflow: {agent: "<agent id or name>", card: <card number or id>}` on the session in `office.agents.report`; without it, a `#<n>` in the session's title seats it when that card is delegated to exactly one agent. An agent's desk panel lists who is at it now, the first five cards of its queue and the cards it finished in the last seven days. See [Seats](#seats) for the rules and who sees what.
+
 ## Briefs
 
 `agents.get` and `workflows.get` return a `brief`: Markdown with everything a runner needs. That covers purpose, reporting line, inputs, outputs, tools, runtime, workflow steps, linked projects, cards (open ones from linked projects too) and deadlines, and the instructions. In the app, **Copy brief** in the side panel puts the same text on the clipboard.

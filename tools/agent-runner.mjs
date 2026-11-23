@@ -1602,7 +1602,9 @@ function prompt(agent,brief,card,retry){
     +`The runner moves the card to UAT for a person to review when this thread finishes, so do not move it yourself.`
     +(retry?`\n\nAn earlier attempt on ${retry} did not finish. Check the project for partial work from it before you start.`:'');
 }
-const titleOf=(a,card)=>`[Flow] ${a.name}: #${card.number} ${card.title}`.slice(0,120);
+// "[Flow] <Agent>: #<n> <card title>": the 3D office seats the thread at the agent's desk from it (lib/office-seats.mjs),
+// so the agent and the number always fit in the 120 characters: a long name is cut, then the card's title.
+const titleOf=(a,card)=>{const name=String(a.name).replace(/\s+/g,' ').trim().slice(0,80).replace(/:$/,'');return `[Flow] ${name}: #${card.number} ${card.title}`.slice(0,120)};
 const startArgv=(title,project)=>(provider,model)=>['thread','start','--provider',provider,'--model',model,'--title',title,...(cfg.worktree?['--worktree',cfg.worktree]:[]),project,'-'];
 
 // ---------- one pass ----------

@@ -1298,7 +1298,9 @@ async function officeEnv(envId){
   return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,
     members:await Promise.all(emails.map(async email=>({email,name:await personName(email)}))),
     projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
-    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[]}))};
+    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[]})),
+    // For seats (lib/office-seats.mjs): which card a live session works on, and each agent's queue.
+    cards:(data?.devops?.cards||[]).map(c=>({id:c.id,number:c.number,title:c.title,column:c.column,moved:c.moved||'',project:c.project||'',due:c.due||'',snoozedUntil:c.snoozedUntil||''}))};
 }
 // Who may enter an environment's office, and which of its projects they see: everyone who can read it
 // sees all of them; a share's recipient sees the projects in their shares' scopes (all for a whole-environment share).
@@ -1308,9 +1310,9 @@ async function officeAccessNow(envId,user){
   if(canRead(e,user))return {ok:true,all:true,projectIds:new Set()};
   const mine=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt&&sameEmail(s.recipientEmail,user.email));
   if(!mine.length||!w?.data)return {ok:false};
-  const d=normalizeDb(structuredClone(stripLinked(w.data))),ids=new Set();let all=false;
-  for(const s of mine){if(s.scope?.kind==='environment')all=true;for(const id of core.resolveScope(d,s).projectIds)ids.add(id)}
-  return {ok:true,all,projectIds:ids};
+  const d=normalizeDb(structuredClone(stripLinked(w.data))),ids=new Set(),cardIds=new Set();let all=false;
+  for(const s of mine){if(s.scope?.kind==='environment')all=true;const r=core.resolveScope(d,s);for(const id of r.projectIds)ids.add(id);for(const id of r.cardIds)cardIds.add(id)}
+  return {ok:true,all,projectIds:ids,cardIds};
 }
 const officeSeen=new Map();
 async function officeAccess(envId,user){

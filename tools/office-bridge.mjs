@@ -12,6 +12,13 @@ const backoff = [3000, 6000, 15000, 30000, 60000];
 const validId = (id, limit = 200) => typeof id === 'string' && id.length > 0 && id.length <= limit
   && !/[\s\u0000-\u001f\u007f]/.test(id);
 const titleCase = word => word[0].toUpperCase() + word.slice(1);
+// The AgentFlow agent and card a thread works on, from the reference runner's title
+// "[Flow] <Agent>: #<n> <card title>" (tools/agent-runner.mjs). The office seats it at that agent's
+// desk (lib/office-seats.mjs reads the same pattern, and plain "#<n>" titles, on the server).
+export function agentflowOf(title) {
+  const match = /^\s*\[Flow\]\s+(.+?):\s+#(\d{1,9})\b/i.exec(String(title ?? ''));
+  return match ? {agent: match[1].trim().slice(0, 200), card: Number(match[2])} : null;
+}
 
 function modelInfo(value, provider) {
   const raw = short(value);
@@ -116,8 +123,9 @@ export async function makePayload({source, host, now, t3, claude, resolveRepo}) 
         requestId: agent.pending.requestId, kind: agent.pending.kind,
         summary: short(agent.pending.summary), can: isT3 ? agent.pending.can : [],
       } : null;
+      const agentflow = agentflowOf(agent.title);
       return {
-        ...describe(agent), activity: short(agent.activity), host, hostLabel: short(host + (isT3 ? ' · T3' : ' · Claude Code'), 120),
+        ...describe(agent), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + (isT3 ? ' · T3' : ' · Claude Code'), 120),
         repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending,
       };
     })));
