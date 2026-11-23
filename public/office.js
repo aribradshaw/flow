@@ -486,7 +486,7 @@ function upsertPerson(p,self=false){
     figure.position.y=-0.88;pose.add(figure);pose.position.y=0.88;obj.add(pose,shade);
     obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
     if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
-    const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
+    const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|blob:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
     const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
     a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
