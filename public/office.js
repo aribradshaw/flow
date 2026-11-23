@@ -22,6 +22,7 @@ import {createReactions} from './office-reactions.js';
 import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
+import {attachOfficeChat,chatChannel} from './office-chat.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures,paceFigures} from './office-figures.js';
 import {cleanLook} from './office-look-core.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
@@ -39,7 +40,7 @@ import {createDecor} from './office-decor.js';
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
 const EMOTES=[['wave','👋','Wave'],['thumbs','👍','Thumbs up'],['clap','👏','Clap'],['heart','❤️','Heart']];
-const SAY_RADIUS=14,SEND_MS=100;
+const SEND_MS=100;
 let S=null; // the open office
 
 // ---------- opening and closing ----------
@@ -111,7 +112,9 @@ export function openOffice(opts){
   root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
   const motion=root.querySelector('.of-motion');motion.checked=S.motion;motion.addEventListener('change',()=>{S.motion=motion.checked;try{localStorage.setItem(MOTION_KEY,S.motion?'1':'0')}catch{}});
   root.querySelector('.of-world').addEventListener('change',e=>{const id=worldId(e.target.value);S.opts.setWorld?.(id);usePlace(id)});
-  root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
+  const office=S;
+  S.composer=attachOfficeChat({form:root.querySelector('.of-say'),env:opts.env,me:()=>office.me,
+    api,show:addLine,toast:opts.toast,canSend:()=>!office.replay?.active});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
   S.presence=attachOfficeStatus(S,{officeBox,refreshColliders:updateColliders});
@@ -127,7 +130,7 @@ export const officePeek=()=>S; // the open office's state, for tests and the scr
 export function closeOffice(){
   if(!S)return;S.replay?.destroy();const s=S;S=null;
   s.devops?.dispose(); // first: the DevOps tab gets its board back whatever else happens
-  s.presence?.destroy();s.lookEditor?.close();
+  s.presence?.destroy();s.composer?.dispose();s.lookEditor?.close();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   // Each part closes on its own (voice first: every call ends, the mic and a shared screen are released), so one
@@ -935,21 +938,27 @@ function addLine(l,{quiet=false}={}){
   if(S.chat.some(line=>line.id===l.id))return;
   S.chat=mergeOfficeChat(S.chat,[l]);
   if(!S.chat.some(line=>line.id===l.id))return;
-  const el=document.createElement('div');el.dataset.id=l.id;el.className='of-line'+(l.key===S.meKey?' mine':'');el.innerHTML=`<b>${esc(l.name)}</b> ${esc(l.text)}`;
+  const channel=chatChannel(l.channel||'office');
+  const el=document.createElement('div');el.dataset.id=l.id;el.className='of-line'+(l.key===S.meKey?' mine':'');
+  el.style.setProperty('--of-chat-color',channel?.color||'#fff');
+  el.innerHTML=`<span class="of-chat-kind">${esc(channel?.label||'Chat')}</span><b>${esc(l.name)}</b> ${esc(l.text)}`;
   const next=S.chat[S.chat.findIndex(line=>line.id===l.id)+1];
   S.lines.insertBefore(el,[...S.lines.children].find(child=>child.dataset.id===next?.id)||null);
   if(S.lines.children.length>50)S.lines.firstChild.remove();S.lines.scrollTop=S.lines.scrollHeight;
   if(quiet)return;
-  const p=S.people.get(l.key);if(!p)return;
-  if(p.obj.position.distanceTo(S.pos)>SAY_RADIUS&&l.key!==S.meKey)return; // too far away to hear: the log only
-  p.bubble?.el.remove();S.labelList=S.labelList.filter(x=>x!==p.bubble);
-  const b=label(p.obj,`<span class="of-bubble">${esc(l.text)}</span>`,{y:2.6,cls:'bubble'});p.bubble=b;
-  setTimeout(()=>{b.el.remove();if(S)S.labelList=S.labelList.filter(x=>x!==b);if(p.bubble===b)p.bubble=null},Math.min(12000,3500+l.text.length*60));
-}
-function say(){
-  if(S.replay?.active)return;
-  const i=S.root.querySelector('.of-input'),t=i.value.trim();if(!t)return;
-  api('say',{text:t}).then(()=>{i.value=''}).catch(e=>S.opts.toast?.(e.message,true));
+  const office=S,p=office.people.get(l.bubbleOn||l.key),obj=p?.obj||(l.bubbleOn?.isObject3D?l.bubbleOn:null);
+  if(!obj)return;
+  const old=obj.userData.chatBubble;
+  old?.el.remove();office.labelList=office.labelList.filter(x=>x!==old);
+  const b=label(obj,`<span class="of-bubble">${esc(l.text)}</span>`,{y:2.6,cls:'bubble'});
+  b.el.style.setProperty('--of-chat-color',channel?.color||'#fff');
+  obj.userData.chatBubble=b;
+  if(p)p.bubble=b;
+  setTimeout(()=>{
+    b.el.remove();office.labelList=office.labelList.filter(x=>x!==b);
+    if(obj.userData.chatBubble===b)delete obj.userData.chatBubble;
+    if(p?.bubble===b)p.bubble=null;
+  },Math.min(12000,3500+l.text.length*60));
 }
 function emote(k){if(S.replay?.active)return;api('emote',{emote:k}).catch(e=>S.opts.toast?.(e.message,true))}
 function showEmote(key,k){
@@ -1195,6 +1204,7 @@ function onKey(e){
   if(S.devops?.focused()){if(e.key==='Escape'&&S.presence?.closeOverlays()){e.preventDefault();e.stopPropagation();return}S.devops.windowKey(e);return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
+    if(S.composer?.escape(e.target))return;
     if(S.decor?.escape())return;
     if(S.interact?.closeOpen())return;
     if(S.voice?.escape())return;

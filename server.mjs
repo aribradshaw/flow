@@ -1495,7 +1495,7 @@ async function officeApi(req,res){
   if(req.method!=='POST'){res.writeHead(405,{Allow:what==='rtc'?'GET, POST':'POST'});res.end();return true}
   readJson(req,res,async b=>{
     try{
-      const out=await (what==='rtc'?officeRtc.signal(envId,user,b):what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):what==='look'?officeHub.setLook(envId,user,b):what==='knock'?officeHub.knock(envId,user,b||{}):what==='admit'?officeHub.admit(envId,user,b||{}):what==='enter'?officeHub.enter(envId,user,b||{}):what==='decorate'?officeHub.decorate(envId,user,b||{}):officeHub.answer(envId,user,b));
+      const out=await (what==='rtc'?officeRtc.signal(envId,user,b):what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text,b||{}):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):what==='look'?officeHub.setLook(envId,user,b):what==='knock'?officeHub.knock(envId,user,b||{}):what==='admit'?officeHub.admit(envId,user,b||{}):what==='enter'?officeHub.enter(envId,user,b||{}):what==='decorate'?officeHub.decorate(envId,user,b||{}):officeHub.answer(envId,user,b));
       json(res,200,out);
     }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
   });
