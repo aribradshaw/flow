@@ -282,3 +282,11 @@ test('alert streams: only the owner hears that their agent waits, never a viewer
     boAlerts.close();boOffice.close();annOffice.close();
   }finally{hub.close();st.close();server.close()}
 });
+
+test('a long reporter request id comes back unchanged in the queued answer',async()=>{
+  const {officeState}=await import('../lib/office.mjs');
+  const st=officeState(),rid='runtime-request:'+'x'.repeat(360);
+  st.report('ann@example.test',{source:'saguaro',agents:[{id:'t1',title:'T',vendor:'claude',status:'waiting',pending:{requestId:rid,kind:'approval',summary:'Run: true',can:['allow','deny']}}]});
+  const a=st.answer({by:'ann@example.test',owner:'ann@example.test',source:'saguaro',agentId:'t1',requestId:rid,decision:'allow'});
+  assert.equal(a.requestId,rid);
+});
