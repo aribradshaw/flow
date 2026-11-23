@@ -315,6 +315,13 @@ async function attachedShares(envId,user){
 }
 // The members of a share (its owner and the recipients of the same records), who can be assigned to its cards.
 const membersOf=async s=>core.shareMembers(s,await shares.list({ownerEnv:s.ownerEnv}));
+// Placed shares with that member list, so a member's account photo can be looked up when their person
+// card is outside the share (lib/opid-photos.mjs photoTargets).
+async function sharesForPhotos(envId,user){
+  const list=await attachedShares(envId,user),out=[];
+  for(const x of list)out.push({...x,members:await membersOf(x.share)});
+  return out;
+}
 // Conflicts are shown to the person who lost them for a day (docs/sharing.md).
 const CONFLICT_MS=864e5;
 // The workspace as its owner sees it: their own data plus the linked copies of shares placed in it.
@@ -881,7 +888,7 @@ async function opidApi(req,res){
         const w=await workspaces.get(envId);
         if(w?.data&&!w.archivedAt){
           const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
-          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await attachedShares(envId,user):[]}));
+          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await sharesForPhotos(envId,user):[]}));
         }
       }
     }catch(err){console.error('opid photos failed',err?.message);photos={}}

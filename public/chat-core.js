@@ -8,6 +8,7 @@
 // Mind map cards use node=<id> instead of card=<id>. Flow shows such a message as a card bubble with
 // details looked up for the person reading it; anywhere else it stays readable as text and a link.
 import {COLUMNS,colorOf} from './devops-core.js';
+import {shownMember} from './agentflow-core.js';
 
 export const USERNAME=/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 export const MESSAGE_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -166,7 +167,8 @@ export function summarize(db,{kind,id},{photo=n=>n.image}={}){
     const dv=db?.devops,c=(dv?.cards||[]).find(x=>x?.id===id);if(!c)return null;
     const labels=new Map((dv.labels||[]).map(l=>[l.id,l])),p=(db.projects||[]).find(x=>x.id===c.project&&c.project),nodes=nodesOf(db);
     const members=new Map([...(db.shares||[]).flatMap(s=>s?.members||[]),...(db.shareMembers||[])].filter(m=>m?.id).map(m=>[m.id,m]));
-    const people=[...new Set((c.assignees||[]).map(a=>a?.node).filter(Boolean))].map(pid=>{const n=nodes.get(pid)||members.get(pid);if(!n)return null;const img=photo(n);return {id:pid,name:short(n.name||n.email,80),...(okImage(img)?{image:img}:{})}}).filter(Boolean);
+    const own=[...nodes.values()];
+    const people=[...new Set((c.assignees||[]).map(a=>a?.node).filter(Boolean))].map(pid=>{const raw=nodes.get(pid)||members.get(pid);const n=raw&&members.has(pid)?shownMember(raw,own):raw;if(!n)return null;const img=photo(n);return {id:pid,name:short(n.name||n.email,80),...(okImage(img)?{image:img}:{})}}).filter(Boolean);
     const col=(dv.columns||[]).find(x=>x.id===c.column)?.name||COLUMNS.find(([k])=>k===c.column)?.[1]||'';
     return {kind:'card',title:short(c.title,200),number:Number.isInteger(c.number)?c.number:null,column:{id:short(c.column,20),name:short(col,80)},
       labels:(c.labels||[]).map(l=>labels.get(l)).filter(Boolean).slice(0,4).map(l=>({name:short(l.name,40),color:colorOf(l.color)})),

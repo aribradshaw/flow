@@ -84,6 +84,36 @@ export function personNamed(people,name){
   for(const p of people||[])if(normName(p?.name)===k){if(hit&&hit.id!==p.id)return null;hit=p}
   return hit;
 }
+// How a share member (@email) is shown in this workspace. When one of the viewer's own person cards
+// has that email, the member is shown under that card's name. The id stays @email, so the assignment
+// is unchanged, and matching the email never links either card to an account. Shared (sh.) and
+// combined (cx.) cards are not the viewer's own. people: person cards the viewer can see.
+export function shownMember(member,people){
+  if(!member||typeof member!=='object')return member;
+  const email=normEmail(member.email||(typeof member.id==='string'&&member.id.startsWith('@')?member.id.slice(1):''));
+  let card=null;
+  if(email)for(const p of people||[]){
+    if(p?.type!=='person'||typeof p.id!=='string'||p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    if(normEmail(p.email)===email){card=p;break}
+  }
+  const out={...member,type:'person'};
+  if(card?.name)out.name=card.name;
+  return out;
+}
+// @email ids to add when a filter selects the viewer's own person card, so that card and the share
+// member with the same email count as one person. memberIds: the @ ids that exist. Shared and
+// combined cards are not the viewer's own, and this never changes who is stored on a card.
+export function memberAliasIds(ids,people,memberIds){
+  const have=new Set(memberIds||[]);if(!have.size||!ids?.length)return [];
+  const emailOf=new Map();
+  for(const p of people||[]){
+    if(p?.type!=='person'||typeof p.id!=='string'||p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    const email=normEmail(p.email);if(email)emailOf.set(p.id,email);
+  }
+  const extra=[];
+  for(const id of ids){const email=emailOf.get(id);if(!email)continue;const mid='@'+email;if(have.has(mid))extra.push(mid)}
+  return extra;
+}
 // Is person card `n` the signed-in user `me` ({email, name})? By email when the card has one;
 // otherwise when it is the only person in `people` with their name and no card carries their email.
 export function isSessionPerson(n,people,me){

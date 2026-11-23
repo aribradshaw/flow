@@ -2,13 +2,13 @@
 // the cards this user sees in the current environment; they are shown only, never saved.
 // Loaded on start, when the environment or its set of linked cards changes, and when the window
 // regains focus. linkCard() links a card to the signed-in user's own account (or unlinks it).
-import {setMemberPhotos,opidLink} from './ui.js';
+import {setMemberPhotos} from './ui.js';
+import {linkedPhotoIds} from './opid-prompt-core.js';
 import {fadeIn} from './motion.js';
 import {currentEnv,refresh} from './sync.js';
 import {sessionUser,signInMode} from './account.js';
 
 let rerender=()=>{},getDb=()=>null,key='',loading=null,again=false;
-const linkedIds=db=>{const out=[];for(const c of db?.charts||[])for(const n of c.nodes||[])if(n.type==='person'&&opidLink(n))out.push(n.id);return out.sort()};
 const enabled=()=>signInMode()==='opid'&&!!sessionUser()?.id;
 
 export async function loadPhotos(){
@@ -16,7 +16,7 @@ export async function loadPhotos(){
   loading=(async()=>{
     try{
       const env=currentEnv();
-      if(!enabled()||!env||!linkedIds(getDb()).length){apply({});return}
+      if(!enabled()||!env||!linkedPhotoIds(getDb()).length){apply({});return}
       const r=await fetch('/api/opid/photos?env='+encodeURIComponent(env),{cache:'no-store'});
       // Not available (signed out, OneProfileID not ready): keep what is shown.
       if(r.ok)apply(await r.json().catch(()=>({})));
@@ -32,7 +32,7 @@ function apply(map){
 }
 // Called after every render: a new environment or a card linked or unlinked loads the photos again.
 export function photosMaybe(){
-  const k=(enabled()?currentEnv()||'':'')+'\n'+linkedIds(getDb()).join(',');
+  const k=(enabled()?currentEnv()||'':'')+'\n'+linkedPhotoIds(getDb()).join(',');
   if(k===key)return;key=k;queueMicrotask(loadPhotos);
 }
 export function startOpidPhotos({db,render}){

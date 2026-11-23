@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
   workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName,
-  setupSteps,cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
+  setupSteps,cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS,shownMember,memberAliasIds} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -372,6 +372,25 @@ test('model makers: the icon follows who made the model, not the harness that ru
   assert.deepEqual(modelMaker('opencode:opencode/big-pickle'),{key:'other',name:'',letter:'B'},'unknown: a letter tile');
   assert.equal(modelMaker('opencode:opencode/big-pickle','Pickle').letter,'P','the label wins for the letter');
   assert.equal(modelMaker('','').letter,'?');assert.equal(modelMaker(null).key,'other');
+});
+
+test('a share member is shown under the viewer\'s own person card with the same email',()=>{
+  const member={id:'@joe@example.test',email:'Joe@Example.test',name:'Joseph Basrawi',image:'https://cdn.example.test/owner.png',opidLinked:true,owner:true};
+  const joe={id:'joe',type:'person',name:'Joe Basrawi',email:'joe@example.test',image:'data:image/png;base64,QQ'};
+  const shared={id:'sh.s1.joe',type:'person',name:'Joseph Basrawi',email:'joe@example.test'};
+  const other={id:'cx.env.p',type:'person',name:'Joseph',email:'joe@example.test'};
+  const shown=shownMember(member,[shared,other,{id:'ann',type:'person',name:'Ann',email:'ann@example.test'},joe]);
+  assert.equal(shown.id,'@joe@example.test','the assignee stays the member');
+  assert.equal(shown.name,'Joe Basrawi');
+  assert.equal(shown.image,member.image,'the photo is chosen separately');
+  assert.equal(shown.opidLinked,true);
+  assert.equal(shownMember(member,[shared,other]).name,'Joseph Basrawi','a shared or combined card is not the viewer\'s own');
+  assert.equal(shownMember({id:'@ann@example.test',email:'ann@example.test',name:'ann@example.test'},[]).name,'ann@example.test');
+  assert.equal(shownMember(null,[]),null);
+  const people=[{id:'joe',type:'person',name:'Joe Basrawi',email:'joe@example.test'},{id:'sh.s1.x',type:'person',email:'joe@example.test'}];
+  assert.deepEqual(memberAliasIds(['joe'],people,['@joe@example.test']),['@joe@example.test']);
+  assert.deepEqual(memberAliasIds(['sh.s1.x','missing'],people,['@joe@example.test']),[],'a shared card is not the filter');
+  assert.deepEqual(memberAliasIds(['joe'],people,[]),[]);
 });
 
 test('matching the signed-in user to a person card: email first, then a unique name',()=>{

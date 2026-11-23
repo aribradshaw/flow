@@ -123,7 +123,7 @@ test('a share recipient links their card in the owner workspace; the owner sees 
   mine=(await bo('GET','/api/workspace?env='+boEnv)).data;
   assert.equal(node(mine.data,lid).opidUser,'u-bo','Bo sees his own link');
   assert.deepEqual((await owner('GET','/api/opid/photos?env='+ENV)).data,{me:photo('u-owner'),bo:photo('u-bo')});
-  assert.deepEqual((await bo('GET','/api/opid/photos?env='+boEnv)).data,{[lid]:photo('u-bo')});
+  assert.deepEqual((await bo('GET','/api/opid/photos?env='+boEnv)).data,{[lid]:photo('u-bo'),['@'+OWNER]:photo('u-owner')},'Bo\'s card, and the owner\'s linked card outside the share on the member label');
   // Kim cannot claim Bo's card through the owner's workspace or anything else.
   assert.equal((await kim('POST','/api/opid/link',{env:boEnv,nodeId:lid,link:true})).status,404);
   // The photos are never stored with the workspace.
@@ -144,7 +144,7 @@ test("a view recipient cannot unlink someone else's link, but can unlink their o
   assert.ok(!JSON.stringify(kd).includes('u-bo'),"Bo's account id never reaches Kim");
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:false})).status,403);
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:true})).status,409,'linked to someone else');
-  assert.deepEqual((await kim('GET','/api/opid/photos?env='+kimEnv)).data,{[kl]:photo('u-bo')},'anyone who sees the card sees the photo');
+  assert.deepEqual((await kim('GET','/api/opid/photos?env='+kimEnv)).data,{[kl]:photo('u-bo'),['@'+OWNER]:photo('u-owner')},'anyone who sees the card sees the photo, including a member whose card is outside the share');
   // An edit share can unlink it.
   assert.equal((await owner('PATCH','/api/shares/'+k.data.share.id,{permission:'edit'})).status,200);
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:false})).status,200);
