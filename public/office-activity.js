@@ -220,5 +220,10 @@ export function createActivity(office){
       if(show){const p=propFor(u,show);if(p){p.visible=true;p.userData.tick?.(t,u.seed)}}
     }
   }
-  return {lounge,attach,tick,actors};
+  function reset(){
+    for(const u of actors.values()){
+      u.pos.copy(u.home);u.yaw=u.facing+Math.PI;u.phase='desk';u.until=0;u.hopAt=0;u.side=null;
+    }
+  }
+  return {lounge,attach,tick,reset,actors};
 }

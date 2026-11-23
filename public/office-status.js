@@ -244,6 +244,7 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
       held.clear();
     },
     closeOverlays() { return closeMenu(); },
+    toast(text,bad) { return toast(root,text,{bad}); },
     // EventSource listener registrar from office.js connect().
     bind(on) {
       on('status', data => {

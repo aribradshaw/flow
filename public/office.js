@@ -26,7 +26,8 @@ import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
-import {attachOfficeStatus} from './office-status.js';
+import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
+import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
@@ -48,6 +49,7 @@ export function openOffice(opts){
       <select class="of-world" aria-label="World" data-tip="World" hidden>${WORLDS.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}</select>
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
+      <button type="button" class="txt" data-of-replay disabled>Replay</button>
       <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
@@ -100,6 +102,9 @@ export function openOffice(opts){
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
   S.presence=attachOfficeStatus(S,{officeBox});
+  S.replay=attachOfficeReplay(root,{env:S.env,scene:replayScene,live:restoreLiveScene,clear:clearReplayScene,
+    names:key=>key===S.meKey?'You':S.members.find(m=>m.key===key)?.name||'Guest',
+    react:e=>{if(e.type==='emote')showEmote(e.member,e.emote);else S.reactions?.react(e.member+'|'+e.agent,e.decision)}});
   connect();S.watch=setInterval(watch,1000);
   root.focus({preventScroll:true});
   if(opts.cardId)openOverlay('card',opts.cardId);
@@ -107,7 +112,7 @@ export function openOffice(opts){
 export const officeOpen=()=>!!S;
 export const officePeek=()=>S; // the open office's state, for tests and the screenshot harness
 export function closeOffice(){
-  if(!S)return;const s=S;S=null;
+  if(!S)return;S.replay?.destroy();const s=S;S=null;
   s.presence?.destroy();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
@@ -200,11 +205,15 @@ function connect(){
   const on=(type,f)=>es.addEventListener(type,e=>{
     if(S?.es!==es)return;
     S.heard=Date.now();
-    try{f(JSON.parse(e.data));S.stream.received(e.lastEventId)}catch(err){console.error('office',type,err)}
+    try{
+      const data=JSON.parse(e.data);
+      if(!liveDuringReplay(type,data))f(data);
+      S.stream.received(e.lastEventId);
+    }catch(err){console.error('office',type,err)}
   });
   on('snapshot',d=>{snapshot(d);S.stream.connected();watch()});
   // Access ended (the share was revoked): say so and stay disconnected.
-  on('gone',()=>{S.gone=true;S.es?.close();S.es=null;clearTimeout(S.retry);showGone()});
+  on('gone',()=>{S.gone=true;S.replay?.finish(false);S.liveFeed=null;S.es?.close();S.es=null;clearTimeout(S.retry);showGone()});
   // Doors changed (a share made or revoked): office-portals.js.
   on('portals',list=>{S.portalList=Array.isArray(list)?list:[];if(S.world)buildDoors()});
   on('restart',()=>disconnect(true));
@@ -220,17 +229,115 @@ function connect(){
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
   on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
-  on('result',a=>{if(S.steer.isSteer(a)){S.steer.track(a,'done');S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)}else answerResult(a)});
+  on('result',a=>{
+    const isSteer=S.steer.isSteer(a);
+    if(isSteer)S.steer.track(a,'done');else answerResult(a);
+    if(S.replay?.active)S.presence?.toast(a.result?.message||(a.result?.ok?'Done':'Agent action failed'),!a.result?.ok);
+    else if(isSteer)S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok);
+  });
   // A nod, a shake, or working until the result, for anyone's agent (lib/office.mjs: no prompt text).
   on('reaction',r=>{const k=r.member+'|'+r.agent;if(r.phase==='answered')S.reactions?.react(k,r.decision);else if(!r.ok||r.decision==='deny')S.reactions?.settle(k)});
   es.onerror=()=>{if(S?.es===es)disconnect()};
 }
+// Keep the live data current while its actors are off-stage.
+function liveDuringReplay(type,data){
+  const replay=S.replay?.active;
+  if(type==='snapshot'){
+    S.liveFeed={data:{...data,live:{...data.live}},people:new Map(data.people.map(p=>[p.key,p]))};
+    if(replay){
+      S.stream.connected();
+      updateSources(data.yourSources||[]);
+      S.portalList=data.portals||[];S.serverWorld=data.env?.world;
+      if(S.world){usePlace(wantedWorld());buildDoors()}
+      for(const a of data.actions||[]){
+        if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');
+        else if(a.result)answerResult(a);
+        else if(!S.answers.has(a.agentId))answerSent(a);
+      }
+      for(const line of data.chat||[])addLine(line,{quiet:true});
+      S.presence?.onSnapshot(data);
+      updateRooms(data.members,data.agentflow);
+      S.replay.reload();
+    }
+    return replay;
+  }
+  const feed=S.liveFeed;
+  if(!feed)return false;
+  if(type==='join'||type==='move')feed.people.set(data.key,data);
+  else if(type==='leave'){
+    feed.people.delete(data.key);
+    const member=feed.data.members.find(m=>m.key===data.key);
+    if(member&&data.at)member.lastSeen=data.at;
+  }else if(type==='portals')feed.data.portals=data;
+  else if(type==='members'){
+    feed.data.members=data.members;feed.data.agentflow=data.agentflow;
+    if(data.world){feed.data.env={...feed.data.env,world:data.world};S.serverWorld=data.world}
+    if(replay){if(S.world)usePlace(wantedWorld());updateRooms(data.members,data.agentflow);S.replay.reload()}
+  }else if(type==='agents'){
+    const previous=feed.data.live[data.member]||[];
+    feed.data.live[data.member]=data.agents;
+    if(replay&&data.member===S.meKey){
+      answersSeen(data.agents);
+      S.presence?.observeWaiting(data.member,data.agents);
+      const waits=new Map(previous.filter(a=>a.status==='waiting').map(a=>[a.source+'|'+a.id,a.pending?.requestId||'']));
+      if(!presenceStatus.isQuiet(S.meKey))for(const a of data.agents){
+        if(a.status==='waiting'&&waits.get(a.source+'|'+a.id)!==(a.pending?.requestId||''))S.presence?.toast(`Live · ${a.title||'An agent'} is waiting`);
+      }
+    }
+  }else if(replay&&type==='say'){addLine(data,{quiet:true});return true}
+  return replay&&['join','move','leave','agents','members','reaction','emote'].includes(type);
+}
+
+function clearReplayScene(){
+  if(!S.world)return;
+  closePanel();closeMenu();S.interact?.closeOpen();clearKeys();
+  S.follow=S.target=null;
+  S.reactions?.reset();
+  S.absent.clear();S.live.clear();
+  for(const key of S.people.keys())removePerson(key);
+  for(const key of S.rooms.keys())buildDesks(key,false);
+  updateColliders();presenceChanged();
+  S.boards?.setVisible(!S.replay?.active);
+}
+
+function replayScene({roster,poses},seek){
+  if(!S.world)return;
+  let presence=false;
+  for(const key of S.people.keys())if(!poses.has(key)){removePerson(key);presence=true}
+  for(const [key,pose] of poses){
+    let p=S.people.get(key);
+    if(!p){
+      p=upsertPerson({key,name:key===S.meKey?'You':S.members.find(m=>m.key===key)?.name||'Guest',...pose});
+      if(key===S.meKey){p.obj.visible=false;p.tag.show=()=>false}
+      presence=true;
+    }
+    p.replayPose=pose;
+    p.obj.position.set(pose.x,pose.y,pose.z);
+  }
+  const changed=[];
+  for(const key of new Set([...S.live.keys(),...roster.keys()])){
+    const prev=S.live.get(key)||[],next=roster.get(key)||[];
+    if(prev.length!==next.length||prev.some((a,i)=>a!==next[i]))changed.push(key);
+  }
+  S.live=roster;
+  for(const key of changed)buildDesks(key,false);
+  if(changed.length)updateColliders();
+  if(presence)presenceChanged();else if(changed.length)seatsChanged();
+  if(seek){S.reactions?.reset();S.activity?.reset();for(let i=0;i<16;i++)S.activity?.tick(.1,i*.1)}
+}
+function restoreLiveScene(){
+  const feed=S.liveFeed;
+  if(feed&&!S.gone)snapshot({...feed.data,actions:[],people:[...feed.people.values()],resumedHere:true});
+  watch();
+}
+
 function watch(){
   if(!S)return;
   S.presence?.tickIdle();
-  if(S.gone){status('No longer shared with you');return}
+  if(S.gone){status('No longer shared with you');S.root.querySelector('[data-of-replay]').disabled=true;return}
   const now=Date.now();
   if(S.es&&now-S.heard>40000){disconnect();return}
+  if(S.replay?.active)return;
   if(!S.stream.stale){
     let changed=false;
     for(const [key,until] of S.absent)if(now>=until){S.absent.delete(key);removePerson(key);roomLook(key);changed=true}
@@ -248,6 +355,7 @@ function updateRooms(members,agentflow){
   const changed=!S.placed||JSON.stringify(roomShape(S.members))!==JSON.stringify(roomShape(members));
   const afChanged=!S.placed||JSON.stringify(S.snapAgentflow)!==JSON.stringify(agentflow);
   S.members=members;S.snapAgentflow=agentflow;
+  S.root.querySelector('[data-of-replay]').disabled=!S.world||!members.some(m=>m.key===S.meKey);
   if(!S.world)return;
   if(afChanged)buildAgentflow();
   if(changed)buildRooms();
@@ -314,7 +422,7 @@ function connectAgents(opener){
 }
 function sendPresence(force){
   const t=performance.now();
-  if(!force&&(S.stream.stale||t-S.sentAt<SEND_MS))return;
+  if(S.replay?.active||(!force&&(S.stream.stale||t-S.sentAt<SEND_MS)))return;
   const {x,y,z,heading,speed,grounded,sprinting}=S.controller.state;
   const rounded=n=>Math.round(n*100)/100;
   const pose={x:rounded(x),y:rounded(y),z:rounded(z),heading:rounded(heading),moving:speed>0.05,jump:!grounded,sprint:sprinting};
@@ -359,9 +467,9 @@ function initScene(){
       return kind==='agent'&&entry.cls?.includes('agent')?agentOf(member,id)?.seat?.card:null;
     }});
   S.cardDrag=createOfficeCardDrag({root:S.root,env:S.env,local:()=>S.env===S.opts.current,hitAt,targetAt:cardTargetAt,openCard});
-  S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:S.cardDrag.grab,
+  S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:e=>S.replay?.active?null:S.cardDrag.grab(e),
     hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
-  const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);frame(Math.min(.05,S.clock.getDelta()),S.clock.elapsedTime)};loop();
+  const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);const delta=S.clock.getDelta();frame(Math.min(.05,delta),S.clock.elapsedTime,delta)};loop();
 }
 function toggleOverview(){
   if(!S.rig)return;
@@ -487,7 +595,7 @@ function buildMainWall(){
 // A room is lit while its member has the office open; otherwise dimmed, with when they were last here.
 const ago=iso=>{const t=Date.parse(iso);if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} d ago`};
 function roomLook(key){
-  const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||r.member.me;
+  const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||(!S.replay?.active&&r.member.me);
   r.floorMat.color.set(r.bg);if(!on)r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);
   r.tag.el.classList.toggle('off',!on);
   const seen=ago(r.member.lastSeen);r.seen=seen;
@@ -688,10 +796,11 @@ function addLine(l,{quiet=false}={}){
   setTimeout(()=>{b.el.remove();if(S)S.labelList=S.labelList.filter(x=>x!==b);if(p.bubble===b)p.bubble=null},Math.min(12000,3500+l.text.length*60));
 }
 function say(){
+  if(S.replay?.active)return;
   const i=S.root.querySelector('.of-input'),t=i.value.trim();if(!t)return;
   api('say',{text:t}).then(()=>{i.value=''}).catch(e=>S.opts.toast?.(e.message,true));
 }
-function emote(k){api('emote',{emote:k}).catch(e=>S.opts.toast?.(e.message,true))}
+function emote(k){if(S.replay?.active)return;api('emote',{emote:k}).catch(e=>S.opts.toast?.(e.message,true))}
 function showEmote(key,k){
   const p=S.people.get(key),e=EMOTES.find(x=>x[0]===k);if(!p||!e)return;
   const l=label(p.obj,`<span class="of-emote">${e[1]}</span>`,{y:p.bubble?3.6:2.6,cls:'emote'});p.emote={kind:k,at:performance.now()};
@@ -702,7 +811,7 @@ function showEmote(key,k){
 function hitAt(e){
   if(!S.camera)return null;const r=S.renderer.domElement.getBoundingClientRect();
   S.ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),S.camera);
-  const board=S.boards?.hit(S.ray);
+  const board=S.replay?.active?null:S.boards?.hit(S.ray);
   for(const h of S.ray.intersectObjects(S.clickables,true)){
     if(board&&board.distance<h.distance)break;
     if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
@@ -748,6 +857,7 @@ function cardTargetAt(e){
 }
 function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
+  if(S.replay?.active){if(hit.point)S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
   if(S.boards?.pick(hit.board))return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
@@ -800,6 +910,7 @@ function openPanel(p){S.panelFor=p;refreshPanel();return {close:closePanel,isOpe
 function closeMenu(){if(S&&!S.menu.hidden){S.menu.hidden=true;return true}return false}
 function onClick(e){
   const em=e.target.closest('[data-emote]');if(em){emote(em.dataset.emote);return}
+  if(S.replay?.active&&e.target.closest('.of-labels'))return;
   const ag=e.target.closest('.of-labels [data-agent]');if(ag){showAgent(ag.dataset.member,ag.dataset.agent);return}
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
   const dr=e.target.closest('.of-labels [data-door]');if(dr){goDoor(S.doorSpots?.find(x=>x.portal.env===dr.dataset.door)?.portal);return}
@@ -923,6 +1034,7 @@ function onKey(e){
     if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
     if(S.presence?.closeOverlays())return;
+    if(S.replay?.active){S.replay.finish();return}
     if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
     closeOffice();return;
   }
@@ -941,7 +1053,7 @@ function onKey(e){
   if(e.code==='Space'&&e.target.closest?.('button,a'))return;
   if(S.presence?.onKey(e))return;
   if(S.input.keyDown(e.code,performance.now(),e.repeat,S.controller.jump)){e.preventDefault();return}
-  if(k==='e'){e.preventDefault();if(!e.repeat)S.interact?.trigger();return}
+  if(k==='e'){e.preventDefault();if(!e.repeat&&!S.replay?.active)S.interact?.trigger();return}
   if(['z','c','f','o','?'].includes(k)){
     e.preventDefault();
     if(e.repeat)return;
@@ -952,7 +1064,7 @@ function onKey(e){
     return;
   }
   if(/^[1-4]$/.test(e.key)){e.preventDefault();emote(EMOTES[+e.key-1][0]);return}
-  if(e.key==='Enter'&&e.target===document.body||e.key==='t'){e.preventDefault();S.root.querySelector('.of-input').focus()}
+  if(!S.replay?.active&&(e.key==='Enter'&&e.target===document.body||e.key==='t')){e.preventDefault();S.root.querySelector('.of-input').focus()}
 }
 function onKeyUp(e){
   if(S?.input.keyUp(e.code)&&!isTyping(e.target))e.stopPropagation();
@@ -978,13 +1090,14 @@ function remoteMotion(p, now){
 }
 
 const rigPos=new THREE.Vector3();
-function frame(dt,t){
+function frame(dt,t,delta){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
-  const paused=overlayOpen();
+  const paused=overlayOpen(),replay=S.replay?.active;
+  const animation=replay?S.replay.tick(Math.min(.25,delta)):{dt,t};
   const editing=paused||S.pointer.grabbing||isTyping(document.activeElement);
   const pads=editing?[]:navigator.getGamepads?.()||[];
   const gamepad=Array.prototype.find.call(pads,pad=>pad?.connected&&pad.mapping==='standard');
-  const input=S.input.sample(gamepad,controller.jump);if(!paused)S.interact?.gamepad(gamepad);
+  const input=S.input.sample(gamepad,controller.jump);if(!paused&&!replay)S.interact?.gamepad(gamepad);
   const {right,forward,orbitX,orbitY}=input,steering=!!(right||forward);
   if(orbitX||orbitY)S.rig.rotate(-orbitX*2.6*dt,orbitY*1.9*dt);
 
@@ -1009,22 +1122,23 @@ function frame(dt,t){
     controller.reset(r,r.heading);S.target=S.follow=null;S.input.clear();player=controller.advance(0,{...input,x:0,z:0},S.colliders,S.place.terrain);
   }
   S.presence?.afterMove(player);
-  S.pos.set(player.x,player.y,player.z);checkDoor();
+  S.pos.set(player.x,player.y,player.z);
   // The deck I stand on (or last stood on, in the air), for the camera.
   const deck=S.place.ground(player.x,player.z);if(deck!==null&&player.grounded)S.floor+=(Math.min(deck,player.y)-S.floor)*Math.min(1,dt*8);
-  if(S.meKey)sendPresence(false);
+  if(!replay){checkDoor();if(S.meKey)sendPresence(false)}
   for(const p of S.people.values()){
     // The figure animation can use the same motion fields for local and remote avatars.
-    const motion=p.motion=p.self?player:remoteMotion(p,now);
+    const motion=p.motion=replay?p.replayPose:p.self?player:remoteMotion(p,now);
+    if(!motion)continue;
     const o=p.obj,hop=0;
     o.position.set(motion.x,motion.y+hop,motion.z);o.rotation.y=motion.heading;
     if(!p.self&&p.wasAirborne&&motion.grounded)p.landing=0.12;
     p.wasAirborne=!motion.grounded;
-    p.landing*=Math.exp(-13*dt);
+    p.landing*=Math.exp(-13*animation.dt);
     const squash=p.self?motion.squash:p.landing;
     const run=THREE.MathUtils.clamp((motion.speed-WALK_SPEED)/(RUN_SPEED-WALK_SPEED),0,1);
     const stride=Math.min(1,motion.speed/WALK_SPEED);
-    p.phase+=dt*motion.speed*(2.35-run*0.37);
+    p.phase+=animation.dt*motion.speed*(2.35-run*0.37);
     const step=motion.grounded?Math.abs(Math.sin(p.phase))*0.065*stride:0;
     const scale=1-squash+(motion.jumping?0.07:0);
     p.pose.scale.set(1+squash*0.5,scale,1+squash*0.5);
@@ -1032,18 +1146,18 @@ function frame(dt,t){
     p.pose.rotation.x=motion.flip|| (motion.jumping?-0.17:stride*(0.05+run*0.13));
     p.pose.rotation.z=motion.grounded?Math.sin(p.phase)*stride*0.045:0;
     p.shade.position.y=0.02-o.position.y;
-    animateHuman(o.userData.rig,t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9});
+    animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9});
   }
-  for(const f of S.afPeople||[])animateHuman(f.userData.rig,t,{phase:(f.id%7)*0.9});
+  for(const f of S.afPeople||[])animateHuman(f.userData.rig,animation.t,{phase:(f.id%7)*0.9});
   // Agents: running bob and type, waiting hop and glow, idle still; subagents circle.
   for(const c of S.clickables){
     const u=c.userData;if(u.kind!=='agent')continue;
-    u.mascot?.update(t,{status:u.status,children:u.children,phase:u.phase});
+    u.mascot?.update(animation.t,{status:u.status,children:u.children,phase:u.phase});
   }
-  pulseMascots(t);
+  pulseMascots(animation.t);
   // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
-  S.activity?.tick(dt,t);
-  if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,t)}
+  S.activity?.tick(animation.dt,animation.t);
+  if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,animation.t)}
   if(!paused){
     // The camera works as if my deck were the ground, then rides up to it; the overview frames the whole world.
     S.rig.update(dt,rigPos.set(S.pos.x,S.pos.y-S.floor,S.pos.z),player.heading,player.vx,player.vz,cameraWalls(),S.overviewRadius,
@@ -1052,9 +1166,9 @@ function frame(dt,t){
     S.camera.position.x+=S.place.center.x*S.ov;S.camera.position.y+=S.floor*(1-S.ov);S.camera.position.z+=S.place.center.z*S.ov;
   }
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
-  S.boards?.frame(S.labelList);
+  if(!replay)S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);
-  S.interact?.update();
+  if(!replay)S.interact?.update();
   placeLabels();
 }
 // The E prompt names what it targets, so that thing's own name tag steps aside while it is targeted.

@@ -36,6 +36,7 @@ export function createReactions(THREE){
       }else if(s.sparks){s.sparks.visible=false;if(dt>1.2&&!s.working){s.sparks.removeFromParent();state.delete(key)}}
       else if(dt>1.2)state.delete(key);
     },
+    reset(){for(const s of state.values())s.sparks?.removeFromParent();state.clear()},
     dispose(){spark.dispose();gold.dispose();state.clear()},
   };
 }

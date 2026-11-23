@@ -155,6 +155,7 @@ function drawNear(board){
 export function createOfficeBoards({env,envName=()=>'',world,camera,position,agents,openCard,seatCard}){
   let dirty=true,wake=null,carrying=new Map(),visibleNumbers=new Set();
   const boards=new Map(),badges=new Map();
+  let showing=true;
   const unsubscribe=subscribeWorkspace(()=>{dirty=true});
   // anchors: {rooms:[{key, member, ...mount}], main: mount}, from the world's boardAnchors().
   function rebuild(anchors){
@@ -162,6 +163,7 @@ export function createOfficeBoards({env,envName=()=>'',world,camera,position,age
     boards.clear();
     for(const a of anchors.rooms||[])boards.set(a.key,makeBoard(world,a,{key:a.key,member:a.member}));
     if(anchors.main)boards.set(null,makeBoard(world,anchors.main,{key:null,member:null}));
+    for(const b of boards.values())b.anchor.visible=showing;
     dirty=true;
   }
   function refresh(){
@@ -239,7 +241,7 @@ export function createOfficeBoards({env,envName=()=>'',world,camera,position,age
     for(const c of board.columns)if(c.tiles.length){const d=x<c.x?c.x-x:x>c.x+c.w?x-c.x-c.w:0;if(d<gap){gap=d;best=c.tiles[0]}}
     return best;
   }
-  return {hit,pick,rebuild,frame,tileNear,invalidate(){dirty=true},
+  return {hit,pick,rebuild,frame,tileNear,invalidate(){dirty=true},setVisible(value){showing=value;for(const b of boards.values())b.anchor.visible=value},
     dispose(){unsubscribe();for(const b of boards.values())disposeBoard(b);boards.clear();for(const b of badges.values())b.remove()}};
 }
 
