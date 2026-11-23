@@ -226,8 +226,14 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     assert.throws(()=>hub.answer('env1',users.bo,{source:'bridge:laptop',agentId:AGENT.id,requestId:'req-1',decision:'allow'}),{status:404},'Bo has no such agent of his own');
     const act=hub.answer('env1',users.ann,{source:'bridge:laptop',agentId:AGENT.id,requestId:'req-1',decision:'allow'});
     assert.equal((await ann.next('action')).id,act.id);
+    // Everyone sees the agent react, under the id they know it by; never the prompt.
+    const [ra,rb,rc]=await Promise.all([ann.next('reaction'),bo.next('reaction'),cy.next('reaction')]);
+    assert.deepEqual(ra,{member:annKey,decision:'allow',phase:'answered',agent:AGENT.id});
+    assert.equal(rb.agent,sb.live[annKey][0].id);assert.equal(rc.agent,sc.live[annKey][0].id);
+    for(const r of [rb,rc])assert.ok(!/rm -rf|req-1|host:t3/.test(JSON.stringify(r)),JSON.stringify(r));
     st.result(users.ann.email,act.id,{ok:true,message:'Approved in T3'});
     assert.equal((await ann.next('result')).result.message,'Approved in T3');
+    assert.deepEqual(await cy.next('reaction'),{member:annKey,decision:'allow',phase:'result',ok:true,agent:sc.live[annKey][0].id});
     await new Promise(r=>setTimeout(r,50));assert.ok(!bo.events.some(e=>e.type==='action'||e.type==='result'));
     time=1001;st.sweep();
     assert.deepEqual(await cy.next('yourSources'),[],'stale sources disappear over SSE');

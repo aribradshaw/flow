@@ -17,6 +17,7 @@ import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
 import {createInteractions} from './office-interact.js';
+import {createReactions} from './office-reactions.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
@@ -104,7 +105,7 @@ export function closeOffice(){
   s.presence?.destroy();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
-  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();
+  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();clearInterval(s.answerTick);
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
@@ -209,11 +210,13 @@ function connect(){
   on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
-  on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
   on('members',({members,agentflow})=>{updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
-  on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()}});
-  on('result',a=>{if(S.steer.isSteer(a))S.steer.track(a,'done');else{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel()}S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
+  on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
+  on('result',a=>{if(S.steer.isSteer(a)){S.steer.track(a,'done');S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)}else answerResult(a)});
+  // A nod, a shake, or working until the result, for anyone's agent (lib/office.mjs: no prompt text).
+  on('reaction',r=>{const k=r.member+'|'+r.agent;if(r.phase==='answered')S.reactions?.react(k,r.decision);else if(!r.ok||r.decision==='deny')S.reactions?.settle(k)});
   es.onerror=()=>{if(S?.es===es)disconnect()};
 }
 function watch(){
@@ -250,7 +253,7 @@ function snapshot(d){
   S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.portalList=d.portals||[];
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();
-  for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
+  for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
     const changed=officeDiff([...previous],[...S.live],([key])=>key);
@@ -345,6 +348,7 @@ function initScene(){
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
   const office=S;
   // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
+  S.reactions=createReactions(THREE);
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
     toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
   const openCard=id=>openOverlay('card',id);
@@ -802,10 +806,10 @@ function refreshPanel(){
         if(a.pending){
           const can=a.mine&&a.pending.can?.length;
           prompt=`<div class="of-prompt"><div class="of-pk">${a.pending.kind==='question'?'Question':'Permission prompt'}</div><pre>${esc(a.pending.summary||'')}</pre>
-            ${can&&ans?.requestId!==a.pending.requestId?`<div class="of-btns">${a.pending.can.includes('allow')?`<button type="button" class="txt primary" data-of="allow">${icon('check',13)}Allow</button>`:''}${a.pending.can.includes('deny')?`<button type="button" class="txt" data-of="deny">${icon('ban',13)}Deny</button>`:''}</div>`:''}
+            ${can&&(ans?.requestId!==a.pending.requestId||ans.state==='failed')?`<div class="of-btns">${a.pending.can.includes('allow')?`<button type="button" class="txt primary" data-of="allow">${icon('check',13)}Allow</button>`:''}${a.pending.can.includes('deny')?`<button type="button" class="txt" data-of="deny">${icon('ban',13)}Deny</button>`:''}</div>`:''}
             ${!can?`<p class="of-note">${a.mine?'Answer it where it runs.':`Waiting on ${esc(owner?.name||'its owner')}.`}</p>`:''}</div>`;
         }
-        const res=ans&&(!a.pending||ans.requestId===a.pending?.requestId||ans.state==='done')?`<p class="of-res ${ans.state==='done'?(ans.result?.ok?'ok':'bad'):''}">${ans.state==='done'?esc(ans.result?.message||'Done'):`${ans.decision==='allow'?'Allow':'Deny'} sent. Waiting for ${esc(a.host||'the reporter')}…`}</p>`:'';
+        const res=answerHtml(ans,a);
         html=head+`<div class="of-pb">${row('Status',STATUS[a.status])}${row('Model',a.model?`${v.name} · ${a.model}`:v.name)}${row('Where',a.hostLabel||a.host)}${row('Repo',a.repo?.slug||a.repo?.name)}${row('Project',(a.projects||[]).join(', '))}
           ${row('Desk',deskOf(a))}${row('Card',a.seat?.card?`#${a.seat.card.number} ${a.seat.card.title}`:'')}${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}${a.mine?'<div class="of-steer-slot"></div>':''}</div>`;
       }
@@ -817,10 +821,50 @@ function refreshPanel(){
   if(p.type==='agent'){const a=agentOf(p.member,p.id);if(a)S.steer.attach(S.panel.querySelector('.of-steer-slot'),a)}
   for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
 }
+// ---------- Allow / Deny: one state flow ----------
+// Click: "Approved" or "Denied" at once, and the mascot nods (and works) or shakes. The reporter's result
+// either fails ("…isn't waiting any more", shown in red, the work stops) or goes through; an approved one
+// shows "Running…" once its next report has it running with nothing pending, then clears. Nothing back
+// in 20 s: "Still waiting on <host>…".
+const ANSWER_SLOW=20000,ANSWER_DONE_MS=3000;
+const reactKey=id=>S.meKey+'|'+id;
 function decide(decision){
   const p=S.panelFor,a=p&&agentOf(p.member,p.id);if(!a?.pending||!a.mine)return;
-  S.answers.set(a.id,{agentId:a.id,requestId:a.pending.requestId,decision,state:'sent'});refreshPanel();
-  api('answer',{source:a.source,agentId:a.id,requestId:a.pending.requestId,decision}).catch(e=>{S.answers.delete(a.id);refreshPanel();S.opts.toast?.(e.message,true)});
+  S.answers.set(a.id,{agentId:a.id,requestId:a.pending.requestId,decision,state:'sent',at:Date.now(),host:a.hostLabel||a.host||''});
+  S.reactions?.react(reactKey(a.id),decision);answerTicker();refreshPanel();
+  api('answer',{source:a.source,agentId:a.id,requestId:a.pending.requestId,decision})
+    .catch(e=>{answerResult({agentId:a.id,requestId:a.pending.requestId,decision,result:{ok:false,message:e.message}})});
+}
+function answerSent(a){const cur=S.answers.get(a.agentId);S.answers.set(a.agentId,{...cur,...a,state:cur?.state==='failed'?'sent':cur?.state||'sent',at:cur?.at||Date.now()});refreshPanel()}
+function answerResult(a){
+  const cur=S.answers.get(a.agentId)||{},ok=!!a.result?.ok,next={...cur,...a,state:ok?'done':'failed'};
+  if(cur.state==='running')next.state='running';
+  S.answers.set(a.agentId,next);
+  if(!ok||a.decision==='deny')S.reactions?.settle(reactKey(a.agentId));
+  if(ok&&a.decision==='deny')setTimeout(()=>{if(S?.answers.get(a.agentId)===next){S.answers.delete(a.agentId);refreshPanel()}},ANSWER_DONE_MS);
+  refreshPanel();
+}
+// My agents' next report: an approved one running again with nothing pending is "Running…", then done.
+function answersSeen(agents){
+  for(const [id,ans] of S.answers){
+    if(ans.decision!=='allow'||ans.state==='failed'||ans.state==='running'||ans.state==='gone')continue;
+    const a=agents.find(x=>x.id===id);
+    if(!a){S.reactions?.settle(reactKey(id));continue}
+    if(a.pending&&a.pending.requestId===ans.requestId)continue; // still on that prompt
+    // Past that prompt: running again is "Running…"; anything else (idle, another prompt) just ends it.
+    ans.state=a.status==='running'&&!a.pending?'running':'gone';S.reactions?.settle(reactKey(id));
+    setTimeout(()=>{if(S?.answers.get(id)===ans){S.answers.delete(id);refreshPanel()}},ans.state==='running'?ANSWER_DONE_MS:0);
+  }
+}
+// While anything is unanswered, the panel re-renders each second so "Still waiting…" appears on time.
+function answerTicker(){if(S.answerTick)return;S.answerTick=setInterval(()=>{if(!S)return;if(![...S.answers.values()].some(x=>x.state==='sent'||x.state==='done')){clearInterval(S.answerTick);S.answerTick=null}refreshPanel()},1000)}
+function answerHtml(ans,a){
+  if(!ans||ans.state==='gone'||(a.pending&&ans.requestId!==a.pending.requestId&&ans.state!=='running'&&ans.state!=='failed'))return '';
+  const word=ans.decision==='allow'?'Approved':'Denied',slow=ans.state==='sent'&&Date.now()-(ans.at||Date.now())>ANSWER_SLOW;
+  if(ans.state==='failed')return `<p class="of-res bad" role="status">${esc(ans.result?.message||'That did not go through')}</p>`;
+  if(ans.state==='running')return `<p class="of-res ok" role="status">${icon('check',12)} Approved · Running…</p>`;
+  if(slow)return `<p class="of-res" role="status">${word}. Still waiting on ${esc(ans.host||a.hostLabel||a.host||'its machine')}…</p>`;
+  return `<p class="of-res ${ans.decision==='allow'?'ok':''}" role="status">${icon(ans.decision==='allow'?'check':'ban',12)} ${word}${ans.state==='done'&&ans.result?.message?` · ${esc(ans.result.message)}`:''}</p>`;
 }
 
 // ---------- keys ----------
@@ -947,6 +991,7 @@ function frame(dt,t){
   pulseMascots(t);
   // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
   S.activity?.tick(dt,t);
+  if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,t)}
   if(!paused)S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
     {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
