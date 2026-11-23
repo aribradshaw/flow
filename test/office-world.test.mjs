@@ -86,7 +86,7 @@ test('yacht: decks are terraced, with one height at each point and stairs betwee
   const w=yachtWorld(4),P=w.plan,{PIT,MAIN,SWIM,UPPER,SUN,FORE}=YACHT;
   assert.equal(w.ground(0,0),PIT);assert.equal(w.ground(0,P.pz+2),MAIN);assert.equal(w.ground(0,P.zL1+3),SWIM);
   assert.equal(w.ground(0,P.zL0-3),UPPER);assert.equal(w.ground(6,P.zS0+2),SUN);assert.equal(w.ground(0,P.pool.z),SUN-0.5);
-  assert.equal(w.ground(0,P.pad.z),FORE);assert.equal(w.ground(0,w.rooms[0].z),UPPER);
+  assert.equal(w.ground(0,P.pad.z),FORE);assert.ok(w.walls.some(b=>b.kind==='heli'&&b.x===P.pad.x),'the helicopter stands on its pad');assert.equal(w.ground(0,w.rooms[0].z),UPPER);
   // stairs are ramps: height changes smoothly along them
   const ramps=[[P.HB-2,P.zL0,P.zL0-P.upRamp,MAIN,UPPER],[0,P.zS1,P.zS1-P.sunRamp,UPPER,SUN],[P.HB-2.4,P.zB0,P.zB0-P.foreRamp,UPPER,FORE],[P.HB-3.2,P.zL1,P.zL1+P.swimRamp,MAIN,SWIM]];
   for(const [x,z0,z1,y0,y1] of ramps){
@@ -109,7 +109,7 @@ test('yacht: rails and bulkheads enclose the decks, and every deck, room and sta
     assert.ok(r.wet.length>0,'the swim platform is open astern');
     for(const p of r.wet)assert.ok(w.open(p.x,p.z)&&p.z>P.zL1+P.swimRamp,`left the deck at ${p.x.toFixed(1)},${p.z.toFixed(1)}`);
     for(const p of r.seen.values())assert.ok(w.ground(p.x,p.z)!==null);
-    const must={lounge:w.lounge,'swim platform':{x:0,z:P.zL1+4},terrace:{x:0,z:P.zL0-3},sundeck:{x:5,z:P.zS0+8},pool:P.pool,helipad:P.pad,'bridge wing':{x:P.HB-2,z:P.zB0+3},'bow':{x:0,z:P.zBow+6}};
+    const must={lounge:w.lounge,'swim platform':{x:0,z:P.zL1+4},terrace:{x:0,z:P.zL0-3},sundeck:{x:5,z:P.zS0+8},pool:P.pool,helipad:{x:P.pad.x+4,z:P.pad.z},'bridge wing':{x:P.HB-2,z:P.zB0+3},'bow':{x:0,z:P.zBow+6}};
     for(const [name,p] of Object.entries(must))assert.ok(r.has(p),`${name} is reachable with ${n} members`);
     for(const room of w.rooms){
       assert.ok(r.has(inRoom(room,0,ROOM_D/2+1.2)),'outside a room\'s door');
@@ -226,7 +226,7 @@ test('yacht: the character controller walks the decks and stairs, falls from whe
   const back=w.respawn(c.state);assert.equal(back.y,SWIM);
   // the world is longer than the flat office's limit, and the controller lets you reach its bow
   assert.ok(-P.zBow>110&&w.terrain.limit>-P.zBow);
-  c.reset({x:0,y:YACHT.FORE,z:P.pad.z},Math.PI);
+  c.reset({x:4,y:YACHT.FORE,z:P.pad.z},Math.PI);
   assert.ok(walk([[0,P.zBow+6]]).z<-110);assert.equal(w.ground(c.state.x,c.state.z),YACHT.FORE);
 });
 

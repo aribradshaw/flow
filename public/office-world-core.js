@@ -179,6 +179,8 @@ export function yachtWorld(members,{commonR=10}={}){
     walls.push(wallBox(s*(HB-1.15),zL1-0.75,0,1,1,0.8,MAIN,'planter'));      // palms
   }
   walls.push(wallBox(0,zS0+3,0,7,1,1.15,SUN,'bar'));                       // the sundeck bar
+  walls.push(wallBox(pad.x,pad.z+0.4,0,2.3,5.2,2.3,FORE,'heli'));          // the helicopter on its pad
+  for(const s of [-1,1])walls.push(wallBox(s*(HB-4.6),zL1+swimRamp+1.9,0,1.3,2.7,0.95,SWIM,'jetski'));
 
   // The main board hangs on a wall at the forward end of the lounge, facing the seating; each room's board
   // hangs on its tall back wall (the cabin's outboard side, the bridge's front).
@@ -199,10 +201,10 @@ export function yachtWorld(members,{commonR=10}={}){
   }
   const mid=(zBow+zSw)/2;
   const spots=[{x:0,y:SWIM,z:zL1+3.6,heading:Math.PI},{x:0,y:MAIN,z:pz+2.2,heading:Math.PI},{x:0,y:UPPER,z:zL0-3.5,heading:0},
-    {x:0,y:UPPER,z:zS1+1.5,heading:Math.PI},{x:0,y:SUN,z:zS1-sunRamp-1.5,heading:Math.PI},{x:0,y:FORE,z:pad.z,heading:Math.PI}];
+    {x:0,y:UPPER,z:zS1+1.5,heading:Math.PI},{x:0,y:SUN,z:zS1-sunRamp-1.5,heading:Math.PI},{x:0,y:FORE,z:pad.z-4.6,heading:Math.PI}];
   const world={id:'yacht',rooms,spare,walls,mainWall,boardAnchors,doors,sea:SEA,center:{x:0,z:mid},radius:(zSw-zBow)/2+6,
     bounds:{minX:-HB,maxX:HB,minZ:zBow,maxZ:zSw},spawn:spots[1],lounge:{x:px-2.2,y:PIT,z:pz-2.2},
-    signs:[{x:0,y:UPPER+4.7,z:zB1-roomD,text:'Bridge'},{x:0,y:SUN+2.9,z:zS0+3,text:'Sundeck bar'},{x:0,y:FORE+1.2,z:pad.z,text:'Helipad'},
+    signs:[{x:0,y:UPPER+4.7,z:zB1-roomD,text:'Bridge'},{x:0,y:SUN+2.9,z:zS0+3,text:'Sundeck bar'},{x:0,y:FORE+4,z:pad.z,text:'Helipad'},
       {x:0,y:SWIM+2.4,z:zL1+0.3,text:'Beach club'}],
     ground,open,halfBeam,
     step:(from,to,all=walls)=>stepIn(world,from,to,all),

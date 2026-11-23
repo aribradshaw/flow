@@ -7,7 +7,7 @@ import {yachtWorld,YACHT} from './office-world-core.js';
 
 const PAL={navy:'#1e3446',stripe:'#3d8f66',keel:'#5d3b38',white:'#f4f7f5',shade:'#dde5e1',teak:'#c99b6c',teak2:'#a97d50',teakLight:'#d9b68a',teakGrey:'#b89878',gold:'#d8b46a',carpet:'#cfe3d2',dark:'#182830',steel:'#c5cecc',
   cushion:'#fbfbf7',green:'#3d8f66',amber:'#e9a23b',teal:'#2f8f8a',coral:'#d9785f',pad:'#39484d',yellow:'#f2c94c',leaf:'#4f9a5d',leaf2:'#37774a',trunk:'#96764f',
-  pool:'#63dbe6',warm:'#ffdca6',red:'#e5484d',lime:'#46c46a',glass:'#bfe3ea',sand:'#e6d6ac',rock:'#8f9a8c',hill:'#6aa56f',hill2:'#4d8a5c',cloud:'#ffffff'};
+  pool:'#63dbe6',warm:'#ffdca6',red:'#e5484d',lime:'#46c46a',glass:'#bfe3ea',sand:'#e6d6ac',rock:'#8f9a8c',hill:'#6aa56f',hill2:'#4d8a5c',cloud:'#ffffff',navy2:'#27455c',heli:'#f2f4f3',dolphin:'#6f8ea6'};
 const SKY={zenith:'#3d8fdc',horizon:'#cfe8f3',haze:'#f7eedc',deep:'#0f5676',shallow:'#2aa0b6',mirror:'#8fc6e6',sun:'#fff1cf'};
 const SUN_DIR=new THREE.Vector3(0.42,0.62,0.66).normalize();
 
@@ -72,17 +72,17 @@ function buildYacht(W){
   // ----- hull: lofted between stations, navy topsides over a green boot stripe -----
   const navyTop=z=>z<=zB0?FORE+RAIL+0.9*((zB0-z)/bow)**2:z<zB0+12?lerp(FORE+RAIL,MAIN+RAIL,(z-zB0)/12):z<=zL1?MAIN+RAIL:lerp(MAIN+RAIL,SWIM+0.02,(z-zL1)/swimRamp);
   const waterBeam=z=>z<zB0?0.9*HB*Math.max(0,1-((zB0-z)/(bow-7))**1.7):0.9*W.halfBeam(z);
-  const profile=z=>{const hw=W.halfBeam(z),wl=Math.min(waterBeam(z),hw);return [[0,SEA-2.3],[wl*0.55,SEA-1.7],[wl,SEA-0.12],[lerp(wl,hw,0.16),SEA+0.5],[hw,navyTop(z)]]};
+  const profile=z=>{const hw=W.halfBeam(z),wl=Math.min(waterBeam(z),hw);const top=navyTop(z);return [[0,SEA-2.3],[wl*0.55,SEA-1.7],[wl,SEA-0.12],[lerp(wl,hw,0.16),SEA+0.5],[lerp(wl,hw,0.86),lerp(SEA+0.5,top,0.72)],[hw,top]]};
   const stations=[];
   for(let i=0;i<=14;i++)stations.push(zBow+bow*(i/14)**1.35);
   for(const z of [zB0+6,zB0+12,(zB0+12+zL0)/2,zL0,(zL0+zL1)/2,zL1])if(z>stations.at(-1)+0.5)stations.push(z);
   for(let i=1;i<=4;i++)stations.push(zL1+(zSw-zL1)*i/4);
-  const bands=[PAL.keel,PAL.keel,PAL.stripe,PAL.navy];
+  const bands=[PAL.keel,PAL.keel,PAL.stripe,PAL.navy,PAL.navy2],NB=bands.length;
   for(let i=0;i<stations.length-1;i++){
     const za=stations[i],zb=stations[i+1],a=profile(za),b=profile(zb),from=[0,SEA,(za+zb)/2];
-    for(const s of [-1,1])for(let j=0;j<4;j++)S.face([s*a[j][0],a[j][1],za],[s*b[j][0],b[j][1],zb],[s*b[j+1][0],b[j+1][1],zb],[s*a[j+1][0],a[j+1][1],za],bands[j],from,j===3?[.74,.74,1,1]:[.9,.9,1,1]);
+    for(const s of [-1,1])for(let j=0;j<NB;j++)S.face([s*a[j][0],a[j][1],za],[s*b[j][0],b[j][1],zb],[s*b[j+1][0],b[j+1][1],zb],[s*a[j+1][0],a[j+1][1],za],bands[j],from,j===3?[.72,.72,1,1]:[.9,.9,1,1]);
   }
-  {const t=profile(zSw);for(let j=0;j<4;j++)S.face([-t[j][0],t[j][1],zSw],[t[j][0],t[j][1],zSw],[t[j+1][0],t[j+1][1],zSw],[-t[j+1][0],t[j+1][1],zSw],bands[j],[0,SEA,zSw-2],[.8,.8,1,1])}
+  {const t=profile(zSw);for(let j=0;j<NB;j++)S.face([-t[j][0],t[j][1],zSw],[t[j][0],t[j][1],zSw],[t[j+1][0],t[j+1][1],zSw],[-t[j+1][0],t[j+1][1],zSw],bands[j],[0,SEA,zSw-2],[.8,.8,1,1])}
   // portholes along the topsides
   for(let z=zB0+5;z<zL1-3;z+=4.4)for(const s of [-1,1])S.box(s*(HB+0.02),SEA+1.75,z,0.08,0.42,1.1,PAL.dark,{ao:1});
 
@@ -126,6 +126,11 @@ function buildYacht(W){
   L.box(0,SUN-0.22,pool.z,pool.halfX*2,0.04,pool.halfZ*2,PAL.pool,{ao:1});
   for(const s of [-1,1]){S.box(s*(SB+0.2),SUN-0.16,(zS0+zS1)/2,0.5,0.14,zS1-zS0+0.9,PAL.shade);S.box(0,SUN-0.16,s>0?zS1+0.2:zS0-0.2,SB*2,0.14,0.5,PAL.shade)}
 
+  // ----- no shadows are drawn, so decks get a darker band where something tall stands on them -----
+  const shade=(x,z,w,d,y,color=PAL.teak2)=>S.box(x,y+0.013,z,w,0.012,d,color,{ao:1});
+  shade(0,zL0+0.95,(HB-3.6)*2,1.5,MAIN);shade(0,zL1+0.75,(HB-4.8)*2,1.2,SWIM);shade(0,zB0-0.7,(HB-4.2)*2,1.4,FORE);
+  shade(0,zS0-0.6,SB*2+1.2,1.2,UPPER);for(const s of [-1,1]){shade(s*(SB+0.6),(zS0+zS1)/2,1.2,zS1-zS0,UPPER);shade(s*(slot+SB)/2,zS1+0.6,SB-slot,1.2,UPPER)}
+  shade(0,zS0+2,7.4,1.3,SUN);shade(0,pad.z+0.4,2.9,5.8,FORE,PAL.pad);
   // ----- windows: long dark bands, broken by mullions -----
   const band=(x,z0,z1,y0,y1,every=3.4)=>{S.box(x,y0,(z0+z1)/2,0.1,y1-y0,z1-z0,PAL.dark,{ao:.9});for(let z=z0+every;z<z1-0.5;z+=every)S.box(x,y0,z,0.14,y1-y0,0.16,PAL.white,{ao:1})};
   const bandX=(z,x0,x1,y0,y1,every=3.4)=>{S.box((x0+x1)/2,y0,z,x1-x0,y1-y0,0.1,PAL.dark,{ao:.9});for(let x=x0+every;x<x1-0.5;x+=every)S.box(x,y0,z,0.16,y1-y0,0.14,PAL.white,{ao:1})};
@@ -275,6 +280,17 @@ function buildYacht(W){
   S.box(pad.x,FORE+0.03,pad.z,2.2,0.02,0.5,PAL.white,{ao:1});
   for(let i=0;i<8;i++){const a=i/8*Math.PI*2;L.box(pad.x+Math.cos(a)*(pad.r-0.2),FORE+0.03,pad.z+Math.sin(a)*(pad.r-0.2),0.22,0.08,0.22,PAL.lime,{ao:1})}
   for(const s of [-1,1]){S.cyl(s*1.5,FORE,zBow+7,0.45,0.7,7,PAL.steel,{r2:0.35});S.box(s*1.5,FORE,zBow+5,0.3,0.25,2.6,PAL.dark)}
+  // a helicopter on the pad (its rotor turns: a mesh of its own), and jet skis on the swim platform
+  {const hx=pad.x,hz=pad.z+0.4,y=FORE+0.5;
+    S.ball(hx,y+0.95,hz-0.7,1.25,PAL.heli,{sy:0.8,n:8});S.ball(hx,y+1.05,hz-1.35,0.95,PAL.dark,{sy:0.7,n:8});
+    S.box(hx,y+0.9,hz+1.9,0.34,0.36,3.2,PAL.heli,{tilt:-0.12});S.box(hx,y+1.5,hz+3.4,0.1,1,0.7,PAL.stripe,{tilt:0.3});
+    S.box(hx,y+0.5,hz+0.6,1.5,0.5,1.4,PAL.heli);S.cyl(hx,y+1.9,hz-0.5,0.12,0.5,5,PAL.steel);
+    for(const s of [-1,1]){S.box(hx+s*0.85,FORE+0.06,hz-0.4,0.09,0.09,3,PAL.steel);for(const dz of [-1.2,0.5])S.box(hx+s*0.7,FORE+0.1,hz+dz,0.07,0.55,0.07,PAL.steel,{roll:-s*0.5})}}
+  for(const b of W.walls)if(b.kind==='jetski'){
+    const c=b.x>0?PAL.coral:PAL.teal;
+    S.box(b.x,b.y+0.1,b.z,1,0.42,2.5,PAL.heli,{top:c});S.box(b.x,b.y+0.5,b.z+0.35,0.5,0.22,1.1,PAL.dark);
+    S.box(b.x,b.y+0.5,b.z-0.75,0.62,0.34,0.5,c,{tilt:-0.4});S.box(b.x,b.y+0.86,b.z-0.6,0.8,0.05,0.07,PAL.dark);
+  }
   // ensign staff at the stern
   {const fx=-(HB-5.3),fz=zL1-0.3;S.cyl(fx,MAIN,fz,0.05,3.4,5,PAL.steel);S.face([fx,MAIN+3.3,fz],[fx,MAIN+2.4,fz],[fx,MAIN+2.4,fz+1.5],[fx,MAIN+3.3,fz+1.5],PAL.stripe,null)}
 
@@ -320,9 +336,11 @@ void main(){
   // foam along the hull, a V from the bow, and the wash astern
   float u=clamp((uHull.y-p.y)/(uHull.y-uHull.x-7.0),0.0,1.0),hw=uHull.w*0.9*(1.0-pow(u,1.7));
   float d=max(abs(p.x)-hw,max(uHull.x+7.0-p.y,p.y-uHull.z));
+  vec2 ps=p+vec2(3.2,4.4);float us=clamp((uHull.y-ps.y)/(uHull.y-uHull.x-7.0),0.0,1.0);
+  col*=1.0-0.3*smoothstep(4.0,-1.5,max(abs(ps.x)-uHull.w*0.95*(1.0-pow(us,1.7)),max(uHull.x+7.0-ps.y,ps.y-uHull.z)));
   float foam=smoothstep(2.2,0.1,d+nz*2.6)*0.9;
   float s2=p.y-(uHull.x+7.0);
-  if(s2>0.0){float arm=abs(abs(p.x)-(1.5+s2*0.33));foam=max(foam,smoothstep(1.2+s2*0.02,0.0,arm)*exp(-s2/95.0)*smoothstep(0.34,0.66,nz)*0.55);}
+  if(s2>0.0){float arm=abs(abs(p.x)-(1.5+s2*0.33));foam=max(foam,smoothstep(1.0+s2*0.025,0.0,arm)*exp(-s2/55.0)*smoothstep(0.44,0.7,nz)*0.6);}
   float s=p.y-uHull.z;
   if(s>0.0){float w0=uHull.w*0.55+s*0.1;foam=max(foam,smoothstep(w0,w0*0.25,abs(p.x))*exp(-s/75.0)*smoothstep(0.4,0.72,nz+0.2*exp(-s/12.0))*0.9);}
   col=mix(col,mix(uShallow,vec3(0.97,0.99,1.0),0.82),clamp(foam,0.0,1.0)*0.9);
@@ -374,6 +392,12 @@ export function createYachtWorld({scene,deck}){
   const ripple=keep(new THREE.Mesh(new THREE.RingGeometry(0.72,1,20),new THREE.MeshBasicMaterial({color:'#ffffff',transparent:true,opacity:0,depthWrite:false})));ripple.rotation.x=-Math.PI/2;ripple.visible=false;scene.add(ripple);
   const group=new THREE.Group();deck.add(group);
   const radar=new THREE.Mesh(new THREE.BoxGeometry(2.6,0.14,0.3),new THREE.MeshLambertMaterial({color:PAL.white,flatShading:true}));group.add(radar);
+  const rotorGeo=(()=>{const m=mesher();m.box(0,0,0,7.6,0.05,0.3,PAL.dark,{bottom:true});m.box(0,0,0,0.3,0.05,7.6,PAL.dark,{bottom:true});return m.build()})();
+  const rotor=new THREE.Mesh(rotorGeo,paint);group.add(rotor);
+  const dolphinGeo=(()=>{const m=mesher();m.cyl(0,-1.15,0,0.03,1.15,6,PAL.dolphin,{r2:0.3,ao:.9});m.cyl(0,0,0,0.3,1.25,6,PAL.dolphin,{r2:0.04,ao:1});
+    m.face([0,-0.2,0.25],[0,0.3,0.25],[0,-0.05,0.62],null,PAL.dolphin,null);m.face([-0.42,-1.3,0],[0.42,-1.3,0],[0,-1.0,0],null,PAL.dolphin,null);
+    const g=m.build();g.rotateX(-Math.PI/2);return g})();
+  const dolphins=keep(new THREE.InstancedMesh(dolphinGeo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}),3));dolphins.frustumCulled=false;scene.add(dolphins);
   const dummy=new THREE.Object3D();
   let core=yachtWorld(1),key='',meshes=[],floor=null,splashAt=-1,splashPos=new THREE.Vector3(),stats={triangles:0};
   // members: the room keys, the owner first. Answers the plan (rooms, walls, board anchors, …) and rebuilds the yacht for it.
@@ -385,7 +409,7 @@ export function createYachtWorld({scene,deck}){
     meshes=[new THREE.Mesh(g.solid,paint),new THREE.Mesh(g.lights,lightMat),new THREE.Mesh(g.glass,glassMat),new THREE.Mesh(g.floors,pickMat)];
     meshes[2].renderOrder=2;floor=meshes[3];for(const m of meshes)group.add(m);
     const P=core.plan;sea.material.uniforms.uHull.value.set(P.zBow,P.zB0,P.zSw,P.HB);
-    radar.position.set(0,YACHT.SUN+3.9+1.9,P.zS0+4.2-0.6);
+    radar.position.set(0,YACHT.SUN+3.9+1.9,P.zS0+4.2-0.6);rotor.position.set(P.pad.x,YACHT.FORE+2.95,P.pad.z-0.1);
     return core;
   }
   function update(t,dt,{camera,motion=true}={}){
@@ -395,7 +419,14 @@ export function createYachtWorld({scene,deck}){
     const k=motion?1:0;
     deck.position.y=k*0.07*Math.sin(t*0.62+0.5);deck.rotation.z=k*(0.0052*Math.sin(t*0.55)+0.0024*Math.sin(t*0.83+1));deck.rotation.x=k*0.0026*Math.sin(t*0.41+2);
     const drift=(t*1.1)%TILE;far[0].position.z=drift;far[1].position.z=drift-TILE;
-    radar.rotation.y=t*1.4;
+    radar.rotation.y=t*1.4;rotor.rotation.y=t*2.2;
+    // dolphins off the starboard bow: each leaps in an arc, then swims under for a while
+    for(let i=0;i<dolphins.count;i++){
+      const cycle=5.5+i*1.3,u=((t+i*1.9)%cycle)/1.5,up=u<1,a=Math.PI*u;
+      dummy.position.set(core.plan.HB+11+i*3.5,up?YACHT.SEA-0.5+Math.sin(a)*2.6:YACHT.SEA-4,core.plan.zBow+34-i*7-(up?u*5:0));
+      dummy.rotation.set(up?Math.cos(a)*0.95:0,0,0);dummy.scale.setScalar(1.25);dummy.updateMatrix();dolphins.setMatrixAt(i,dummy.matrix);
+    }
+    dolphins.instanceMatrix.needsUpdate=true;
     const P=core.plan;
     for(let i=0;i<gulls.count;i++){
       const a=t*(0.16+i*0.013)*(i%2?1:-1)+i*2.1,r=16+i*5.5;dummy.position.set(Math.cos(a)*r,YACHT.SUN+9+i*1.7+Math.sin(t*0.4+i)*1.5,P.zS0+10+Math.sin(a)*r*1.4);
@@ -421,7 +452,7 @@ export function createYachtWorld({scene,deck}){
     dispose(){
       deck.remove(group);deck.position.y=0;deck.rotation.set(0,0,0);
       for(const o of own){scene.remove(o);o.geometry?.dispose();o.material?.dispose()}
-      for(const m of meshes)m.geometry.dispose();radar.geometry.dispose();radar.material.dispose();farGeo.dispose();
+      for(const m of meshes)m.geometry.dispose();radar.geometry.dispose();radar.material.dispose();farGeo.dispose();rotorGeo.dispose();
       for(const m of [paint,glassMat,lightMat,farMat,pickMat])m.dispose();
       scene.fog=null;
     },
