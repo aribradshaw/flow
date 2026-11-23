@@ -13,7 +13,7 @@ import {officeBox} from './office-controls.js';
 import {classicLayout,toWorld,roomMeterMount,officeMeterMount,ROOM_W,ROOM_D,WALL_T,BACK_WALL_H,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
 export {ROOM_W,ROOM_D};
 
-export const WORLDS=[{id:'classic',name:'Office'},{id:'yacht',name:'Yacht'}];
+export const WORLDS=[{id:'classic',name:'🏢 Office'},{id:'yacht',name:'🛥️ Yacht'}];
 export const DEFAULT_WORLD='classic';
 export const worldId=v=>WORLDS.some(w=>w.id===v)?v:DEFAULT_WORLD;
 export const BODY=0.38;
