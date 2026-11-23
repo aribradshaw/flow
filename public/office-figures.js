@@ -27,7 +27,7 @@ const SHADOW=()=>matOf('#000000',{basic:true});
 
 // ---------- people ----------
 // A person about 1.75 tall facing +z: legs and arms hang from pivots so they can swing.
-export function makeHuman(look,{dim=false}={}){
+export function makeHuman(look,{dim=false,shadow=true}={}){
   const g=geo(),m=c=>matOf(c,{dim}),root=new THREE.Group(),body=new THREE.Group();root.add(body);
   const limb=(x,y,len,w,color,end,endColor)=>{const p=new THREE.Group();p.position.set(x,y,0);p.add(mesh(g.box,m(color),[0,-len/2,0],[w,len,w*1.1]));p.add(mesh(end==='shoe'?g.box:g.ball,m(endColor),end==='shoe'?[0,-len,0.04]:[0,-len-0.04,0],end==='shoe'?[w*1.05,0.08,w*1.7]:[0.065,0.065,0.065]));body.add(p);return p};
   const legL=limb(0.12,0.86,0.78,0.17,look.pants,'shoe','#2a2a2a'),legR=limb(-0.12,0.86,0.78,0.17,look.pants,'shoe','#2a2a2a');
@@ -43,7 +43,7 @@ export function makeHuman(look,{dim=false}={}){
   if(look.style===1)head.add(mesh(g.box,m(look.hair),[0,-0.04,-0.12],[0.36,0.3,0.1]));
   if(look.style===2)head.add(mesh(g.box,m(look.hair),[0,0.2,0.07],[0.3,0.06,0.18]));
   if(look.style===3)head.add(mesh(g.ball,m(look.hair),[0,0.16,-0.01],[0.17,0.08,0.18]));
-  const sh=mesh(g.disc,SHADOW(),[0,0.02,0],[0.42,0.42,0.42]);sh.rotation.x=-Math.PI/2;sh.material.transparent=true;sh.material.opacity=.14;sh.material.depthWrite=false;root.add(sh);
+  if(shadow){const sh=mesh(g.disc,SHADOW(),[0,0.02,0],[0.42,0.42,0.42]);sh.rotation.x=-Math.PI/2;sh.material.transparent=true;sh.material.opacity=.14;sh.material.depthWrite=false;root.add(sh)}
   root.userData.rig={body,legL,legR,armL,armR,torso,head};
   // The animation hook: update(t, {speed, grounded, jumping, emote:{kind, at}, phase}) each frame.
   root.userData.update=(t,st)=>animateHuman(root.userData.rig,t,st);

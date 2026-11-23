@@ -102,8 +102,8 @@ function connect(){
   on('snapshot',d=>{S.tries=0;S.down=0;updateSources(d.yourSources||[]);snapshot(d)});
   on('yourSources',updateSources);
   on('hb',()=>{});
-  on('join',p=>{if(S.world){upsertPerson(p);presenceChanged(p.key)}});on('move',p=>{if(S.world)upsertPerson(p)});
-  on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;presenceChanged(key)});
+  on('join',p=>{if(!S.world)return;upsertPerson(p);presenceChanged(p.key)});on('move',p=>{if(S.world)upsertPerson(p)});
+  on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel()});
@@ -126,6 +126,7 @@ function snapshot(d){
   S.meKey=d.me.key;S.me=d.me;S.members=d.members;S.snapAgentflow=d.agentflow;S.live=new Map(Object.entries(d.live||{}));
   S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
+  watch();
   if(!S.world)return;
   buildAgentflow();buildRooms();
   if(!S.placed){
@@ -331,7 +332,8 @@ function buildAgentflow(){
 }
 
 // ---------- people ----------
-function makeAvatar(key){const g=makeHuman(lookFor(key));return g}
+// A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
+function makeAvatar(key){return makeHuman(lookFor(key),{shadow:false})}
 function upsertPerson(p,self=false){
   if(!S)return;let a=S.people.get(p.key);
   if(!a){
@@ -550,7 +552,7 @@ function frame(dt,t){
   for(const p of S.people.values()){
     // The figure animation can use the same motion fields for local and remote avatars.
     const motion=p.motion=p.self?player:remoteMotion(p,now);
-    const o=p.obj,hop=p.hop&&now-p.hop<700?Math.sin((now-p.hop)/700*Math.PI)*0.45:0;
+    const o=p.obj,hop=0;
     o.position.set(motion.x,motion.y+hop,motion.z);o.rotation.y=motion.heading;
     if(!p.self&&p.wasAirborne&&motion.grounded)p.landing=0.12;
     p.wasAirborne=!motion.grounded;
