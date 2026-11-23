@@ -1324,13 +1324,18 @@ async function apiAuth(req){
   const t=tokenUser(req);return t?{user:t,scopes:['read','write','admin']}:null;
 }
 // ---------- 3D office (lib/office.mjs, docs/concepts/12-office.md) ----------
-// In memory, in this process: Flow runs as one server instance, so this one process holds every office.
+// Streams and poses stay local. Postgres (or BACKUP_DIR) keeps the durable office state.
 // Members of an environment: its owner, its members, and everyone with an active share into it.
 const officeMod=await import('./lib/office.mjs'),afCore=await import('./public/agentflow-core.js');
-// The key behind members' and agents' opaque ids, kept beside the backups so avatars keep their looks across restarts.
-const officeSecret=(()=>{const f=join(fileURLToPath(backupRoot),'_office-secret');try{const v=readFileSync(f,'utf8').trim();if(v.length>=32)return v}catch{}
+// Use the existing local key to seed the shared key during an upgrade.
+const officeSecretSeed=(()=>{const f=join(fileURLToPath(backupRoot),'_office-secret');try{const v=readFileSync(f,'utf8').trim();if(v.length>=32)return v}catch{}
   const v=randomUUID()+randomUUID();try{mkdirSync(fileURLToPath(backupRoot),{recursive:true});writeFileSync(f,v,{mode:0o600})}catch{}return v})();
-const officeState=officeMod.officeState();
+const {officeStorage:openOfficeStorage}=await import('./lib/office-storage.mjs');
+const officeStorage=await openOfficeStorage({db:await cloud(),dir:fileURLToPath(backupRoot),secret:officeSecretSeed}).catch(e=>{
+  throw Error('Could not initialize office storage: '+cloudError(e));
+});
+const officeState=officeMod.officeState({storage:officeStorage});
+await officeState.refresh().catch(e=>{throw Error('Could not load office reports: '+cloudError(e))});
 const officeLimit=memoryRateLimit({perMinute:600});
 const personName=async email=>(await users.get(email).catch(()=>null))?.name||(auth.mode==='local'&&sameEmail(email,auth.localUser?.email)?auth.localUser.name:'')||String(email).split('@')[0];
 async function officeEnv(envId){
@@ -1397,7 +1402,7 @@ async function officePortals(envId,user){
   if(!sameEmail(here?.owner,user.email)){const mine=await workspaces.ownedBy(user.email).catch(()=>null);if(mine?.envId)await add(mine.envId,'Your office',true)}
   return out;
 }
-const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeSecret});
+const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
 // /api/office/{env}/events (SSE), presence, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
 // the app's page only, signed in (local mode too).
 async function officeApi(req,res){
@@ -1407,7 +1412,9 @@ async function officeApi(req,res){
     if(!trusted(req)){res.writeHead(403);res.end();return true}
     if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
     const user=await requireUser(req,res);if(!user)return true;
-    officeHub.alerts(user,req,res);return true;
+    try{await officeState.refresh([String(user.email).trim().toLowerCase()]);if(!res.destroyed)officeHub.alerts(user,req,res)}
+    catch(e){console.error('office alerts failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open office alerts'});else res.end()}
+    return true;
   }
   const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
@@ -1424,15 +1431,15 @@ async function officeApi(req,res){
   if(!access.ok){json(res,404,{error:'Not found'});return true}
   if(what==='events'){
     if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
-    try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',e?.message);if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
+    try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
     return true;
   }
   if(req.method!=='POST'){res.writeHead(405,{Allow:'POST'});res.end();return true}
-  readJson(req,res,b=>{
+  readJson(req,res,async b=>{
     try{
-      const out=what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):officeHub.answer(envId,user,b);
+      const out=await (what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):officeHub.answer(envId,user,b));
       json(res,200,out);
-    }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',e);json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
+    }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
   });
   return true;
 }
@@ -1526,7 +1533,12 @@ function resolveStatic(url){
   if(!file.startsWith(resolve(root)+sep)||!types[extname(file)]||!existsSync(file)||!statSync(file).isFile())return null;
   return file;
 }
+let draining=false;
 const server=http.createServer(async(req,res)=>{
+  res.once('finish',()=>{if(draining)setImmediate(()=>server.closeIdleConnections())});
+  if(req.url.split('?')[0]==='/health'&&(req.method==='GET'||req.method==='HEAD')){
+    res.writeHead(draining?503:200,{'Cache-Control':'no-store'});res.end();return;
+  }
   // Who may frame Flow (lib/embed.mjs): this origin only, unless FLOW_FRAME_ANCESTORS adds others.
   // Decided once per request (lib/embed.mjs): the same answer sets the frame headers and the sign-in cookies.
   try{req.flowEmbed=await auth.embed.decide(req);for(const [k,v] of Object.entries(auth.embed.headers(req.flowEmbed)))res.setHeader(k,v)}catch{}
@@ -1573,4 +1585,19 @@ server.once('listening',()=>{
   memberships.start(Number.isFinite(s)&&s>0?Math.max(1,s)*1000:0);
 });
 server.on('listening',()=>{const url=auth.mode==='opid'&&!LOOPBACK.includes(host)?`${auth.appOrigin} (listening on ${host}:${server.address().port})`:`http://${host==='::1'?'[::1]':host}:${server.address().port}`;if(!VERIFY&&auth.mode==='local')writeFileSync(new URL('./running.json',import.meta.url),JSON.stringify({url,pid:process.pid}));console.log(`Flygon Flow: ${url} (${auth.mode==='opid'?'OneProfileID sign-in':'local single-user mode'}${auth.mode==='local'&&SYNC_URL&&SYNC_TOKEN?`, syncing with ${SYNC_HOST}`:''})`);});
+process.on('SIGTERM',()=>{
+  if(draining)return;
+  draining=true;
+  memberships.stop();
+  const deadline=setTimeout(()=>{server.closeAllConnections();process.exit(1)},25000);
+  deadline.unref();
+  server.close(async error=>{
+    await officeHub.flush();
+    await pool?.end().catch(()=>{});
+    clearTimeout(deadline);
+    process.exit(error?1:0);
+  });
+  officeHub.close({restart:true});
+  officeState.close();
+});
 server.listen(port,host);

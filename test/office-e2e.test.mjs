@@ -4,6 +4,7 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 import http from 'node:http';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -19,14 +20,14 @@ const call=async(method,path,body,headers={})=>{
 const api=(method,path,body)=>call(method,path,body,{authorization:'Bearer '+key});
 function sse(path,headers={}){
   const events=[];let buf='',res;
-  const ready=new Promise((ok,no)=>{const req=http.get(base+path,{headers},r=>{res=r;r.setEncoding('utf8');r.on('data',c=>{buf+=c;let i;while((i=buf.indexOf('\n\n'))>=0){const b=buf.slice(0,i);buf=buf.slice(i+2);
-    const type=/^event: (.+)$/m.exec(b)?.[1],data=/^data: (.+)$/m.exec(b)?.[1];if(type)events.push({type,data:JSON.parse(data)})}});ok(r)});req.on('error',no)});
-  const next=async(type,ms=3000)=>{for(const end=Date.now()+ms;Date.now()<end;){const i=events.findIndex(e=>e.type===type);if(i>=0)return events.splice(i,1)[0].data;await new Promise(r=>setTimeout(r,15))}throw Error('no '+type+' event')};
-  return {ready,next,close:()=>res?.destroy()};
+  let end;const ended=new Promise(resolve=>{end=resolve});
+  const ready=new Promise((ok,no)=>{const req=http.get(base+path,{headers},r=>{res=r;r.once('end',end);r.setEncoding('utf8');r.on('data',c=>{buf+=c;let i;while((i=buf.indexOf('\n\n'))>=0){const b=buf.slice(0,i);buf=buf.slice(i+2);
+    const type=/^event: (.+)$/m.exec(b)?.[1],data=/^data: (.+)$/m.exec(b)?.[1];if(type)events.push({type,data:JSON.parse(data),id:/^id: (.+)$/m.exec(b)?.[1],retry:Number(/^retry: (.+)$/m.exec(b)?.[1])})}});ok(r)});req.on('error',no)});
+  const nextEvent=async(type,ms=3000)=>{for(const end=Date.now()+ms;Date.now()<end;){const i=events.findIndex(e=>e.type===type);if(i>=0)return events.splice(i,1)[0];await new Promise(r=>setTimeout(r,15))}throw Error('no '+type+' event')};
+  return {ready,ended,nextEvent,next:async type=>(await nextEvent(type)).data,close:()=>res?.destroy()};
 }
 
-before(async()=>{
-  dir=mkdtempSync(join(tmpdir(),'ff-office-'));
+async function start(){
   app=spawn(process.execPath,['server.mjs'],{cwd:ROOT,env:{...process.env,FLOW_SYNC_URL:'',FLOW_SYNC_TOKEN:'',DATABASE_URL:'',PORT:'0',ORG_CHART_VERIFY:'1',
     OPID_BASE_URL:'',OPID_APP_ID:'',OPID_APP_SECRET:'',OPID_APP_ORIGIN:'',BACKUP_DIR:join(dir,'backups'),SAVES_DIR:join(dir,'saves'),INBOX_DIR:join(dir,'inbox')}});
   let err='';app.stderr.on('data',d=>err+=d);
@@ -39,6 +40,11 @@ before(async()=>{
     });
     app.once('exit',()=>reject(Error('server did not start: '+err)));
   });
+}
+
+before(async()=>{
+  dir=mkdtempSync(join(tmpdir(),'ff-office-'));
+  await start();
   const r=await call('POST','/api/office/default-workspace/bridge-key',{});
   assert.equal(r.status,201,JSON.stringify(r.data));key=r.data.key;
 });
@@ -83,4 +89,59 @@ test('local mode: the office opens for the local user with their reported agents
   r=await fetch(base+'/mcp',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+key},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}).then(x=>x.json());
   assert.ok(['office_agents_report','office_actions_wait','office_actions_result'].every(n=>r.result.tools.some(t=>t.name===n)));
   s.close();
+});
+
+test('SIGTERM announces restart, closes the stream and preserves the office for its successor',{timeout:10000},async()=>{
+  const office='/api/office/default-workspace',source='restart-test';
+  const report={source,at:'2026-01-01T00:00:00.000Z',agents:[
+    {id:'waiting',status:'waiting',pending:{requestId:'queued',kind:'approval',can:['allow']}},
+  ]};
+  assert.equal((await call('GET','/health')).status,200);
+  assert.equal((await api('PUT','/api/v1/office/agents',report)).status,200);
+  const s=sse(office+'/events');await s.ready;
+  const snapshot=await s.nextEvent('snapshot');
+  const same=sse(office+'/events',{'Last-Event-ID':snapshot.id});await same.ready;
+  assert.equal((await same.next('snapshot')).resumedHere,true);
+  same.close();
+  assert.equal((await call('POST',office+'/presence',{x:7,z:9,status:'Available'})).status,200);
+  assert.equal((await call('POST',office+'/say',{text:'Back in a moment'})).status,200);
+  const action=await call('POST',office+'/answer',{source,agentId:'waiting',requestId:'queued',decision:'allow'});
+  assert.equal(action.status,200);
+  const alerts=sse('/api/office/alerts');await alerts.next('mine');
+  const late=JSON.stringify({source:'during-drain',agents:[{id:'in-flight'}]});
+  const incoming=http.request(base+'/api/v1/office/agents',{method:'PUT',headers:{
+    authorization:'Bearer '+key,'content-type':'application/json','content-length':Buffer.byteLength(late),expect:'100-continue',
+  }});
+  const continued=once(incoming,'continue'),response=once(incoming,'response');incoming.flushHeaders();
+  await continued;
+  const exit=once(app,'exit');app.kill('SIGTERM');
+  const restart=await s.nextEvent('restart');
+  incoming.end(late);
+  const [finished]=await response;assert.equal(finished.statusCode,200);finished.resume();
+  assert.equal((await alerts.nextEvent('restart')).retry,500);
+  await alerts.ended;
+  assert.equal(restart.retry,500);
+  assert.match(restart.id,/^[a-f0-9-]+:\d+$/);
+  await s.ended;
+  assert.deepEqual(await exit,[0,null]);
+
+  await start();
+  const resumed=sse(office+'/events?lastEventId='+encodeURIComponent(restart.id));await resumed.ready;
+  const fresh=await resumed.next('snapshot');
+  assert.equal(fresh.resumedHere,false);
+  assert.equal(fresh.me.key,snapshot.data.me.key);
+  assert.equal(fresh.me.status,'Available');
+  assert.deepEqual(fresh.people,[]);
+  assert.equal(fresh.chat.at(-1).text,'Back in a moment');
+  assert.equal(fresh.live[fresh.me.key].find(a=>a.source===source).id,'waiting');
+  assert.equal(fresh.live[fresh.me.key].find(a=>a.source==='during-drain').id,'in-flight');
+  assert.equal(fresh.yourSources.find(s=>s.source===source).at,report.at);
+  assert.ok(fresh.actions.some(a=>a.id===action.data.id));
+  assert.deepEqual((await api('GET','/api/v1/office/actions?source='+source)).data.actions.map(a=>a.id),[action.data.id]);
+  assert.deepEqual((await api('PUT','/api/v1/office/agents',report)).data.actions,[]);
+  resumed.close();
+  const secondExit=once(app,'exit');app.kill('SIGTERM');await secondExit;
+
+  await start();
+  assert.deepEqual((await api('GET','/api/v1/office/actions?source='+source)).data.actions,[]);
 });

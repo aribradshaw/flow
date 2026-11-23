@@ -206,6 +206,7 @@ function updateRooms(members,agentflow){
 }
 function snapshot(d){
   const previous=S.live;
+  if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
   S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);
@@ -267,7 +268,9 @@ function sendPresence(force){
   const pose={x:rounded(x),y:rounded(y),z:rounded(z),heading:rounded(heading),moving:speed>0.05,jump:!grounded,sprint:sprinting};
   const sig=JSON.stringify(pose);
   if(!force&&sig===S.lastSent)return;
-  const office=S;S.sentAt=t;S.lastSent=sig;api('presence',pose).catch(()=>{if(S===office&&S.lastSent===sig)S.lastSent=''})
+  const office=S;S.sentAt=t;S.lastSent=sig;
+  if(force&&typeof S.me?.status==='string')pose.status=S.me.status;
+  api('presence',pose).catch(()=>{if(S===office&&S.lastSent===sig)S.lastSent=''})
 }
 
 // ---------- the scene ----------

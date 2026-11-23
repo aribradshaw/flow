@@ -33,6 +33,23 @@ Under **Other ways to sign in**, the screen also offers **Sign in with your phon
 
 `RESEND_API_KEY` and `FLOW_EMAIL_FROM` optionally deliver invitation emails. `FLOW_EMAIL_FROM` is a sender on a domain verified in Resend, for example `Flygon Flow <flow@flygonlc.com>`. The invite is laid out by [OneMail](https://github.com/aribradshaw/onemail): its header logo is `/email/flow-logo@2x.png` from your instance's public URL, so it shows only when that URL is https; otherwise the header is the name as text. Invites can still be created without email delivery; share the invitation details yourself. Back up the persistent volume or Postgres database, and test restoring a Save snapshot before depending on the instance for important work.
 
+## Deploy on Railway
+
+For a Flow service backed by Postgres, set these values in Railway:
+
+| Service setting | Value |
+| --- | --- |
+| Healthcheck Path | `/health` |
+| `RAILWAY_HEALTHCHECK_TIMEOUT_SEC` | `300` |
+| `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS` | `5` |
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | `30` |
+
+Flow starts listening after it initializes office storage. Railway waits for the healthcheck before switching traffic. On SIGTERM, Flow asks office streams to reconnect after 500 ms and gives active HTTP requests up to 25 seconds to finish. Railway services with an attached volume can still have a short interruption while the volume moves to the new deployment. See Railway's [healthchecks](https://docs.railway.com/deployments/healthchecks) and [deployment teardown](https://docs.railway.com/deployments/deployment-teardown).
+
+Use the same `DATABASE_URL` for both deployments. Reconnecting viewers get the saved reports, chat, status and actions in their snapshot. When a reporter and a viewer are routed to different deployments during overlap, live agent updates, chat, replies and avatar movement can appear delayed until the viewer reconnects. Postgres prevents both deployments from claiming the same action. The file fallback requires a single process and a persistent `BACKUP_DIR`.
+
+For users in the southwestern United States, use **US West Metal (California)**, `us-west2`, for both the Flow service and its database when possible. See [Railway regions](https://docs.railway.com/deployments/regions).
+
 ## Limits
 
 A Flow that other people can join keeps each person within limits, so one account cannot fill the server. The owner (`OWNER_EMAIL`) has larger limits and no environment or storage cap. Set any of these to change them; the defaults are in brackets.
