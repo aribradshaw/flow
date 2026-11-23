@@ -4563,7 +4563,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12}}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
 ```
 
 ```json
@@ -4600,6 +4600,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
+| `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `sources` | object[] | yes |  |
 | `sources[].source` | string | yes |  |
 | `sources[].at` | string | yes |  |
@@ -4642,6 +4643,23 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
         "agent": "Builder",
         "card": 12
       },
+      "transcript": [
+        {
+          "role": "user",
+          "text": "Fix the login redirect loop.",
+          "at": "2026-10-29T17:00:00.000Z"
+        },
+        {
+          "role": "assistant",
+          "text": "The callback keeps ?next=/login. Running the tests next.",
+          "at": "2026-10-29T17:00:00.000Z"
+        },
+        {
+          "role": "tool",
+          "text": "Run: npm test",
+          "at": "2026-10-29T17:00:00.000Z"
+        }
+      ],
       "source": "bridge:laptop"
     }
   ],

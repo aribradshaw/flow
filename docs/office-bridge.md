@@ -53,6 +53,8 @@ The bridge uses the same sign-in as the rest of the CLI. `FLOW_URL` and `FLOW_AP
 
 T3’s default database is `~/.t3/userdata/statev2.sqlite` on Linux and macOS and `%USERPROFILE%\.t3\userdata\statev2.sqlite` on Windows. When `T3CODE_HOME` is set, the bridge looks under its `userdata` directory. Claude Code sessions come from the `projects` directory under `~/.claude` or `CLAUDE_CONFIG_DIR` and show up when their transcript was modified in the last five minutes. The bridge filters out Claude sessions that it can link to a live T3 thread.
 
+Each agent also carries the last 12 lines of its conversation: your messages, the agent's replies, and one line per command, file edit or tool call. The bridge masks secret-looking text (tokens, keys, passwords, `Authorization` headers, credentials in URLs and `.env`-style lines) and cuts each line to 400 characters before sending. Flow shows the transcript only to you, in your agent's panel.
+
 The reporting user can answer supported T3 approvals in Flow. Open T3 Code or Claude Code to answer T3 questions, Claude Code prompts, and T3 requests that lack a reviewable approval summary. A delegated T3 thread with a pending prompt appears separately so Flow can show its prompt.
 
 ## Run at sign-in

@@ -5,6 +5,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs, promisify} from 'node:util';
 import {createClaudeScanner} from './office-bridge-claude.mjs';
 import {createT3Responder, defaultT3Db, loadSqlite, readT3, short} from './office-bridge-t3.mjs';
+import {transcriptText} from '../lib/office-mask.mjs';
 
 const exec = promisify(execFile);
 const API = '/api/v1/office';
@@ -124,9 +125,13 @@ export async function makePayload({source, host, now, t3, claude, resolveRepo}) 
         summary: short(agent.pending.summary), can: isT3 ? agent.pending.can : [],
       } : null;
       const agentflow = agentflowOf(agent.title);
+      // The transcript tail, masked and cut here before it leaves the machine (Flow masks it again).
+      const transcript = (Array.isArray(agent.transcript) ? agent.transcript : []).slice(-12)
+        .map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
       return {
         ...describe(agent), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + (isT3 ? ' · T3' : ' · Claude Code'), 120),
         repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending,
+        ...(transcript.length ? {transcript} : {}),
       };
     })));
   }

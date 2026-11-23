@@ -19,6 +19,38 @@ function userPrompt(row) {
   return text.trimStart().startsWith('<') || text.startsWith('[Request interrupted') ? '' : short(text);
 }
 
+// The transcript tail: user prompts, the assistant's text and one line per tool call, newest last.
+const firstLine = value => String(value ?? '').split('\n').find(line => line.trim())?.trim() ?? '';
+const fileOf = value => short(String(value ?? '')).split(/[\\/]/).at(-1);
+export function toolLine(block) {
+  const input = block?.input && typeof block.input === 'object' ? block.input : {};
+  const name = short(block?.name, 60) || 'Tool';
+  if (name === 'Bash' || name === 'PowerShell') return 'Run: ' + (firstLine(input.command) || 'a command');
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) return 'Edit: ' + (fileOf(input.file_path || input.notebook_path) || 'a file');
+  if (name === 'Read') return 'Read: ' + (fileOf(input.file_path) || 'a file');
+  if (name === 'Grep' || name === 'Glob') return name + ': ' + short(input.pattern, 120);
+  if (name === 'WebFetch') return 'WebFetch: ' + short(input.url, 160);
+  if (name === 'WebSearch') return 'WebSearch: ' + short(input.query, 160);
+  if (name === 'Task' || name === 'Agent') return 'Subagent: ' + (short(input.description, 160) || 'started');
+  return name;
+}
+function transcriptRows(row) {
+  const at = typeof row.timestamp === 'string' && Number.isFinite(Date.parse(row.timestamp)) ? {at: row.timestamp} : {};
+  if (row.type === 'user') {
+    if (row.isMeta || blocks(row).some(b => b?.type === 'tool_result')) return [];
+    const content = row.message?.content;
+    const text = (typeof content === 'string' ? content : blocks(row).filter(b => b?.type === 'text').map(b => b.text).join('\n')).trim();
+    return text && !text.startsWith('<') && !text.startsWith('[Request interrupted') ? [{role: 'user', text, ...at}] : [];
+  }
+  if (row.type !== 'assistant') return [];
+  const out = [];
+  for (const block of blocks(row)) {
+    if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) out.push({role: 'assistant', text: block.text.trim(), ...at});
+    if (block?.type === 'tool_use') out.push({role: 'tool', text: toolLine(block), ...at});
+  }
+  return out;
+}
+
 function readRows(fd, offset, size, total) {
   const buffer = Buffer.alloc(size);
   const bytes = readSync(fd, buffer, 0, size, offset);
@@ -53,7 +85,9 @@ function readTranscript(path, size) {
       }
     }
     if (!title && !model && !cwd) return null;
-    return {title, model, cwd, fromT3, lastTool, outstanding};
+    const transcript = [];
+    for (let i = rows.length - 1; i >= 0 && transcript.length < 12; i--) transcript.unshift(...transcriptRows(rows[i]));
+    return {title, model, cwd, fromT3, lastTool, outstanding, transcript: transcript.slice(-12)};
   } finally {
     closeSync(fd);
   }
@@ -115,6 +149,7 @@ export function createClaudeScanner(root) {
             title: data.title || 'Claude Code session', model: data.model, cwd: data.cwd || state?.cwd,
             status: waiting ? 'waiting' : 'running', pending,
             activity: waiting ? 'Waiting for input' : short(data.lastTool?.name) || 'Working in Claude Code',
+            transcript: data.transcript,
           });
         } catch {
           // A session can disappear or be rewritten as it is being scanned.

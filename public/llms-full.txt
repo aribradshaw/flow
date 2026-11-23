@@ -338,6 +338,7 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **DevOps whiteboards.** Each room shows up to three of that person's cards in Doing, UAT and Blocked, in board order. The common area shows Requests and Doing cards delegated to AgentFlow agents. Walk up to a whiteboard and click a card to open its DevOps details. An agent with a Doing card shows its number beside its name. The boards use the cards available in your workspace, including cards shared with you in the office you visit.
 - **Live agents.** The coding agents running on a member's machines sit at desks in their room, as a little mascot: Claude's crab, a cloud for OpenAI and Codex, a whale for DeepSeek, Grok's black sphere, Gemini's sparkle, or an orb for anything else. They turn slowly and bob; one waiting on its person hops and glows with a **!**, and an idle one is still and dim. Its subagents are tiny copies circling it. Click an agent (or its name tag) for its title, model, machine, repo and project, what it is doing and its subagents.
 - **Seats.** The AgentFlow agents are the jobs; a live session working on one of an agent's cards is the one doing it. It sits at that agent's desk in the common area instead of a desk in its owner's room, as the same live mascot, with the agent's name and the card (such as **Builder · #12**) on its tag. An agent with nobody at its desk stands idle and dimmed. Click an agent for who is at its desk now, its queue (the first five cards, as `agents.work` orders them) and the cards it finished (moved to UAT or Done) in the last seven days. Allow and Deny still go only to the session's owner. See [Seats](#seats) for how a session finds its desk.
+- **Transcript.** Your own agent's panel shows the latest lines of its conversation (up to 12: what you asked, what it said, and one line per tool call), scrolled to the newest. Only you ever see it: not the environment's owner, not someone who can see its project. Reporters mask secrets before sending, and Flow masks tokens, keys, `Authorization` headers and `.env`-looking lines again on the way in.
 - **Allow and Deny.** When your own agent waits on a permission prompt that its reporter can answer, its panel shows the prompt with **Allow** and **Deny**. Your answer goes to the reporter on that machine (usually within a second), and the panel shows how it went. Only the agent's owner ever gets these buttons.
 - **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one).
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
@@ -366,8 +367,8 @@ Agents belong to a person, not to an environment: they show in the office of eve
 
 | Viewer | Sees |
 |---|---|
-| The agent's owner | Everything, plus Allow / Deny |
-| Someone who can see the Flow project the agent's repo belongs to | Everything except the buttons: title, model, machine, repo, project, activity, subagents and the prompt |
+| The agent's owner | Everything, plus Allow / Deny and its transcript |
+| Someone who can see the Flow project the agent's repo belongs to | Everything except the buttons and the transcript: title, model, machine, repo, project, activity, subagents and the prompt |
 | Anyone else | Only the mascot, the vendor and running / waiting / idle, labelled **Private project** |
 
 The environment's owner (and anyone else who can read the whole environment) sees all its projects. A share's recipient sees the projects in their share's scope; a whole-environment share means all of them. An agent whose repo is in none of the environment's projects is private to everyone but its owner, including the environment's owner. Nothing about a private agent (its title, activity, repo, model, prompt, machine or id) is sent to that viewer's browser. A share's recipient also sees only the AgentFlow agents linked to the projects they can see.
@@ -398,8 +399,8 @@ flow projects update Lantern --repos acme/lantern,acme/lantern-site
 
 `flow office bridge` runs on your own machine and keeps your agents in the office. Every 3 seconds it reads the agents running there and sends them as source `bridge:<hostname>`, and it waits for Allow / Deny answers and carries them out.
 
-- **T3 Code.** It reads T3's state database (`~/.t3/userdata/statev2.sqlite`, read-only) for threads with a running turn: title, model, the project folder's git remote, latest activity, subagents and open approval requests. Allow and Deny go through T3's own API (a short-lived token from `t3 auth session issue`), after checking that the request is still open. Questions are answered in T3.
-- **Claude Code** in a terminal. Running sessions (`~/.claude/sessions/` and their transcripts under `~/.claude/projects/`) are reported with their status and latest activity. Their prompts cannot be answered from outside, so they show without buttons. Sessions T3 runs are reported once, as T3 agents.
+- **T3 Code.** It reads T3's state database (`~/.t3/userdata/statev2.sqlite`, read-only) for threads with a running turn: title, model, the project folder's git remote, latest activity, subagents, open approval requests and the last 12 lines of the conversation (user and assistant messages, one line per command, file edit or tool). Allow and Deny go through T3's own API (a short-lived token from `t3 auth session issue`), after checking that the request is still open. Questions are answered in T3.
+- **Claude Code** in a terminal. Running sessions (`~/.claude/sessions/` and their transcripts under `~/.claude/projects/`) are reported with their status, latest activity and the last 12 lines of the conversation. Their prompts cannot be answered from outside, so they show without buttons. Sessions T3 runs are reported once, as T3 agents.
 
 Open **AgentFlow › 3D › Connect your agents**. Choose the operating system on the machine that runs your agents, then create a bridge key. Copy the terminal commands or paste the setup prompt into a local coding agent such as Claude Code, Codex or Cursor. The dialog confirms the first report from a new source, even if no agents are running yet.
 
@@ -452,7 +453,7 @@ The bridge stores nothing itself: the server and key come from `flow login` (or 
 
 Anything can report agents the same way, such as a home-server dashboard. Authenticate with an API key with the `write` scope; agents belong to the key's owner.
 
-- `PUT /api/v1/office/agents` (`office.agents.report`) with `{source, at, agents:[…]}`. Each agent: `id` (stable within the source), `title`, `vendor` (`claude`, `codex`, `gemini`, `deepseek`, `grok` or `other`; with `other` the mascot is picked from the model when it names one), `model`, `status` (`running`, `waiting` or `idle`), `activity`, `host`, `hostLabel`, `repo` (`{name, remote}` or `null`), `children` (subagents, the same fields), `pending` (`null`, or `{requestId, kind: approval | question, summary, can: ["allow","deny"]}`) and `agentflow` (optional, `{agent: "<AgentFlow agent id or name>", card: <card number or id>}`: the AgentFlow agent and card it works on, which seat it at that agent's desk; see [Seats](#seats)). Each source replaces only its own agents; up to 200 agents and 20 children each are kept, long strings are cut, and credentials in a remote are dropped. The answer is `{actions:[…]}`: Allow / Deny answers for this source not yet delivered.
+- `PUT /api/v1/office/agents` (`office.agents.report`) with `{source, at, agents:[…]}`. Each agent: `id` (stable within the source), `title`, `vendor` (`claude`, `codex`, `gemini`, `deepseek`, `grok` or `other`; with `other` the mascot is picked from the model when it names one), `model`, `status` (`running`, `waiting` or `idle`), `activity`, `host`, `hostLabel`, `repo` (`{name, remote}` or `null`), `children` (subagents, the same fields), `pending` (`null`, or `{requestId, kind: approval | question, summary, can: ["allow","deny"]}`) `agentflow` (optional, `{agent: "<AgentFlow agent id or name>", card: <card number or id>}`: the AgentFlow agent and card it works on, which seat it at that agent's desk; see [Seats](#seats)) and `transcript` (optional, `[{role: user | assistant | tool, text, at}]`, oldest first: the last 12 are kept, each `text` up to 400 characters, other roles dropped; shown only to the owner, and masked again on the server). Each source replaces only its own agents; up to 200 agents and 20 children each are kept, long strings are cut, and credentials in a remote are dropped. The answer is `{actions:[…]}`: Allow / Deny answers for this source not yet delivered.
 - `GET /api/v1/office/actions?source=…&wait=25` (`office.actions.wait`): a long-poll that answers as soon as an answer is queued, or with an empty list after `wait` seconds (up to 30). Each answer is `{id, agentId, requestId, decision, at}` and is delivered once.
 - `POST /api/v1/office/actions/{id}` (`office.actions.result`) with `{ok, message}`: how carrying it out went. The person who answered sees the message right away.
 - `GET /api/v1/office/agents` (`office.agents.list`): your agents as Flow holds them.
@@ -5027,7 +5028,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12}}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
 ```
 
 ```json
@@ -5064,6 +5065,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
+| `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `sources` | object[] | yes |  |
 | `sources[].source` | string | yes |  |
 | `sources[].at` | string | yes |  |
@@ -5106,6 +5108,23 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
         "agent": "Builder",
         "card": 12
       },
+      "transcript": [
+        {
+          "role": "user",
+          "text": "Fix the login redirect loop.",
+          "at": "2026-10-29T17:00:00.000Z"
+        },
+        {
+          "role": "assistant",
+          "text": "The callback keeps ?next=/login. Running the tests next.",
+          "at": "2026-10-29T17:00:00.000Z"
+        },
+        {
+          "role": "tool",
+          "text": "Run: npm test",
+          "at": "2026-10-29T17:00:00.000Z"
+        }
+      ],
       "source": "bridge:laptop"
     }
   ],

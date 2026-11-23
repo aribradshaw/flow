@@ -68,6 +68,32 @@ function activity(item) {
   }
 }
 
+// The transcript tail (docs/concepts/12-office.md): what was said and what the tools did, newest last.
+// The bridge masks and cuts each text before sending (lib/office-mask.mjs); Flow shows it to the owner only.
+export const TRANSCRIPT_ITEMS = ['user_message', 'assistant_message', 'command_execution', 'file_change', 'dynamic_tool', 'subagent'];
+const firstLine = value => String(value ?? '').split('\n').find(line => line.trim())?.trim() ?? '';
+export function transcriptEntry(type, data, at) {
+  const entry = (role, text) => text ? {role, text, ...(at ? {at} : {})} : null;
+  switch (type) {
+    case 'user_message': return entry('user', typeof data.text === 'string' ? data.text.trim() : '');
+    case 'assistant_message': return entry('assistant', typeof data.text === 'string' ? data.text.trim() : '');
+    case 'command_execution': return entry('tool', 'Run: ' + (firstLine(data.input) || 'a command'));
+    case 'file_change': return entry('tool', 'Edit: ' + (short(data.fileName).split(/[\\/]/).at(-1) || 'a file'));
+    case 'dynamic_tool': return entry('tool', short(data.title) || short(data.toolName) || 'Used a tool');
+    case 'subagent': return entry('tool', 'Subagent: ' + (short(data.title) || 'started'));
+    default: return null;
+  }
+}
+function transcriptOf(db, threadId, limit = 12) {
+  return optional(db, `SELECT * FROM ${items}
+    WHERE thread_id=? AND type IN (${TRANSCRIPT_ITEMS.map(() => '?').join(',')}) ORDER BY ordinal DESC LIMIT ?`, threadId, ...TRANSCRIPT_ITEMS, limit)
+    .reverse().map(row => {
+      const data = parseJson(row.payload_json);
+      const at = [data.startedAt, data.updatedAt, row.updated_at].find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)));
+      return transcriptEntry(row.type, data, at);
+    }).filter(Boolean);
+}
+
 function pendingFor(row, item) {
   const question = row.kind === 'user_input';
   const detail = short(item?.prompt) || (Array.isArray(item?.questions)
@@ -133,6 +159,7 @@ export function readT3(DatabaseSync, path) {
         parent: state.lineage?.parentThreadId, children,
         status: pending ? 'waiting' : 'running',
         activity: pending ? (pending.kind === 'question' ? 'Asked a question' : 'Waiting for approval') : activity(latest),
+        transcript: transcriptOf(db, id),
       });
     }
 
