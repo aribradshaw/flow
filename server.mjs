@@ -373,6 +373,9 @@ async function openedShare(envId,user){
   return {share:s,home};
 }
 const GONE={error:'This environment is no longer shared with you',code:'share_revoked'};
+// The share as it is right now, just before a write to the owner's data: null once revoked. A save in flight
+// re-reads it here, so a revoke or a lower permission between the save's first check and its write wins.
+const shareNow=async s=>{const cur=await shares.get(s.id).catch(()=>null);return cur&&!cur.revokedAt?cur:null};
 // What an opened environment serves: {data, shared (a signature, as for placed shares), conflicts, rev (the owner's)}.
 async function openedView(envId,user,{share:s,home}){
   const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
@@ -436,7 +439,7 @@ function fieldMap(v){
 // the opened projection (every chart, AgentFlow). -> {bulk: a save refused for changing too many records}
 async function applyRecipientSave(envId,user,data,base,{opened=null}={}){
   const result={bulk:false};
-  for(const {share:s} of opened?[opened]:await attachedShares(envId,user)){
+  for(let {share:s} of opened?[opened]:await attachedShares(envId,user)){
     const members=await membersOf(s);
     for(let attempt=0;attempt<3;attempt++){
       const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)break;
@@ -460,6 +463,8 @@ async function applyRecipientSave(envId,user,data,base,{opened=null}={}){
       }
       if(!patch.length)break;
       if(bulkWrite(hist)){result.bulk=true;console.error('share write-back refused: too many records in one save',JSON.stringify({share:s.id,env:envId,records:new Set(hist.map(h=>h.recordId)).size,fields:hist.length}));break}
+      const fresh=await shareNow(s);if(!fresh)break;
+      if(fresh.permission!==s.permission){s=fresh;continue} // permission changed mid-save: redo the edits under the new one
       const out=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:core.applyOwnerPatch(home.data,patch),by:user.email,owner:home.owner,visibility:home.visibility,name:home.name});
       if(out.refused)break;
       if(out.conflict)continue;
@@ -535,6 +540,7 @@ async function commitAdds(envId,user,plans){
       let done=false;
       for(let attempt=0;attempt<4&&!done;attempt++){
         const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)break;
+        const fresh=await shareNow(s);if(!fresh||core.addsOf(fresh)!=='direct')break; // revoked or additions turned down mid-save
         const {db,map}=core.applyAdditions(home.data,plan.records);
         const w=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:db,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'share'}});
         if(w.refused)break;if(w.conflict)continue;
@@ -545,6 +551,7 @@ async function commitAdds(envId,user,plans){
       if(done)continue;
       // The owner's workspace could not take it (a limit, or it kept changing): it waits as a proposal instead.
     }
+    {const cur=await shareNow(s);if(!cur||core.addsOf(cur)==='off')continue} // revoked, or additions off, mid-save: nothing waits
     if(join?.status==='pending'){
       const merged={...join,records:Object.fromEntries(Object.entries(join.records).map(([k,list])=>[k,[...list,...(plan.records[k]||[])]]))};
       if(await shares.updateProposal(merged)){ids(null,true);continue}
