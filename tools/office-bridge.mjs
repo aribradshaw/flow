@@ -124,13 +124,15 @@ export async function makePayload({source, host, now, t3, claude, resolveRepo}) 
         requestId: agent.pending.requestId, kind: agent.pending.kind,
         summary: short(agent.pending.summary), can: isT3 ? agent.pending.can : [],
       } : null;
+      // Messages and stops: T3 threads only (Claude Code in a terminal cannot be reached from outside).
+      const can = isT3 && Array.isArray(agent.can) ? agent.can.filter(k => k === 'message' || k === 'stop') : [];
       const agentflow = agentflowOf(agent.title);
       // The transcript tail, masked and cut here before it leaves the machine (Flow masks it again).
       const transcript = (Array.isArray(agent.transcript) ? agent.transcript : []).slice(-12)
         .map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
       return {
         ...describe(agent), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + (isT3 ? ' · T3' : ' · Claude Code'), 120),
-        repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending,
+        repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending, can,
         ...(transcript.length ? {transcript} : {}),
       };
     })));
@@ -194,13 +196,18 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
       respondQueue = respondQueue.then(async () => {
         if (signal.aborted) return;
         let result = {ok: false, message: 'Invalid office action.'};
-        if (validId(action.agentId) && validId(action.requestId, 300)
-          && (action.source === undefined || action.source === source)) {
-          try { result = await respond(action, signal); }
-          catch { result = {ok: false, message: 'Could not answer the local agent.'}; }
+        // kind: answer (Allow / Deny; also when missing), message (text) or stop.
+        const kind = action.kind ?? 'answer';
+        const valid = kind === 'answer' ? validId(action.requestId, 300)
+          : kind === 'message' ? typeof action.text === 'string' && action.text.trim() !== '' && action.text.length <= 2000
+          : kind === 'stop';
+        if (validId(action.agentId) && valid && (action.source === undefined || action.source === source)) {
+          try { result = await respond({...action, kind}, signal); }
+          catch { result = {ok: false, message: 'Could not reach the local agent.'}; }
         }
         job.result = result;
-        log('office bridge: ' + result.message);
+        // Messages and stops are logged with the agent and the outcome, never the message's text.
+        log('office bridge: ' + (kind === 'answer' ? '' : `${kind} for ${short(action.agentId, 120)}: ${result.ok ? 'ok' : 'failed'}: `) + result.message);
       });
     }
   }

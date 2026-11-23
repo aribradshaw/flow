@@ -1,4 +1,4 @@
-import {execFile} from 'node:child_process';
+import {execFile, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {existsSync, readFileSync} from 'node:fs';
 import {homedir} from 'node:os';
@@ -152,8 +152,12 @@ export function readT3(DatabaseSync, path) {
       const children = run ? optional(db, `SELECT payload_json FROM ${items}
         WHERE thread_id=? AND run_id=? AND type='subagent' AND status='running' ORDER BY ordinal`, id, run.run_id)
         .map(row => parseJson(row.payload_json)) : [];
+      const delegated = typeof state.lineage?.parentThreadId === 'string' && state.lineage.parentThreadId !== '';
       agents.set(id, {
-        id, title: thread.title, provider, model: selection?.model, pending,
+        id, title: thread.title, provider, model: selection?.model, pending, runId: run?.run_id,
+        // Top-level threads take a message (a new user turn) and a stop from the office; delegated ones are
+        // steered by the thread that delegated them.
+        can: delegated ? [] : ['message', 'stop'],
         cwd: typeof state.worktreePath === 'string' && state.worktreePath.trim()
           ? state.worktreePath : projects.get(thread.project_id),
         parent: state.lineage?.parentThreadId, children,
@@ -222,7 +226,7 @@ function dispatch(url, command, stillPending, signal) {
     ws.addEventListener('open', () => {
       opened = true;
       try {
-        if (!stillPending()) throw new Error('This approval is no longer pending in T3.');
+        if (!stillPending()) throw new Error('This request is no longer current in T3.');
         ws.send(JSON.stringify({_tag: 'Request', id: '1', tag: 'orchestration.dispatchCommand', payload: command, headers: []}));
       } catch (err) {
         finish(false, err);
@@ -237,12 +241,26 @@ function dispatch(url, command, stillPending, signal) {
       const messages = Array.isArray(data) ? data : [data];
       const reply = messages.find(message => message?._tag === 'Exit' && message.requestId === '1');
       if (!reply) return;
-      finish(true, reply.exit?._tag === 'Success' ? null : new Error('T3 rejected the approval response.'));
+      finish(true, reply.exit?._tag === 'Success' ? null : new Error('T3 rejected the command.'));
     });
   });
 }
 
-export async function respondT3(path, {agentId, requestId, decision}, stillPending, signal) {
+// The environment for the t3 CLI: this database's T3 home, ~/.local/bin on PATH, and no Flow key.
+function t3Env(path) {
+  const userdata = dirname(path);
+  const env = {...process.env};
+  delete env.FLOW_API_KEY;
+  if (basename(userdata) === 'userdata') env.T3CODE_HOME = dirname(userdata);
+  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'PATH';
+  env[pathKey] = [join(homedir(), '.local', 'bin'), env[pathKey]].filter(Boolean).join(delimiter);
+  return env;
+}
+
+// One orchestration command on the local T3 server, the way the T3 app sends it: a short-lived token from
+// `t3 auth session issue`, a WebSocket ticket, then orchestration.dispatchCommand. stillValid() is checked
+// right before it is sent.
+export async function dispatchT3(path, command, stillValid, signal) {
   const userdata = dirname(path);
   const runtime = parseJson(readFileSync(join(userdata, 'server-runtime.json'), 'utf8'));
   if (!Number.isInteger(runtime.port) || runtime.port < 1 || runtime.port > 65535) {
@@ -250,12 +268,7 @@ export async function respondT3(path, {agentId, requestId, decision}, stillPendi
   }
   const args = ['auth', 'session', 'issue', '--scope', 'orchestration:read',
     '--scope', 'orchestration:operate', '--ttl', '2m', '--label', 'flow-office-bridge', '--token-only'];
-  const env = {...process.env};
-  delete env.FLOW_API_KEY;
-  if (basename(userdata) === 'userdata') env.T3CODE_HOME = dirname(userdata);
-  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'PATH';
-  env[pathKey] = [join(homedir(), '.local', 'bin'), env[pathKey]].filter(Boolean).join(delimiter);
-  const options = {timeout: 15000, maxBuffer: 32768, windowsHide: true, signal, env};
+  const options = {timeout: 15000, maxBuffer: 32768, windowsHide: true, signal, env: t3Env(path)};
   // Windows installations can expose T3 as a .cmd launcher. All shell arguments here are fixed.
   const {stdout} = await (process.platform === 'win32'
     ? exec(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 't3', ...args], options)
@@ -263,10 +276,6 @@ export async function respondT3(path, {agentId, requestId, decision}, stillPendi
   const token = stdout.trim().split(/\r?\n/).at(-1);
   if (!token) throw new Error('T3 did not issue a bearer token.');
   const host = '127.0.0.1:' + runtime.port;
-  const command = {
-    type: 'runtime-request.respond', commandId: randomUUID(), threadId: agentId, requestId,
-    decision: decision === 'allow' ? 'accept' : 'decline',
-  };
 
   for (const protocol of ['2', '']) {
     const response = await fetch('http://' + host + '/api/auth/websocket-ticket/rpc', {
@@ -279,14 +288,91 @@ export async function respondT3(path, {agentId, requestId, decision}, stillPendi
     const url = new URL('ws://' + host + '/ws');
     url.searchParams.set('wsTicket', ticket);
     if (protocol) url.searchParams.set('orchestrationProtocol', protocol);
-    if (await dispatch(url, command, stillPending, signal)) return;
+    if (await dispatch(url, command, stillValid, signal)) return;
   }
   throw new Error('T3 refused the WebSocket connection.');
 }
 
-export function createT3Responder(DatabaseSync, path, send = respondT3) {
+export function respondT3(path, {agentId, requestId, decision}, stillPending, signal) {
+  return dispatchT3(path, {
+    type: 'runtime-request.respond', commandId: randomUUID(), threadId: agentId, requestId,
+    decision: decision === 'allow' ? 'accept' : 'decline',
+  }, stillPending, signal);
+}
+
+// Stop: interrupt the thread's running turn (run.interrupt, as T3's own stop button and t3_thread_interrupt do).
+export function stopT3(path, {agentId, runId}, stillRunning, signal) {
+  return dispatchT3(path, {type: 'run.interrupt', commandId: randomUUID(), threadId: agentId, runId,
+    reason: 'Stopped from the Flow office'}, stillRunning, signal);
+}
+
+// A message: `t3 thread send <thread> -` with the text on stdin (never in the arguments). A busy thread gets it
+// as its next turn; an idle one starts a turn. -> T3's JSON answer ({delivery: "queued" | …}).
+export function sendT3(path, {agentId, text}, signal) {
+  return new Promise((resolve, reject) => {
+    const args = ['thread', 'send', '--json', agentId, '-'];
+    const child = process.platform === 'win32'
+      ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 't3', ...args], {env: t3Env(path), windowsHide: true, signal})
+      : spawn('t3', args, {env: t3Env(path), windowsHide: true, signal});
+    let out = '';
+    const timer = setTimeout(() => child.kill(), 30000);
+    child.stdout.setEncoding('utf8').on('data', chunk => { if (out.length < 65536) out += chunk; });
+    child.stderr.resume();
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error('t3 thread send failed.'));
+      resolve(parseJson(out.trim().split(/\r?\n/).at(-1)));
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(text);
+  });
+}
+
+function readRun(DatabaseSync, path, runId) {
+  const db = open(DatabaseSync, path);
+  try {
+    return db.prepare(`SELECT * FROM ${runs} WHERE run_id=?`).get(runId);
+  } finally {
+    db.close();
+  }
+}
+
+// Messages and stops for a T3 thread, after checking it is still a top-level thread of this T3 server that
+// the bridge offers them for (can), and, for a stop, that the same turn is still running.
+async function steerT3(DatabaseSync, path, action, signal, {message, stop}) {
+  const failure = text => ({ok: false, message: text});
+  const kind = action.kind;
+  const current = () => readT3(DatabaseSync, path).agents.get(action.agentId);
+  try {
+    const agent = current();
+    if (!agent) return failure('This T3 thread is not running here any more.');
+    if (!agent.can?.includes(kind)) return failure(kind === 'stop' ? 'Stop it in T3 Code.' : 'Send it messages in T3 Code.');
+    if (kind === 'message') {
+      if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 2000) return failure('That message is empty or too long.');
+      const sent = await message(path, {agentId: action.agentId, text: action.text}, signal);
+      return {ok: true, message: sent?.delivery === 'queued' ? 'Queued in T3 Code: it is the next turn.' : 'Sent to T3 Code.'};
+    }
+    const runId = agent.runId;
+    if (!runId) return failure('It has no running turn to stop.');
+    await stop(path, {agentId: action.agentId, runId}, () => current()?.runId === runId, signal);
+    for (let i = 0; i < 20; i++) {
+      const run = readRun(DatabaseSync, path, runId);
+      if (!run || !['running', 'starting', 'queued'].includes(run.status)) return {ok: true, message: 'Stopped in T3 Code.'};
+      await delay(250, undefined, {signal});
+    }
+    return {ok: true, message: 'Asked T3 Code to stop; the turn is still finishing.'};
+  } catch {
+    // CLI errors can include local paths or authentication output.
+    return failure(kind === 'stop' ? 'Could not stop it. Check T3 Code and the local bridge setup.' : 'Could not send the message. Check T3 Code and the local bridge setup.');
+  }
+}
+
+export function createT3Responder(DatabaseSync, path, send = respondT3, {message = sendT3, stop = stopT3} = {}) {
   return async (action, signal) => {
     const failure = message => ({ok: false, message});
+    if (action.kind === 'message' || action.kind === 'stop') return steerT3(DatabaseSync, path, action, signal, {message, stop});
+    if (action.kind !== undefined && action.kind !== 'answer') return failure('Unknown action.');
     if (action.decision !== 'allow' && action.decision !== 'deny') return failure('Unknown decision.');
     const stillPending = () => {
       const agent = readT3(DatabaseSync, path).agents.get(action.agentId);

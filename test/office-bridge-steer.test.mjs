@@ -114,3 +114,144 @@ test('Claude Code: user prompts, assistant text and tool calls become the transc
     assert.equal(agent.transcript.length, 5);
   });
 });
+
+// ---------- steering: can, and messages and stops against a fake T3 (its CLI and its WebSocket API) ----------
+import {createHash} from 'node:crypto';
+import {chmodSync, readFileSync} from 'node:fs';
+import {createServer} from 'node:http';
+import {createT3Responder} from '../tools/office-bridge-t3.mjs';
+import {runBridge} from '../tools/office-bridge.mjs';
+
+test('can: top-level T3 threads take messages and stops; delegated threads and Claude Code do not', async t => {
+  const {path} = t3Fixture(t);
+  const {agents} = readT3(DatabaseSync, path);
+  agents.get('main').children = [];
+  agents.set('delegate', {...agents.get('main'), id: 'delegate', parent: 'elsewhere', can: []});
+  const claude = [{id: 'claude:1', title: 'Terminal session', status: 'running', provider: 'claudeAgent'}];
+  const payload = await makePayload({source: 's', host: 'h', now: 0, t3: agents, claude, resolveRepo: async () => null});
+  const can = Object.fromEntries(payload.agents.map(a => [a.id, a.can]));
+  assert.deepEqual(can, {main: ['message', 'stop'], delegate: [], 'claude:1': []});
+});
+
+// A fake T3: the `t3` CLI (auth session issue, thread send) on PATH, and its HTTP + WebSocket API.
+async function fakeT3(t, path, cwd, onCommand) {
+  const bin = join(cwd, 'home', '.local', 'bin');
+  mkdirSync(bin, {recursive: true});
+  const log = join(cwd, 't3-cli.json');
+  writeFileSync(join(bin, 't3'), `#!${process.execPath}
+const fs = require('node:fs'), args = process.argv.slice(2);
+if (args[0] === 'auth') { console.log('t3-token'); process.exit(0); }
+if (args[0] === 'thread' && args[1] === 'send') {
+  let input = ''; process.stdin.on('data', d => input += d).on('end', () => {
+    fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({args, input, home: process.env.T3CODE_HOME || null}));
+    console.log(JSON.stringify({delivery: 'queued', runId: 'run-2'}));
+  });
+} else process.exit(2);
+`);
+  chmodSync(join(bin, 't3'), 0o755);
+  const commands = [];
+  const server = createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    if (req.method === 'POST' && u.pathname === '/api/auth/websocket-ticket/rpc' && req.headers.authorization === 'Bearer t3-token') {
+      res.writeHead(200, {'content-type': 'application/json'});
+      return res.end(JSON.stringify({ticket: 'ticket-1'}));
+    }
+    res.writeHead(404); res.end();
+  });
+  server.on('upgrade', (req, socket) => {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname !== '/ws' || u.searchParams.get('wsTicket') !== 'ticket-1') { socket.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
+    const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    let buf = Buffer.alloc(0);
+    socket.on('data', chunk => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 2) {
+        let len = buf[1] & 127, off = 2;
+        if (len === 126) { len = buf.readUInt16BE(2); off = 4; }
+        if (buf.length < off + 4 + len) return;
+        const mask = buf.subarray(off, off + 4), data = Buffer.from(buf.subarray(off + 4, off + 4 + len)).map((b, i) => b ^ mask[i % 4]);
+        const op = buf[0] & 15;
+        buf = buf.subarray(off + 4 + len);
+        if (op === 8) { socket.end(); return; }
+        if (op !== 1) continue;
+        const message = JSON.parse(data.toString());
+        commands.push(message.payload);
+        onCommand(message.payload);
+        const reply = Buffer.from(JSON.stringify({_tag: 'Exit', requestId: message.id, exit: {_tag: 'Success'}}));
+        socket.write(Buffer.concat([Buffer.from([0x81, reply.length]), reply]));
+      }
+    });
+    socket.on('error', () => {});
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  writeFileSync(join(cwd, 'server-runtime.json'), JSON.stringify({port: server.address().port}));
+  const env = {HOME: process.env.HOME, PATH: process.env.PATH};
+  process.env.HOME = join(cwd, 'home');
+  t.after(() => {
+    Object.assign(process.env, env);
+    server.closeAllConnections();
+    return new Promise(resolve => server.close(resolve));
+  });
+  return {commands, sent: () => JSON.parse(readFileSync(log, 'utf8'))};
+}
+
+test('message and stop reach T3 through its API, after checking the thread, and report back', async t => {
+  const {path, cwd, run, remove} = t3Fixture(t);
+  const t3 = await fakeT3(t, path, cwd, command => { if (command.type === 'run.interrupt') run('interrupted'); });
+  const respond = createT3Responder(DatabaseSync, path);
+  const signal = AbortSignal.timeout(20000);
+  const text = 'Also add a test for ?next=/login\nand keep it small';
+  assert.deepEqual(await respond({kind: 'message', agentId: 'main', text}, signal), {ok: true, message: 'Queued in T3 Code: it is the next turn.'});
+  const sent = t3.sent();
+  assert.deepEqual(sent.args, ['thread', 'send', '--json', 'main', '-'], 'the text goes on stdin, never in the arguments');
+  assert.equal(sent.input, text);
+  assert.deepEqual(await respond({kind: 'stop', agentId: 'main'}, signal), {ok: true, message: 'Stopped in T3 Code.'});
+  assert.deepEqual(t3.commands.map(c => [c.type, c.threadId, c.runId]), [['run.interrupt', 'main', 'live']]);
+  // Checked first: not running any more, not a thread it offers them for, or gone.
+  assert.equal((await respond({kind: 'stop', agentId: 'main'}, signal)).ok, false, 'no running turn');
+  assert.equal((await respond({kind: 'message', agentId: 'nope', text: 'hi'}, signal)).ok, false);
+  assert.equal((await respond({kind: 'message', agentId: 'idle', text: 'hi'}, signal)).ok, false, 'a thread it did not report');
+  assert.equal((await respond({kind: 'message', agentId: 'main', text: ''}, signal)).ok, false);
+  run('running');remove();
+  assert.equal((await respond({kind: 'message', agentId: 'main', text: 'hi'}, signal)).ok, false, 'a deleted thread');
+  assert.equal(t3.commands.length, 1);
+});
+
+test('runBridge carries out messages and stops, logs them without their text, and acknowledges each', async t => {
+  const calls = [], logs = [], results = new Map();
+  const controller = new AbortController();
+  const actions = [
+    {id: 'a-msg', kind: 'message', agentId: 'main', text: 'secret plan: ship it', source: 's'},
+    {id: 'a-stop', kind: 'stop', agentId: 'main', source: 's'},
+    {id: 'a-bad', kind: 'message', agentId: 'main', text: '', source: 's'},
+    {id: 'a-odd', kind: 'dance', agentId: 'main', source: 's'},
+    {id: 'a-old', agentId: 'main', requestId: 'r-1', decision: 'allow', source: 's'},
+  ];
+  const server = createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    res.writeHead(200, {'content-type': 'application/json'});
+    if (req.method === 'PUT' && u.pathname === '/api/v1/office/agents') return res.end(JSON.stringify({actions}));
+    if (req.method === 'GET' && u.pathname === '/api/v1/office/actions') { await new Promise(r => setTimeout(r, 50)); return res.end('{"actions":[]}'); }
+    if (req.method === 'POST' && u.pathname.startsWith('/api/v1/office/actions/')) {
+      results.set(decodeURIComponent(u.pathname.split('/').at(-1)), JSON.parse(raw));
+      if (results.size === actions.length) controller.abort();
+      return res.end('{}');
+    }
+    res.end('{}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await runBridge({cfg: {url: 'http://127.0.0.1:' + server.address().port, key: 'k'}, source: 's', interval: 100,
+    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+    scan: async () => ({source: 's', at: new Date().toISOString(), agents: []}),
+    respond: async action => { calls.push([action.kind, action.text]); return {ok: true, message: action.kind === 'stop' ? 'Stopped in T3 Code.' : 'Done.'}; },
+    log: line => logs.push(line)});
+  assert.deepEqual(calls, [['message', 'secret plan: ship it'], ['stop', undefined], ['answer', undefined]]);
+  assert.deepEqual([...results].map(([id, r]) => [id, r.ok]).sort(), [['a-bad', false], ['a-msg', true], ['a-odd', false], ['a-old', true], ['a-stop', true]]);
+  assert.ok(logs.includes('office bridge: message for main: ok: Done.'));
+  assert.ok(logs.includes('office bridge: stop for main: ok: Stopped in T3 Code.'));
+  assert.ok(!logs.join('\n').includes('secret plan'), 'never the text');
+});

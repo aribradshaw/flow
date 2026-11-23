@@ -55,6 +55,8 @@ T3’s default database is `~/.t3/userdata/statev2.sqlite` on Linux and macOS an
 
 Each agent also carries the last 12 lines of its conversation: your messages, the agent's replies, and one line per command, file edit or tool call. The bridge masks secret-looking text (tokens, keys, passwords, `Authorization` headers, credentials in URLs and `.env`-style lines) and cuts each line to 400 characters before sending. Flow shows the transcript only to you, in your agent's panel.
 
+From your own T3 agent's panel in the office you can also send it a message (it runs as your next turn, after the current one when it is busy; the bridge passes the text to `t3 thread send` on standard input) and stop its running turn (T3's interrupt, only for the turn that was running). The bridge checks the thread is still running on this computer first, and logs each one with the agent and how it went, never the message text. Threads delegated by another T3 thread, and Claude Code sessions, cannot be steered from Flow.
+
 The reporting user can answer supported T3 approvals in Flow. Open T3 Code or Claude Code to answer T3 questions, Claude Code prompts, and T3 requests that lack a reviewable approval summary. A delegated T3 thread with a pending prompt appears separately so Flow can show its prompt.
 
 ## Run at sign-in

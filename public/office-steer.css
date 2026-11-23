@@ -1,0 +1,34 @@
+/* The 3D office's steer section in your own agent's panel (public/office-steer.js): transcript, message box, Stop. */
+.of-steer{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.of-steer .of-pk{display:block;color:var(--muted);margin-bottom:4px}
+.of-tx-wrap{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fafafa;padding:2px 0;outline-offset:2px}
+.of-tx{list-style:none;margin:0;padding:0}
+.of-tx li{padding:5px 8px;font-size:12px;line-height:1.4}
+.of-tx li+li{border-top:1px solid var(--line)}
+.of-tx-who{display:block;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.of-tx-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.of-tx-user .of-tx-who{color:var(--primary)}
+.of-tx-tool .of-tx-text{font:11.5px/1.4 ui-monospace,Consolas,monospace;color:#444}
+.of-msg{margin-top:10px}
+.of-msg[hidden],.of-stop[hidden]{display:none}
+.of-msg textarea{box-sizing:border-box;width:100%;min-height:52px;max-height:160px;resize:vertical;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:13px/1.4 inherit;font-family:inherit;background:#fff;color:inherit}
+.of-msg textarea:focus{outline:2px solid var(--primary);outline-offset:0;border-color:transparent}
+.of-msg-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.of-count{flex:1;font-size:11px;color:var(--muted)}
+.of-steer .txt{display:inline-flex;align-items:center;gap:4px;height:30px}
+.of-steer .txt.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.of-steer .txt.primary:disabled{opacity:.5}
+.of-steer .txt.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.of-stop{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;font-size:12px}
+.of-stop span{flex-basis:100%;font-weight:600}
+.of-steps{list-style:none;margin:8px 0 0;padding:0}
+.of-steps:empty{display:none}
+.of-step{display:flex;flex-direction:column;padding:4px 0;font-size:12px}
+.of-step+.of-step{border-top:1px dashed var(--line)}
+.of-step-what{overflow-wrap:anywhere}
+.of-step-state{color:var(--muted)}
+.of-step.ok .of-step-state{color:var(--accent)}
+.of-step.bad .of-step-state{color:var(--danger)}
+.of-step[data-state=pending] .of-step-state::before,.of-step[data-state=sent] .of-step-state::before{content:'';display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--primary);animation:of-steer-pulse 1s ease-in-out infinite alternate;vertical-align:1px}
+@keyframes of-steer-pulse{from{opacity:.25}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.of-step-state::before{animation:none}}

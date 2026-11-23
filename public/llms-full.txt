@@ -341,6 +341,7 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **What they are doing.** A running agent acts out its kind of work (its [`activityKind`](#activity-kinds)), and its name tag starts with the matching sign: it types at its keyboard while it edits files (✏️), reads a floating book (📖), sweeps a magnifying glass while it searches (🔍), has terminal glyphs on its screen while it runs commands (⌨️), shakes a bubbling test tube that flashes green and red while it tests (🧪), thinks under a thought cloud (💭) or spins a little globe on the web (🌐). An idle agent is dim, and now and then wanders to its room's coffee corner and back (☕).
 - **Waiting gets your attention.** When an agent starts waiting on its person (⏳), it glows with a **!** and, if its owner is in the office, walks over to their avatar and hops beside them until it is answered, then walks back to its desk. If its owner is not in the office, it hops at its desk. For the owner, it also plays a short, soft ping; the speaker button in the office's top bar turns the sound off and on. Click the agent or its **!** for its panel, with **Allow** and **Deny** when the prompt can be answered from Flow.
 - **Transcript.** Your own agent's panel shows the latest lines of its conversation (up to 12: what you asked, what it said, and one line per tool call), scrolled to the newest. Only you ever see it: not the environment's owner, not someone who can see its project. Reporters mask secrets before sending, and Flow masks tokens, keys, `Authorization` headers and `.env`-looking lines again on the way in.
+- **Send to agent and Stop.** When its reporter can carry them out (T3 Code threads, through `flow office bridge` or another reporter that says so), your own agent's panel has a **Send to agent** box and a **Stop** button. Type a message and press **Enter** to send it (**Shift+Enter** for a new line): it reaches the agent as your next message, after its current turn when it is busy. **Stop** asks you to confirm, then interrupts its running turn. Each one shows as sending, then sent (waiting for the reporter), then how it went. While you type in the box, the movement and shortcut keys go to the box, not the office. Only the agent's owner ever gets these, they are rate-limited, and the reporter checks the agent is still the same before it acts. Claude Code in a terminal cannot be reached from outside, so its panel has neither.
 - **Allow and Deny.** When your own agent waits on a permission prompt that its reporter can answer, its panel shows the prompt with **Allow** and **Deny**. Your answer goes to the reporter on that machine (usually within a second), and the panel shows how it went. Only the agent's owner ever gets these buttons.
 - **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one).
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
@@ -369,7 +370,7 @@ Agents belong to a person, not to an environment: they show in the office of eve
 
 | Viewer | Sees |
 |---|---|
-| The agent's owner | Everything, plus Allow / Deny and its transcript |
+| The agent's owner | Everything, plus Allow / Deny, its transcript, and Send to agent and Stop |
 | Someone who can see the Flow project the agent's repo belongs to | Everything except the buttons and the transcript: title, model, machine, repo, project, activity, subagents and the prompt |
 | Anyone else | Only the mascot, the vendor and running / waiting / idle, labelled **Private project** |
 
@@ -401,8 +402,8 @@ flow projects update Lantern --repos acme/lantern,acme/lantern-site
 
 `flow office bridge` runs on your own machine and keeps your agents in the office. Every 3 seconds it reads the agents running there and sends them as source `bridge:<hostname>`, and it waits for Allow / Deny answers and carries them out.
 
-- **T3 Code.** It reads T3's state database (`~/.t3/userdata/statev2.sqlite`, read-only) for threads with a running turn: title, model, the project folder's git remote, latest activity, subagents, open approval requests and the last 12 lines of the conversation (user and assistant messages, one line per command, file edit or tool). Allow and Deny go through T3's own API (a short-lived token from `t3 auth session issue`), after checking that the request is still open. Questions are answered in T3.
-- **Claude Code** in a terminal. Running sessions (`~/.claude/sessions/` and their transcripts under `~/.claude/projects/`) are reported with their status, latest activity and the last 12 lines of the conversation. Their prompts cannot be answered from outside, so they show without buttons. Sessions T3 runs are reported once, as T3 agents.
+- **T3 Code.** It reads T3's state database (`~/.t3/userdata/statev2.sqlite`, read-only) for threads with a running turn: title, model, the project folder's git remote, latest activity, subagents, open approval requests and the last 12 lines of the conversation (user and assistant messages, one line per command, file edit or tool). Allow and Deny go through T3's own API (a short-lived token from `t3 auth session issue`), after checking that the request is still open. Top-level threads take **Send to agent** (`t3 thread send`, with the text on standard input) and **Stop** (T3's `run.interrupt`, for the same turn that was running), after checking the thread is still running there; threads delegated by another thread are steered by that thread. The bridge logs each message and stop with the agent and how it went, never the text. Questions are answered in T3.
+- **Claude Code** in a terminal. Running sessions (`~/.claude/sessions/` and their transcripts under `~/.claude/projects/`) are reported with their status, latest activity and the last 12 lines of the conversation. Their prompts cannot be answered from outside, and they cannot take messages or be stopped from the office, so they show without buttons (`can: []`). Sessions T3 runs are reported once, as T3 agents.
 
 Open **AgentFlow › 3D › Connect your agents**. Choose the operating system on the machine that runs your agents, then create a bridge key. Copy the terminal commands or paste the setup prompt into a local coding agent such as Claude Code, Codex or Cursor. The dialog confirms the first report from a new source, even if no agents are running yet.
 
@@ -455,9 +456,9 @@ The bridge stores nothing itself: the server and key come from `flow login` (or 
 
 Anything can report agents the same way, such as a home-server dashboard. Authenticate with an API key with the `write` scope; agents belong to the key's owner.
 
-- `PUT /api/v1/office/agents` (`office.agents.report`) with `{source, at, agents:[…]}`. Each agent: `id` (stable within the source), `title`, `vendor` (`claude`, `codex`, `gemini`, `deepseek`, `grok` or `other`; with `other` the mascot is picked from the model when it names one), `model`, `status` (`running`, `waiting` or `idle`), `activity`, `activityKind` (optional, see [Activity kinds](#activity-kinds)), `host`, `hostLabel`, `repo` (`{name, remote}` or `null`), `children` (subagents: `id`, `title`, `vendor`, `model`, `status`, `activityKind`), `pending` (`null`, or `{requestId, kind: approval | question, summary, can: ["allow","deny"]}`) `agentflow` (optional, `{agent: "<AgentFlow agent id or name>", card: <card number or id>}`: the AgentFlow agent and card it works on, which seat it at that agent's desk; see [Seats](#seats)) and `transcript` (optional, `[{role: user | assistant | tool, text, at}]`, oldest first: the last 12 are kept, each `text` up to 400 characters, other roles dropped; shown only to the owner, and masked again on the server). Each source replaces only its own agents; up to 200 agents and 20 children each are kept, long strings are cut, and credentials in a remote are dropped. The answer is `{actions:[…]}`: Allow / Deny answers for this source not yet delivered.
-- `GET /api/v1/office/actions?source=…&wait=25` (`office.actions.wait`): a long-poll that answers as soon as an answer is queued, or with an empty list after `wait` seconds (up to 30). Each answer is `{id, agentId, requestId, decision, at}` and is delivered once.
-- `POST /api/v1/office/actions/{id}` (`office.actions.result`) with `{ok, message}`: how carrying it out went. The person who answered sees the message right away.
+- `PUT /api/v1/office/agents` (`office.agents.report`) with `{source, at, agents:[…]}`. Each agent: `id` (stable within the source), `title`, `vendor` (`claude`, `codex`, `gemini`, `deepseek`, `grok` or `other`; with `other` the mascot is picked from the model when it names one), `model`, `status` (`running`, `waiting` or `idle`), `activity`, `activityKind` (optional, see [Activity kinds](#activity-kinds)), `host`, `hostLabel`, `repo` (`{name, remote}` or `null`), `children` (subagents: `id`, `title`, `vendor`, `model`, `status`, `activityKind`), `pending` (`null`, or `{requestId, kind: approval | question, summary, can: ["allow","deny"]}`) `agentflow` (optional, `{agent: "<AgentFlow agent id or name>", card: <card number or id>}`: the AgentFlow agent and card it works on, which seat it at that agent's desk; see [Seats](#seats)) `can` (optional, `["message","stop"]`: what the owner may do from the office besides Allow / Deny; list only what this reporter can carry out, `[]` or none for agents that can only be steered where they run) and `transcript` (optional, `[{role: user | assistant | tool, text, at}]`, oldest first: the last 12 are kept, each `text` up to 400 characters, other roles dropped; shown only to the owner, and masked again on the server). Each source replaces only its own agents; up to 200 agents and 20 children each are kept, long strings are cut, and credentials in a remote are dropped. The answer is `{actions:[…]}`: the actions for this source not yet delivered (see the next item).
+- `GET /api/v1/office/actions?source=…&wait=25` (`office.actions.wait`): a long-poll that answers as soon as an answer is queued, or with an empty list after `wait` seconds (up to 30). Each action is delivered once and has a `kind`: `answer` is Allow / Deny, `{id, agentId, kind: "answer", requestId, decision, at}` (treat a missing `kind` as `answer`: servers before this change sent none); `message` is `{id, agentId, kind: "message", text, at}`, up to 2000 characters to send to the agent as a new user turn; `stop` is `{id, agentId, kind: "stop", at}`, to interrupt its running turn. Messages and stops come only from the agent's owner, only for agents whose `can` lists them, and at most 3 messages in a row per agent (then one every 10 seconds), 2 stops (then one every 30 seconds) and 10 of either per person (then one every 6 seconds). Before carrying one out, check it is still the same agent on your side.
+- `POST /api/v1/office/actions/{id}` (`office.actions.result`) with `{ok, message}`: how carrying it out went. The agent's owner sees the message right away, in the panel and as a notice. Keep it short and never echo a message's text; log messages and stops on your side without their text.
 - `GET /api/v1/office/agents` (`office.agents.list`): your agents as Flow holds them.
 
 A source that has not reported for 90 seconds is gone, and its agents leave the office. An answer is accepted only from the agent's owner, and only while that agent is waiting on that same `requestId`; carry it out only after checking the request is still open on your side. The same operations are MCP tools (`office_agents_report`, …) and CLI commands (`flow office agents report`).
@@ -483,7 +484,7 @@ Send `activityKind` when your reporter knows the tool an agent is using: it is m
 
 ### How it runs
 
-The office is live over Server-Sent Events: `GET /api/office/{env}/events` sends a snapshot (rooms, AgentFlow agents, live agents as this viewer may see them, who is here and the last 50 chat lines, and the viewer's own live reporter sources), then moves, chat, emotes, agent updates and answer results as they happen, with a heartbeat every 15 seconds. Moves, chat (up to 280 characters), emotes and answers are small POSTs to `/api/office/{env}/presence`, `say`, `emote` and `answer`, rate-limited per person. Only the app's own page can call them, signed in. The events stream also takes an API key with the `read` scope for that environment (`Authorization: Bearer flow_…`), so a dashboard can watch the office. A stream that stops hearing heartbeats reconnects by itself; the header says "Reconnecting…" only after a few seconds without it.
+The office is live over Server-Sent Events: `GET /api/office/{env}/events` sends a snapshot (rooms, AgentFlow agents, live agents as this viewer may see them, who is here and the last 50 chat lines, and the viewer's own live reporter sources), then moves, chat, emotes, agent updates and answer results as they happen, with a heartbeat every 15 seconds. Moves, chat (up to 280 characters), emotes, answers and steering are small POSTs to `/api/office/{env}/presence`, `say`, `emote`, `answer` and `steer` (`{kind: "message", source, agentId, text}` or `{kind: "stop", source, agentId}`; `answer` takes the same body, and a body without `kind` is Allow / Deny), rate-limited per person. There is no API key operation for sending messages or stops: they come only from the signed-in owner in the office. Only the app's own page can call them, signed in. The events stream also takes an API key with the `read` scope for that environment (`Authorization: Bearer flow_…`), so a dashboard can watch the office. A stream that stops hearing heartbeats reconnects by itself; the header says "Reconnecting…" only after a few seconds without it.
 
 Everything about the office is kept in memory on the server: reported agents, presence and chat (which is not saved). Flow runs as a single server instance, so this works as is; a restart empties the office and reporters fill it again within seconds. Running several Flow instances behind a load balancer would need shared state for it. The office is drawn with [Three.js](https://threejs.org) (MIT), vendored in `public/vendor/three` and loaded only when the office opens.
 
@@ -5019,7 +5020,7 @@ Report your live coding agents
 
 `PUT /api/v1/office/agents` · scope `write` · MCP tool `office_agents_report`
 
-A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
+A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the actions from the office that this source has not been sent yet (also served by office.actions.wait): Allow / Deny answers, and messages and stops for agents that list them in can.
 
 **Input**
 
@@ -5037,8 +5038,10 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].requestId` | string |  | answer only. |
+| `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `actions[].text` | string |  | message only: what its owner wrote. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 | `accepted` | integer |  | How many agents were kept. |
@@ -5049,7 +5052,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"can":["message","stop"],"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
 ```
 
 ```json
@@ -5087,6 +5090,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
+| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn) and "stop" (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
 | `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `sources` | object[] | yes |  |
 | `sources[].source` | string | yes |  |
@@ -5131,6 +5135,10 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
         "agent": "Builder",
         "card": 12
       },
+      "can": [
+        "message",
+        "stop"
+      ],
       "transcript": [
         {
           "role": "user",
@@ -5167,7 +5175,7 @@ Wait for answers to your agents' prompts
 
 `GET /api/v1/office/actions` · scope `write` · MCP tool `office_actions_wait`
 
-Long-poll for the Allow / Deny answers given in the 3D office to this source's agents: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). Each answer is delivered once (here or in the office.agents.report answer). Carry it out, then send the result with office.actions.result.
+Long-poll for the actions taken in the 3D office on this source's agents by their owner: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). kind answer is Allow / Deny on pending.requestId (a missing kind is answer); message is text to send as a new user turn; stop interrupts its running turn (both only for agents whose can lists them). Each action is delivered once (here or in the office.agents.report answer). Check the agent is still the same and still yours, carry it out, then send the result with office.actions.result.
 
 **Input**
 
@@ -5184,8 +5192,10 @@ Long-poll for the Allow / Deny answers given in the 3D office to this source's a
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].requestId` | string |  | answer only. |
+| `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `actions[].text` | string |  | message only: what its owner wrote. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 
@@ -5203,8 +5213,38 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25"
       "id": "act_1",
       "agentId": "laptop:t3:thread-abc",
       "source": "bridge:laptop",
+      "kind": "answer",
       "requestId": "req-1",
       "decision": "allow",
+      "at": "2026-10-29T17:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Example: A message and a stop**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "actions": [
+    {
+      "id": "act_2",
+      "agentId": "laptop:t3:thread-abc",
+      "source": "bridge:laptop",
+      "kind": "message",
+      "text": "Also add a test for it.",
+      "at": "2026-10-29T17:00:00.000Z"
+    },
+    {
+      "id": "act_3",
+      "agentId": "laptop:t3:thread-abc",
+      "source": "bridge:laptop",
+      "kind": "stop",
       "at": "2026-10-29T17:00:00.000Z"
     }
   ]
@@ -5217,7 +5257,7 @@ Say how an answer went
 
 `POST /api/v1/office/actions/{id}` · scope `write` · MCP tool `office_actions_result`
 
-The reporter carried out (or could not carry out) an answer from office.actions.wait: the person who answered sees the message in the office right away.
+The reporter carried out (or could not carry out) an action from office.actions.wait: the agent's owner sees the message in the office right away. Keep it short, and never echo a message's text.
 
 **Input**
 
@@ -5235,8 +5275,10 @@ The reporter carried out (or could not carry out) an answer from office.actions.
 | `action.id` | string | yes |  |
 | `action.agentId` | string | yes |  |
 | `action.source` | string |  |  |
-| `action.requestId` | string | yes |  |
-| `action.decision` | enum | yes | One of `allow`, `deny`. |
+| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `action.requestId` | string |  | answer only. |
+| `action.decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `action.text` | string |  | message only: what its owner wrote. |
 | `action.at` | string | yes |  |
 | `action.result` | object |  |  |
 
@@ -5255,6 +5297,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
     "id": "act_1",
     "agentId": "laptop:t3:thread-abc",
     "source": "bridge:laptop",
+    "kind": "answer",
     "requestId": "req-1",
     "decision": "allow",
     "at": "2026-10-29T17:00:00.000Z",

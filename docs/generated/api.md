@@ -4533,7 +4533,7 @@ Report your live coding agents
 
 `PUT /api/v1/office/agents` · scope `write` · MCP tool `office_agents_report`
 
-A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
+A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the actions from the office that this source has not been sent yet (also served by office.actions.wait): Allow / Deny answers, and messages and stops for agents that list them in can.
 
 **Input**
 
@@ -4551,8 +4551,10 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].requestId` | string |  | answer only. |
+| `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `actions[].text` | string |  | message only: what its owner wrote. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 | `accepted` | integer |  | How many agents were kept. |
@@ -4563,7 +4565,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"can":["message","stop"],"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
 ```
 
 ```json
@@ -4601,6 +4603,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
+| `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn) and "stop" (interrupt its running turn). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
 | `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |
 | `sources` | object[] | yes |  |
 | `sources[].source` | string | yes |  |
@@ -4645,6 +4648,10 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
         "agent": "Builder",
         "card": 12
       },
+      "can": [
+        "message",
+        "stop"
+      ],
       "transcript": [
         {
           "role": "user",
@@ -4681,7 +4688,7 @@ Wait for answers to your agents' prompts
 
 `GET /api/v1/office/actions` · scope `write` · MCP tool `office_actions_wait`
 
-Long-poll for the Allow / Deny answers given in the 3D office to this source's agents: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). Each answer is delivered once (here or in the office.agents.report answer). Carry it out, then send the result with office.actions.result.
+Long-poll for the actions taken in the 3D office on this source's agents by their owner: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). kind answer is Allow / Deny on pending.requestId (a missing kind is answer); message is text to send as a new user turn; stop interrupts its running turn (both only for agents whose can lists them). Each action is delivered once (here or in the office.agents.report answer). Check the agent is still the same and still yours, carry it out, then send the result with office.actions.result.
 
 **Input**
 
@@ -4698,8 +4705,10 @@ Long-poll for the Allow / Deny answers given in the 3D office to this source's a
 | `actions[].id` | string | yes |  |
 | `actions[].agentId` | string | yes |  |
 | `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `actions[].requestId` | string |  | answer only. |
+| `actions[].decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `actions[].text` | string |  | message only: what its owner wrote. |
 | `actions[].at` | string | yes |  |
 | `actions[].result` | object |  |  |
 
@@ -4717,8 +4726,38 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25"
       "id": "act_1",
       "agentId": "laptop:t3:thread-abc",
       "source": "bridge:laptop",
+      "kind": "answer",
       "requestId": "req-1",
       "decision": "allow",
+      "at": "2026-10-29T17:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Example: A message and a stop**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "actions": [
+    {
+      "id": "act_2",
+      "agentId": "laptop:t3:thread-abc",
+      "source": "bridge:laptop",
+      "kind": "message",
+      "text": "Also add a test for it.",
+      "at": "2026-10-29T17:00:00.000Z"
+    },
+    {
+      "id": "act_3",
+      "agentId": "laptop:t3:thread-abc",
+      "source": "bridge:laptop",
+      "kind": "stop",
       "at": "2026-10-29T17:00:00.000Z"
     }
   ]
@@ -4731,7 +4770,7 @@ Say how an answer went
 
 `POST /api/v1/office/actions/{id}` · scope `write` · MCP tool `office_actions_result`
 
-The reporter carried out (or could not carry out) an answer from office.actions.wait: the person who answered sees the message in the office right away.
+The reporter carried out (or could not carry out) an action from office.actions.wait: the agent's owner sees the message in the office right away. Keep it short, and never echo a message's text.
 
 **Input**
 
@@ -4749,8 +4788,10 @@ The reporter carried out (or could not carry out) an answer from office.actions.
 | `action.id` | string | yes |  |
 | `action.agentId` | string | yes |  |
 | `action.source` | string |  |  |
-| `action.requestId` | string | yes |  |
-| `action.decision` | enum | yes | One of `allow`, `deny`. |
+| `action.kind` | enum | yes | answer: Allow / Deny (requestId, decision); message: send text as a new user turn; stop: interrupt its running turn. Treat a missing kind as answer. One of `answer`, `message`, `stop`. |
+| `action.requestId` | string |  | answer only. |
+| `action.decision` | enum |  | answer only. One of `allow`, `deny`. |
+| `action.text` | string |  | message only: what its owner wrote. |
 | `action.at` | string | yes |  |
 | `action.result` | object |  |  |
 
@@ -4769,6 +4810,7 @@ curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
     "id": "act_1",
     "agentId": "laptop:t3:thread-abc",
     "source": "bridge:laptop",
+    "kind": "answer",
     "requestId": "req-1",
     "decision": "allow",
     "at": "2026-10-29T17:00:00.000Z",

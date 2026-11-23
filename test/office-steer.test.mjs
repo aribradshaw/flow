@@ -85,3 +85,65 @@ test('transcript privacy over the live channel: shared-project viewers and stran
     for(const u of [ub,uc])assert.ok(!u.raw.includes('Also add a test')&&!u.raw.includes('transcript'));
   }finally{for(const s of streams)s.res?.destroy();hub.close();st.close();server.close()}
 });
+
+// ---------- steering: messages and stops ----------
+const STEERABLE={...AGENT,id:'host:t3:2',can:['message','stop','dance','STOP']};
+test('can: only message and stop are kept, and only the owner sees them',()=>{
+  const [a,b]=cleanReport({source:'s',agents:[STEERABLE,{id:'x',can:'message'}]}).agents;
+  assert.deepEqual(a.can,['message','stop']);assert.equal(b.can,undefined);
+  assert.deepEqual(viewAgent({...a,source:'s'},{owner:true}).can,['message','stop']);
+  assert.deepEqual(viewAgent({...a,source:'s'},{full:true,key:()=>'k'}).can,[]);
+  assert.equal(viewAgent({...a,source:'s'},{key:()=>'k'}).can,undefined);
+});
+
+test('steer: owner only, only what can allows, messages checked, stops not doubled, rate-limited, delivered once',async()=>{
+  let t=1e6;const st=officeState({now:()=>t}),events=[];st.on(e=>events.push(e));
+  const ann='ann@example.test',src='bridge:laptop';
+  st.report(ann,{source:src,agents:[STEERABLE,{...AGENT,id:'cli'}]});
+  const base={by:ann,owner:ann,source:src,agentId:STEERABLE.id};
+  assert.throws(()=>st.steer({...base,by:'bo@example.test',kind:'message',text:'hi'}),{status:403,code:'not_owner'});
+  assert.throws(()=>st.steer({...base,kind:'dance'}),{status:400});
+  assert.throws(()=>st.steer({...base,kind:'message',text:'   '}),{status:400});
+  assert.throws(()=>st.steer({...base,kind:'message',text:'x'.repeat(2001)}),{status:400});
+  assert.throws(()=>st.steer({...base,kind:'message'}),{status:400});
+  assert.throws(()=>st.steer({...base,agentId:'gone',kind:'stop'}),{status:404});
+  assert.throws(()=>st.steer({...base,agentId:'cli',kind:'message',text:'hi'}),{status:409,code:'cannot_steer'},'a reporter that did not list it in can');
+  const poll=st.wait(ann,src,5000);
+  const m=st.steer({...base,kind:'message',text:'  Also add a test\r\nand keep it small \u0007 '});
+  assert.deepEqual({kind:m.kind,text:m.text,requestId:m.requestId,decision:m.decision},{kind:'message',text:'Also add a test\nand keep it small',requestId:undefined,decision:undefined});
+  assert.deepEqual((await poll).map(x=>[x.id,x.kind,x.text]),[[m.id,'message','Also add a test\nand keep it small']]);
+  assert.deepEqual(st.report(ann,{source:src,agents:[STEERABLE]}).actions,[],'delivered once');
+  const s=st.steer({...base,kind:'stop'});
+  assert.deepEqual(Object.keys(s).sort(),['agentId','at','id','kind','source']);
+  assert.throws(()=>st.steer({...base,kind:'stop'}),{code:'already_stopping'});
+  st.result(ann,s.id,{ok:true,message:'Stopped in T3 Code.'});
+  assert.equal(events.filter(e=>e.type==='result').at(-1).action.kind,'stop');
+  assert.ok(events.every(e=>e.type==='agents'||e.email===ann),'only the owner hears of steering');
+  // Rate limits: per agent (3 messages, then one per 10 s) and per person (10, then one per 6 s).
+  st.steer({...base,kind:'message',text:'2'});st.steer({...base,kind:'message',text:'3'});
+  assert.throws(()=>st.steer({...base,kind:'message',text:'4'}),{status:429,code:'rate_limited'});
+  t+=10e3;st.steer({...base,kind:'message',text:'5'});
+  assert.throws(()=>st.steer({...base,kind:'message',text:'6'}),{status:429});
+  st.close();
+  const per=officeState({now:()=>t});
+  per.report(ann,{source:src,agents:Array.from({length:12},(_,i)=>({...STEERABLE,id:'a'+i}))});
+  for(let i=0;i<10;i++)per.steer({...base,agentId:'a'+i,kind:'message',text:'hi'});
+  assert.throws(()=>per.steer({...base,agentId:'a10',kind:'message',text:'hi'}),{status:429},'per person');
+  per.close();
+});
+
+test('answers stay backward compatible: no kind is an answer, and answers say kind "answer"',async()=>{
+  const st=officeState(),ann='ann@example.test',src='bridge:laptop';
+  const waiting={...STEERABLE,status:'waiting',pending:{requestId:'req-1',kind:'approval',summary:'Run: npm test',can:['allow','deny']}};
+  st.report(ann,{source:src,agents:[waiting]});
+  const hub=officeHub({state:st,context:{env:async()=>({id:'e',name:'E',ownerEmail:ann,members:[{email:ann,name:'Ann'}],projects:[],agents:[]})},heartbeatMs:60e3});
+  try{
+    const a=hub.answer('e',{email:ann},{source:src,agentId:waiting.id,requestId:'req-1',decision:'allow'});
+    assert.deepEqual({kind:a.kind,requestId:a.requestId,decision:a.decision},{kind:'answer',requestId:'req-1',decision:'allow'});
+    assert.throws(()=>hub.answer('e',{email:ann},{kind:'answer',source:src,agentId:waiting.id,requestId:'req-1',decision:'deny'}),{code:'already_answered'});
+    const m=hub.answer('e',{email:ann},{kind:'message',source:src,agentId:waiting.id,text:'Go ahead'});assert.equal(m.kind,'message');
+    assert.throws(()=>hub.answer('e',{email:'bo@example.test'},{kind:'stop',source:src,agentId:waiting.id}),{status:404},'someone else has no such agent of their own');
+    const got=await st.wait(ann,src,0);
+    assert.deepEqual(got.map(x=>x.kind),['answer','message']);
+  }finally{hub.close();st.close()}
+});

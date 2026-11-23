@@ -14,6 +14,7 @@ import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
 import {openBridgeDialog} from './office-connect.js';
+import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
@@ -71,7 +72,7 @@ export function openOffice(opts){
   root.tabIndex=-1;document.body.append(root);
   S={opts,root,lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
-    me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
+    steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
@@ -135,8 +136,9 @@ function connect(){
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending()});
   on('members',({members,agentflow})=>{updateRooms(members,agentflow);refreshPanel()});
-  on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
-  on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
+  // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
+  on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()}});
+  on('result',a=>{if(S.steer.isSteer(a))S.steer.track(a,'done');else{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel()}S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
   es.onerror=()=>{if(S?.es===es)disconnect()};
 }
 function watch(){
@@ -170,7 +172,7 @@ function snapshot(d){
   S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);
-  for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
+  for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
     const changed=officeDiff([...previous],[...S.live],([key])=>key);
@@ -630,11 +632,14 @@ function refreshPanel(){
         }
         const res=ans&&(!a.pending||ans.requestId===a.pending?.requestId||ans.state==='done')?`<p class="of-res ${ans.state==='done'?(ans.result?.ok?'ok':'bad'):''}">${ans.state==='done'?esc(ans.result?.message||'Done'):`${ans.decision==='allow'?'Allow':'Deny'} sent. Waiting for ${esc(a.host||'the reporter')}…`}</p>`:'';
         html=head+`<div class="of-pb">${row('Status',STATUS[a.status])}${row('Model',a.model?`${v.name} · ${a.model}`:v.name)}${row('Where',a.hostLabel||a.host)}${row('Repo',a.repo?.slug||a.repo?.name)}${row('Project',(a.projects||[]).join(', '))}
-          ${row('Desk',deskOf(a))}${row('Card',a.seat?.card?`#${a.seat.card.number} ${a.seat.card.title}`:'')}${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}</div>`;
+          ${row('Desk',deskOf(a))}${row('Card',a.seat?.card?`#${a.seat.card.number} ${a.seat.card.title}`:'')}${row('Doing',[doing,a.activity].filter(Boolean).join(' · '))}${a.children?.length?row('Subagents',`${a.children.length}: ${a.children.map(c=>c.title||VENDOR[c.vendor]?.name).join(', ')}`):''}${row('Belongs to',a.mine?'You':owner?.name)}${prompt}${res}${a.mine?'<div class="of-steer-slot"></div>':''}</div>`;
       }
     }
   }
+  S.steer.before(S.panel);
   S.panel.innerHTML=html;S.panel.hidden=false;
+  // Your own agent: its transcript, a message box and Stop (office-steer.js), kept across redraws.
+  if(p.type==='agent'){const a=agentOf(p.member,p.id);if(a)S.steer.attach(S.panel.querySelector('.of-steer-slot'),a)}
   for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
   S.panel.querySelector('[data-of="openAfAgent"]')?.addEventListener('click',e=>{const id=e.currentTarget.dataset.id,f=S.opts.focusAgent;closeOffice();f?.(id)});
 }

@@ -1306,10 +1306,10 @@ async function officeAccess(envId,user){
   const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
 }
 const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow},secret:officeSecret});
-// /api/office/{env}/events (SSE), presence, say, emote, answer: the app's page only, signed in (local mode too).
+// /api/office/{env}/events (SSE), presence, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs): the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
-  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer)$/.exec(u.pathname);
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
   // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
   const keyed=m[2]==='events'&&!!req.headers.authorization;
