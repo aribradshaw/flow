@@ -7,7 +7,7 @@
 // wall, people and agents.
 import * as THREE from './vendor/three/three.module.min.js';
 import {classicWorld} from './office-world-core.js';
-import {batch} from './office-batch.js';
+import {batch,bakedLight} from './office-batch.js';
 import {ROOM_W,ROOM_D,WALL_H,DOOR_W,MAIN_WALL_H,MAIN_WALL_T,PLAN,toWorld} from './office-layout.js';
 
 const C={concrete:'#e2e5e2',spine:'#eceeeb',stage:'#d9dee2',terrazzo:'#d6dadd',rug:'#9fb9c4',rugEdge:'#7f9dab',wood:'#d8b98c',wood2:'#cfae80',
@@ -18,10 +18,15 @@ const mix=(a,b,t)=>'#'+new THREE.Color(a).lerp(new THREE.Color(b),t).getHexStrin
 // The same "random" every time, from a seed.
 const rng=seed=>()=>{seed=(seed+0x6d2b79f5)>>>0;let t=seed;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return ((t^(t>>>14))>>>0)/4294967296};
 
+// The office's two lights, as office.js's own things are lit by them; the scenery has them baked in.
+const SUN={sky:'#ffffff',ground:'#c2cbc7',hemi:2.25,sun:'#fff6e8',sunIntensity:1.5,sunFrom:[14,30,20]},LIGHT=bakedLight(SUN);
+
 function buildScenery(core){
   const P=PLAN,HW=core.halfWidth,zF=core.zFront,zN=core.bounds.minZ,zS=core.bounds.maxZ,T=P.OUTER_T,H=P.OUTER_H;
-  const floor=batch(),solid=batch(),glass=batch(),lights=batch(),city=batch();
-  const sides={N:batch(),S:batch(),W:batch(),E:batch()};
+  // The lit meshes carry their lighting in their colours (LIGHT below), so they are drawn unlit.
+  const lit=()=>batch({light:LIGHT});
+  const floor=lit(),solid=lit(),city=lit(),glass=batch(),lights=batch(),shade=batch();
+  const sides={N:lit(),S:lit(),W:lit(),E:lit()};
 
   // ----- the floor and its zones -----
   floor.flat(0,(zN+zS)/2,2*HW,zS-zN,-0.02,C.concrete);
@@ -65,6 +70,8 @@ function buildScenery(core){
   // South: the meeting room and the lounge (a higher sill over its counter) have windows too.
   run(sides.S,true,zS+T/2,wing((side,i)=>i===1?(side>0?1.15:0.9):bayAt(1)(side,i)));
   for(const [b,x] of [[sides.W,-HW-T/2],[sides.E,HW+T/2]])run(b,false,x,[[zN-T,-zF+0.3,false],[-zF+0.3,zF-0.3,true],[zF-0.3,zS+T,false]]);
+  // A skirting along each wall's foot.
+  sides.N.box(0,zN+0.012,2*HW,0.024,0,0.11,C.trim);sides.S.box(0,zS-0.012,2*HW,0.024,0,0.11,C.trim);sides.W.box(-HW+0.012,0,0.024,zS-zN,0,0.11,C.trim);sides.E.box(HW-0.012,0,0.024,zS-zN,0,0.11,C.trim);
 
   // ----- the service core behind the main board -----
   {const w=core.mainWall,d=w.z-MAIN_WALL_T/2-zN;solid.box(0,zN+d/2,P.CENTER-0.5,d,0,MAIN_WALL_H,C.core,0,{top:C.roof}).box(0,zN+d/2,P.CENTER-2.5,d-2,MAIN_WALL_H,MAIN_WALL_H+0.12,C.roof2)}
@@ -76,6 +83,8 @@ function buildScenery(core){
     const pane=(lx,lz,w,d)=>{const p=at(lx,lz);glass.box(p.x,p.z,w,d,WALL_H,G,C.glass,r.facing);solid.box(p.x,p.z,w+0.02,d+0.04,G,G+0.07,C.frame,r.facing)};
     pane(-ROOM_W/2,0,0.05,ROOM_D);pane(ROOM_W/2,0,0.05,ROOM_D);pane(-(DOOR_W/2+side/2),ROOM_D/2,side,0.05);pane(DOOR_W/2+side/2,ROOM_D/2,side,0.05);
     {const p=at(0,ROOM_D/2);solid.box(p.x,p.z,DOOR_W,0.09,G,G+0.07,C.frame,r.facing)}
+    // Slim posts in the glass, so it reads as glass at eye level.
+    for(const [lx,lz] of [[-ROOM_W/2,-1.5],[-ROOM_W/2,1.5],[ROOM_W/2,-1.5],[ROOM_W/2,1.5],[-(DOOR_W/2+side/2),ROOM_D/2],[DOOR_W/2+side/2,ROOM_D/2]]){const p=at(lx,lz);solid.box(p.x,p.z,0.06,0.06,WALL_H,G,C.frame,r.facing)}
     for(const [lx,lz,y0] of [[-ROOM_W/2,ROOM_D/2,WALL_H],[ROOM_W/2,ROOM_D/2,WALL_H],[-DOOR_W/2,ROOM_D/2,1.5],[DOOR_W/2,ROOM_D/2,1.5]]){const p=at(lx,lz);solid.box(p.x,p.z,0.1,0.1,y0,G,C.frame,r.facing)}
   }
 
@@ -145,7 +154,7 @@ function buildScenery(core){
   // ----- light panels overhead (they fade when the camera is above them) -----
   const LY=3.93,panel=(x,z,w,d)=>lights.box(x,z,w,d,LY,LY+0.05,'#ffffff',0,{bottom:true});
   for(const p of core.pods)for(const t of p.tables)panel(t.x,t.z,Math.max(1.6,t.w-0.6),0.5);
-  for(let z=-zF+2;z<=zF-1.9;z+=4)panel(0,z,0.5,2.2);
+  // None over the spine: nothing hangs in the view from reception to the main board.
   for(const s of [-1,1])for(let x=-HW+4;x<=HW-4;x+=8)if(Math.abs(x)>P.SPINE)panel(x,s*(zF-P.CORRIDOR/2),2.6,0.4);
 
   // ----- the city outside: towers around the floor, paler the farther off -----
@@ -172,17 +181,32 @@ function buildScenery(core){
     // A wall sign's board is part of its wall, and fades with it.
     }else{const [x,z]=local(s.x,s.z,yaw,0,-0.01);(sides[s.wall]||solid).box(x,z,s.w+0.1,0.04,s.y-0.05,s.y+s.h+0.05,C.trim,yaw,{bottom:true})}
   }
-  return {floor,solid,glass,lights,city,sides};
+  // ----- soft shadows where things meet the floor (a mesh that darkens what is under it) -----
+  const SY=0.012,WALLS='#d3d3d3',THINGS='#d8d8d8';
+  shade.shade(0,zN-0.5,2*HW,1,SY,WALLS,0.7).shade(0,zS+0.5,2*HW,1,SY,WALLS,0.7).shade(-HW-0.5,0,1,2*zF,SY,WALLS,0.7).shade(HW+0.5,0,1,2*zF,SY,WALLS,0.7);
+  {const w=core.mainWall;shade.shade(0,w.z-0.5,w.width,1.4,SY,WALLS,0.8)}
+  for(const r of core.rooms){const side=(ROOM_W-DOOR_W)/2;for(const s of [-1,1]){const p=toWorld(r,s*(DOOR_W/2+side/2),ROOM_D/2);shade.shade(p.x,p.z,side,0.2,SY,WALLS,0.5)}}
+  {const m=core.meeting;shade.shade(m.x,m.z,m.w,m.d,SY,'#e9e9e9',0.45)}
+  for(const p of core.pods)for(const t of p.tables)shade.shade(t.x,t.z,t.w,t.d+0.5,SY,THINGS,0.35);
+  for(const r of core.props){
+    if(r.t==='plant')shade.shade(r.x,r.z,0.5*(r.s||1),0.5*(r.s||1),SY,'#cfcfcf',0.4);
+    else if(r.t==='stool')shade.shade(r.x,r.z,0.2,0.2,SY,'#d6d6d6',0.2);
+    else if(r.t!=='rug')shade.shade(r.x,r.z,r.w,r.d,SY,THINGS,0.32,r.yaw||0);
+  }
+  return {floor,solid,glass,lights,city,sides,shade};
 }
 
-export function createClassicWorld({scene}){
+// ctx.name(): the office's name, for the sign over the main board.
+export function createClassicWorld({scene,name=()=>''}){
   const bg='#e4edf4';
   scene.background=new THREE.Color(bg);scene.fog=new THREE.Fog(bg,45,135);
-  const hemi=new THREE.HemisphereLight('#ffffff','#c2cbc7',2.25),sun=new THREE.DirectionalLight('#fff6e8',1.5);sun.position.set(14,30,20);
+  const hemi=new THREE.HemisphereLight(SUN.sky,SUN.ground,SUN.hemi),sun=new THREE.DirectionalLight(SUN.sun,SUN.sunIntensity);sun.position.set(...SUN.sunFrom);
   scene.add(hemi,sun);
-  const lit=()=>new THREE.MeshLambertMaterial({vertexColors:true});
+  const lit=()=>new THREE.MeshBasicMaterial({vertexColors:true});
   const mats={floor:lit(),solid:lit(),city:lit(),
     glass:new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:0.26,depthWrite:false}),
+    // Multiplies the floor under it: white leaves it as it is, grey darkens it.
+    shade:new THREE.MeshBasicMaterial({vertexColors:true,blending:THREE.MultiplyBlending,premultipliedAlpha:true,transparent:true,depthWrite:false,fog:false}),
     lights:new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:0.9,depthWrite:false,fog:false}),
     N:lit(),S:lit(),W:lit(),E:lit()};
   const group=new THREE.Group();group.name='classic-scenery';scene.add(group);
@@ -192,7 +216,9 @@ export function createClassicWorld({scene}){
     for(const m of Object.values(meshes)){group.remove(m);if(m.userData.dispose)m.userData.dispose();else m.geometry.dispose()}
     const b=buildScenery(core);meshes={};let triangles=0;
     const add=(name,bt,material)=>{const m=bt.mesh(material);m.name=name;meshes[name]=m;group.add(m);triangles+=bt.count();return m};
-    add('floor',b.floor,mats.floor);add('solid',b.solid,mats.solid);add('city',b.city,mats.city);
+    add('floor',b.floor,mats.floor);add('solid',b.solid,mats.solid);
+    // The city is behind everything: drawn last of the solid meshes, so what hides it costs nothing.
+    add('city',b.city,mats.city).renderOrder=1;add('shade',b.shade,mats.shade).renderOrder=1;
     for(const s of 'NSWE')add(s,b.sides[s],mats[s]);
     add('glass',b.glass,mats.glass).renderOrder=2;add('lights',b.lights,mats.lights).renderOrder=3;
     const faces=signFaces(core.signs);if(faces){faces.name='signs';meshes.signs=faces;group.add(faces);triangles+=faces.geometry.attributes.position.count/3}
@@ -200,9 +226,9 @@ export function createClassicWorld({scene}){
   }
   const world={
     id:'classic',name:'Office',background:bg,sea:-Infinity,floors:[],stats:{triangles:0},terrain:null,scenery:[group],
-    layout(keys,opts={}){core=classicWorld(keys,opts);if(core.sig!==sig){sig=core.sig;rebuild()}return core},
+    layout(keys,opts={}){core=classicWorld(keys,{...opts,name:opts.name??name()});if(core.sig!==sig){sig=core.sig;rebuild()}return core},
     // Where the AgentFlow org stands for these members: Map(id -> {x, z, yaw}); sig changes when the floor must be laid out again.
-    org(list,keys){const w=classicWorld(keys,{org:list});return {pos:w.org.pos,pods:w.org.pods,radius:Math.max(9,w.coreDepth/2),sig:w.sig}},
+    org(list,keys){const w=classicWorld(keys,{org:list,name:name()});return {pos:w.org.pos,pods:w.org.pods,radius:Math.max(9,w.coreDepth/2),sig:w.sig}},
     common(){},
     // The rooms office.js built: their back walls are the outer walls' inner face, and fade with them.
     adoptRooms(rooms){backs=[];for(const [key,r] of rooms)if(r.backMat)backs.push({key,mat:r.backMat,side:r.center.z<0?'N':'S'});veilSig=''},
@@ -225,8 +251,9 @@ export function createClassicWorld({scene}){
       // From high above the floor is a plan: the city under it steps back.
       setFade(mats.city,Math.max(0.07,Math.min(1,(64-p.y)/36)));
     },
-    get walls(){return core.walls},// The plan's signs are boards in the world here, so office.js has no labels to draw for them.
-    signs:[],get spawn(){return core.spawn},get center(){return core.center},get bounds(){return core.bounds},
+    get walls(){return core.walls},// The plan's signs are boards in the world here; office.js labels the places only in the overview, where
+    // a board seen from above is a line.
+    get signs(){return core.plan().zones.filter(z=>z.kind!=='core'&&z.kind!=='office'&&z.kind!=='meeting'&&z.kind!=='board').map(z=>({x:z.x,y:1,z:z.z,text:z.name,overview:true}))},get spawn(){return core.spawn},get center(){return core.center},get bounds(){return core.bounds},
     ground:(x,z)=>core.ground(x,z),respawn:p=>core.respawn(p),splash(){},
     dispose(){scene.remove(hemi,sun,group);for(const m of Object.values(meshes)){if(m.userData.dispose)m.userData.dispose();else m.geometry.dispose()}for(const m of Object.values(mats))m.dispose();scene.fog=null},
   };

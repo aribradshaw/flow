@@ -3,10 +3,29 @@
 // builds its scenery with it, and office.js a room's walls.
 import * as THREE from './vendor/three/three.module.min.js';
 
+// What a hemisphere light and a directional light give a flat-shaded Lambert face, as a multiplier per channel:
+// the same picture as MeshLambertMaterial under those lights, with no lighting to work out per pixel.
+// {sky, ground, hemi (intensity), sun (colour), sunIntensity, sunFrom: [x, y, z]}
+export function bakedLight({sky='#ffffff',ground='#ffffff',hemi=1,sun='#ffffff',sunIntensity=1,sunFrom=[0,1,0]}){
+  const S=new THREE.Color(sky),G=new THREE.Color(ground),D=new THREE.Color(sun),l=Math.hypot(...sunFrom),dx=sunFrom[0]/l,dy=sunFrom[1]/l,dz=sunFrom[2]/l,memo=new Map();
+  return n=>{
+    const key=n[0].toFixed(3)+','+n[1].toFixed(3)+','+n[2].toFixed(3);let k=memo.get(key);
+    if(!k){
+      const len=Math.hypot(n[0],n[1],n[2])||1,w=0.5*n[1]/len+0.5,d=Math.max(0,(n[0]*dx+n[1]*dy+n[2]*dz)/len)*sunIntensity;
+      k=[((G.r+(S.r-G.r)*w)*hemi+D.r*d)/Math.PI,((G.g+(S.g-G.g)*w)*hemi+D.g*d)/Math.PI,((G.b+(S.b-G.b)*w)*hemi+D.b*d)/Math.PI];memo.set(key,k);
+    }
+    return k;
+  };
+}
 // A batch: boxes, prisms and floor quads with a colour each, as one geometry (flat shaded: a normal per face).
-export function batch(){
+// light: optional, (normal) -> [r, g, b] to multiply a face's colour by: the lighting baked in, for a mesh drawn
+// with an unlit material (bakedLight below).
+export function batch({light=null}={}){
   const pos=[],nor=[],col=[],c=new THREE.Color();
-  const tri=(a,b,d,n)=>{pos.push(a[0],a[1],a[2],b[0],b[1],b[2],d[0],d[1],d[2]);for(let i=0;i<3;i++){nor.push(n[0],n[1],n[2]);col.push(c.r,c.g,c.b)}};
+  const tri=(a,b,d,n)=>{
+    const k=light?light(n):null,r=k?c.r*k[0]:c.r,g=k?c.g*k[1]:c.g,bl=k?c.b*k[2]:c.b;
+    pos.push(a[0],a[1],a[2],b[0],b[1],b[2],d[0],d[1],d[2]);for(let i=0;i<3;i++){nor.push(n[0],n[1],n[2]);col.push(r,g,bl)}
+  };
   const quad=(a,b,d,e,n)=>{tri(a,b,d,n);tri(a,d,e,n)};
   const api={
     count:()=>pos.length/9,
@@ -33,6 +52,17 @@ export function batch(){
       const cs=Math.cos(yaw),sn=Math.sin(yaw),at=(lx,lz)=>[x+lx*cs+lz*sn,z-lx*sn+lz*cs];
       api.flat(x,z,w-2*bw,d-2*bw,y,color,yaw);
       for(const s of [-1,1]){const a=at(0,s*(d-bw)/2);api.flat(a[0],a[1],w,bw,y,edge,yaw);const b=at(s*(w-bw)/2,0);api.flat(b[0],b[1],bw,d-2*bw,y,edge,yaw)}
+      return api;
+    },
+    // A soft shadow on the floor (for a material that multiplies what is under it): a w by d rectangle of
+    // `dark`, fading to white over `spread` all round.
+    shade(x,z,w,d,y,dark,spread=0.3,yaw=0){
+      const cs=Math.cos(yaw),sn=Math.sin(yaw),p=(lx,lz)=>[x+lx*cs+lz*sn,y,z-lx*sn+lz*cs],up=[0,1,0],hx=w/2,hz=d/2,ox=hx+spread,oz=hz+spread;
+      const dk=new THREE.Color(dark),put=(v,k)=>{pos.push(v[0],v[1],v[2]);nor.push(0,1,0);if(k)col.push(dk.r,dk.g,dk.b);else col.push(1,1,1)};
+      const q=(a,ka,b,kb,e,ke,f,kf)=>{put(a,ka);put(b,kb);put(e,ke);put(a,ka);put(e,ke);put(f,kf)};
+      const i=[p(-hx,hz),p(hx,hz),p(hx,-hz),p(-hx,-hz)],o=[p(-ox,oz),p(ox,oz),p(ox,-oz),p(-ox,-oz)];
+      q(i[0],1,i[1],1,i[2],1,i[3],1);
+      for(let k=0;k<4;k++){const n=(k+1)%4;q(o[k],0,o[n],0,i[n],1,i[k],1)}
       return api;
     },
     // A prism or cone standing on y0: radius r0 at the bottom, r1 at the top.

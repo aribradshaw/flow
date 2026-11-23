@@ -22,7 +22,7 @@
 //   ground(x, z)                     floor height there, or null where there is no floor (water)
 //   floors   [Mesh]                  what a click or tap lands on
 //   spawn, respawn(pos)              where people arrive, and come back after falling in
-//   signs    [{x, y, z, text}]       names of places
+//   signs    [{x, y, z, text}]       names of places (overview: true shows one only in the overview)
 //   center                           what the overview looks at
 //   sea                              water level (-Infinity without water); splash(pos, t)
 //   common(radius)                   the common area grew or shrank with the AgentFlow org
@@ -36,5 +36,5 @@ import {createClassicWorld} from './office-world-classic.js';
 import {createYachtWorld} from './office-world-yacht.js';
 export {WORLDS,DEFAULT_WORLD,worldId,wallsFrom};
 
-// ctx: {scene, deck} — deck is the group office.js adds rooms, people and agents to.
+// ctx: {scene, deck, name()} — deck is the group office.js adds rooms, people and agents to; name() the office's name.
 export const createWorld=(id,ctx)=>worldId(id)==='yacht'?createYachtWorld(ctx):createClassicWorld(ctx);

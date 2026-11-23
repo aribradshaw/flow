@@ -62,7 +62,7 @@ const nearest=(points,p)=>points.reduce((best,q)=>Math.hypot(q.x-p.x,q.z-p.z)<Ma
 
 // ---------- classic: office-layout.js's floor plan, on one flat floor ----------
 const keysOf=n=>Array.isArray(n)?n:Array.from({length:Math.max(0,n|0)},(_,i)=>'m'+i);
-// opts.org: the AgentFlow agents, for the pods in the open-plan core.
+// opts.org: the AgentFlow agents, for the pods in the open-plan core; opts.name: the office's name, for its sign.
 export function classicWorld(members,opts={}){
   const layout=classicLayout(keysOf(members),opts),b=layout.bounds,spawn=layout.spawn;
   // cam: how high a box stops the camera (glass and the fading outer walls: not at all).
@@ -70,7 +70,7 @@ export function classicWorld(members,opts={}){
   const inside=(x,z)=>x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ;
   const world={...layout,id:'classic',rooms:layout.rooms.map(r=>({...r,y:0})),walls,plain:layout.walls,sea:-Infinity,
     // What the scenery is built from: when this is the same, nothing moved.
-    sig:JSON.stringify([layout.halfWidth,layout.coreDepth,layout.rooms.map(r=>[r.x,r.z]),layout.bays.map(x=>x.type),layout.pods.map(p=>[p.id,p.name,p.x,p.z,p.w,p.d,p.tables.map(t=>t.seats)])]),
+    sig:JSON.stringify([String(opts.name||''),layout.halfWidth,layout.coreDepth,layout.rooms.map(r=>[r.x,r.z]),layout.bays.map(x=>x.type),layout.pods.map(p=>[p.id,p.name,p.x,p.z,p.w,p.d,p.tables.map(t=>t.seats)])]),
     ground:(x,z)=>Number.isFinite(x)&&Number.isFinite(z)&&inside(x,z)?0:null,open:()=>false,respawn:()=>({...spawn})};
   world.step=(from,to,all=walls)=>stepIn(world,from,to,all);
   return world;

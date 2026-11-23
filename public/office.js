@@ -593,7 +593,9 @@ const mine=()=>S.env===S.opts.current;
 const wantedWorld=()=>worldId(mine()&&S.opts.world?S.opts.world():S.serverWorld);
 function usePlace(id){
   if(S.place?.id===id)return;
-  S.place?.dispose();S.place=createWorld(id,{scene:S.scene,deck:S.world});
+  // Another world: nothing is hidden behind a faded wall any more.
+  S.veilRev=undefined;S.boards?.veil([]);
+  S.place?.dispose();S.place=createWorld(id,{scene:S.scene,deck:S.world,name:()=>S?.opts.offices.find(o=>o.id===S.env)?.name||''});
   S.root.style.background=S.place.background;S.root.dataset.world=id;S.place.common(S.commonR||10);
   const pick=S.root.querySelector('.of-world');pick.value=id;pick.hidden=!(mine()&&S.opts.setWorld);
   S.root.querySelector('.of-motion-row').hidden=S.place.sea===-Infinity;
@@ -634,7 +636,7 @@ function buildRooms(){
   // Boxes are solid from their top down, so one on a raised deck is that much taller.
   const boxAt=(frame,x,z,w,d,h)=>{const p=toWorld(frame,x,z);S.walls.push(officeBox(p.x,p.z,frame.facing,w,d,h+(frame.y||0)))};
   S.signs=new THREE.Group();S.world.add(S.signs);
-  for(const n of S.place.signs){const o=new THREE.Object3D();o.position.set(n.x,n.y,n.z);S.signs.add(o);label(o,`<span class="of-sign">${esc(n.text)}</span>`,{y:0,cls:'sign',near:n.near||26})}
+  for(const n of S.place.signs){const o=new THREE.Object3D();o.position.set(n.x,n.y,n.z);S.signs.add(o);label(o,`<span class="of-sign">${esc(n.text)}</span>`,n.overview?{y:0,cls:'sign',show:()=>!!S.rig?.overview}:{y:0,cls:'sign',near:n.near||26})}
   for(const slot of S.worldLayout.rooms){
     const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,slot.y||0,slot.z),facing=slot.facing;
     const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
@@ -1440,6 +1442,16 @@ function placeLabels(){
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}
-    l.el.style.transform=`translate(${((p.x+1)/2*w).toFixed(1)}px,${((1-p.y)/2*h).toFixed(1)}px) translate(-50%,${l.top?'0':'-100%'})`;
+    l.sx=(p.x+1)/2*w;l.sy=(1-p.y)/2*h;
+    l.el.style.transform=`translate(${l.sx.toFixed(1)}px,${l.sy.toFixed(1)}px) translate(-50%,${l.top?'0':'-100%'})`;
+  }
+  // In the overview, place names that would overlap give way to the ones listed first.
+  if(S.rig?.overview){
+    const kept=[];
+    for(const l of S.labelList){
+      if(l.cls!=='sign'||l.hidden)continue;
+      const half=(l.w??=l.el.offsetWidth||80)/2+3;
+      if(kept.some(k=>Math.abs(k.x-l.sx)<k.half+half&&Math.abs(k.y-l.sy)<19)){l.el.style.display='none';l.hidden=true}else kept.push({x:l.sx,y:l.sy,half});
+    }
   }
 }

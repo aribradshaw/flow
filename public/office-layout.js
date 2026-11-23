@@ -18,7 +18,7 @@
 // a bigger org adds pods, and widens the floor too once the pods would make the core too deep. A slot
 // nobody has is an open bay with seats by the windows.
 //
-// classicLayout(keys, {org}) -> the plan:
+// classicLayout(keys, {org, name}) -> the plan (org: the AgentFlow agents; name: the office's name, for its sign):
 //   rooms [{key, x, z, facing}], mainWall, radius (what the overview frames), center, bounds, spawn, entrance
 //   boardAnchors(), meterAnchors(), meetingAnchors(), doors(portals)     as every world answers them (below)
 //   org {pos: Map(agent id -> {x, z, yaw}), pods: [{id, name, x, z, w, d, color}]}   where the AgentFlow org stands
@@ -128,7 +128,7 @@ function packPods(pods,width){
   return {depth:Math.max(depthOf(sides[0]),depthOf(sides[1])),sides};
 }
 
-export function classicLayout(keys,{org=[]}={}){
+export function classicLayout(keys,{org=[],name=''}={}){
   const P=PLAN,n=keys.length,pods=orgPods(org);
   // Slots per wing side: enough for the members, the meeting room and the lounge. The pods keep close to the
   // spine: they are packed as if the floor were one slot wide, and only wider (widening the floor when it
@@ -293,6 +293,8 @@ export function classicLayout(keys,{org=[]}={}){
   // Hung above head height: read from across the floor, out of the way of the view once you are under them.
   const hang=(text,x,z,w,o={})=>({kind:'hang',text,x:round(x),y:3.38,z:round(z),w,h:0.5,facing:0,...o});
   const signs=[
+    // The office's own name, over the main board.
+    ...(String(name||'').trim()?[(t=>({kind:'wall',text:t,x:0,y:4.56,z:round(mainWall.z+MAIN_WALL_T/2+0.04),w:Math.min(9,Math.max(3.2,t.length*0.36+1.2)),h:0.46,facing:0}))(String(name).trim().slice(0,36))]:[]),
     {kind:'wall',wall:'S',text:'Reception',x:0,y:3.2,z:round(zS-0.03),w:5.4,h:0.62,facing:Math.PI},
     hang('Lounge',lounge.x,zFront+0.35,2.3),
     ...bays.map(b=>hang(bayName[b.type],b.x,b.z-b.wing*(ROOM_D/2-0.35),2.9)),
