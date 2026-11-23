@@ -37,6 +37,7 @@ import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
 import {createVoice} from './office-voice.js';
 import {createDecor} from './office-decor.js';
+import {createChief} from './office-chief.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -139,7 +140,7 @@ export function closeOffice(){
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   // Each part closes on its own (voice first: every call ends, the mic and a shared screen are released), so one
   // that fails cannot leave the office on screen.
-  for(const close of [()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.npc?.dispose()])
+  for(const close of [()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.chief?.dispose(),()=>s.npc?.dispose()])
     try{close()}catch(e){console.error('office close',e)}
   clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();const all=[];s.scene?.traverse(o=>all.push(o));for(const o of all)o.userData.dispose?.();disposeFigures();disposeMascots();s.renderer?.dispose();for(const o of all){o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()}}catch{}
@@ -256,7 +257,7 @@ function connect(){
   // Someone saved a new look (office-look-editor.js), or went back to their default (look: null).
   on('look',({key,look})=>setLook(key,look));
   on('rtc',d=>S.voice?.event(d)); // voice signalling (office-voice.js, lib/office-rtc.mjs)
-  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}S.chief?.update();S.chief?.agents(member,agents);refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
   on('meters',d=>{S.sparks=d.sparks||{};S.meters?.invalidate()});
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   on('decor',row=>{if(S.world)S.decor?.remote(row)});
@@ -393,6 +394,7 @@ function updateRooms(members,agentflow){
   if(afChanged)buildAgentflow();
   if(changed)buildRooms();
   else for(const m of members){const room=S.rooms.get(m.key);if(room){room.member=m;roomLook(m.key)}}
+  S.chief?.update();
 }
 function snapshot(d){
   const previous=S.live;
@@ -429,6 +431,7 @@ function snapshot(d){
   sendPresence(true);refreshPanel();focusPending();
   S.presence?.onSnapshot(d);
   for(const [member,agents] of S.live)S.presence?.observeWaiting(member,agents);
+  S.chief?.update();S.chief?.agents(S.meKey,S.live.get(S.meKey)||[]);
 }
 function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
@@ -489,6 +492,7 @@ function initScene(){
   S.npcLayer=new THREE.Group();S.world.add(S.npcLayer);
   S.npc=createNpcs({THREE,layer:S.npcLayer,world:S.world,
     navWorld,person:key=>S.people.get(key),isQuiet:key=>presenceStatus.isQuiet(key),
+    inMeeting:key=>{const p=S?.people.get(key)?.obj.position;return !!p&&!!S.voice?.inMeeting?.(p.x,p.z)},
     room:roomSpots,boardSpot:key=>(key==null?S.devops?.spot():S.boards?.spot(key))||null,
     entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,player:()=>S.pos,
     label,unlabel:l=>{l.el.remove();S.labelList=S.labelList.filter(x=>x!==l)},
@@ -525,6 +529,14 @@ function initScene(){
     layout:()=>({world:office.worldLayout,rooms:[...office.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:office.commonR||10,roomW:ROOM_W,roomD:ROOM_D}),
     walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,
     toast:(m,bad)=>office.opts.toast?.(m,bad)});
+  // Your Chief of Staff (office-chief.js): your conductor as a companion that walks with you and takes /cos.
+  S.chief=createChief({root:S.root,meKey:()=>office.meKey,members:()=>office.members,live:()=>office.live,af:afAgents,deskKey,npc:S.npc,
+    label,unlabel:l=>{if(!l)return;l.el.remove();office.labelList=office.labelList.filter(x=>x!==l)},labelAlive:l=>office.labelList.includes(l),
+    interact:S.interact,openPanel,post:body=>api('steer',body),toast:(m,bad)=>office.opts.toast?.(m,bad),isQuiet:key=>presenceStatus.isQuiet(key),
+    cardId:n=>office.env===office.opts.current&&office.opts.overlays?.card?store.db?.devops?.cards?.find(c=>c.number===n)?.id||null:null,openCard,
+    cards:()=>office.env===office.opts.current?store.db?.devops?.cards||[]:[],refs:()=>{const m=office.members.find(x=>x.me);return m?officeMemberRefs(store.db,m):[]},
+    myName:()=>office.opts.me?.name||office.me?.name||'',afName:id=>afOf(id)?.name||'',lines:()=>office.lines,
+    showAgent:(member,id)=>showAgent(member,id),repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
   S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
@@ -858,6 +870,7 @@ function buildAgentflow(){
     S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
   }
   buildSeats(seats);
+  S.chief?.update();
 }
 // Seats (office-seats.js): each live session working on an AgentFlow agent's card sits at a small desk beside
 // that agent, seen from any side, with the agent's name and the card on its tag; up to three per agent.
@@ -1142,6 +1155,7 @@ const row=(k,v)=>v?`<div class="of-row"><span>${k}</span><b>${esc(v)}</b></div>`
 function refreshPanel(){
   const p=S?.panelFor;if(!p)return;
   let html='';
+  if(p.type==='chief'){S.chief.before(S.panel);S.panel.innerHTML=S.chief.panelHtml();S.panel.hidden=false;S.chief.attach(S.panel);return}
   if(p.type==='af'){
     const a=afAgents().find(x=>x.id===p.id);if(!a){S.panel.hidden=true;return}
     const here=S.env===S.opts.current&&S.opts.overlays?.agent;
@@ -1373,6 +1387,7 @@ function frame(dt,t,delta){
   // Where everyone who is not a person walks (office-npc.js), then what agents act out at their desks
   // (office-activity.js): after the above, so they have the last word.
   S.npc?.tick(animation.dt,animation.t);
+  S.chief?.frame();
   S.activity?.tick(animation.dt,animation.t);
   S.decor?.frame();
   if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,animation.t)}

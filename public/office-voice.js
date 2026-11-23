@@ -7,6 +7,7 @@
 //   voice.event(data)     an `rtc` event from the office stream (lib/office-rtc.mjs)
 //   voice.layout()        the rooms moved: place the meeting room again (office-voice-core.js meetingAnchors)
 //   voice.walls           the meeting room's walls, for the office's colliders
+//   voice.inMeeting(x, z) true inside the meeting room
 //   voice.frame(dt)       once per frame: room membership, proximity mix, speaking rings
 //   voice.keyDown(e) / keyUp(e)   M mute, hold V to talk (the office calls these outside text fields only)
 //   voice.escape()        closes the full-screen view (-> true)
@@ -539,6 +540,8 @@ export function createVoice(o){
   return {
     event,layout,frame,keyDown,keyUp,
     get walls(){return V.walls},
+    // Is (x, z) inside the meeting room? (a Chief of Staff waits at its desk while its person is in a meeting)
+    inMeeting:(x,z)=>!!roomAt(V.anchors,x,z),
     escape:()=>{if(V.confirm){V.confirm=null;paint();return true}if(V.settings){toggleSettings();return true}return closeFull()},
     pick(ray){if(!V.screen||!sharer())return false;if(!ray.intersectObject(V.screen,false).length)return false;openFull();return true},
     // For tests and the docs: what this browser is doing.

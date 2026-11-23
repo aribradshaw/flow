@@ -17,6 +17,8 @@
 //                               owner rebuild it.
 //     self,                     true only for something that is the player: anything else within 0.3 m of the
 //                               player is never offered (a prop that walked onto you, a stale position)
+//     anyAngle,                 true: offered behind you too (a companion that follows you); give it a low priority
+//                               so what you face still wins
 //   })
 //   interact.unregister(id)     interact.unregisterWhere(id=>bool)
 //   interact.update()           once per frame: picks the target and places the prompt and highlight (positions
@@ -54,7 +56,7 @@ export function createInteractions({scene,camera,stage,player,facing,toast=()=>{
       if(it.enabled&&!it.enabled())continue;
       const q=where(it);if(!finite(q))continue;
       const dx=q.x-me.x,dz=q.z-me.z,d=Math.hypot(dx,dz);if(d>(it.radius??2.2)||(d<0.3&&!it.self))continue;
-      const front=d<1?1:Math.max(...dirs.map(([sx,sz])=>(dx*sx+dz*sz)/d));if(front<0.25)continue;
+      const front=d<1||it.anyAngle?1:Math.max(...dirs.map(([sx,sz])=>(dx*sx+dz*sz)/d));if(front<0.25)continue;
       const score=d+(1-front)*0.8-(it.priority||0)*0.75;if(score<bestScore){bestScore=score;best=it}
     }
     return best;

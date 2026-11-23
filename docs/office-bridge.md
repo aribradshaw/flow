@@ -49,6 +49,9 @@ The bridge uses the same sign-in as the rest of the CLI. `FLOW_URL` and `FLOW_AP
 | `--source <name>` | Override `bridge:<hostname>`. Use a distinct name per reporter if two computers share a host name. |
 | `--interval <s>` | Set the reporting interval to 1–60 seconds. The default is 3. |
 | `--t3-db <path>` | Override the T3 database path. The bridge looks for `server-runtime.json` next to the database to answer approvals. |
+| `--conductor` / `--no-conductor` | Keep (or not) a Chief of Staff thread in T3 for the office. On by default when T3 Code is set up on this computer. See below. |
+| `--conductor-project <path>` | The T3 project the Chief of Staff thread runs in. Default: the one it used last, else the project of your newest T3 thread. |
+| `--conductor-env <env>` | The Flow environment whose **Chief of Staff** agent gives the thread its instructions. Default: the first of your environments that has one. |
 | `--help` | Show usage. |
 
 T3’s default database is `~/.t3/userdata/statev2.sqlite` on Linux and macOS and `%USERPROFILE%\.t3\userdata\statev2.sqlite` on Windows. When `T3CODE_HOME` is set, the bridge looks under its `userdata` directory. Claude Code sessions come from the `projects` directory under `~/.claude` or `CLAUDE_CONFIG_DIR` and show up when their transcript was modified in the last five minutes. The bridge filters out Claude sessions that it can link to a live T3 thread.
@@ -58,6 +61,14 @@ Each agent also carries the last 12 lines of its conversation: your messages, th
 From your own T3 agent's panel in the office you can also send it a message (it runs as your next turn, after the current one when it is busy; the bridge passes the text to `t3 thread send` on standard input) and stop its running turn (T3's interrupt, only for the turn that was running). The bridge checks the thread is still running on this computer first, and logs each one with the agent and how it went, never the message text. Threads delegated by another T3 thread, and Claude Code sessions, cannot be steered from Flow.
 
 The reporting user can answer supported T3 approvals in Flow. Open T3 Code or Claude Code to answer T3 questions, Claude Code prompts, and T3 requests that lack a reviewable approval summary. A delegated T3 thread with a pending prompt appears separately so Flow can show its prompt.
+
+## Chief of Staff (`--conductor`)
+
+With T3 Code set up here, the bridge keeps one long-lived T3 thread titled **[Flow] Chief of Staff · conductor**: your [Chief of Staff](concepts/12-office.md#chief-of-staff) in the office. On start it reuses the thread it made before (its id is kept in `office-conductor.json` in the CLI's configuration folder), or one with that title in the project, and otherwise starts one with `t3 thread start`. A deleted or archived thread is replaced on the next report (at most once a minute).
+
+Its first message is its brief: the **Chief of Staff** agent's instructions from Flow when the environment has one (else sensible defaults: small, reversible work on its own; anything public, legal, financial, touching production or deleting waits for you in UAT with "Needs …"), how to answer from Flow and route work with the Flow MCP tools (`cards_create` with `agents` to delegate, `agents_list` / `agents_get` to pick the agent, and the warning that `cards_update` replaces a description: read it first and prepend), GBrain search when that server is configured, and the reply contract: end every reply with one line, `[[office]] {"say": "<one short sentence>", "cards": [<numbers>]}`.
+
+The bridge reports it as your conductor (`role: "conductor"`, always able to take a message) with its transcript and its latest reply. Your office messages go straight to the thread over the bridge's warm T3 connection (a new user turn, queued after a running one), so "on it" shows at once and the answer comes when the model replies. The thread uses the MCP servers T3 Code has configured on this computer; without the Flow MCP server it can fall back to the `flow` CLI.
 
 ## What the usage meters count
 

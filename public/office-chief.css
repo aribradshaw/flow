@@ -1,0 +1,20 @@
+/* The Chief of Staff in the 3D office (public/office-chief.js): its gold bubble, card links, and its panel. */
+.of-cos-say{display:inline-block;max-width:260px;white-space:normal;padding:6px 10px;border-radius:12px;background:#f6d77a;color:#2a2410;box-shadow:0 2px 8px rgba(0,0,0,.16);font-size:12px;line-height:1.35;position:relative;overflow-wrap:anywhere}
+.of-cos-say::after{content:'';position:absolute;left:50%;bottom:-6px;margin-left:-6px;border:6px solid transparent;border-bottom:0;border-top-color:#f6d77a}
+.of-cos-say.dots{padding:1px 8px 3px;line-height:1;animation:of-cos-dots 1.6s ease-in-out infinite}
+@keyframes of-cos-dots{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.of-cos-say.dots{animation:none}}
+.of-label.cos-bubble button,.of-cos-card{pointer-events:auto}
+.of-cos-card{display:inline;padding:0 3px;border:0;border-radius:4px;background:rgba(122,90,0,.14);color:#6b4d00;font:inherit;font-weight:650;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.of-cos-card:hover,.of-cos-card:focus-visible{background:rgba(122,90,0,.26)}
+.of-line .of-cos-card{color:inherit}
+.of-cos-ask{display:grid;gap:4px;margin:8px 0}
+.of-cos-row{display:flex;gap:6px}
+.of-cos-row input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line2,#d8dde3);border-radius:7px;font:inherit;font-size:13px}
+.of-cos-wait,.of-cos-log{list-style:none;margin:4px 0 8px;padding:0;display:grid;gap:5px;font-size:12.5px}
+.of-cos-wait li{display:flex;gap:6px;align-items:baseline;min-width:0}
+.of-cos-wait li span{color:var(--muted,#5b6670);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.of-cos-wait .txt{padding:1px 6px;font-size:12px}
+.of-cos-log li{padding:5px 8px;border-radius:8px;background:var(--panel2,#f3f5f6)}
+.of-cos-log li.assistant{background:#fbf1d3}
+.of-cos-log li div{white-space:pre-wrap;overflow-wrap:anywhere}

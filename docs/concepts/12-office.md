@@ -24,6 +24,7 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **Screen sharing.** In the meeting room, **Share screen** in the voice bar (or **E** at the table) shows your screen on the room's wall screen for everyone in the call. Click the wall screen, press **E** in front of it, or use the expand button to watch it full screen. One screen is shared at a time: if someone else is sharing, Flow asks before yours replaces theirs.
 - **Knocking.** Someone else's room has a door. You walk in when they are available, away, or not here. Focus and Do not disturb keep it shut until they let you in. See [Knocking](#knocking).
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). The channel chip shows who will get your message. See [Chat channels](#chat-channels). Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
+- **Chief of Staff.** Your own Chief of Staff walks with you: type `/cos` in the chat (the gold **Chief** channel) or press **E** on it to ask a question or hand it work. It answers in a gold bubble only you see. See [Chief of Staff](#chief-of-staff).
 - **Worlds.** The office can be the classic **Office** or a **Yacht**. See [Worlds](#worlds).
 - **Several offices.** If shares from other people's environments are placed in yours, the office's title becomes a menu: pick a shared environment to enter its office as a member. The shared office opens first, until you pick another.
 - **One office for a shared environment.** When you open an environment shared with you as a whole (see [Sharing](#sharing)), its 3D office is the owner environment's office: the same rooms, the same chat and the same people, so the owner and everyone it is shared with see each other live. Your own coding agents show in your room there, as in every office you are a member of.
@@ -156,13 +157,25 @@ Your look is your account's [avatar](#avatars), not one office's: it follows you
 
 People blink, look around, shift their weight and fidget while they stand, swing their arms when they walk or run, and move their mouth while their speech bubble shows. Each emote has its own face: a wink with the thumbs up, closed smiling eyes with a clap, a blush with the heart.
 
+## Chief of Staff
+
+Your Chief of Staff is a conductor: one long-lived T3 thread on your own computer, kept by your reporter (`flow office bridge`, on by default when T3 Code is set up there; see [`--conductor`](../office-bridge.md)). It takes your messages from the office, turns work into cards and delegates them to the right AgentFlow agents, answers questions ("what's blocked on the launch?", "what's in UAT?") from Flow's cards, agents and timeline (and GBrain, when that MCP server is set up on the same computer), and reports back.
+
+- **Ask.** Type `/cos what's in UAT?` in the chat, pick **Chief** from the channel menu, or press **E** on your Chief and use **Ask**. "Chief is on it…" shows over it at once; the answer follows when the model replies, as a gold bubble over your Chief and a line in your chat log. Card numbers in it are links that open the card in the office.
+- **It follows you.** When the environment has an AgentFlow agent named **Chief of Staff**, that robot is your Chief (the environment owner's, when several members have one; everyone else's Chief is their own conductor's mascot). While you are in the office it walks about 1.7 m behind you, a little to one side, and jogs to catch up. It goes back to its desk when you leave or walk into the meeting room.
+- **Press E on it** for its panel: its status, an **Ask** box, **Waiting on you** (your agents waiting on a prompt, and cards in UAT assigned to you or saying "Needs <your first name>: …") and your recent exchanges.
+- **It tells you.** When one of your agents starts waiting on you while you are here, your Chief says so once ("Web Builder needs you"), at most one line every 20 seconds, several at once in one line. Not in **Do not disturb**: what is still waiting when you leave it is said then.
+- **Private.** Only you see what you ask and what it answers: your messages go to your own reporter through the owner-only steer path, and the server sends a conductor's transcript and reply to its owner only. Everyone else sees your Chief walking with you, and "…" over it while it works. A teammate never talks to your Chief: each person has their own, on their own computer.
+- **What it may do on its own.** It follows the **Chief of Staff** agent's instructions in the environment (its autonomy rules), or, without one, sensible defaults: it creates cards, delegates them and starts small, reversible work at once. Anything public or customer-facing, legal or financial, involving production credentials or data, or deleting anything waits for you: the card goes to UAT with "Needs <you>: …".
+- **For reporters.** Report the thread with `role: "conductor"`, `can: ["message"]` (and `"stop"` while it runs), and its latest reply as `reply: {text, at, cards}` (see [The reporter API](#the-reporter-api)). The bridge reads the reply from the last line of its message, `[[office]] {"say": "…", "cards": [461]}`, which its brief asks for; without that line, the start of the message shows.
+
 ## Who sees what
 
 Agents belong to a person, not to an environment: they show in the office of every environment that person is a member of. For each viewer, Flow decides on the server what leaves it:
 
 | Viewer | Sees |
 |---|---|
-| The agent's owner | Everything, plus Allow / Deny, its transcript, and Send to agent and Stop |
+| The agent's owner | Everything, plus Allow / Deny, its transcript, and Send to agent and Stop (and a conductor's replies) |
 | Someone who can see the Flow project the agent's repo belongs to | Everything except the buttons and the transcript: title, model, machine, repo, project, activity, subagents and the prompt |
 | Anyone else | Only the mascot, the vendor and running / waiting / idle, labelled **Private project** |
 

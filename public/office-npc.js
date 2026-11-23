@@ -11,15 +11,18 @@
 //   new card         walks to the board, takes the card, carries it to its desk; UAT/Done: puts it up, cheers
 //   idle             desk, coffee, the board, a short wander, a chat with another idle one ("…")
 //   subagents        trail behind their parent while it walks, circle it while it is still
+//   follow           a Chief of Staff (office-chief.js setFollow) walks 1.5–2 m behind its person, a little to one
+//                    side so it never blocks the camera; back to its desk when they leave or go into a meeting
 //
 // office.js and office-activity.js keep building the figures as before; this module takes over where they
 // stand. Remote people's avatars are not NPCs: they keep their own interpolation.
 //
-// createNpcs(office) -> {mascot, org, orgGhosts, tick, reset, invalidate, working, hidesCard, alive, dispose, stats}
+// createNpcs(office) -> {mascot, org, orgGhosts, tick, reset, invalidate, working, hidesCard, alive, setFollow, figure, dispose, stats}
 //   office: {THREE, layer (a group in the world's frame, for figures that outlived their desk), world (the
 //     group every room is in), navWorld() -> {boxes, bounds?, ground?}, person(memberKey) -> {obj}|undefined,
 //     isQuiet(memberKey), room(memberKey) -> {door, lounge}|undefined, boardSpot(memberKey|null) -> {x, z, yaw}|null,
 //     entrance() -> {x, z}, commonRadius(), player() -> {x, z}, label(obj, html, opts) -> l, unlabel(l),
+//     inMeeting(memberKey) -> true while they are in the meeting room (a follower waits at its desk),
 //     retire(obj): a figure now only walking out (no clicks, no E)}
 import {buildNav,navBounds,follow,separation,sidestep} from './office-nav.js';
 import {createBrain,pairUp,unit,CHAT_SLOT} from './office-brain.js';
@@ -27,9 +30,17 @@ import {animateHuman} from './office-figures.js';
 
 const PATHS_PER_FRAME=4,SETTLE_MS=2000,DIP_FAR=4,HUGE=45,WALK=1.7,JOG=3.4,TURN=9;
 const R={mascot:0.38,seated:0.22,robot:0.36,human:0.3,player:0.45};
+// Following: how far behind its person and to their right (about 1.7 m, out of the camera's way behind them), when to
+// jog, and how far they must move for a new path.
+export const FOLLOW_BACK=1.2,FOLLOW_SIDE=1.2,FOLLOW_FAR=5,FOLLOW_REPLAN=0.6;
+// The spot a follower aims for: behind (x, z) facing heading, a little to the right. Pure, for tests.
+export function behind(x,z,heading,back=FOLLOW_BACK,side=FOLLOW_SIDE){
+  const s=Math.sin(heading),c=Math.cos(heading);
+  return {x:x-s*back-c*side,z:z-c*back+s*side};
+}
 
 export function createNpcs(office){
-  const {THREE}=office,npcs=new Map(),queue=[];
+  const {THREE}=office,npcs=new Map(),queue=[],follows=new Map();
   let nav=null,navDirty=true,navRev=0,settledAt=0,pairs=new Map(),pairsAt=-1,others=new Float32Array(64*3),clock=0;
   const v=new THREE.Vector3(),m4=new THREE.Matrix4(),worldInv=new THREE.Matrix4(),push={x:0,z:0},hs={speed:0,emote:null,phase:0};
   const tileGeo=new THREE.BoxGeometry(0.36,0.26,0.025),tileMat=new THREE.MeshLambertMaterial({color:'#fff3c4'}),tileBand=new THREE.MeshBasicMaterial({color:'#e9a23b'});
@@ -213,6 +224,12 @@ export function createNpcs(office){
         const rad=Math.max(4,office.commonRadius()-1.2);n.gx=Math.cos(a)*rad;n.gz=Math.sin(a)*rad;n.faceX=0;n.faceZ=0;return true;
       }
       case 'wander':{const a=s*Math.PI*2,d=1.4+s*1.8;n.gx=n.home.x+Math.sin(a)*d;n.gz=n.home.z+Math.cos(a)*d;return true}
+      case 'follow':{
+        const who=office.person(follows.get(n.key));const p=who?.obj.position;if(!p){n.gx=n.home.x;n.gz=n.home.z;return true}
+        // Their heading from how they last moved (the same for your own avatar and someone else's).
+        const h=n.lead??=(n.leadAt={x:p.x,z:p.z},Math.atan2(n.x-p.x,n.z-p.z)+Math.PI);
+        const at=behind(p.x,p.z,h);n.gx=at.x;n.gz=at.z;n.faceX=p.x;n.faceZ=p.z;return true;
+      }
       case 'partner':{
         const p=npcs.get(n.input.partner);if(!p){n.gx=n.x;n.gz=n.z;return false}
         const mx=(n.x+p.x)/2,mz=(n.z+p.z)/2,dx=n.x-mx,dz=n.z-mz,d=Math.hypot(dx,dz)||1;
@@ -279,6 +296,13 @@ export function createNpcs(office){
     const inp=n.input;
     inp.status=n.status;inp.kind=n.kind;inp.card=n.card;inp.still=n.still;inp.wander=n.wander;inp.board=!!spotOf(n.boardKey??null);
     inp.ownerHere=n.type==='mascot'&&!!office.person(n.member)&&!office.isQuiet?.(n.member);
+    // A Chief of Staff keeps up with its person while they are here and not in a meeting.
+    const lead=follows.get(n.key),lp=lead&&office.person(lead)?.obj.position;
+    inp.follow=!!lp&&!office.inMeeting?.(lead);
+    if(lp){
+      const m=n.leadAt;if(!m||Math.hypot(lp.x-m.x,lp.z-m.z)>0.25){if(m)n.lead=Math.atan2(lp.x-m.x,lp.z-m.z);n.leadAt={x:lp.x,z:lp.z}}
+      inp.far=Math.hypot(lp.x-n.x,lp.z-n.z)>FOLLOW_FAR;
+    }else{inp.far=false;n.lead=undefined;n.leadAt=null}
     inp.partner=pairs.get(n.key)||'';inp.arrived=n.arrived&&n.pathRev===n.intent.rev;
     const it=n.brain.update(t,inp);
     if(it.goal!=='owner')n.side=null;
@@ -286,9 +310,9 @@ export function createNpcs(office){
     if(it.rev!==n.pathRev&&!n.queued)request(n);
     else if(n.walking&&n.pathNav!==navRev&&!n.queued)request(n);
     // Moving targets: re-plan when they moved off the end of the path.
-    if((it.goal==='owner'||it.goal==='partner')&&t>n.checkAt){
-      n.checkAt=t+0.5;const gx=n.gx,gz=n.gz;resolve(n);
-      if(Math.hypot(n.gx-gx,n.gz-gz)>1)request(n);else{n.gx=gx;n.gz=gz}
+    if((it.goal==='owner'||it.goal==='partner'||it.goal==='follow')&&t>n.checkAt){
+      const follow=it.goal==='follow';n.checkAt=t+(follow?0.3:0.5);const gx=n.gx,gz=n.gz;resolve(n);
+      if(Math.hypot(n.gx-gx,n.gz-gz)>(follow?FOLLOW_REPLAN:1))request(n);else{n.gx=gx;n.gz=gz}
     }
     // Walk.
     let speed=0;
@@ -321,6 +345,7 @@ export function createNpcs(office){
       let face=null;
       if(it.pose==='sit'&&it.goal==='home')face=n.home.yaw;
       else if(it.goal==='owner'){const p=office.person(n.member)?.obj.position;if(p)face=Math.atan2(p.x-n.x,p.z-n.z)}
+      else if(it.goal==='follow'){const p=office.person(follows.get(n.key))?.obj.position;if(p)face=Math.atan2(p.x-n.x,p.z-n.z)}
       else if(it.goal==='partner'){const p=npcs.get(inp.partner);if(p)face=Math.atan2(p.x-n.x,p.z-n.z)}
       else if((it.goal==='board'||it.goal==='lounge')&&n.faceX!==undefined)face=Math.atan2(n.faceX-n.x,n.faceZ-n.z);
       else if(it.goal==='home')face=n.home.yaw;
@@ -443,5 +468,9 @@ export function createNpcs(office){
     for(const n of npcs.values()){restore(n);if(n.tile)office.layer.remove(n.tile)}
     npcs.clear();queue.length=0;tileGeo.dispose();tileMat.dispose();tileBand.dispose();
   }
-  return {mascot,org,orgGhosts,tick,reset,invalidate(){navDirty=true},working,hidesCard,alive,stats,dispose,npcs};
+  // Who an NPC follows (a member key), or nobody: office-chief.js picks each person's Chief of Staff.
+  function setFollow(key,member){if(member)follows.set(key,member);else follows.delete(key)}
+  // Where an NPC is drawn, for labels and E: a robot's anchor, a figure's object.
+  const figure=key=>{const n=npcs.get(key);return n&&!n.removed?(n.type==='robot'?n.anchor:n.obj)||null:null};
+  return {mascot,org,orgGhosts,tick,reset,invalidate(){navDirty=true},working,hidesCard,alive,setFollow,figure,following:key=>npcs.get(key)?.brain.state==='follow',stats,dispose,npcs};
 }

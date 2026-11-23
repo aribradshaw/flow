@@ -1,12 +1,14 @@
 import {execFile} from 'node:child_process';
 import {homedir, hostname} from 'node:os';
-import {basename, join, resolve} from 'node:path';
+import {basename, dirname, join, resolve} from 'node:path';
+import {existsSync, readFileSync} from 'node:fs';
 import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs, promisify} from 'node:util';
 import {createCodexScanner} from './office-bridge-codex.mjs';
 import {createT3Usage, sumUsage} from './office-bridge-usage.mjs';
 import {createClaudeScanner} from './office-bridge-claude.mjs';
 import {createT3PromptDetector, createT3Responder, createT3Session, defaultT3Db, loadSqlite, readT3, respondT3, short, stopT3} from './office-bridge-t3.mjs';
+import {CONDUCTOR_AGENT, createConductor} from './office-bridge-conductor.mjs';
 import {transcriptText} from '../lib/office-mask.mjs';
 
 const exec = promisify(execFile);
@@ -92,7 +94,9 @@ function describe(agent) {
   };
 }
 
-export async function makePayload({source, host, now, t3, claude, codex = [], resolveRepo}) {
+export async function makePayload({source, host, now, t3, claude, codex = [], resolveRepo, conductor = null}) {
+  // The conductor (office-bridge-conductor.mjs) is reported once, as itself, never as an ordinary T3 thread.
+  if (conductor && t3.has(conductor.id)) { t3 = new Map(t3); t3.delete(conductor.id); }
   const childrenByParent = new Map();
   const top = [];
   for (const agent of t3.values()) {
@@ -110,7 +114,15 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
   top.push(...[...claude, ...codex].filter(agent => validId(agent.id) && !t3.has(agent.id)));
   top.sort((a, b) => Number(Boolean(b.pending)) - Number(Boolean(a.pending)));
   const agents = [];
-  const selected = top.slice(0, 200);
+  if (conductor && validId(conductor.id)) {
+    const transcript = (conductor.transcript ?? []).slice(-12).map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
+    agents.push({...describe(conductor), role: 'conductor', activity: short(conductor.activity), activityKind: conductor.activityKind,
+      host, hostLabel: short(host + ' · T3', 120), repo: null, children: [], pending: null,
+      can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop'),
+      ...(transcript.length ? {transcript} : {}),
+      ...(conductor.reply ? {reply: {...conductor.reply, text: transcriptText(conductor.reply.text, 600)}} : {})});
+  }
+  const selected = top.slice(0, 200 - agents.length);
   for (let offset = 0; offset < selected.length; offset += 8) {
     agents.push(...await Promise.all(selected.slice(offset, offset + 8).map(async agent => {
       const isT3 = t3.has(agent.id);
@@ -332,6 +344,63 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
   await respondQueue;
 }
 
+// Messages for the conductor go to its thread over the warm T3 session, whether or not a turn is running; a stop
+// is T3's interrupt for the turn it reported. Everything else goes to the ordinary T3 responder.
+export function conductorResponder(conductor, respond, {DatabaseSync, path, dispatch} = {}) {
+  if (!conductor) return respond;
+  return async (action, signal) => {
+    if (!conductor.owns(action.agentId)) return respond(action, signal);
+    if (action.kind === 'message') return conductor.send(action.text, signal);
+    if (action.kind === 'stop') {
+      const runId = conductor.entry('')?.runId;
+      if (!runId) return {ok: false, message: 'It has no running turn to stop.'};
+      try {
+        await stopT3(path, {agentId: action.agentId, runId}, () => conductor.entry('')?.runId === runId, signal, dispatch);
+        return {ok: true, message: 'Stopped in T3 Code.'};
+      } catch { return {ok: false, message: 'Could not stop it. Check T3 Code.'}; }
+    }
+    return respond(action, signal);
+  };
+}
+
+function configDir() {
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'flygon-flow');
+}
+
+// The T3 project the conductor runs in: the one it used before, else the project with the newest thread.
+export function conductorProject(DatabaseSync, path, stateFile) {
+  try {
+    const saved = JSON.parse(readFileSync(stateFile, 'utf8'));
+    if (typeof saved.project === 'string' && saved.project) return saved.project;
+  } catch {}
+  try {
+    const db = new DatabaseSync(path, {readOnly: true});
+    try {
+      const row = db.prepare(`SELECT p.workspace_root AS root FROM orchestration_v2_projection_threads t
+        JOIN projection_projects p ON p.project_id = t.project_id WHERE t.deleted_at IS NULL ORDER BY t.updated_at DESC LIMIT 1`).get();
+      if (row?.root) return row.root;
+    } finally { db.close(); }
+  } catch {}
+  return homedir();
+}
+
+// The Chief of Staff agent's brief from Flow: env given, else the first of your environments that has the agent.
+export async function fetchBrief(cfg, env, {fetchImpl = fetch} = {}) {
+  const get = async path => {
+    const response = await fetchImpl(cfg.url + path, {headers: {authorization: 'Bearer ' + cfg.key, accept: 'application/json'},
+      redirect: 'error', signal: AbortSignal.timeout(15000)});
+    if (!response.ok) { await response.body?.cancel(); return null; }
+    return response.json();
+  };
+  const envs = env ? [env] : ((await get('/api/v1/envs'))?.items ?? []).map(e => e.id).filter(Boolean).slice(0, 10);
+  for (const id of envs) {
+    const found = await get(`/api/v1/envs/${encodeURIComponent(id)}/agents/${encodeURIComponent(CONDUCTOR_AGENT)}`).catch(() => null);
+    const text = found?.agent?.instructions;
+    if (found?.agent) return {env: id, agent: found.agent.name, rules: typeof text === 'string' ? text : ''};
+  }
+  return {env: envs[0] || ''};
+}
+
 const help = `Usage: flow office bridge [options]
 Report local T3 Code, Claude Code and Codex CLI agents to Flow's 3D office.
 Uses the server URL and write-scope API key from flow login or FLOW_URL and FLOW_API_KEY.
@@ -341,12 +410,17 @@ Uses the server URL and write-scope API key from flow login or FLOW_URL and FLOW
   --source <name> Override the source (default: bridge:<hostname>)
   --interval <s>  Seconds between reports (default: 3)
   --t3-db <path>  T3 state database (default: ~/.t3/userdata/statev2.sqlite or T3CODE_HOME)
+  --conductor     Keep a Chief of Staff thread in T3 for the office (default when T3 is set up here)
+  --no-conductor  Do not
+  --conductor-project <path>  The T3 project it runs in (default: the last one used, else your newest project)
+  --conductor-env <env>       The Flow environment whose "Chief of Staff" agent gives its brief (default: the first one that has it)
   --help          Show these options`;
 
 export async function officeBridge(cfg, argv) {
   const {values} = parseArgs({args: argv, options: {
     once: {type: 'boolean'}, 'dry-run': {type: 'boolean'}, help: {type: 'boolean', short: 'h'},
     source: {type: 'string'}, interval: {type: 'string'}, 't3-db': {type: 'string'},
+    conductor: {type: 'boolean'}, 'no-conductor': {type: 'boolean'}, 'conductor-project': {type: 'string'}, 'conductor-env': {type: 'string'},
   }});
   if (values.help) {
     console.log(help);
@@ -374,6 +448,15 @@ export async function officeBridge(cfg, argv) {
   const session = createT3Session(path, controller.signal);
   const dispatch = (_path, command, valid, signal) => session.dispatch(command, valid, signal);
   const reportWake = createReportWake();
+  // The Chief of Staff conductor: on when T3 is set up here (its database and a running server), unless --no-conductor.
+  const wantConductor = !values['no-conductor'] && !values['dry-run'] && (values.conductor || existsSync(join(dirname(path), 'server-runtime.json')));
+  const conductor = wantConductor ? createConductor({
+    DatabaseSync, path, stateFile: join(configDir(), 'office-conductor.json'),
+    project: values['conductor-project'] ? resolve(values['conductor-project']) : conductorProject(DatabaseSync, path, join(configDir(), 'office-conductor.json')),
+    fetchBrief: () => fetchBrief(cfg, values['conductor-env']),
+    dispatch: (command, valid, signal) => session.dispatch(command, valid, signal),
+    log: message => console.error(message),
+  }) : null;
   let detector, promptTimer, warmTimer;
   if (!values.once && !values['dry-run']) {
     detector = createT3PromptDetector(DatabaseSync, path);
@@ -387,9 +470,9 @@ export async function officeBridge(cfg, argv) {
   try {
     await runBridge({
       cfg, source, interval, once: values.once, dryRun: values['dry-run'], signal: controller.signal, reportWake,
-      respond: createT3Responder(DatabaseSync, path, (...args) => respondT3(...args, dispatch), {
+      respond: conductorResponder(conductor, createT3Responder(DatabaseSync, path, (...args) => respondT3(...args, dispatch), {
         stop: (...args) => stopT3(...args, dispatch),
-      }),
+      }), {DatabaseSync, path, dispatch}),
       scan: async () => {
         const now = Date.now();
         let data;
@@ -402,8 +485,13 @@ export async function officeBridge(cfg, argv) {
           t3Unavailable = true;
           data = {agents: new Map(), nativeIds: new Set()};
         }
+        let chief = null;
+        if (conductor) {
+          try { await conductor.ensure(controller.signal); chief = conductor.entry(host); }
+          catch { chief = null; }
+        }
         return makePayload({source, host, now, t3: data.agents, claude: scanClaude(data.nativeIds, now),
-          codex: scanCodex(data.nativeIds, now), resolveRepo});
+          codex: scanCodex(data.nativeIds, now), resolveRepo, conductor: chief});
       },
     });
   } finally {

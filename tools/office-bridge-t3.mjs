@@ -293,7 +293,7 @@ function sendCommand(ws, id, command, stillValid, signal) {
 }
 
 // The environment for the t3 CLI: this database's T3 home, ~/.local/bin on PATH, and no Flow key.
-function t3Env(path) {
+export function t3Env(path) {
   const userdata = dirname(path);
   const env = {...process.env};
   delete env.FLOW_API_KEY;

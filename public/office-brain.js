@@ -9,6 +9,8 @@
 //   idle      a calm round of: sit at the desk, the lounge or coffee corner, the nearest board, a short wander;
 //             10 to 40 seconds at each. Two idle ones nearby sometimes meet and chat (pairUp).
 //   summon    waiting on its person, who is in the office and not in Do not disturb: jogs over and hops there
+//   follow    a Chief of Staff whose person is in the office (not in a meeting): walks 1.5–2 m behind them, jogging
+//             when they get far ahead; back to its desk when they leave or go into a meeting
 //   waitDesk  waiting, but its person is away or busy: hops at its desk
 //   fetch     it picked up a new card: walks to the board, takes the card (take), carries it to its desk (carry)
 //   deliver   its card went to UAT or Done: carries it to the board, puts it up (putup), celebrates (cheer)
@@ -18,12 +20,15 @@
 // brain.update(now, input) -> intent (the same object every time; intent.rev changes when the goal does)
 //   input: {status:'running'|'waiting'|'idle', kind, card:{number, column}|null, ownerHere, gone, arrived,
 //           partner (id of a chat partner, or ''), wander (false: stays at its desk when idle), still (true:
-//           never moves, e.g. a paused agent)}
-//   intent: {state, goal:'home'|'here'|'door'|'owner'|'board'|'lounge'|'wander'|'partner', pace:'walk'|'jog',
+//           never moves, e.g. a paused agent), follow (true: keep up with its person, see follow), far (they are a
+//           long way ahead: jog)}
+//   intent: {state, goal:'home'|'here'|'door'|'owner'|'board'|'lounge'|'wander'|'partner'|'follow', pace:'walk'|'jog',
 //            pose:'sit'|'stand'|'hop'|'wave'|'cheer'|'look'|'talk', carry, say, fade (0..1), spot (0..1), rev}
 
 export const DWELL_MIN=10,DWELL_MAX=40,CHAT_SLOT=25,TAKE=1.2,CHEER=1.6,WAVE=1.4,STAND=0.4,FADE=0.8;
 const DONE=new Set(['uat','done']);
+// What a follower drops to keep up with its person: its everyday states, not leaving, entering or a card in hand.
+const FOLLOWS=new Set(['work','idle','chat','waitDesk']);
 
 // FNV-1a, then a final mix so ids that differ only at the end land far apart.
 export function hashOf(s){let h=2166136261;s=String(s);for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);
@@ -46,7 +51,7 @@ export function createBrain(id,{now=0,entering=false}={}){
   const intent={state:'',goal:'home',pace:'walk',pose:'sit',carry:false,say:'',fade:0,spot:0,rev:0};
   let state='',since=now,rng=rngFrom(hashOf(id)),act='desk',until=Infinity,arrivedAt=-1,pending=[],partner='',carried=false;
   // The last input seen, as plain values (no objects made per frame). seenCard: false before the first look.
-  let mStatus=null,mKind=null,mNum=null,seenCard=false,cNum=null,cCol=null;
+  let mStatus=null,mKind=null,mNum=null,seenCard=false,cNum=null,cCol=null,far=false;
   const set=(s,t)=>{if(s!==state){state=s;since=t;arrivedAt=-1}};
   const aim=(goal,spot=intent.spot)=>{if(goal!==intent.goal||spot!==intent.spot){intent.goal=goal;intent.spot=spot;intent.rev++}};
   // Change the plan when the server's view of it changes; the same view always plans the same way.
@@ -75,18 +80,21 @@ export function createBrain(id,{now=0,entering=false}={}){
   // What it does when nothing special is going on.
   function settle(inp,t){
     if(inp.status==='waiting'){set(inp.ownerHere?'summon':'waitDesk',t);return}
+    if(inp.follow&&!inp.still){pending.length=0;set('follow',t);return}
     if(pending.length&&!inp.still){const e=pending.shift();set(e,t);carried=e==='deliver';return}
     if(inp.status==='idle'&&!inp.still){if(state!=='idle'&&state!=='chat'){set('idle',t);act='desk';until=Infinity}return}
     set('work',t);
   }
 
   function update(t,inp){
-    remode(inp);cardEvents(inp);
+    remode(inp);cardEvents(inp);far=!!inp.far;
+    if(inp.follow&&!inp.still&&inp.status!=='waiting')pending.length=0; // board trips while it follows are old news
     const leaving=state==='leave'||state==='exit'||state==='fade'||state==='gone';
     if(inp.gone&&!leaving)set('leave',t);
     else if(!inp.gone&&leaving&&state!=='gone')set('enter',t);
     if(!state)set(entering?'enter':'',t);
     if(!state)settle(inp,t);
+    if(inp.follow&&!inp.still&&FOLLOWS.has(state)&&!(state==='waitDesk'&&inp.status==='waiting'))settle(inp,t);
     const el=t-since;
     switch(state){
       case 'leave':if(el>=STAND+WAVE)set('exit',t);break;
@@ -105,6 +113,8 @@ export function createBrain(id,{now=0,entering=false}={}){
         if(inp.status!=='waiting'||!inp.ownerHere)settle(inp,t);break;
       case 'waitDesk':
         if(inp.status!=='waiting'||inp.ownerHere)settle(inp,t);break;
+      case 'follow':
+        if(!inp.follow||inp.still||inp.status==='waiting')settle(inp,t);break;
       case 'chat':
         if(inp.status!=='idle'||!inp.partner||inp.partner!==partner){partner='';set('idle',t);nextAct(inp,t)}break;
       case 'idle':
@@ -129,6 +139,7 @@ export function createBrain(id,{now=0,entering=false}={}){
       case 'work':aim('home');intent.pose='sit';break;
       case 'waitDesk':aim('home');intent.pose='hop';break;
       case 'summon':aim('owner');intent.pace='jog';intent.pose='hop';break;
+      case 'follow':aim('follow');intent.pace=far?'jog':'walk';intent.pose='stand';break;
       case 'fetch':case 'deliver':aim('board');intent.pose='stand';break;
       case 'take':case 'putup':aim('board');intent.pose='look';break;
       case 'cheer':aim('board');intent.pose='cheer';break;
