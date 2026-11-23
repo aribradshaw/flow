@@ -1119,7 +1119,9 @@ async function membersApi(req,res){
 const shareSvc=(await import('./lib/share-service.mjs')).shareServices({shares,workspaces,onRevoke:()=>shareRevoked()});
 // A revoke takes effect at once: photos, the office's access cache, and open office streams (lib/office.mjs
 // recheck closes the ones that lost access, with a 'gone' event).
-function shareRevoked(){photoCache.clear();officeSeen.clear();officeHub.recheck().catch(()=>{})}
+function shareRevoked(){photoCache.clear();officeSeen.clear();officeHub.recheck({portals:true}).catch(()=>{})}
+// A new share: its recipient's open offices get a door to the shared office.
+function shareMade(){officeSeen.clear();officeHub.recheck({portals:true}).catch(()=>{})}
 const {previewOf,shareSummary,scopeLabel,saveShare,updateShare,shareView}=shareSvc;
 async function sharesApi(req,res){
   const u=new URL(req.url,'http://x'),path=u.pathname;
@@ -1153,6 +1155,7 @@ async function sharesApi(req,res){
       const r=await saveShare(w,user,b||{});
       if(r.error==='linked')return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
       if(!r.ok)return fail(r);
+      if(!r.existing)shareMade();
       json(res,200,{share:await view(r.share),existing:r.existing,preview:previewOf(w.data,r.share)});
     });return true}
     if(path==='/api/shares/incoming'&&req.method==='GET'){
@@ -1396,8 +1399,10 @@ async function officeAccess(envId,user){
 async function officePortals(envId,user){
   const out=[],seen=new Set([envId]);if(!user?.email||user.token||user.key)return out;
   const add=async(env,label,own)=>{if(seen.has(env)||out.length>=12)return;seen.add(env);const w=await workspaces.get(env).catch(()=>null);if(!w?.data||w.archivedAt)return;out.push({env,label,sub:w.name||w.data.environment?.name||'',own})};
-  for(const s of await shares.list({recipientEmail:user.email}).catch(()=>[]))await add(s.ownerEnv,`${await personName(s.ownerEmail)}'s office`,false);
-  for(const s of await shares.list({ownerEmail:user.email}).catch(()=>[]))if(sameEmail((await workspaces.get(s.ownerEnv).catch(()=>null))?.owner,user.email))await add(s.ownerEnv,'Your office',true);
+  // One door per environment: read each once.
+  const byEnv=list=>[...new Map(list.map(s=>[s.ownerEnv,s])).values()];
+  for(const s of byEnv(await shares.list({recipientEmail:user.email}).catch(()=>[])))if(!seen.has(s.ownerEnv))await add(s.ownerEnv,`${await personName(s.ownerEmail)}'s office`,false);
+  for(const s of byEnv(await shares.list({ownerEmail:user.email}).catch(()=>[])))if(!seen.has(s.ownerEnv)&&sameEmail((await workspaces.get(s.ownerEnv).catch(()=>null))?.owner,user.email))await add(s.ownerEnv,'Your office',true);
   const here=await workspaces.get(envId).catch(()=>null);
   if(!sameEmail(here?.owner,user.email)){const mine=await workspaces.ownedBy(user.email).catch(()=>null);if(mine?.envId)await add(mine.envId,'Your office',true)}
   return out;

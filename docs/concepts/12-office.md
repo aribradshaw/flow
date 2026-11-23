@@ -161,7 +161,7 @@ Send `activityKind` when your reporter knows the tool an agent is using: it is m
 
 An office's members are its environment's owner and the recipient of every active share of that environment (any scope; a whole-environment share also shows all its projects and AgentFlow agents). Opening an environment shared with you as a whole (docs/sharing.md, `share-<shareId>`) opens the owner environment's office: `/api/office/share-<shareId>/…` resolves to it for the share's recipient and is 404 for anyone else, like any office you are not a member of. What each viewer sees there follows [Who sees what](#who-sees-what), per viewer, unchanged.
 
-The snapshot carries `portals: [{env, label, sub, own}]`, the doors for this viewer (computed on the server from their shares). Access is checked again on every heartbeat, and at once when a share is revoked (from the app, the API or MCP): a stream that lost access gets a `gone` event and is closed, and its person leaves the office for everyone else.
+The snapshot carries `portals: [{env, label, sub, own}]`, the doors for this viewer (computed on the server from their shares). When a share is made or revoked, open offices get a `portals` event with their doors as they are now, so a door appears or goes at once. Access is checked again on every heartbeat, and at once when a share is revoked (from the app, the API or MCP): a stream that lost access gets a `gone` event and is closed, and its person leaves the office for everyone else.
 
 ## How it runs
 

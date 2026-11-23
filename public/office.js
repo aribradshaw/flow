@@ -194,6 +194,8 @@ function connect(){
   on('snapshot',d=>{snapshot(d);S.stream.connected();watch()});
   // Access ended (the share was revoked): say so and stay disconnected.
   on('gone',()=>{S.gone=true;S.es?.close();S.es=null;clearTimeout(S.retry);showGone()});
+  // Doors changed (a share made or revoked): office-portals.js.
+  on('portals',list=>{S.portalList=Array.isArray(list)?list:[];if(S.world)buildDoors()});
   on('restart',()=>disconnect(true));
   on('yourSources',updateSources);
   on('hb',()=>{});

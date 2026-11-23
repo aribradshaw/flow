@@ -198,8 +198,11 @@ test('one office: the opened environment’s office is the owner’s; doors lead
   assert.equal((await os.next('join')).name,'Bo B','the owner sees them come in');
   assert.equal((await owner('POST','/api/office/default-workspace/say',{text:'hello Bo'})).status,200);
   assert.equal((await bs.next('say')).text,'hello Bo');
+  // Their own office, open meanwhile: its door to the owner's office goes with the share.
+  const own=bo.sse(`/api/office/${mine}/events`);await own.ready;await own.next('snapshot');
   // Revoke: the open stream hears it and closes; the environment answers 410; the office refuses them.
   assert.equal((await owner('DELETE','/api/shares/'+editShare)).status,200);
+  assert.ok(!(await own.next('portals')).some(p=>p.env==='default-workspace'),'the door is gone');
   assert.equal((await bs.next('gone')).reason,'access');
   for(let i=0;i<100&&!bs.ended();i++)await new Promise(r=>setTimeout(r,20));
   assert.ok(bs.ended(),'the stream is closed');
@@ -207,5 +210,8 @@ test('one office: the opened environment’s office is the owner’s; doors lead
   assert.equal((await bo('GET','/api/workspace?env='+opened(editShare))).status,410);
   assert.equal((await bo('POST','/api/office/default-workspace/say',{text:'still here?'})).status,404);
   assert.equal((await bo('GET','/api/environments')).data.shared.length,0);
-  os.close();
+  // Shared again: the door comes back at once.
+  assert.equal((await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'project',projectId:'p1'},permission:'view'})).status,200);
+  assert.ok((await own.next('portals')).some(p=>p.env==='default-workspace'),'a door again');
+  own.close();os.close();
 });
