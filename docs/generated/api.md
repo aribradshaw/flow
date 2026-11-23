@@ -1393,7 +1393,7 @@ Update a DevOps card
 
 `PATCH /api/v1/envs/{env}/cards/{card}` · scope `write` · MCP tool `cards_update`
 
-Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. snoozedUntil snoozes the card until an ISO time ("" or null wakes it). The column only changes through cards.move, which applies the board's gates.
+Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. snoozedUntil snoozes the card until an ISO time ("" or null wakes it). The column only changes through cards.move, which applies the board's gates. A description you send replaces the old one: to add to it, read the card and send ifUpdated (its `updated`), so a change someone made meanwhile is refused with 409 card_changed instead of lost.
 
 **Input**
 
@@ -1422,6 +1422,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `links[].url` | string | yes |  |
 | `item` | string |  | Timeline item id or title; "" for none. |
 | `agents` | string[] |  | Delegate the card to these agents (replaces the list; [] for none). It joins each one's work queue (agents.work). |
+| `ifUpdated` | string |  | The card's `updated` as you read it (cards.get). If the card changed since, nothing is written: 409 card_changed, with the current card in details.card. Read it again and reapply your change. |
 
 **Output**
 
@@ -1557,7 +1558,7 @@ Move a DevOps card
 
 `POST /api/v1/envs/{env}/cards/{card}/move` · scope `write` · MCP tool `cards_move`
 
-Move a card to a column (and position: `index` among that column's other cards; end if left out). The board's gates apply: into Done needs `confirm: true`, or `approve: true` from UAT (the Approve button); out of Done needs `confirm: true`; into Doing without a developer needs `developer` (a person, who is assigned) or `confirm: true` to leave it unassigned. A refused gate is 409 with code confirm_done, confirm_reopen or pick_developer.
+Move a card to a column (and position: `index` among that column's other cards; end if left out). The board's gates apply: into Done needs `confirm: true`, or `approve: true` from UAT (the Approve button); out of Done needs `confirm: true`; into Doing without a developer needs `developer` (a person, who is assigned) or `confirm: true` to leave it unassigned. A refused gate is 409 with code confirm_done, confirm_reopen or pick_developer. ifUpdated (the card's `updated` as you read it) refuses the move with 409 card_changed if the card changed since.
 
 **Input**
 
@@ -1570,6 +1571,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `confirm` | boolean |  |  |
 | `approve` | boolean |  |  |
 | `developer` | string |  | Person node id or name, or someone the card is shared with (@email or email). |
+| `ifUpdated` | string |  | The card's `updated` as you read it (cards.get). If the card changed since, nothing is written: 409 card_changed, with the current card in details.card. Read it again and reapply your change. |
 
 **Output**
 

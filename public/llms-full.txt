@@ -114,6 +114,7 @@ The server is the source of truth. Each environment's workspace is stored with a
 
 - `GET /api/workspace?env=<id>` returns `{rev, data}`. `PUT` with `{baseRev, data}` saves the workspace when `baseRev` is still current.
 - If the workspace has moved on, the save gets `409` along with the newer copy. The client then merges per entity and field and retries. When both sides changed the same field, the local change wins. A deletion only applies to an entity the other side has not touched.
+- DevOps cards are the exception: the board never sends its copy of them as edits. It keeps a list of the cards it changed itself (`cardEdits`: the fields it changed and what they were before, the cards it added and removed), and the server writes only those. Every other card stays as the server has it, so a copy that is out of date (a tab that slept, a browser that could not store its latest copy) never puts old descriptions, columns or due dates back on cards that an agent or another tab changed. When it was out of date on some cards, the answer includes `cardsKept: true` and the client reads the workspace again. An edit over a value the browser never saw (someone else changed that field meanwhile) gets `409` with `code: "card_conflict"`, the clashing cards and the newer copy; the browser shows it, keeps the user's edit and says so. A tab still running an older version of Flow that would change cards gets `428` (`reload_required`) and has to reload.
 - A save that would drop most of a large workspace is refused with `422`, unless it is a deliberate load or replace.
 - AgentFlow runners belong to the server: only `runners.report` changes them. A `PUT` keeps the runners as they last reported (their models and scheduled jobs), even when the saved copy is missing them or holds an older report, such as a tab still running an older version of Flow. The answer then includes `runnersKept: true`, and the client reads the workspace again.
 - Card numbers only grow. A `PUT` with a lower `devops.nextNumber` keeps the server's and answers `countersKept: true`, so the client reads the workspace back.
@@ -121,7 +122,7 @@ The server is the source of truth. Each environment's workspace is stored with a
 - A write that removes DevOps cards also records each card in `flygon_flow_card_deletes` (or `BACKUP_DIR/workspaces/deleted/`), in the same transaction, for 180 days (see Recently deleted on the DevOps board). A `PUT` may send `intent: {deleted: [card ids deleted on purpose], undo: true|false}` so the record says how each card left; other removed cards come back as `removedCards`.
 - Open tabs pick up remote changes every 20 seconds, and offline edits upload when the connection comes back.
 
-API writes go through the same revision check, so an agent's change and a human's edit never silently overwrite each other.
+API writes go through the same revision check, so an agent's change and a human's edit never silently overwrite each other. An agent that reads a card and writes it back (for example, adding to its description) can send `ifUpdated` with the card's `updated` to `cards.update` or `cards.move`; if the card changed since, nothing is written and it gets `409 card_changed` with the current card.
 
 ## Sharing
 
@@ -1820,7 +1821,7 @@ Update a DevOps card
 
 `PATCH /api/v1/envs/{env}/cards/{card}` · scope `write` · MCP tool `cards_update`
 
-Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. snoozedUntil snoozes the card until an ISO time ("" or null wakes it). The column only changes through cards.move, which applies the board's gates.
+Change a card's fields. Lists you send (labels, assignees, checklist, links) replace the old ones. snoozedUntil snoozes the card until an ISO time ("" or null wakes it). The column only changes through cards.move, which applies the board's gates. A description you send replaces the old one: to add to it, read the card and send ifUpdated (its `updated`), so a change someone made meanwhile is refused with 409 card_changed instead of lost.
 
 **Input**
 
@@ -1849,6 +1850,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `links[].url` | string | yes |  |
 | `item` | string |  | Timeline item id or title; "" for none. |
 | `agents` | string[] |  | Delegate the card to these agents (replaces the list; [] for none). It joins each one's work queue (agents.work). |
+| `ifUpdated` | string |  | The card's `updated` as you read it (cards.get). If the card changed since, nothing is written: 409 card_changed, with the current card in details.card. Read it again and reapply your change. |
 
 **Output**
 
@@ -1984,7 +1986,7 @@ Move a DevOps card
 
 `POST /api/v1/envs/{env}/cards/{card}/move` · scope `write` · MCP tool `cards_move`
 
-Move a card to a column (and position: `index` among that column's other cards; end if left out). The board's gates apply: into Done needs `confirm: true`, or `approve: true` from UAT (the Approve button); out of Done needs `confirm: true`; into Doing without a developer needs `developer` (a person, who is assigned) or `confirm: true` to leave it unassigned. A refused gate is 409 with code confirm_done, confirm_reopen or pick_developer.
+Move a card to a column (and position: `index` among that column's other cards; end if left out). The board's gates apply: into Done needs `confirm: true`, or `approve: true` from UAT (the Approve button); out of Done needs `confirm: true`; into Doing without a developer needs `developer` (a person, who is assigned) or `confirm: true` to leave it unassigned. A refused gate is 409 with code confirm_done, confirm_reopen or pick_developer. ifUpdated (the card's `updated` as you read it) refuses the move with 409 card_changed if the card changed since.
 
 **Input**
 
@@ -1997,6 +1999,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `confirm` | boolean |  |  |
 | `approve` | boolean |  |  |
 | `developer` | string |  | Person node id or name, or someone the card is shared with (@email or email). |
+| `ifUpdated` | string |  | The card's `updated` as you read it (cards.get). If the card changed since, nothing is written: 409 card_changed, with the current card in details.card. Read it again and reapply your change. |
 
 **Output**
 

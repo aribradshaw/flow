@@ -45,7 +45,7 @@ const {validOpidUser,normalize:normalizeDb}=await import('./lib/cleaners.mjs');
 const flowSessions=sessionStore({db:()=>cloud(),max:auth.SESSION_MAX});auth.useSessionStore(flowSessions);
 // Removing people from Flow (lib/revocations.mjs): the owner's removals and OneProfileID's membership events.
 const {revocationStore,membershipControl,SCHEMA:REVOCATION_SCHEMA}=await import('./lib/revocations.mjs');
-const {shrinks,size,keepCounters,fieldBase}=await import('./public/sync-core.js');
+const {shrinks,size,keepCounters,fieldBase,applyCardEdits,sameCard}=await import('./public/sync-core.js');
 const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
 const appHost=auth.appOrigin?new URL(auth.appOrigin).host:'';
@@ -221,7 +221,10 @@ async function inbox(req,res){
 
 // ---------- workspaces: the server is the source of truth (GET/PUT /api/workspace) ----------
 // GET  /api/workspace[?env=<id>][&since=<rev>]  -> {env, rev, data, updatedAt} (rev 0 / data null: nothing yet)
-// PUT  /api/workspace?env=<id>  {baseRev, data[, allowShrink]} -> {rev} | 409 {rev, data} | 422 shrink
+// PUT  /api/workspace?env=<id>  {baseRev, data[, allowShrink][, cardEdits]} -> {rev} | 409 {rev, data} | 422 shrink
+//      cardEdits (the board, sync-core cardEditsOf): only those cards and fields are written; a card edit
+//      over a value the browser never saw is 409 {code:'card_conflict', clashes}. A browser tab running
+//      older code (intent but no cardEdits) that changes cards is refused with 428: it must reload.
 // Auth: the signed-in user, or `Authorization: Bearer <FLOW_SYNC_TOKEN>` acting as the owner
 // (OWNER_EMAIL) for imports and for a local app syncing to production.
 // With FLOW_SYNC_URL + FLOW_SYNC_TOKEN set (e.g. Owner's local app), these calls are relayed to that
@@ -349,6 +352,19 @@ async function project(envId,user,data){
   d=dropDangling(d);if(meta.length)d.shares=meta;
   const seen=new Set();
   return {data:d,shared:sig.join(','),conflicts:conflicts.filter(c=>{const k=[c.kind,c.id,c.field,c.at].join('|');return !seen.has(k)&&seen.add(k)})};
+}
+// The board's own card edits (sync-core cardEditsOf) from a request body; null if not sent.
+function cardEditsBody(v){
+  if(!plain(v))return null;
+  const changed={},removed={};
+  if(plain(v.changed))for(const [id,f] of Object.entries(v.changed))if(plain(f))changed[id]=f;
+  if(plain(v.removed))for(const [id,c] of Object.entries(v.removed))if(plain(c))removed[id]=c;
+  return {changed,added:Array.isArray(v.added)?v.added.filter(x=>typeof x==='string').slice(0,5000):[],removed};
+}
+// Whether two workspaces hold the same own DevOps cards, in the same order.
+function sameCards(a,b){
+  const x=(a?.devops?.cards||[]).filter(c=>!isLinked(c?.id)),y=(b?.devops?.cards||[]).filter(c=>!isLinked(c?.id));
+  return x.length===y.length&&x.every((c,i)=>c?.id===y[i]?.id&&sameCard(c,y[i]));
 }
 const SCOPE_KEY={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
 // {kind:{id:{field:value}}} from a request body (fieldBase, sharedEdits), keeping only that shape; null if none.
@@ -679,7 +695,23 @@ async function workspace(req,res){
         const adds=user.token?null:await planAdds(envId,user,body.data,w?stripLinked(w.data):null).catch(e=>{console.error('share additions failed',e?.message);return null});
         if(adds)body.data=adds.data;
         // Linked copies of shared records are not stored (they are re-projected on every read).
-        const incoming=stripLinked(body.data),stored=w?stripLinked(w.data):null;
+        let incoming=stripLinked(body.data);const stored=w?stripLinked(w.data):null;
+        // DevOps cards (card #447): a copy of the board can be out of date, and sending it whole put old
+        // descriptions and columns back on cards agents had just changed. The board says which cards and
+        // fields it changed (cardEdits); everything else stays as stored. A tab running older code sends
+        // the whole board as it holds it, so when that would change cards it is asked to reload instead.
+        const cardEdits=cardEditsBody(body.cardEdits);let cardsKept=false;
+        if(stored&&!cardEdits&&!user.token&&body.intent&&!sameCards(stored,incoming)){json(res,428,{error:'Flow was updated. Reload this page to keep saving (your last change was not saved).',code:'reload_required'});return}
+        if(stored&&cardEdits&&w.rev===body.baseRev){
+          const r=applyCardEdits(stored.devops?.cards,incoming.devops?.cards,cardEdits);
+          if(r.clashes.length){json(res,409,{error:'Someone else changed these cards meanwhile',code:'card_conflict',clashes:r.clashes,rev:w.rev,data:(await withCombined(envId,user,await withShares(envId,user,w.data),u.searchParams.get('combine')||'')).data});return}
+          // A card whose content changes gets a newer updated than the one stored, so an API client holding the
+          // old one (ifUpdated) is refused: a merged or undone copy can carry an updated that is not newer.
+          const was=new Map((stored.devops?.cards||[]).map(c=>[c?.id,c])),at=new Date().toISOString();let stamped=false;
+          const later=t=>{const x=Date.parse(t);return Number.isFinite(x)&&x>=Date.parse(at)?new Date(x+1).toISOString():at};
+          const cards=r.cards.map(c=>{const o=was.get(c?.id);if(!o||sameCard(o,c)||String(c.updated||'')>String(o.updated||''))return c;stamped=true;return {...c,updated:later(o.updated)}});
+          incoming={...incoming,devops:{...(incoming.devops||{}),cards}};cardsKept=r.ignored>0||stamped;
+        }
         if(w&&w.rev===body.baseRev&&shrinks(stored,incoming)&&!body.allowShrink){json(res,422,{error:`This save would remove most of the workspace (${size(stored)} → ${size(incoming)} things). Nothing was changed.`,shrink:true});return}
         // Runners are the server's (only runners.report changes them): a save never drops or rolls back
         // what a runner reported, e.g. a tab running older code that saves runners without their jobs.
@@ -714,7 +746,7 @@ async function workspace(req,res){
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
         // OneProfileID links this save tried to add for someone else were refused: the browser reads the workspace back.
         if(out.opidRefused?.length)photoCache.clear();
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.publicRefused?{publicRefused:out.publicRefused}:{}),...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.publicRefused?{publicRefused:out.publicRefused}:{}),...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(cardsKept?{cardsKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;

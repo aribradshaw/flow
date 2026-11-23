@@ -730,6 +730,12 @@ store.onChange=()=>{render();const m=decisionNotice();if(m)toast(m,m.includes('d
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 store.onLimit=msg=>{if(msg)toast(msg)};
+// Your edit of a card replaced a change made elsewhere (an agent, another tab) that this browser had not shown yet.
+store.onCardClash=list=>{
+  const name=c=>`Card ${c.number!=null?'#'+c.number+' ':''}“${c.title}”`,kept=list.filter(c=>c.fields.includes('removed')),edited=list.filter(c=>!c.fields.includes('removed'));
+  if(kept.length)toast(`${kept.length===1?name(kept[0]):`${kept.length} cards`} changed elsewhere, so ${kept.length===1?'it was':'they were'} not deleted.`);
+  if(edited.length)toast(`${edited.length===1?name(edited[0]):`${edited.length} cards`} changed elsewhere while you were editing; your change was kept over theirs (${[...new Set(edited.flatMap(c=>c.fields))].slice(0,4).join(', ')}). The earlier version is in the workspace history.`);
+};
 setPeopleSource(()=>peopleOf(store.db||{}));
 startOpidPhotos({db:()=>store.db,render:()=>render()});
 // Signing in (or changing the account photo) changes which cards show the user's photo.
