@@ -44,6 +44,16 @@ final class MapCamera {
     var offset: CGPoint = .zero
     var zoom: CGFloat = 1
     var fitRequest = 0
+    // true: the fit button (the whole chart, however small); false: a readable opening view.
+    var overview = false
+    // Zoom to a world rect (a card from search, a tapped area).
+    var focus: CGRect?
+    var focusRequest = 0
+
+    func show(_ rect: CGRect) {
+        focus = rect
+        focusRequest += 1
+    }
 }
 
 struct MindMapView: View {
@@ -51,6 +61,8 @@ struct MindMapView: View {
     let edges: [FlowEdge]
     @Binding var selected: String?
     let camera: MapCamera
+    // A card was tapped (open its details). Tapping an area zooms into it instead.
+    var onOpen: (FlowNode) -> Void = { _ in }
 
     private var bounds: CGRect {
         let r = nodes.map(\.rect).reduce(CGRect.null) { $0.union($1) }
@@ -61,20 +73,32 @@ struct MindMapView: View {
         let b = bounds
         ZStack {
             ChartCanvas(nodes: nodes, edges: edges, selected: selected, origin: b.origin, camera: camera)
-            ZoomScroller(contentSize: b.size, camera: camera) { p in
+            ZoomScroller(contentSize: b.size, origin: b.origin, home: hub.map { CGPoint(x: $0.x - b.minX, y: $0.y - b.minY) }, camera: camera) { p in
                 let world = CGPoint(x: p.x + b.minX, y: p.y + b.minY)
-                withAnimation(.snappy(duration: 0.2)) { selected = hit(world)?.id }
+                let n = hit(world)
+                withAnimation(.snappy(duration: 0.2)) { selected = n?.id }
+                guard let n else { return }
+                if n.type == "area" { camera.show(n.rect.insetBy(dx: -24, dy: -24)) } else { onOpen(n) }
             }
         }
         .background(Theme.bg)
         .sensoryFeedback(.selection, trigger: selected)
     }
 
-    // Cards first (topmost last drawn), then an area by its title strip or its box.
+    // The card with the most lines: where a chart too wide to read whole opens.
+    private var hub: CGPoint? {
+        var count = [String: Int]()
+        for e in edges { count[e.from, default: 0] += 1; count[e.to, default: 0] += 1 }
+        guard let id = count.max(by: { $0.value < $1.value })?.key, let n = nodes.first(where: { $0.id == id }) else { return nil }
+        return CGPoint(x: n.rect.midX, y: n.rect.midY + 120)
+    }
+
+    // Cards first (when they are big enough on screen to aim at), then the smallest area under the finger.
     private func hit(_ p: CGPoint) -> FlowNode? {
         let pad: CGFloat = 6 / max(camera.zoom, 0.3)
-        if let n = nodes.last(where: { $0.type != "area" && $0.rect.insetBy(dx: -pad, dy: -pad).contains(p) }) { return n }
-        return nodes.last(where: { $0.type == "area" && $0.rect.contains(p) })
+        if camera.zoom >= 0.3 || !nodes.contains(where: { $0.type == "area" && $0.rect.contains(p) }),
+           let n = nodes.last(where: { $0.type != "area" && $0.rect.insetBy(dx: -pad, dy: -pad).contains(p) }) { return n }
+        return nodes.filter { $0.type == "area" && $0.rect.contains(p) }.min { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }
     }
 }
 
@@ -133,7 +157,7 @@ private struct ChartCanvas: View {
                     ctx.stroke(path, with: .color(Theme.edgeGroup), style: StrokeStyle(lineWidth: max(1, 1.8 * z), lineCap: .round, dash: [0, 4.5 * z]))
                 } else {
                     ctx.stroke(path, with: .color(Theme.edge), style: StrokeStyle(lineWidth: max(1, 1.5 * z), lineJoin: .round))
-                    if let pct = e.percent, !pct.isEmpty, z > 0.2 {
+                    if let pct = e.percent, !pct.isEmpty, z > 0.42 {
                         let text = Text("\(pct)%").font(.system(size: 10.5 * z, weight: .semibold)).foregroundStyle(Theme.ink)
                         let w = CGFloat(pct.count + 1) * 6.2 * z + 10 * z, h = 16 * z
                         let box = CGRect(x: label.x - w / 2, y: label.y - h / 2, width: w, height: h)
@@ -157,7 +181,17 @@ private struct ChartCanvas: View {
                 if sel {
                     ctx.stroke(Path(roundedRect: r.insetBy(dx: -3, dy: -3), cornerRadius: 5 * z), with: .color(Theme.green.opacity(0.35)), lineWidth: 3)
                 }
-                guard z > 0.22 else { continue }
+                guard z > 0.3 else {
+                    // Zoomed out: a one-line name in a fixed small size, when the card is wide enough to hold one.
+                    if r.width >= 26 {
+                        // As large as fits the card's width (6.5 to 9 points), so short names show whole.
+                        let fit = (r.width - 6) / (CGFloat(max(n.name.count, 4)) * 0.56)
+                        let size = min(9, max(6.5, fit))
+                        let name = ctx.resolve(Text(n.name).font(.system(size: size, weight: .medium)).foregroundStyle(Theme.ink))
+                        ctx.draw(name, in: CGRect(x: r.minX + 3, y: r.midY - size * 0.65, width: r.width - 6, height: size * 1.3))
+                    }
+                    continue
+                }
                 let iconColor: Color = n.type == "person" ? Theme.person : isNote ? Theme.note : Theme.accent
                 let iy = isNote ? r.minY + 17 * z : r.midY
                 ctx.draw(Text(Image(systemName: n.symbol)).font(.system(size: 12 * z, weight: .medium)).foregroundStyle(iconColor),
@@ -168,6 +202,20 @@ private struct ChartCanvas: View {
                 let measured = resolved.measure(in: textRect.size)
                 let y = isNote ? textRect.minY + 4 * z : textRect.midY - measured.height / 2
                 ctx.draw(resolved, in: CGRect(x: textRect.minX, y: y, width: textRect.width, height: min(measured.height, textRect.height)))
+            }
+
+            // Zoomed out: each area's name stays readable, on a tag over its top edge, above everything.
+            if z <= 0.3 {
+                for n in nodes where n.type == "area" {
+                    let r = rect(n.rect)
+                    guard r.width > 36, r.intersects(visible) else { continue }
+                    let label = ctx.resolve(Text(n.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.ink))
+                    let m = label.measure(in: CGSize(width: max(40, r.width + 60), height: 16))
+                    let tag = CGRect(x: r.minX, y: r.minY - m.height - 5, width: m.width + 10, height: m.height + 4)
+                    ctx.fill(Path(roundedRect: tag, cornerRadius: 3), with: .color(Theme.surface))
+                    ctx.stroke(Path(roundedRect: tag, cornerRadius: 3), with: .color(Theme.line2), lineWidth: 1)
+                    ctx.draw(label, in: tag.insetBy(dx: 5, dy: 2))
+                }
             }
         }
         .allowsHitTesting(false)
@@ -219,13 +267,30 @@ private struct ChartCanvas: View {
 // Gestures only: a clear UIScrollView over the Canvas reports offset and zoom into the camera.
 private struct ZoomScroller: UIViewRepresentable {
     let contentSize: CGSize
+    let origin: CGPoint
+    let home: CGPoint?
     let camera: MapCamera
     let onTap: (CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    // Rotation or a split-view resize refits the map.
+    final class MapScrollView: UIScrollView {
+        var onResize: (() -> Void)?
+        private var lastSize: CGSize = .zero
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if bounds.size != lastSize, bounds.width > 0 {
+                let first = lastSize == .zero
+                lastSize = bounds.size
+                if !first { DispatchQueue.main.async { self.onResize?() } }
+            }
+        }
+    }
+
     func makeUIView(context: Context) -> UIScrollView {
-        let sv = UIScrollView()
+        let sv = MapScrollView()
+        sv.onResize = { [weak sv, weak coordinator = context.coordinator] in if let sv { coordinator?.fit(sv) } }
         sv.backgroundColor = .clear
         sv.delegate = context.coordinator
         sv.showsHorizontalScrollIndicator = false
@@ -253,6 +318,11 @@ private struct ZoomScroller: UIViewRepresentable {
             c.fitted = camera.fitRequest
             DispatchQueue.main.async { c.fit(sv) }
         }
+        if c.focused != camera.focusRequest, let rect = camera.focus {
+            c.focused = camera.focusRequest
+            let local = rect.offsetBy(dx: -origin.x, dy: -origin.y)
+            DispatchQueue.main.async { c.focus(sv, on: local) }
+        }
     }
 
     @MainActor
@@ -260,7 +330,15 @@ private struct ZoomScroller: UIViewRepresentable {
         var parent: ZoomScroller
         weak var content: UIView?
         var fitted = -1
+        var focused = 0
         var needsFit = true
+
+        // Zooms so the rect fills the screen (readable: at least 0.55), centered.
+        func focus(_ sv: UIScrollView, on rect: CGRect) {
+            let z = min(sv.maximumZoomScale, max(0.55, min(sv.bounds.width / rect.width, sv.bounds.height / rect.height)))
+            let w = sv.bounds.width / z, h = sv.bounds.height / z
+            sv.zoom(to: CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h), animated: true)
+        }
 
         init(_ p: ZoomScroller) { parent = p }
 
@@ -292,10 +370,23 @@ private struct ZoomScroller: UIViewRepresentable {
             let fit = min(sv.bounds.width / size.width, sv.bounds.height / size.height)
             sv.minimumZoomScale = max(0.08, min(fit, 1) * 0.6)
             sv.maximumZoomScale = 3
-            sv.setZoomScale(min(fit, 1), animated: false)
-            center(sv)
-            let ox = max(-sv.contentInset.left, (sv.contentSize.width - sv.bounds.width) / 2)
-            sv.setContentOffset(CGPoint(x: ox, y: -sv.contentInset.top), animated: false)
+            let overview = parent.camera.overview
+            parent.camera.overview = false
+            if !overview, fit < 0.32, let home = parent.home {
+                // Too small to read whole: open readable, centered on the hub. The fit button shows all of it.
+                let z: CGFloat = 0.5
+                sv.setZoomScale(z, animated: false)
+                center(sv)
+                let ox = min(max(-sv.contentInset.left, home.x * z - sv.bounds.width / 2), sv.contentSize.width - sv.bounds.width)
+                let oy = min(max(-sv.contentInset.top, home.y * z - sv.bounds.height / 2), max(-sv.contentInset.top, sv.contentSize.height - sv.bounds.height))
+                sv.setContentOffset(CGPoint(x: ox, y: oy), animated: false)
+            } else {
+                sv.setZoomScale(min(fit, 1), animated: false)
+                center(sv)
+                let ox = max(-sv.contentInset.left, (sv.contentSize.width - sv.bounds.width) / 2)
+                let oy = max(-sv.contentInset.top, (sv.contentSize.height - sv.bounds.height) / 2)
+                sv.setContentOffset(CGPoint(x: ox, y: oy), animated: false)
+            }
             publish(sv)
         }
 

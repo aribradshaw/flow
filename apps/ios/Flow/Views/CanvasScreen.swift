@@ -8,6 +8,7 @@ struct CanvasScreen: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var mode: Mode = {
         #if DEBUG
         if UserDefaults.standard.string(forKey: "mapMode") == "timeline" { return .timeline }
@@ -19,6 +20,8 @@ struct CanvasScreen: View {
     @State private var timeline = TimelineStore()
     @State private var timelineMode: TimelineMode?
     @State private var selectedNode: String?
+    @State private var openNode: FlowNode?
+    @State private var searching = false
     @State private var selectedItem: TimelineItem?
     @State private var showOffice = false
     @State private var error: String?
@@ -32,28 +35,30 @@ struct CanvasScreen: View {
                 }
             }
             .background(Theme.bg)
-            .navigationTitle(mode == .map ? (map.chart?.name ?? "Mind map") : "Timeline")
+            .navigationTitle(landscapePhone ? "" : mode == .map ? (map.chart?.name ?? "Mind map") : "Timeline")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .safeAreaInset(edge: .top, spacing: 0) {
-                HStack {
-                    FlowSegmented(options: [Mode.map, .timeline], selection: $mode, title: { $0 == .map ? "Mind map" : "Timeline" })
-                    Spacer()
-                    if mode == .timeline {
-                        FlowSegmented(options: TimelineMode.allCases, selection: Binding(get: { currentTimelineMode }, set: { timelineMode = $0 }), title: \.title)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(Theme.bg)
-                .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+                if !landscapePhone { switcherBar }
             }
             .task(id: model.envID) { await load() }
             .onChange(of: map.chartID) { Task { await loadMap() } }
             .refreshable { await load() }
-            .sheet(isPresented: Binding(get: { selectedNode != nil }, set: { if !$0 { selectedNode = nil } })) {
-                if let n = map.nodes.first(where: { $0.id == selectedNode }) {
-                    NodeSheet(node: n, nodes: map.nodes, edges: map.edges) { id in selectedNode = id }
+            .sheet(item: $openNode) { n in
+                NodeSheet(node: n, nodes: map.nodes, edges: map.edges) { id in
+                    // A related card: close this, highlight and fly to it, then open it.
+                    guard let next = map.nodes.first(where: { $0.id == id }) else { return }
+                    openNode = nil
+                    selectedNode = id
+                    camera.show(next.rect.insetBy(dx: -120, dy: -90))
+                    Task { try? await Task.sleep(for: .milliseconds(450)); openNode = next }
+                }
+            }
+            .sheet(isPresented: $searching) {
+                NodeSearch(nodes: map.nodes) { n in
+                    searching = false
+                    selectedNode = n.id
+                    camera.show(n.rect.insetBy(dx: -120, dy: -90))
                 }
             }
             .sheet(item: $selectedItem) { ItemSheet(item: $0, store: timeline) }
@@ -61,7 +66,30 @@ struct CanvasScreen: View {
         }
     }
 
-    private var currentTimelineMode: TimelineMode { timelineMode ?? (sizeClass == .regular ? .roadmap : .list) }
+    private var currentTimelineMode: TimelineMode { timelineMode ?? (sizeClass == .regular || landscapePhone ? .roadmap : .list) }
+
+    // An iPhone on its side: no room for a second bar, so the switchers move into the navigation bar.
+    private var landscapePhone: Bool { verticalSizeClass == .compact }
+
+    private var modeSwitcher: some View {
+        FlowSegmented(options: [Mode.map, .timeline], selection: $mode, title: { $0 == .map ? "Mind map" : "Timeline" })
+    }
+
+    private var timelineSwitcher: some View {
+        FlowSegmented(options: TimelineMode.allCases, selection: Binding(get: { currentTimelineMode }, set: { timelineMode = $0 }), title: \.title)
+    }
+
+    private var switcherBar: some View {
+        HStack {
+            modeSwitcher
+            Spacer()
+            if mode == .timeline { timelineSwitcher }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Theme.bg)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
 
     @ViewBuilder
     private var mapView: some View {
@@ -72,9 +100,10 @@ struct CanvasScreen: View {
                                        description: Text(error ?? "Add entities and people to it in Flow on the web."))
             }
         } else {
-            MindMapView(nodes: map.nodes, edges: map.edges, selected: $selectedNode, camera: camera)
+            MindMapView(nodes: map.nodes, edges: map.edges, selected: $selectedNode, camera: camera) { openNode = $0 }
+                .ignoresSafeArea(edges: [.horizontal, .bottom])
                 .overlay(alignment: .bottomTrailing) {
-                    Button { camera.fitRequest += 1 } label: {
+                    Button { camera.overview = true; camera.fitRequest += 1 } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.muted)
                             .frame(width: 38, height: 38)
@@ -103,7 +132,19 @@ struct CanvasScreen: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) { ProfileButton() }
+        if landscapePhone {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 10) {
+                    modeSwitcher
+                    if mode == .timeline { timelineSwitcher }
+                }
+            }
+        }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            if mode == .map && !map.nodes.isEmpty {
+                Button { searching = true } label: { Image(systemName: "magnifyingglass") }
+                    .accessibilityLabel("Find a card on the map")
+            }
             if mode == .map && map.charts.count > 1 {
                 Menu {
                     Picker("Mind map", selection: Binding(get: { map.chartID }, set: { map.chartID = $0 })) {
@@ -241,4 +282,42 @@ struct CanvasWebView: UIViewRepresentable {
     let web: CanvasWeb
     func makeUIView(context: Context) -> WKWebView { web.webView }
     func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+// Find a card on the map by name (and jump to it).
+private struct NodeSearch: View {
+    let nodes: [FlowNode]
+    let onPick: (FlowNode) -> Void
+    @State private var query = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let list = nodes.filter { q.isEmpty || $0.name.lowercased().contains(q) || ($0.notes ?? "").lowercased().contains(q) }
+            .sorted { ($0.type == "area" ? 0 : 1, $0.name.lowercased()) < ($1.type == "area" ? 0 : 1, $1.name.lowercased()) }
+        NavigationStack {
+            List(list) { n in
+                Button { onPick(n) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: n.symbol)
+                            .foregroundStyle(n.type == "person" ? Theme.person : n.type == "note" ? Theme.note : n.type == "area" ? Theme.faint : Theme.accent)
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(n.name).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(n.kindTitle).font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+                .listRowBackground(Theme.surface)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Entities, people, areas, notes")
+            .navigationTitle("Find on the map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
 }
