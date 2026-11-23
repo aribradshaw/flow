@@ -78,7 +78,7 @@ test('yacht: a room for every member, on deck, apart from each other; the owner 
   }
   assert.ok(yachtWorld(12).bounds.minZ<yachtWorld(3).bounds.minZ,'more cabins, more yacht');
   // A big AgentFlow org widens the lounge, and the beam with it.
-  const big=yachtWorld(3,{commonR:18});assert.ok(big.plan.px>=18&&big.plan.HB>=22);
+  const big=yachtWorld(3,{commonR:18});assert.ok(big.plan.px>=18&&big.plan.HB>=22);assert.ok(big.plan.bow>yachtWorld(3).plan.bow,'and a longer bow to keep its lines');
   assert.equal(big.ground(17,0),YACHT.PIT,'the org stands in the sunken seating');
 });
 

@@ -87,7 +87,7 @@ export function yachtWorld(members,{commonR=10}={}){
   const SB=HB-4.4,sunLen=24,sunRamp=7.6,slot=2.1;            // sundeck block: half width, length, stair slot
   const zS1=zC0-3,zS0=zS1-sunLen;
   const zB1=zS0-8,zB0=zB1-roomD-1.6;                         // bridge: door line, front
-  const bow=34,zBow=zB0-bow,foreRamp=5.4;
+  const bow=Math.max(34,HB*2.2),zBow=zB0-bow,foreRamp=5.4;       // a wider yacht (a big org in the lounge) gets a longer bow, so it still tapers
   const pool={x:0,z:zS1-sunRamp-5.6,halfX:3.6,halfZ:2.5};
   const pad={x:0,z:zB0-foreRamp-9,r:7};
   // Half beam of the hull at z: full amidships, fining to the stem, a little tumblehome at the stern.
