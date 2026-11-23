@@ -562,7 +562,7 @@ function buildAgentflow(){
   const items=[],people=[];
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
-    if(a.kind==='human'){if(a.member&&S.people.has(a.member))continue;people.push({a,p,offline:!!a.member,dim})}
+    if(a.kind==='human'){if(a.member&&(a.member===S.meKey||S.people.has(a.member)))continue;people.push({a,p,offline:!!a.member,dim})}
     else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,dim:dim||kind==='agent'&&!seats.has(a.id)})}
   }
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
