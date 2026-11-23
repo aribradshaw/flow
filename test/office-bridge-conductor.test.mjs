@@ -108,7 +108,7 @@ test('its office entry: idle, the latest finished reply (never a running turn\'s
   item('r1', 'assistant_message', 2, 'Two cards: #12 and #40.\n[[office]] {"say":"Two in UAT: #12, #40","cards":[12,40]}', '2026-11-22T10:00:05Z');
   f.insert(prefix + 'runs', 'r1', id, 'completed', 'claudeAgent', 1, '{}');
   let e = c.entry('box');
-  assert.deepEqual([e.role, e.status, e.title, e.can], ['conductor', 'idle', 'Chief of Staff', ['message']]);
+  assert.deepEqual([e.role, e.status, e.title, e.can], ['conductor', 'idle', 'Chief of Staff', ['message', 'history']]);
   assert.deepEqual(e.reply, {text: 'Two in UAT: #12, #40', cards: [12, 40], at: '2026-11-22T10:00:05Z'});
   assert.ok(e.transcript.some(l => l.role === 'assistant' && l.text === 'Two cards: #12 and #40.'), 'the tag line is not in the transcript');
   // A new message is being answered: running, and the reply stays the last finished one until the tagged answer.
@@ -116,7 +116,7 @@ test('its office entry: idle, the latest finished reply (never a running turn\'s
   item('r2', 'assistant_message', 4, 'Let me check the agents first.', '2026-11-22T10:01:02Z');
   f.insert(prefix + 'runs', 'r2', id, 'running', 'claudeAgent', 2, '{}');
   e = c.entry('box');
-  assert.deepEqual([e.status, e.can, e.runId], ['running', ['message', 'stop'], 'r2']);
+  assert.deepEqual([e.status, e.can, e.runId], ['running', ['message', 'stop', 'history'], 'r2']);
   assert.equal(e.reply.text, 'Two in UAT: #12, #40', 'until the new answer, the last finished one stays (the office tells them apart)');
   item('r2', 'assistant_message', 5, 'Done.\n[[office]] {"say":"Routed to Builder as #461","cards":[461]}', '2026-11-22T10:01:09Z');
   assert.equal(c.entry('box').reply.text, 'Routed to Builder as #461');

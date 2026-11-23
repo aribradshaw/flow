@@ -130,7 +130,7 @@ test('can: top-level T3 threads take messages and stops; delegated threads and C
   const claude = [{id: 'claude:1', title: 'Terminal session', status: 'running', provider: 'claudeAgent'}];
   const payload = await makePayload({source: 's', host: 'h', now: 0, t3: agents, claude, resolveRepo: async () => null});
   const can = Object.fromEntries(payload.agents.map(a => [a.id, a.can]));
-  assert.deepEqual(can, {main: ['message', 'stop'], delegate: [], 'claude:1': []});
+  assert.deepEqual(can, {main: ['message', 'stop', 'history'], delegate: [], 'claude:1': []});
 });
 
 // A fake T3: the `t3` CLI (auth session issue, thread send) on PATH, and its HTTP + WebSocket API.

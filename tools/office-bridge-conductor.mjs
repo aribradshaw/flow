@@ -19,6 +19,7 @@ import {dirname} from 'node:path';
 
 import {transcriptText} from '../lib/office-mask.mjs';
 import {parseJson, short, t3Env, transcriptEntry} from './office-bridge-t3.mjs';
+import {readLive} from './office-bridge-threads.mjs';
 
 export const CONDUCTOR_TITLE = '[Flow] Chief of Staff · conductor';
 export const CONDUCTOR_AGENT = 'Chief of Staff';
@@ -207,7 +208,9 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
           id, title: 'Chief of Staff', role: 'conductor', model, provider: live?.provider || row.provider_instance_id,
           status, activity: status === 'running' ? 'Working on your message' : status === 'waiting' ? 'Waiting for you in T3 Code' : 'Listening',
           activityKind: status === 'running' ? 'think' : 'idle', host, cwd: null,
-          can: live ? ['message', 'stop'] : ['message'], runId: live?.run_id, transcript, ...(reply ? {reply} : {}),
+          can: live ? ['message', 'stop', 'history'] : ['message', 'history'], runId: live?.run_id, transcript, ...(reply ? {reply} : {}),
+          // What it is doing while it works: its reasoning and tool steps (owner only in Flow).
+          ...(live ? {live: readLive(db, id, live.run_id)} : {}),
         };
       } finally { db.close(); }
     },

@@ -7,6 +7,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {promisify} from 'node:util';
 
 import {localDay} from './office-bridge-usage.mjs';
+import {readHistory, readLive, threadAlive} from './office-bridge-threads.mjs';
 
 const exec = promisify(execFile);
 const terminal = new Set(['resolved', 'cancelled', 'expired']);
@@ -187,9 +188,11 @@ export function readT3(DatabaseSync, path, readUsage, now = Date.now()) {
       const delegated = typeof state.lineage?.parentThreadId === 'string' && state.lineage.parentThreadId !== '';
       agents.set(id, {
         id, title: thread.title, provider, model: selection?.model, pending, runId: run?.run_id,
-        // Top-level threads take a message (a new user turn) and a stop from the office; delegated ones are
-        // steered by the thread that delegated them.
-        can: delegated ? [] : ['message', 'stop'],
+        // Top-level threads take a message (a new user turn) and a stop from the office, and send their history;
+        // delegated ones are steered by the thread that delegated them.
+        can: delegated ? [] : ['message', 'stop', 'history'],
+        // What the running turn is doing this moment (docs/concepts/12-office.md "Live steps, threads and history").
+        live: run ? readLive(db, id, run.run_id) : null,
         cwd: typeof state.worktreePath === 'string' && state.worktreePath.trim()
           ? state.worktreePath : projects.get(thread.project_id),
         parent: state.lineage?.parentThreadId, children,
@@ -446,13 +449,26 @@ function readRun(DatabaseSync, path, runId) {
 
 // Messages and stops for a T3 thread, after checking it is still a top-level thread of this T3 server that
 // the bridge offers them for (can), and, for a stop, that the same turn is still running.
+// A message may also go to a thread that is not running: any top-level thread of this T3 that is still there (the
+// office's thread index lists them); T3 starts a new turn on it.
+function alive(DatabaseSync, path, id) {
+  const db = open(DatabaseSync, path);
+  try { return threadAlive(db, id); }
+  finally { db.close(); }
+}
+
 async function steerT3(DatabaseSync, path, action, signal, {message, stop}) {
   const failure = text => ({ok: false, message: text});
   const kind = action.kind;
   const current = () => readT3(DatabaseSync, path).agents.get(action.agentId);
   try {
     const agent = current();
-    if (!agent) return failure('This T3 thread is not running here any more.');
+    if (!agent && kind === 'message' && alive(DatabaseSync, path, action.agentId)) {
+      if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 2000) return failure('That message is empty or too long.');
+      const sent = await message(path, {agentId: action.agentId, text: action.text}, signal);
+      return {ok: true, message: sent?.delivery === 'queued' ? 'Queued in T3 Code: it is the next turn.' : 'Sent to T3 Code: it starts a new turn.'};
+    }
+    if (!agent) return failure(kind === 'message' ? 'That T3 thread is not here any more.' : 'This T3 thread is not running here any more.');
     if (!agent.can?.includes(kind)) return failure(kind === 'stop' ? 'Stop it in T3 Code.' : 'Send it messages in T3 Code.');
     if (kind === 'message') {
       if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 2000) return failure('That message is empty or too long.');
@@ -474,9 +490,22 @@ async function steerT3(DatabaseSync, path, action, signal, {message, stop}) {
   }
 }
 
+// A page of a top-level thread's conversation for the office (masked here; Flow masks it again and never stores it).
+export function historyT3(DatabaseSync, path, {agentId, before}) {
+  const db = open(DatabaseSync, path);
+  try {
+    if (!threadAlive(db, agentId)) return {ok: false, message: 'That T3 thread is not here any more.'};
+    const data = readHistory(db, agentId, before);
+    return {ok: true, message: data.items.length === 1 ? '1 item' : data.items.length + ' items', data};
+  } catch {
+    return {ok: false, message: 'Could not read that thread in T3 Code.'};
+  } finally { db.close(); }
+}
+
 export function createT3Responder(DatabaseSync, path, send = respondT3, {message = sendT3, stop = stopT3} = {}) {
   return async (action, signal) => {
     const failure = message => ({ok: false, message});
+    if (action.kind === 'history') return historyT3(DatabaseSync, path, action);
     if (action.kind === 'message' || action.kind === 'stop') return steerT3(DatabaseSync, path, action, signal, {message, stop});
     if (action.kind !== undefined && action.kind !== 'answer') return failure('Unknown action.');
     if (action.decision !== 'allow' && action.decision !== 'deny') return failure('Unknown decision.');

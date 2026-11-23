@@ -9,6 +9,7 @@ import {createT3Usage, sumUsage} from './office-bridge-usage.mjs';
 import {createClaudeScanner} from './office-bridge-claude.mjs';
 import {createT3PromptDetector, createT3Responder, createT3Session, defaultT3Db, loadSqlite, readT3, respondT3, short, stopT3} from './office-bridge-t3.mjs';
 import {CONDUCTOR_AGENT, createConductor} from './office-bridge-conductor.mjs';
+import {createLiveWatcher, liveFromTranscript, readRunningLive, readThreads} from './office-bridge-threads.mjs';
 import {transcriptText} from '../lib/office-mask.mjs';
 
 const exec = promisify(execFile);
@@ -94,7 +95,7 @@ function describe(agent) {
   };
 }
 
-export async function makePayload({source, host, now, t3, claude, codex = [], resolveRepo, conductor = null}) {
+export async function makePayload({source, host, now, t3, claude, codex = [], resolveRepo, conductor = null, threads}) {
   // The conductor (office-bridge-conductor.mjs) is reported once, as itself, never as an ordinary T3 thread.
   if (conductor && t3.has(conductor.id)) { t3 = new Map(t3); t3.delete(conductor.id); }
   const childrenByParent = new Map();
@@ -118,7 +119,8 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
     const transcript = (conductor.transcript ?? []).slice(-12).map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
     agents.push({...describe(conductor), role: 'conductor', activity: short(conductor.activity), activityKind: conductor.activityKind,
       host, hostLabel: short(host + ' · T3', 120), repo: null, children: [], pending: null,
-      can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop'),
+      can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop' || k === 'history'),
+      ...(conductor.live && conductor.status !== 'idle' ? {live: conductor.live} : {}),
       ...(transcript.length ? {transcript} : {}),
       ...(conductor.reply ? {reply: {...conductor.reply, text: transcriptText(conductor.reply.text, 600)}} : {})});
   }
@@ -138,8 +140,10 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
         requestId: agent.pending.requestId, kind: agent.pending.kind,
         summary: short(agent.pending.summary), can: isT3 ? agent.pending.can : [],
       } : null;
-      // Messages and stops: T3 threads only (Claude Code in a terminal cannot be reached from outside).
-      const can = isT3 && Array.isArray(agent.can) ? agent.can.filter(k => k === 'message' || k === 'stop') : [];
+      // Messages, stops and history: T3 threads only (Claude Code in a terminal cannot be reached from outside).
+      const can = isT3 && Array.isArray(agent.can) ? agent.can.filter(k => k === 'message' || k === 'stop' || k === 'history') : [];
+      // What it is doing right now: T3's turn items, else the transcript tail since its last prompt.
+      const live = agent.live ?? (!isT3 && agent.status !== 'idle' ? liveFromTranscript(agent.transcript) : null);
       const agentflow = agentflowOf(agent.title);
       // The transcript tail, masked and cut here before it leaves the machine (Flow masks it again).
       const transcript = (Array.isArray(agent.transcript) ? agent.transcript : []).slice(-12)
@@ -150,12 +154,12 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
       return {
         ...describe(agent), ...(usage ? {usage} : {}), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + ' · ' + reporter, 120),
         repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending, can,
-        ...(transcript.length ? {transcript} : {}),
+        ...(live ? {live} : {}), ...(transcript.length ? {transcript} : {}),
       };
     })));
   }
   // The REST API accepts a JSON body of at most 1 MiB. Keep top-level agents ahead of children.
-  const payload = {source, at: new Date(now).toISOString(), agents: []};
+  const payload = {source, at: new Date(now).toISOString(), agents: [], ...(threads !== undefined ? {threads} : {})};
   let room = (1 << 20) - Buffer.byteLength(JSON.stringify(payload));
   const children = [];
   for (const agent of agents) {
@@ -228,7 +232,7 @@ export function createReportWake() {
 }
 
 export async function runBridge({cfg, source, scan, respond, signal, interval = 3000, once = false, dryRun = false,
-  print = console.log, log = console.error, sleep = delay, reportWake}) {
+  print = console.log, log = console.error, sleep = delay, reportWake, onReported}) {
   const request = requestFlow(cfg, signal);
   const jobs = new Map();
   let respondQueue = Promise.resolve();
@@ -245,13 +249,14 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
         const kind = action.kind ?? 'answer';
         const valid = kind === 'answer' ? validId(action.requestId, 300)
           : kind === 'message' ? typeof action.text === 'string' && action.text.trim() !== '' && action.text.length <= 2000
+          : kind === 'history' ? action.before === undefined || (typeof action.before === 'string' && action.before.length <= 200)
           : kind === 'stop';
         if (validId(action.agentId) && valid && (action.source === undefined || action.source === source)) {
           try { result = await respond({...action, kind}, signal); }
           catch { result = {ok: false, message: 'Could not reach the local agent.'}; }
         }
         // Messages and stops are logged with the agent and the outcome, never the message's text.
-        log('office bridge: ' + (kind === 'answer' ? '' : `${kind} for ${short(action.agentId, 120)}: ${result.ok ? 'ok' : 'failed'}: `) + result.message);
+        if (kind !== 'history' || !result.ok) log('office bridge: ' + (kind === 'answer' ? '' : `${kind} for ${short(action.agentId, 120)}: ${result.ok ? 'ok' : 'failed'}: `) + result.message);
         job.result = result;
         if (!once) {
           job.next = Infinity;  // The retry loop starts only if this POST fails.
@@ -285,6 +290,7 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
     if (once || dryRun) print(JSON.stringify(payload, null, 2));
     if (!dryRun) {
       enqueue(await request('PUT', '/agents', payload));
+      onReported?.(payload);
       const snapshot = JSON.stringify(payload.agents.map(agent => [agent.id, agent.status,
         agent.pending?.requestId, agent.children.map(child => [child.id, child.status]).sort()]).sort());
       if (!once && snapshot !== lastSnapshot) {
@@ -360,6 +366,78 @@ export function conductorResponder(conductor, respond, {DatabaseSync, path, disp
       } catch { return {ok: false, message: 'Could not stop it. Check T3 Code.'}; }
     }
     return respond(action, signal);
+  };
+}
+
+// Live steps between reports (docs/concepts/12-office.md "Live steps, threads and history"): every write to T3's
+// database is noticed within pollMs; debounceMs after the last one (at most maxWaitMs while it keeps streaming, and
+// never closer than gapMs) the running turns' live fields are read, and what changed since the last report or
+// update goes to Flow (POST /live). A turn that started or ended, or a change to the thread index, asks for a full
+// report instead (wake). read() -> {live: Map(id -> live), index?: signature}.
+export function createLiveStream({read, post, wake, pollMs = 100, debounceMs = 150, maxWaitMs = 400, gapMs = 250, changed,
+  now = () => Date.now(), log = () => {}}) {
+  let sent = new Map(), reported = new Set(), index, timer, poll, first = 0, lastPost = 0, busy = false, again = false, failing = false;
+  const sig = v => JSON.stringify(v ?? null);
+  async function flush() {
+    timer = undefined; first = 0;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const {live, index: nextIndex} = read();
+      if (nextIndex !== undefined && index !== undefined && nextIndex !== index) { index = nextIndex; wake(); return; }
+      if (nextIndex !== undefined) index = nextIndex;
+      const running = new Set(live.keys());
+      if ([...running].some(id => !reported.has(id)) || [...reported].some(id => !running.has(id))) { wake(); return; }
+      const agents = [];
+      for (const [id, value] of live) if (sig(value) !== sent.get(id)) agents.push({id, live: value ?? null});
+      if (!agents.length) return;
+      const wait = lastPost + gapMs - now();
+      if (wait > 0) { again = true; await delay(wait); }
+      lastPost = now();
+      await post(agents);
+      for (const a of agents) sent.set(a.id, sig(a.live));
+      if (failing) log('office bridge: live updates recovered');
+      failing = false;
+    } catch (error) {
+      if (!failing) log('office bridge: live updates failed' + (error?.status ? ' (HTTP ' + error.status + ')' : ''));
+      failing = true;
+    } finally {
+      busy = false;
+      if (again) { again = false; schedule(); }
+    }
+  }
+  function schedule() {
+    const t = now();
+    if (!first) first = t;
+    clearTimeout(timer);
+    timer = setTimeout(flush, Math.max(0, Math.min(debounceMs, first + maxWaitMs - t)));
+  }
+  return {
+    // After each full report: what Flow now holds (running agents' ids and their live fields).
+    reported(agents) {
+      reported = new Set(agents.filter(a => a.status !== 'idle').map(a => a.id));
+      sent = new Map(agents.map(a => [a.id, sig(a.live)]));
+    },
+    start() { poll = setInterval(() => { if (changed()) schedule(); }, pollMs); },
+    schedule,
+    stop() { clearInterval(poll); clearTimeout(timer); },
+  };
+}
+
+// The thread index goes in a report when it changed, and at least once a minute (Flow keeps the last one).
+export function createThreadsOut({read, everyMs = 60_000, now = () => Date.now()}) {
+  let sentSig, sentAt = 0, pendingSig;
+  return {
+    take() {
+      let data;
+      try { data = read(); } catch { return undefined; }
+      const sig = JSON.stringify(data);
+      if (sig === sentSig && now() - sentAt < everyMs) return undefined;
+      pendingSig = sig;
+      return data;
+    },
+    sent(payload) { if (payload.threads !== undefined && pendingSig) { sentSig = pendingSig; sentAt = now(); pendingSig = undefined; } },
+    signature() { try { return JSON.stringify(read()); } catch { return undefined; } },
   };
 }
 
@@ -457,7 +535,31 @@ export async function officeBridge(cfg, argv) {
     dispatch: (command, valid, signal) => session.dispatch(command, valid, signal),
     log: message => console.error(message),
   }) : null;
-  let detector, promptTimer, warmTimer;
+  // Your T3 thread index (owner only in Flow), from the same database.
+  const withDb = fn => { const db = new DatabaseSync(path, {readOnly: true}); try { db.exec('PRAGMA busy_timeout=200'); return fn(db); } finally { db.close(); } };
+  const threadsOut = existsSync(path) ? createThreadsOut({read: () => withDb(db => readThreads(db))}) : null;
+  let detector, promptTimer, warmTimer, liveStream, liveWatcher;
+  if (!values.once && !values['dry-run'] && existsSync(path)) {
+    liveWatcher = createLiveWatcher(DatabaseSync, path);
+    let indexAt = 0, indexSig;
+    liveStream = createLiveStream({
+      changed: () => liveWatcher.check(),
+      read: () => withDb(db => {
+        const live = readRunningLive(db);
+        // Only top-level threads and the conductor are agents in the report; the rest are children.
+        const chief = conductor?.entry(host);
+        if (chief && chief.status !== 'idle') live.set(chief.id, chief.live ?? null);
+        if (Date.now() - indexAt > 1000) { indexAt = Date.now(); indexSig = threadsOut?.signature(); }
+        return {live, index: indexSig};
+      }),
+      post: agents => fetch(cfg.url + API + '/live', {method: 'POST', redirect: 'error',
+        headers: {authorization: 'Bearer ' + cfg.key, 'content-type': 'application/json', accept: 'application/json'},
+        body: JSON.stringify({source, agents}), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)])})
+        .then(async r => { await r.body?.cancel(); if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), {status: r.status}); }),
+      wake: () => reportWake.notify(),
+      log: message => console.error(message),
+    });
+  }
   if (!values.once && !values['dry-run']) {
     detector = createT3PromptDetector(DatabaseSync, path);
     detector.check();
@@ -467,9 +569,15 @@ export async function officeBridge(cfg, argv) {
     warmTimer = setInterval(warm, 5000);
   }
   let t3Unavailable = false;
+  liveStream?.start();
   try {
     await runBridge({
       cfg, source, interval, once: values.once, dryRun: values['dry-run'], signal: controller.signal, reportWake,
+      onReported: payload => {
+        threadsOut?.sent(payload);
+        // The T3 agents in it (Claude Code and Codex CLI sessions get their live field with each report only).
+        liveStream?.reported(payload.agents.filter(agent => / · T3$/.test(agent.hostLabel ?? '')));
+      },
       respond: conductorResponder(conductor, createT3Responder(DatabaseSync, path, (...args) => respondT3(...args, dispatch), {
         stop: (...args) => stopT3(...args, dispatch),
       }), {DatabaseSync, path, dispatch}),
@@ -491,13 +599,15 @@ export async function officeBridge(cfg, argv) {
           catch { chief = null; }
         }
         return makePayload({source, host, now, t3: data.agents, claude: scanClaude(data.nativeIds, now),
-          codex: scanCodex(data.nativeIds, now), resolveRepo, conductor: chief});
+          codex: scanCodex(data.nativeIds, now), resolveRepo, conductor: chief, threads: threadsOut?.take()});
       },
     });
   } finally {
     controller.abort();
     clearInterval(promptTimer);
     clearInterval(warmTimer);
+    liveStream?.stop();
+    liveWatcher?.close();
     detector?.close();
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
