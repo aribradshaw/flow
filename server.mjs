@@ -990,7 +990,7 @@ const apiStore=(key,user)=>{
   const served=new Map(),withLinked=w=>!!user?.email&&!user.token&&sameEmail(w.owner,user.email);
   return {...workspaces,
     async get(id){const w=await workspaces.get(id);if(!w?.data)return w;
-      if(withLinked(w)){const {data}=await withShares(id,user,w.data);if(core.linkedShareIds(data).length){served.set(id,normalizeDb(structuredClone(data)));return {...w,data}}}
+      if(withLinked(w)){const {data}=await withShares(id,user,w.data);if(core.linkedShareIds(data).length||data.shareMembers?.length){served.set(id,normalizeDb(structuredClone(data)));return {...w,data}}}
       served.delete(id);
       const data=dropDangling(structuredClone(stripLinked(w.data)));
       if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},

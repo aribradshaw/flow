@@ -371,6 +371,21 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   h=await home();const k=h.data.devops.cards.find(c=>c.id==='k-ad');
   assert.deepEqual([k.title,k.points,k.column],['Ad copy v2',3,'doing'],'API edits to a shared card reach the owner');
   assert.ok(k.assignees.some(a=>a.node==='cleo'),"the owner's hidden assignee stays");
+  // Members by email through the API: the owner (a member, whose person card is outside the scope) is stored as their card.
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{assignees:[{node:L('bo'),role:'developer'},{node:OWNER,role:'tester'}]});
+  assert.equal(x.status,200,JSON.stringify(x.data));
+  assert.deepEqual(x.data.card.assignees,[{node:L('bo'),role:'developer'},{node:'@'+OWNER,role:'tester'}]);
+  h=await home();assert.deepEqual(h.data.devops.cards.find(c=>c.id==='k-ad').assignees.map(a=>a.node).sort(),['bo','cleo','me']);
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{assignees:[{node:KIM,role:'tester'}]});
+  assert.equal(x.status,400,'someone who is not a member: '+JSON.stringify(x.data));
+  assert.equal((await v1('POST','/cards',{title:'Bo private',assignees:[{node:OWNER}]})).status,400,"a member is not assignable on Bo's own cards");
+  // The owner's key: a recipient without a person card is assignable on the cards shared with them only.
+  {const ok=(await owner('POST','/api/keys',{name:'own-cards',env:'default-workspace',scopes:['read','write']})).data.key;
+    const o1=(method,path,b)=>fetch(BASE+'/api/v1/envs/default-workspace'+path,{method,headers:{authorization:'Bearer '+ok,'content-type':'application/json'},body:b&&JSON.stringify(b)}).then(async y=>({status:y.status,data:await y.json().catch(()=>null)}));
+    let y=await o1('PATCH','/cards/k-ad',{assignees:[{node:'cleo',role:'developer'},{node:BO,role:'tester'}]});
+    assert.equal(y.status,200,JSON.stringify(y.data));assert.ok(y.data.card.assignees.some(a=>a.node==='@'+BO),JSON.stringify(y.data.card.assignees));
+    y=await o1('POST','/cards',{title:'Not shared',assignees:[{node:BO}]});assert.equal(y.status,400,'not on a card that is not shared with them');
+    y=await o1('GET','/cards?assignee='+encodeURIComponent(BO));assert.deepEqual(y.data.items.map(c=>c.id),['k-ad'],JSON.stringify(y.data));}
   assert.equal((await v1('POST','/projects',{name:'Bo own project'})).status,201);
   x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{project:'Bo own project'});
   assert.equal(x.status,403,'a shared card keeps its project: '+JSON.stringify(x.data));

@@ -1084,7 +1084,7 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `column` | string |  | Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of `requests`, `doing`, `blocked`, `uat`, `done`, `must`, `nice`. |
 | `project` | string |  | Project id or name, or "none". |
 | `label` | string |  | Label id or name. |
-| `assignee` | string |  | Person node id or name. |
+| `assignee` | string |  | Person node id or name, or a share member (@email or email). |
 | `agent` | string |  | AgentFlow agent id or name: cards delegated to it. |
 | `q` | string |  |  |
 | `hideDone` | boolean |  |  |
@@ -1284,7 +1284,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
 | `snoozedUntil` | string | null |  | Snooze the card until this time: an ISO time such as 2026-11-23T16:00:00Z (include Z or a time zone offset). "" or null wakes it. A time already past wakes it too. |
 | `assignees` | object[] |  |  |
-| `assignees[].node` | string | yes | A person on a chart: node id or name. |
+| `assignees[].node` | string | yes | A person on a chart (node id or name), or someone the card is shared with (@email, email or name). |
 | `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
 | `checklist` | object[] |  |  |
 | `checklist[].id` | string |  |  |
@@ -1397,7 +1397,7 @@ Change a card's fields. Lists you send (labels, assignees, checklist, links) rep
 | `due` | string |  | YYYY-MM-DD, or "" for none. |
 | `snoozedUntil` | string | null |  | Snooze the card until this time: an ISO time such as 2026-11-23T16:00:00Z (include Z or a time zone offset). "" or null wakes it. A time already past wakes it too. |
 | `assignees` | object[] |  |  |
-| `assignees[].node` | string | yes | A person on a chart: node id or name. |
+| `assignees[].node` | string | yes | A person on a chart (node id or name), or someone the card is shared with (@email, email or name). |
 | `assignees[].role` | enum |  | One of `developer`, `tester`, `requester`. |
 | `checklist` | object[] |  |  |
 | `checklist[].id` | string |  |  |
@@ -1556,7 +1556,7 @@ Move a card to a column (and position: `index` among that column's other cards; 
 | `index` | integer |  |  |
 | `confirm` | boolean |  |  |
 | `approve` | boolean |  |  |
-| `developer` | string |  | Person node id or name. |
+| `developer` | string |  | Person node id or name, or someone the card is shared with (@email or email). |
 
 **Output**
 
