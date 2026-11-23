@@ -1,7 +1,7 @@
 // The 3D office (docs/concepts/12-office.md): a full-screen, low-poly office for one environment, drawn with
 // Three.js (public/vendor/three, MIT). One room per member with their live coding agents at desks, the
 // environment's AgentFlow agents in the common area, and everyone who has the office open as an avatar.
-// Live over Server-Sent Events (GET /api/office/{env}/events); moves, chat, emotes and Allow / Deny are
+// Live over Server-Sent Events (GET /api/office/{env}/events); moves, status, chat, emotes and Allow / Deny are
 // small POSTs to /api/office/{env}/… The server redacts other people's agents per viewer, so what
 // arrives here is already what this person may see. Loaded on demand from the AgentFlow toolbar.
 import * as THREE from './vendor/three/three.module.min.js';
@@ -25,6 +25,7 @@ import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
+import {attachOfficeStatus} from './office-status.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -72,7 +73,8 @@ export function openOffice(opts){
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
-        <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd></dl>
+        <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
+        <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
     </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
@@ -91,6 +93,7 @@ export function openOffice(opts){
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
+  S.presence=attachOfficeStatus(S,{officeBox});
   connect();S.watch=setInterval(watch,1000);
   root.focus({preventScroll:true});
   if(opts.cardId)openOverlay('card',opts.cardId);
@@ -98,6 +101,7 @@ export function openOffice(opts){
 export const officeOpen=()=>!!S;
 export function closeOffice(){
   if(!S)return;const s=S;S=null;
+  s.presence?.destroy();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();
@@ -199,12 +203,13 @@ function connect(){
   on('restart',()=>disconnect(true));
   on('yourSources',updateSources);
   on('hb',()=>{});
+  S.presence?.bind(on);
   on('join',p=>{if(!S.world)return;const joined=!S.people.has(p.key);upsertPerson(p);if(joined)presenceChanged(p.key)});
   on('move',p=>{if(S.world)upsertPerson(p)});
   on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
-  on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending()});
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
   on('members',({members,agentflow})=>{updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
   on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()}});
@@ -213,6 +218,7 @@ function connect(){
 }
 function watch(){
   if(!S)return;
+  S.presence?.tickIdle();
   if(S.gone){status('No longer shared with you');return}
   const now=Date.now();
   if(S.es&&now-S.heard>40000){disconnect();return}
@@ -269,6 +275,8 @@ function snapshot(d){
     if(joined)presenceChanged();
   }
   sendPresence(true);refreshPanel();focusPending();
+  S.presence?.onSnapshot(d);
+  for(const [member,agents] of S.live)S.presence?.observeWaiting(member,agents);
 }
 function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
@@ -401,12 +409,14 @@ function buildRooms(){
     const sign=new THREE.Object3D();sign.position.set(DOOR_W/2+side/2,0,ROOM_D/2+WALL_T/2+0.02);g.add(sign);
     const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,tag,note:previous.get(m.key)?.note||''});roomLook(m.key);
+    const entrance=new THREE.Vector3(0,0,ROOM_D/2).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
   buildMainWall();
   buildDoors();
+  S.presence?.syncDoors();
   updateColliders();
   const anchors=S.worldLayout.boardAnchors();
   S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
@@ -438,13 +448,17 @@ function roomLook(key){
   const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||r.member.me;
   r.floorMat.color.set(r.bg);if(!on)r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);
   r.tag.el.classList.toggle('off',!on);
-  const seen=ago(r.member.lastSeen),parts=[on?'':`offline${seen?` · last seen ${seen}`:''}`,r.note].filter(Boolean);
-  r.tag.el.querySelector('small').textContent=parts.length?' · '+parts.join(' · '):'';
+  const seen=ago(r.member.lastSeen);r.seen=seen;
+  if(S.presence)S.presence.paintRoom(r,on);
+  else{
+    const parts=[on?'':`offline${seen?` · last seen ${seen}`:''}`,r.note].filter(Boolean);
+    r.tag.el.querySelector('small').textContent=parts.length?' · '+parts.join(' · '):'';
+  }
 }
 function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
 function updateColliders(){
-  S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes)];
+  S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes),...(S.presence?.doorBoxes()||[])];
 }
 function buildDesks(key,refresh=true){
   const room=S.rooms.get(key);if(!room)return;
@@ -592,9 +606,9 @@ function upsertPerson(p,self=false){
     figure.position.y=-0.88;pose.add(figure);pose.position.y=0.88;obj.add(pose,shade);
     obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
     if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
-    const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|blob:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
-    const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
-    a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
+    const [bg,fg]=memberColor(p.key);
+    const tag=label(obj,S.presence?S.presence.nameTag({name:p.name,image:p.image,self,bg,fg,key:p.key,presence:{status:'available',text:''}}):`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
+    a={key:p.key,name:p.name,image:p.image||'',colors:[bg,fg],obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
         if(!S.people.has(p.key))return false;
@@ -608,6 +622,8 @@ function upsertPerson(p,self=false){
     if(samples.length>12)samples.shift();
   }
   if(p.name)a.name=p.name;
+  if(p.image)a.image=p.image;
+  S.presence?.paintPerson(a);
   return a;
 }
 function removePerson(key){const a=S?.people.get(key);if(!a)return;clear(a.obj);S.people.delete(key);if(S.follow===key)S.follow=null;closeMenu()}
@@ -818,6 +834,7 @@ function onKey(e){
     if(S.interact?.closeOpen())return;
     if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
+    if(S.presence?.closeOverlays())return;
     if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
     closeOffice();return;
   }
@@ -834,6 +851,7 @@ function onKey(e){
     return;
   }
   if(e.code==='Space'&&e.target.closest?.('button,a'))return;
+  if(S.presence?.onKey(e))return;
   if(S.input.keyDown(e.code,performance.now(),e.repeat,S.controller.jump)){e.preventDefault();return}
   if(k==='e'){e.preventDefault();if(!e.repeat)S.interact?.trigger();return}
   if(['z','c','f','o','?'].includes(k)){
@@ -894,7 +912,9 @@ function frame(dt,t){
       }else if(!S.follow)S.target=null;
     }
   }
+  S.presence?.beforeMove();
   const player=controller.advance(dt,{...input,x,z},S.colliders);
+  S.presence?.afterMove(player);
   S.pos.set(player.x,player.y,player.z);checkDoor();
   if(S.meKey)sendPresence(false);
   for(const p of S.people.values()){

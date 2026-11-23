@@ -3,13 +3,15 @@
 // bubbling test tube with green and red flashes (test), a thought cloud (think) and a little globe (web).
 // Idle agents wander to their room's coffee corner and back. An agent that starts waiting walks to its
 // owner's avatar when they are in the office (else stays at its desk), hops there under its "!", and, for
-// the owner only, plays a soft ping (WebAudio, no assets; muted from the HUD). Clicking it still opens its
+// the owner only, plays a soft ping (WebAudio, no assets; muted from the HUD). Do not disturb
+// (status.isQuiet) holds that ping: the badge stays, the sound does not play. Clicking it still opens its
 // panel with Allow / Deny (office.js).
 //
 // office.js owns the scene and rebuilds a room's desks on every report; this module keeps each agent's
 // place and pose across rebuilds (keyed by owner and agent id), so walks carry on. One set of geometries
 // and materials per open office, shared by every prop; per frame only transforms change.
 import {getPref,setPref} from './prefs.js';
+import {status} from './office-status.js';
 
 // [emoji, verb] for name tags and the side panel.
 export const KINDS={edit:['✏️','Editing'],read:['📖','Reading'],search:['🔍','Searching'],run:['⌨️','Running commands'],test:['🧪','Testing'],think:['💭','Thinking'],web:['🌐','On the web'],idle:['☕','Idle']};
@@ -146,7 +148,7 @@ export function createActivity(office){
     Object.assign(u,{desk,root,home,facing,lounge,kind:kindOf(a),status:a.status,mine:!!a.mine});
     const req=a.pending?.requestId||'',started=!!prev&&a.status==='waiting'&&(prev.lastStatus!=='waiting'||(req&&req!==prev.lastReq));
     u.lastStatus=a.status;u.lastReq=req;actors.set(key,u);
-    if(started){u.hopAt=performance.now();if(u.mine)ping()}
+    if(started){u.hopAt=performance.now();if(u.mine&&!status.isQuiet(member))ping()}
     place(u,0);
     return started?'waiting':'';
   }

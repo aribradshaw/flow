@@ -1408,7 +1408,7 @@ async function officePortals(envId,user){
   return out;
 }
 const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
-// /api/office/{env}/events (SSE), presence, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
+// /api/office/{env}/events (SSE), presence, status, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
 // the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
@@ -1421,7 +1421,7 @@ async function officeApi(req,res){
     catch(e){console.error('office alerts failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open office alerts'});else res.end()}
     return true;
   }
-  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer)$/.exec(u.pathname);
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
   // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
   const keyed=m[2]==='events'&&!!req.headers.authorization;
@@ -1442,7 +1442,7 @@ async function officeApi(req,res){
   if(req.method!=='POST'){res.writeHead(405,{Allow:'POST'});res.end();return true}
   readJson(req,res,async b=>{
     try{
-      const out=await (what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):officeHub.answer(envId,user,b));
+      const out=await (what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):officeHub.answer(envId,user,b));
       json(res,200,out);
     }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
   });
