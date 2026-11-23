@@ -5,10 +5,26 @@ The 3D office is a small virtual office for one environment, where you can see y
 - **Rooms.** Every member of the environment has a room with their name on it: the environment's owner, and everyone with an active share into it (see [Sharing](#sharing)). The common area in the middle holds the environment's AgentFlow agents, people and teams, laid out loosely like the org chart. Click one to see it, or to open it in AgentFlow.
 - **Live agents.** The coding agents running on a member's machines sit at desks in their room, as a little mascot for Claude, Codex, Gemini or anything else. A running agent types and bobs, one waiting on its person hops and glows with a **!**, and an idle one is dim. Its subagents are tiny copies circling it. Click an agent (or its name tag) for its title, model, machine, repo and project, what it is doing and its subagents.
 - **Allow and Deny.** When your own agent waits on a permission prompt that its reporter can answer, its panel shows the prompt with **Allow** and **Deny**. Your answer goes to the reporter on that machine (usually within a second), and the panel shows how it went. Only the agent's owner ever gets these buttons.
-- **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one). Walk with **WASD** or the arrow keys, or click (tap, on a tablet) where you want to go. The mouse wheel or **+** and **−** zoom.
+- **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one).
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
 - **Several offices.** If shares from other people's environments are placed in yours, the office's title becomes a menu: pick a shared environment to enter its office as a member.
 - **Local mode.** Without sign-in, the office opens with just you and your AgentFlow agents, and your own reported agents.
+
+## Office controls
+
+Open **?** in the office header for the control list and the option to turn off automatic recentering.
+
+| Action | Control |
+|---|---|
+| Walk | **WASD**, arrow keys, or click/tap a destination |
+| Sprint | Hold **Shift** or double-tap and hold a direction |
+| Jump | **Space**. Hold for a higher jump. Press again in the air to flip. |
+| Orbit | Drag with the middle or right mouse button, **Alt** + left drag, **Q** / **E**, or one-finger drag |
+| Zoom | Scroll, use the **+** / **−** buttons, or pinch |
+| Pan | Drag with two fingers |
+| Recenter | Middle-click or press **F** |
+| Top-down overview | Press **O** or select the overview button |
+| Gamepad | Left stick to walk, right stick to orbit, **A** to jump, **B** or **X** to sprint |
 
 ## Who sees what
 

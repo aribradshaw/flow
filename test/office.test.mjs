@@ -153,8 +153,13 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     for(const s of ['Fix the login','Side project','secret-thing','Opus','rm -rf','laptop'])assert.ok(!JSON.stringify(sc).includes(s),s);
     // Presence: the first move is a join for the others, then moves; never echoed to the mover.
     hub.move('env1',users.bo,{x:3,z:-2,heading:1,moving:true});
-    assert.deepEqual(await ann.next('join'),{key:sb.me.key,name:'Bo',image:'',x:3,z:-2,heading:1,moving:true});
-    hub.move('env1',users.bo,{x:4,z:-2,heading:1,moving:false});assert.equal((await cy.next('move')).x,4);
+    assert.deepEqual(await ann.next('join'),{key:sb.me.key,name:'Bo',image:'',x:3,y:0,z:-2,heading:1,moving:true,jump:false,sprint:false});
+    hub.move('env1',users.bo,{x:4,y:1.35,z:-2,heading:1,moving:true,jump:true,sprint:true});
+    const airborne=await ann.next('move');
+    assert.deepEqual([airborne.x,airborne.y,airborne.jump,airborne.sprint],[4,1.35,true,true]);
+    hub.move('env1',users.bo,{x:4,z:-2,heading:1,moving:false});
+    const legacy=await ann.next('move');
+    assert.deepEqual([legacy.y,legacy.jump,legacy.sprint],[0,false,false]);
     assert.ok(!bo.events.some(e=>e.type==='join'||e.type==='move'));
     assert.throws(()=>hub.move('env1',users.bo,{x:'a',z:1}),{status:400});
     assert.throws(()=>hub.say('env1',{email:'zed@example.test'},'hi'),{status:409},'only people in the office');
