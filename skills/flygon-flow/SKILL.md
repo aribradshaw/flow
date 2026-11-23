@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (40)
+## Operations (44)
 
 ### Environments
 
@@ -121,6 +121,15 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | Operation | MCP tool | REST | Scope | What it does |
 | --- | --- | --- | --- | --- |
 | `search` | `search` | `GET /api/v1/envs/{env}/search` | read | Search an environment |
+
+### 3D office
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `office.agents.report` | `office_agents_report` | `PUT /api/v1/office/agents` | write | Report your live coding agents |
+| `office.agents.list` | `office_agents_list` | `GET /api/v1/office/agents` | read | List your reported agents |
+| `office.actions.wait` | `office_actions_wait` | `GET /api/v1/office/actions` | write | Wait for answers to your agents' prompts |
+| `office.actions.result` | `office_actions_result` | `POST /api/v1/office/actions/{id}` | write | Say how an answer went |
 
 ## Examples
 
@@ -596,6 +605,54 @@ flow search --input '{"env":"default-workspace","q":"sign-up"}'
 
 curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
   -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### One agent waiting on a prompt
+
+MCP: call `office_agents_report` with `{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]}}]}`
+
+```sh
+flow office agents report --input '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]}}]}'
+
+curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]}}]}'
+```
+
+### Yours
+
+MCP: call `office_agents_list` with `{}`
+
+```sh
+flow office agents list
+
+curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### An answer
+
+MCP: call `office_actions_wait` with `{"source":"bridge:laptop","wait":25}`
+
+```sh
+flow office actions wait --input '{"source":"bridge:laptop","wait":25}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Done
+
+MCP: call `office_actions_result` with `{"id":"act_1","ok":true,"message":"Approved in T3"}`
+
+```sh
+flow office actions result --input '{"id":"act_1","ok":true,"message":"Approved in T3"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"ok":true,"message":"Approved in T3"}'
 ```
 
 ## More

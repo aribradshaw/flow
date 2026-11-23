@@ -31,12 +31,14 @@ function mockOpid(){
 }
 function agent(){
   const jar=new Map();
-  return async(method,path,body)=>{
+  const f=async(method,path,body)=>{
     const r=await fetch(BASE+path,{method,headers:{'content-type':'application/json',cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; ')},body:body===undefined?undefined:JSON.stringify(body)});
     for(const c of r.headers.getSetCookie()){const [pair]=c.split(';'),i=pair.indexOf('=');jar.set(pair.slice(0,i).trim(),pair.slice(i+1))}
     let data=null;try{data=await r.json()}catch{}
     return {status:r.status,data};
   };
+  f.cookie=async()=>[...jar].map(([k,v])=>`${k}=${v}`).join('; ');
+  return f;
 }
 const cli=args=>new Promise(res=>execFile(process.execPath,['tools/env.mjs',...args,'--to',BASE],{cwd:ROOT,env:{...process.env,FLOW_SYNC_TOKEN:TOKEN}},(e,out,err)=>res({code:e?e.code||1:0,out:out+err})));
 
@@ -116,6 +118,32 @@ test('the recipient sees it under Shared with you and adds it to their own envir
   assert.equal((await bo('POST',`/api/shares/${shareId}/attach`,{env:'default-workspace'})).status,404,"Bo cannot attach it to Owner's environment");
   assert.equal((await bo('POST',`/api/shares/${shareId}/attach`,{env:boEnv})).status,200);
   assert.deepEqual((await bo('GET','/api/shares/incoming')).data.shares[0].envs,[boEnv]);
+});
+
+// The 3D office (docs/concepts/12-office.md): a share's recipient is a member of the owner's office and sees a
+// live agent's details only when its repo belongs to a project in their share's scope; Kim, with no share, cannot enter.
+test("3D office: Bo enters the owner's office; agents in Bo's shared project show in full, others as Private project",async()=>{
+  const k=await owner('POST','/api/keys',{name:'office',env:'*',scopes:['read','write']});assert.equal(k.status,201);
+  assert.equal((await owner('PATCH','/api/v1/envs/default-workspace/projects/Studio%20launch',{repos:['acme/studio']})).status,200);
+  assert.equal((await owner('PATCH','/api/v1/envs/default-workspace/projects/Service%20retainer',{repos:['acme/retainer']})).status,200);
+  const put=await fetch(BASE+'/api/v1/office/agents',{method:'PUT',headers:{'content-type':'application/json',authorization:'Bearer '+k.data.key},body:JSON.stringify({source:'bridge:t',agents:[
+    {id:'a1',title:'Studio fix',vendor:'claude',status:'running',repo:{name:'studio',remote:'git@github.com:acme/studio.git'}},
+    {id:'a2',title:'Retainer invoice script',vendor:'codex',status:'waiting',repo:{name:'retainer',remote:'https://github.com/acme/retainer'},pending:{requestId:'r',summary:'Run: send invoices',can:['allow']}}]})});
+  assert.equal(put.status,200);
+  const snapshot=async who=>{
+    const r=await fetch(BASE+'/api/office/default-workspace/events',{headers:{cookie:await who.cookie()}});
+    if(r.status!==200)return {status:r.status};
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+    try{for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value);const m=/event: snapshot\ndata: (.+)\n\n/.exec(buf);if(m)return {status:200,data:JSON.parse(m[1])}}}finally{rd.cancel().catch(()=>{})}
+  };
+  const b=await snapshot(bo),mine=b.data.live[b.data.members.find(m=>m.owner).key];
+  assert.equal(b.status,200);assert.equal(b.data.members.length,2,'the owner and Bo have rooms');
+  assert.deepEqual(mine.map(a=>a.private?'private':a.title),['Studio fix','private']);
+  const text=JSON.stringify(b.data);for(const s of ['Retainer','retainer','send invoices','Service retainer'])assert.ok(!text.includes(s),s+' must not reach Bo');
+  assert.equal((await snapshot(kim)).status,404,'no share, no office');
+  const o=await snapshot(owner);assert.deepEqual(o.data.live[o.data.me.key].map(a=>a.title),['Studio fix','Retainer invoice script']);
+  for(const p of ['Studio%20launch','Service%20retainer'])await owner('PATCH','/api/v1/envs/default-workspace/projects/'+p,{repos:[]});
+  await fetch(BASE+'/api/v1/office/agents',{method:'PUT',headers:{'content-type':'application/json',authorization:'Bearer '+k.data.key},body:JSON.stringify({source:'bridge:t',agents:[]})});
 });
 
 test("Bo's workspace: Marsh and Campfire Studio linked, Kestrel Group and Quill as read-only stubs, never anything else",async()=>{

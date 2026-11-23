@@ -91,6 +91,13 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 
 - [search](/docs/search.html#op-search): `GET /api/v1/envs/{env}/search` (read). Search an environment
 
+## API: 3D office
+
+- [office.agents.report](/docs/office.html#op-office-agents-report): `PUT /api/v1/office/agents` (write). Report your live coding agents
+- [office.agents.list](/docs/office.html#op-office-agents-list): `GET /api/v1/office/agents` (read). List your reported agents
+- [office.actions.wait](/docs/office.html#op-office-actions-wait): `GET /api/v1/office/actions` (write). Wait for answers to your agents' prompts
+- [office.actions.result](/docs/office.html#op-office-actions-result): `POST /api/v1/office/actions/{id}` (write). Say how an answer went
+
 ## Optional
 
 - [Full text for LLMs](/llms-full.txt): every concept and the whole API reference in one file

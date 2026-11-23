@@ -12,6 +12,7 @@ import {apiV1,envCheckFor,memoryRateLimit,openapi} from '../lib/api-v1.mjs';
 import {operations,getOperation,invoke} from '../lib/registry.mjs';
 import {check} from '../lib/json-schema.mjs';
 import * as cleaners from '../lib/cleaners.mjs';
+import {officeState} from '../lib/office.mjs';
 
 const OWNER={id:'u-owner',email:'owner@example.test'},BOB={id:'u-bob',email:'bob@example.com'};
 const KEYS={flow_rw:{user:OWNER,scopes:['read','write']},flow_ro:{user:OWNER,scopes:['read']},flow_bob:{user:BOB,scopes:['read','write']},flow_limited:{user:{id:'u-lim',email:'lim@example.com'},scopes:['read']}};
@@ -25,6 +26,7 @@ const seed=()=>({active:'c1',charts:[{id:'c1',name:'Brainstorm',nodes:[
   environment:{id:ENV,name:'Test',ownerEmail:OWNER.email,visibility:'private',members:[]}});
 
 let dir,store,server,base;
+const office=officeState();
 const called=new Set();
 async function call(method,path,{key='flow_rw',body,headers={}}={}){
   const r=await fetch(base+path,{method,headers:{...(key?{authorization:'Bearer '+key}:{}),...(body!==undefined?{'content-type':'application/json'}:{}),...headers},body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});
@@ -50,7 +52,7 @@ before(async()=>{
   const limit=memoryRateLimit({perMinute:3});
   limiter=({req,user,operation})=>user.email==='lim@example.com'?limit({req,user,operation}):{ok:true};
   server=http.createServer(async(req,res)=>{
-    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter}))return;
+    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter,office}))return;
     res.writeHead(418);res.end();
   });
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
@@ -62,7 +64,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   const ids=new Set(),routes=new Set();
   for(const o of operations){
     assert.ok(o.id&&!ids.has(o.id),`${o.id}: unique id`);ids.add(o.id);
-    assert.ok(['GET','POST','PATCH','DELETE'].includes(o.method),`${o.id}: method`);
+    assert.ok(['GET','POST','PATCH','PUT','DELETE'].includes(o.method),`${o.id}: method`);
     assert.ok(o.path.startsWith('/api/v1/'),`${o.id}: path under /api/v1`);
     assert.ok(!routes.has(o.method+o.path),`${o.id}: unique route`);routes.add(o.method+o.path);
     assert.ok(['read','write','admin'].includes(o.scope),`${o.id}: scope`);
@@ -82,7 +84,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update'];
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -96,7 +98,7 @@ test('lib/cleaners.mjs matches the client cleaners in public/store.js',()=>{
   const charts=[seed().charts[0],{name:'x',nodes:[{id:'a',name:'A',type:'bad',x:0,y:0}],edges:[]},{name:'x',nodes:[{id:'a',name:'A',type:'note',x:0,y:0,w:0}],edges:[]},
     {name:'x',nodes:[{id:'a',name:'A',type:'note',x:0,y:0},{id:'b',name:'B',type:'note',x:1,y:1}],edges:[{id:'e',from:'a',to:'b',type:'ownership',percent:'150'}]},null];
   for(const c of charts)assert.equal(cleaners.validChart(c),orig.validChart(c));
-  const projects=[{id:'p',name:'P'.repeat(100),color:'#zzz'},{id:'q',name:'Q',color:'#AABBCC',entity:5},{name:'none'},null];
+  const projects=[{id:'p',name:'P'.repeat(100),color:'#zzz'},{id:'q',name:'Q',color:'#AABBCC',entity:5},{name:'none'},null,{id:'r',name:'R',repos:['acme/flow',' flow ','acme/flow',7,'',...Array(30).fill(0).map((_,i)=>'r'+i)]},{id:'s',name:'S',repos:'flow'}];
   projects.forEach((p,i)=>assert.deepEqual(cleaners.cleanProject(p,i),orig.cleanProject(p,i)));
   const ps=[{id:'p'}],items=[{id:'i',title:'T',start:'2026-01-02',end:'2026-01-01',kind:'nope',status:'done',projects:['p','p','zz'],priority:'high',inbox:{at:'x',sig:'s'}},
     {id:'j',title:'U',start:'',end:'2026-01-01'},{id:'k',title:'V',start:'bad'},{id:'l',title:'W',start:'2026-02-01',end:'2026-03-01',owner:7,notes:null}];
@@ -580,6 +582,32 @@ test('deleted cards: API and MCP writes name the key; agent links come back on r
   assert.deepEqual(seen,{via:'mcp',actor:'Runner key'});
 });
 
+test('projects carry repos; the office operations report agents, long-poll answers and take results',async()=>{
+  let r=await op('projects.update',{env:ENV,project:'Lantern',repos:['acme/lantern','https://github.com/acme/lantern-site.git']});
+  assert.equal(r.status,200);assert.deepEqual(r.body.project.repos,['acme/lantern','https://github.com/acme/lantern-site.git']);
+  r=await op('projects.create',{env:ENV,name:'Repo project',repos:['flow']});assert.deepEqual(r.body.project.repos,['flow']);
+  r=await op('projects.update',{env:ENV,project:'Repo project',repos:[]});assert.equal(r.body.project.repos,undefined,'[] clears them');
+  const agent={id:'t3:a',title:'Fix login',vendor:'anthropic',model:'Opus 5.5',status:'waiting',activity:'x'.repeat(900),repo:{name:'lantern',remote:'https://user:secret@github.com/acme/lantern.git'},
+    pending:{requestId:'req-1',kind:'approval',summary:'Run: npm test',can:['allow','deny']}};
+  r=await op('office.agents.report',{source:'bridge:test',agents:[agent]});
+  assert.equal(r.status,200);assert.deepEqual(r.body,{actions:[],accepted:1});
+  r=await op('office.agents.list',{});
+  const got=r.body.agents[0];assert.equal(got.vendor,'claude');assert.equal(got.activity.length,300);assert.ok(!JSON.stringify(got).includes('secret'),'credentials in a remote are dropped');
+  assert.equal((await op('office.agents.report',{source:'bridge:test',agents:[agent]},{key:'flow_ro'})).status,403,'reporting needs write');
+  assert.equal((await op('office.agents.report',{agents:[]})).body.code,'invalid_input');
+  // Bob cannot answer the owner's agent; the owner can, once.
+  assert.throws(()=>office.answer({by:BOB.email,owner:OWNER.email,source:'bridge:test',agentId:'t3:a',requestId:'req-1',decision:'allow'}),{code:'not_owner'});
+  assert.throws(()=>office.answer({by:OWNER.email,owner:OWNER.email,source:'bridge:test',agentId:'t3:a',requestId:'req-0',decision:'allow'}),{code:'not_waiting'});
+  const waiting=op('office.actions.wait',{source:'bridge:test',wait:5});
+  await new Promise(ok=>setTimeout(ok,50));
+  const a=office.answer({by:OWNER.email,owner:OWNER.email,source:'bridge:test',agentId:'t3:a',requestId:'req-1',decision:'allow'});
+  r=await waiting;assert.equal(r.status,200);assert.deepEqual(r.body.actions.map(x=>[x.id,x.decision,x.requestId]),[[a.id,'allow','req-1']]);
+  assert.deepEqual((await op('office.actions.wait',{source:'bridge:test'})).body.actions,[],'delivered once');
+  assert.equal((await op('office.actions.result',{id:a.id,ok:true,message:'Approved'},{key:'flow_bob'})).status,404,'only the owner reports a result');
+  r=await op('office.actions.result',{id:a.id,ok:true,message:'Approved'});assert.equal(r.body.action.result.message,'Approved');
+  assert.equal((await op('office.actions.wait',{source:'bridge:test',wait:31})).body.code,'invalid_input');
+});
+
 test('every operation was exercised over HTTP',()=>{
   assert.deepEqual(operations.map(o=>o.id).filter(id=>!called.has(id)),[]);
 });
@@ -690,7 +718,7 @@ test('OpenAPI 3.1 document from the registry',async()=>{
     assert.equal(d.path,o.path);assert.equal(d.method,o.method);assert.equal(d['x-scope'],o.scope);assert.equal(d.description,o.description);
     const names=(o.path.match(/\{(\w+)\}/g)||[]).map(s=>s.slice(1,-1));
     assert.deepEqual(d.parameters.filter(p=>p.in==='path').map(p=>p.name),names);
-    if(o.method==='POST'||o.method==='PATCH'){
+    if(o.method==='POST'||o.method==='PATCH'||o.method==='PUT'){
       const s=d.requestBody.content['application/json'].schema;
       for(const n of names)assert.ok(!(n in s.properties),`${o.id}: path parameter ${n} is not in the body`);
       assert.ok(Object.keys(d.requestBody.content['application/json'].examples).length);

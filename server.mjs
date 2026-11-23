@@ -1030,18 +1030,78 @@ async function apiAuth(req){
   if(bearerKey(req)){const a=await authenticateApiKey(req,apiKeys).catch(()=>null);return a?.user?{user:{id:'key:'+a.keyId,email:a.user.email,key:a},scopes:a.scopes}:null}
   const t=tokenUser(req);return t?{user:t,scopes:['read','write','admin']}:null;
 }
+// ---------- 3D office (lib/office.mjs, docs/concepts/12-office.md) ----------
+// In memory, in this process: Flow runs as one server instance, so this one process holds every office.
+// Members of an environment: its owner, its members, and everyone with an active share into it.
+const officeMod=await import('./lib/office.mjs');
+const officeState=officeMod.officeState();
+const officeLimit=memoryRateLimit({perMinute:600});
+const personName=async email=>(await users.get(email).catch(()=>null))?.name||(auth.mode==='local'&&sameEmail(email,auth.localUser?.email)?auth.localUser.name:'')||String(email).split('@')[0];
+async function officeEnv(envId){
+  const w=await workspaces.get(envId).catch(()=>null),e=envs.get(envId),data=w?.data?normalizeDb(structuredClone(stripLinked(w.data))):null;
+  const owner=String(w?.owner||e?.ownerEmail||'').toLowerCase();
+  const recipients=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt).map(s=>s.recipientEmail);
+  const emails=[...new Set([owner,...(e?.members||[]),...(data?.environment?.members||[]),...recipients].map(x=>String(x||'').toLowerCase()).filter(Boolean))];
+  return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,
+    members:await Promise.all(emails.map(async email=>({email,name:await personName(email)}))),
+    projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
+    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[]}))};
+}
+// Who may enter an environment's office, and which of its projects they see: everyone who can read it
+// sees all of them; a share's recipient sees the projects in their shares' scopes (all for a whole-environment share).
+async function officeAccessNow(envId,user){
+  const w=await workspaces.get(envId).catch(()=>null);if(w?.archivedAt)return {ok:false};
+  const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[]}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
+  if(canRead(e,user))return {ok:true,all:true,projectIds:new Set()};
+  const mine=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt&&sameEmail(s.recipientEmail,user.email));
+  if(!mine.length||!w?.data)return {ok:false};
+  const d=normalizeDb(structuredClone(stripLinked(w.data))),ids=new Set();let all=false;
+  for(const s of mine){if(s.scope?.kind==='environment')all=true;for(const id of core.resolveScope(d,s).projectIds)ids.add(id)}
+  return {ok:true,all,projectIds:ids};
+}
+const officeSeen=new Map();
+async function officeAccess(envId,user){
+  const k=envId+'\n'+String(user.email).toLowerCase(),hit=officeSeen.get(k);
+  if(hit&&Date.now()-hit.at<15000)return hit.access;
+  const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
+}
+const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv}});
+// /api/office/{env}/events (SSE), presence, say, emote, answer: the app's page only, signed in (local mode too).
+async function officeApi(req,res){
+  const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer)$/.exec(u.pathname);
+  if(!m){json(res,404,{error:'Not found'});return true}
+  if(!trusted(req)){res.writeHead(403);res.end();return true}
+  const user=await requireUser(req,res);if(!user)return true;
+  const [,envId,what]=m,access=await officeAccess(envId,user);
+  if(!access.ok){json(res,404,{error:'Not found'});return true}
+  if(what==='events'){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',e?.message);if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
+    return true;
+  }
+  if(req.method!=='POST'){res.writeHead(405,{Allow:'POST'});res.end();return true}
+  readJson(req,res,b=>{
+    try{
+      const out=what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):officeHub.answer(envId,user,b);
+      json(res,200,out);
+    }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',e);json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
+  });
+  return true;
+}
+const apiRateLimit=a=>a.operation?.tags?.includes('office')?officeLimit(a):apiLimit(a);
 async function apiV1Route(req,res){
   if(!req.url.startsWith('/api/v1'))return false;
   // One authentication per request (it also counts towards the key's rate limit).
   let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
   if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiLimit,heldCards});
+  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards}),
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 
@@ -1108,6 +1168,8 @@ async function prefs(req,res){
 const FLYGON_STYLES_PATH='/flygon-styles.css',flygonStylesFile=fileURLToPath(import.meta.resolve('@flygon/styles/themes.css'));
 // Static files: any existing file under public/ (so new modules need no restart). The decoded path
 // is resolved and must stay inside public/; dotfiles and unknown types are refused.
+// Vendored libraries (public/vendor, e.g. Three.js for the 3D office) change only with a release: a day of caching.
+const vendorRoot=resolve(root,'vendor')+sep;
 function resolveStatic(url){
   const rel=url==='/'?'index.html':url.replace(/^[\\/]+/,'');
   if(!rel||/[\u0000-\u001f:]/.test(rel)||rel.split(/[\\/]/).some(p=>p.startsWith('.')))return null;
@@ -1128,7 +1190,7 @@ const server=http.createServer(async(req,res)=>{
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
   if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await officeApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
@@ -1145,7 +1207,7 @@ const server=http.createServer(async(req,res)=>{
   }
   let file;try{file=resolveStatic(decodeURIComponent(req.url?.split('?')[0]||'/'))}catch{file=null}
   if(!file||(req.method!=='GET'&&req.method!=='HEAD')){res.writeHead(404);res.end('Not found');return;}
-  try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}
+  try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control',file.startsWith(vendorRoot)?'public, max-age=86400':'no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}
 });
 // Local single-user mode only ever listens on loopback; a public deploy must run with OneProfileID.
 // With OPID_* set it listens on HOST (default 0.0.0.0) at PORT, as hosts like Railway expect.
