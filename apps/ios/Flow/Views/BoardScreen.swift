@@ -32,9 +32,9 @@ struct BoardScreen: View {
                 }
                 .toolbar { toolbar }
                 .refreshable { await load() }
-                .task(id: model.envID) { await load() }
+                .task(id: model.envID) { if !(board.isFresh && board.loadedEnv == model.envID) { await load() } }
                 .onChange(of: board.projectFilter) { Task { await load() } }
-                .onChange(of: scenePhase) { if scenePhase == .active { Task { await load() } } }
+                .onChange(of: scenePhase) { if scenePhase == .active && !board.isFresh { Task { await load() } } }
                 .safeAreaInset(edge: .bottom) { banner }
                 .cardMoveDialog(mover)
                 .sensoryFeedback(.success, trigger: moved)
@@ -46,7 +46,7 @@ struct BoardScreen: View {
                         }
                     }
                 }
-                .onAppear { mover.onMoved = { card in withAnimation(.snappy) { board.replace(card) }; moved += 1 } }
+                .onAppear { mover.onMoved = { card in board.replace(card); moved += 1 } }
         }
     }
 
@@ -96,12 +96,20 @@ struct BoardScreen: View {
         } else {
             VStack(spacing: 0) {
                 ColumnStrip(board: board, column: $column)
-                TabView(selection: $column) {
-                    ForEach(BoardColumn.allCases) { col in
-                        columnPage(col).tag(col)
+                // A paging scroll view (not TabView's page style, which jumps when its pages change).
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(BoardColumn.allCases) { col in
+                            columnPage(col)
+                                .containerRelativeFrame(.horizontal)
+                                .id(col)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+                .scrollTargetBehavior(.paging)
+                .scrollIndicators(.hidden)
+                .scrollPosition(id: Binding(get: { column }, set: { if let c = $0 { column = c } }))
             }
         }
     }
@@ -202,7 +210,6 @@ struct BoardScreen: View {
 private struct ColumnStrip: View {
     let board: BoardStore
     @Binding var column: BoardColumn
-    @Namespace private var ns
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -211,7 +218,7 @@ private struct ColumnStrip: View {
                     ForEach(BoardColumn.allCases) { col in
                         let selected = col == column
                         Button {
-                            withAnimation(.snappy) { column = col }
+                            withAnimation(.easeInOut(duration: 0.25)) { column = col }
                         } label: {
                             HStack(spacing: 5) {
                                 Circle().fill(Theme.columnColor(col.rawValue)).frame(width: 6, height: 6)
@@ -227,7 +234,6 @@ private struct ColumnStrip: View {
                                 if selected {
                                     RoundedRectangle(cornerRadius: 3).fill(Theme.surface)
                                         .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.line2))
-                                        .matchedGeometryEffect(id: "pill", in: ns)
                                 }
                             }
                             .foregroundStyle(selected ? Theme.ink : Theme.muted)
@@ -242,7 +248,7 @@ private struct ColumnStrip: View {
                 .padding(.vertical, 8)
             }
             .scrollClipDisabled()
-            .onChange(of: column) { withAnimation(.snappy) { proxy.scrollTo(column, anchor: .center) } }
+            .onChange(of: column) { withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(column, anchor: .center) } }
         }
         .sensoryFeedback(.selection, trigger: column)
     }

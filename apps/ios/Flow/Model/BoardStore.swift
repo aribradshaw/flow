@@ -12,6 +12,10 @@ final class BoardStore {
     private(set) var loading = false
     private(set) var loadedEnv: String?
     var projectFilter: String?
+    private(set) var lastLoad: Date = .distantPast
+
+    // Coming back to the tab within half a minute does not reload (pull to refresh always does).
+    var isFresh: Bool { Date.now.timeIntervalSince(lastLoad) < 30 }
 
     func cards(in column: BoardColumn) -> [FlowCard] {
         cards.filter { $0.column == column.rawValue }
@@ -28,18 +32,23 @@ final class BoardStore {
             cards = []
             projectFilter = nil
         }
-        loading = true
+        if !loading { loading = true }
         defer { loading = false }
         async let c = api.cards(env: env, project: projectFilter)
         async let p = api.projects(env: env)
         async let l = api.labels(env: env)
         async let ppl = api.people(env: env)
         let (cards, projects, labels) = try await (c, p, l)
-        people = (try? await ppl) ?? people
-        self.cards = cards
-        self.projects = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        self.labels = Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        loadedEnv = env
+        let fetchedPeople = (try? await ppl) ?? people
+        // Only what changed is published, so a refresh with nothing new redraws nothing (no flicker).
+        if fetchedPeople != people { people = fetchedPeople }
+        if cards != self.cards { self.cards = cards }
+        let pd = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if pd != self.projects { self.projects = pd }
+        let ld = Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if ld != self.labels { self.labels = ld }
+        if loadedEnv != env { loadedEnv = env }
+        lastLoad = .now
     }
 
     func replace(_ card: FlowCard) {

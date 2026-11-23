@@ -95,6 +95,13 @@ struct FlowAPI {
         return out.card
     }
 
+    // MARK: Agents
+
+    func liveAgents() async throws -> [LiveAgent] {
+        let out: LiveAgents = try await request("GET", "/api/v1/office/agents")
+        return out.agents
+    }
+
     // MARK: Inbox
 
     func inbox() async throws -> AppInbox {

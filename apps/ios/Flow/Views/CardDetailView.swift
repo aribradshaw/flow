@@ -33,7 +33,6 @@ struct CardDetailView: View {
         .background(Theme.bg)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if let card {
                 ToolbarItemGroup(placement: .topBarTrailing) {

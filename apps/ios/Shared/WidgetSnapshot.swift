@@ -16,6 +16,18 @@ struct WidgetSnapshot: Codable, Equatable {
         }
     }
 
+    // Live agents (written by the Agents tab). Optional so older snapshots still read.
+    struct AgentItem: Codable, Equatable, Identifiable {
+        let id: String
+        let name: String
+        let doing: String
+        let state: String   // running, waiting or idle
+        let vendor: String
+    }
+    var live: [AgentItem]?
+    var liveWorking: Int?
+    var liveWaiting: Int?
+
     var updated: Date
     var signedIn: Bool
     var agentsWaiting: Int
@@ -26,9 +38,16 @@ struct WidgetSnapshot: Codable, Equatable {
 
     var waitingCount: Int { agentsWaiting + uat }
 
-    static let empty = WidgetSnapshot(updated: .distantPast, signedIn: false, agentsWaiting: 0, uat: 0, doing: 0, waiting: [], inProgress: [])
+    static let empty = WidgetSnapshot(live: nil, liveWorking: nil, liveWaiting: nil, updated: .distantPast, signedIn: false, agentsWaiting: 0, uat: 0, doing: 0, waiting: [], inProgress: [])
 
-    static let preview = WidgetSnapshot(updated: .now, signedIn: true, agentsWaiting: 1, uat: 2, doing: 3,
+    static let preview = WidgetSnapshot(
+        live: [
+            .init(id: "1", name: "Fix login", doing: "Running tests", state: "running", vendor: "claude"),
+            .init(id: "2", name: "Widgets", doing: "Bash: npm test", state: "waiting", vendor: "codex"),
+            .init(id: "3", name: "Docs pass", doing: "Edit README.md", state: "running", vendor: "claude"),
+        ],
+        liveWorking: 2, liveWaiting: 1,
+        updated: .now, signedIn: true, agentsWaiting: 1, uat: 2, doing: 3,
         waiting: [
             Item(id: "a", title: "Fix login is waiting", detail: "Run: npm test", kind: .agent, link: "flowapp://inbox"),
             Item(id: "b", title: "#12 Sign-up form", detail: "UAT · Lantern", kind: .uat, link: "flowapp://inbox"),

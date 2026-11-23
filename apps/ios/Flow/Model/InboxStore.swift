@@ -6,11 +6,13 @@ import WidgetKit
 // Where a notification tap or a widget link goes.
 enum AppRoute: Equatable {
     case inbox
+    case agents
     case card(CardRef)
 
     // flowapp://inbox, flowapp://card?env=…&id=…
     init?(url: URL) {
         guard url.scheme == "flowapp" else { return nil }
+        if url.host == "agents" { self = .agents; return }
         if url.host == "card", let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
            let env = q.first(where: { $0.name == "env" })?.value, let id = q.first(where: { $0.name == "id" })?.value {
             self = .card(CardRef(env: env, id: id))
@@ -80,7 +82,8 @@ final class InboxStore {
                                 detail: $0.pending?.summary ?? "", kind: .agent, link: "flowapp://inbox")
         }
         let uat = cards.filter { $0.column == "uat" }, doing = cards.filter { $0.column == "doing" }
-        let snapshot = WidgetSnapshot(updated: .now, signedIn: true, agentsWaiting: agents.count, uat: uat.count, doing: doing.count,
+        let old = SharedStore.load()
+        let snapshot = WidgetSnapshot(live: old.live, liveWorking: old.liveWorking, liveWaiting: old.liveWaiting, updated: .now, signedIn: true, agentsWaiting: agents.count, uat: uat.count, doing: doing.count,
             waiting: agentItems + uat.map { .init(id: $0.id, title: "\($0.numberText) \($0.title)", detail: detail($0), kind: .uat, link: link($0)) },
             inProgress: doing.map { .init(id: $0.id, title: "\($0.numberText) \($0.title)", detail: $0.project?.name ?? "", kind: .doing, link: link($0)) })
         if snapshot.waiting.prefix(6) != SharedStore.load().waiting.prefix(6) || snapshot.inProgress.prefix(6) != SharedStore.load().inProgress.prefix(6) || snapshot.waitingCount != SharedStore.load().waitingCount {

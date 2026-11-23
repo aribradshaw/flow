@@ -385,3 +385,92 @@ struct TimelineItem: Decodable, Identifiable, Hashable {
         }
     }
 }
+
+// MARK: Live agents (GET /api/v1/office/agents)
+
+struct LiveAgents: Decodable {
+    let agents: [LiveAgent]
+}
+
+struct LiveAgent: Decodable, Identifiable, Hashable {
+    let id: String
+    let source: String?
+    let title: String?
+    let vendor: String?
+    let model: String?
+    let status: String?
+    let activity: String?
+    let activityKind: String?
+    let host: String?
+    let hostLabel: String?
+    let children: [Child]?
+    let pending: Pending?
+    let can: [String]?
+    let live: Live?
+    let transcript: [Line]?
+    let role: String?
+    let reply: Reply?
+    let usage: Usage?
+
+    struct Child: Decodable, Hashable {
+        let title: String?
+        let vendor: String?
+        let model: String?
+        let status: String?
+        let activityKind: String?
+    }
+
+    struct Pending: Decodable, Hashable {
+        let requestId: String?
+        let kind: String?
+        let summary: String?
+        let can: [String]?
+    }
+
+    struct Live: Decodable, Hashable {
+        let phase: String?
+        let text: String?
+        let steps: [Step]?
+        let at: String?
+
+        struct Step: Decodable, Hashable {
+            let kind: String
+            let text: String
+            let at: String?
+        }
+    }
+
+    struct Line: Decodable, Hashable {
+        let role: String
+        let text: String
+        let at: String?
+    }
+
+    struct Reply: Decodable, Hashable {
+        let text: String?
+        let at: String?
+    }
+
+    struct Usage: Decodable, Hashable {
+        let tokens: Double?
+        let costUsd: Double?
+    }
+
+    var state: State {
+        switch status {
+        case "waiting": .waiting
+        case "running": .working
+        default: .idle
+        }
+    }
+
+    enum State: Int, Comparable {
+        case waiting, working, idle
+        static func < (a: State, b: State) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    var name: String { (title?.isEmpty == false ? title : nil) ?? vendor?.capitalized ?? "Agent" }
+    var machine: String { (hostLabel?.isEmpty == false ? hostLabel : nil) ?? host ?? "This Mac" }
+    var canAnswer: Bool { (pending?.can ?? []).contains("allow") }
+    var isQuestion: Bool { pending?.kind == "question" }
+}

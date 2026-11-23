@@ -64,7 +64,7 @@ final class AppModel {
     }
 
     // Projects and labels per environment, for showing and editing cards anywhere.
-    struct EnvMeta {
+    struct EnvMeta: Equatable {
         var projects: [String: FlowProject] = [:]
         var labels: [String: FlowLabel] = [:]
         var people: [String: FlowPerson] = [:]
@@ -85,9 +85,10 @@ final class AppModel {
     private(set) var metas: [String: EnvMeta] = [:]
 
     func setMeta(_ env: String, projects: [FlowProject], labels: [FlowLabel], people: [FlowPerson]? = nil) {
-        metas[env] = EnvMeta(projects: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+        let next = EnvMeta(projects: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                              labels: Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                              people: people.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) } ?? metas[env]?.people ?? [:])
+        if metas[env] != next { metas[env] = next }
     }
 
     func meta(_ env: String) async -> EnvMeta {

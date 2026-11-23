@@ -15,11 +15,12 @@ struct RootView: View {
 // Tabs on iPhone, a sidebar on iPad (.sidebarAdaptable).
 struct MainView: View {
     enum Section: Hashable {
-        case inbox, board, canvas
+        case inbox, board, canvas, agents
     }
 
     @Environment(AppModel.self) private var model
     @State private var inbox = InboxStore.shared
+    @State private var agents = AgentsStore.shared
     @State private var boardPath = NavigationPath()
     @State private var inboxPath = NavigationPath()
     @State private var section: Section = {
@@ -28,6 +29,7 @@ struct MainView: View {
         switch UserDefaults.standard.string(forKey: "startTab") {
         case "board": return .board
         case "canvas": return .canvas
+        case "agents": return .agents
         default: return .inbox
         }
         #else
@@ -47,6 +49,10 @@ struct MainView: View {
             Tab("Map", systemImage: "point.3.connected.trianglepath.dotted", value: .canvas) {
                 CanvasScreen()
             }
+            Tab("Agents", systemImage: "sparkles", value: .agents) {
+                AgentsScreen()
+            }
+            .badge(agents.waiting)
         }
         .tabViewStyle(.sidebarAdaptable)
         .sheet(isPresented: Binding(get: { model.showingSettings }, set: { model.showingSettings = $0 })) { SettingsScreen() }
@@ -74,6 +80,8 @@ struct MainView: View {
         switch route {
         case .inbox:
             section = .inbox
+        case .agents:
+            section = .agents
         case .card(let ref):
             section = .inbox
             inboxPath = NavigationPath()

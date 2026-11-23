@@ -1,8 +1,6 @@
 import SwiftUI
-import WebKit
 
-// The Map tab: the mind map and the timeline, native (MindMapView, TimelineView). The 3D office is the
-// web app in a WKWebView that shares the sign-in's website data store, with the web's top bar hidden.
+// The Map tab: the mind map and the timeline, native (MindMapView, TimelineView).
 struct CanvasScreen: View {
     enum Mode: Hashable { case map, timeline }
 
@@ -23,7 +21,6 @@ struct CanvasScreen: View {
     @State private var openNode: FlowNode?
     @State private var searching = false
     @State private var selectedItem: TimelineItem?
-    @State private var showOffice = false
     @State private var error: String?
 
     var body: some View {
@@ -62,7 +59,6 @@ struct CanvasScreen: View {
                 }
             }
             .sheet(item: $selectedItem) { ItemSheet(item: $0, store: timeline) }
-            .fullScreenCover(isPresented: $showOffice) { OfficeScreen() }
         }
     }
 
@@ -141,6 +137,7 @@ struct CanvasScreen: View {
                 Button { searching = true } label: { Image(systemName: "magnifyingglass") }
                     .accessibilityLabel("Find a card on the map")
             }
+            if mode == .timeline || map.charts.count > 1 {
             Menu {
                 if mode == .timeline {
                     Picker("View", selection: Binding(get: { currentTimelineMode }, set: { timelineMode = $0 })) {
@@ -153,11 +150,11 @@ struct CanvasScreen: View {
                         ForEach(map.charts) { c in Text(c.name).tag(Optional(c.id)) }
                     }
                 }
-                Button { showOffice = true } label: { Label("Open the 3D office", systemImage: "building.2") }
             } label: {
-                Image(systemName: "ellipsis")
+                Image(systemName: mode == .timeline ? "slider.horizontal.3" : "rectangle.stack")
             }
-            .accessibilityLabel("More")
+            .accessibilityLabel(mode == .timeline ? "Timeline view" : "Choose a mind map")
+            }
         }
     }
 
@@ -181,108 +178,6 @@ struct CanvasScreen: View {
             self.error = error.localizedDescription
         }
     }
-}
-
-// The 3D office: the web app, full screen (it is 3D and has its own controls).
-struct OfficeScreen: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var web = CanvasWeb()
-
-    var body: some View {
-        NavigationStack {
-            CanvasWebView(web: web)
-                .ignoresSafeArea(edges: .bottom)
-                .overlay { if !web.loadedOnce { ProgressView().controlSize(.large) } }
-                .navigationTitle("Office")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                    ToolbarItem(placement: .topBarTrailing) { Button("Reload", systemImage: "arrow.clockwise") { web.reload() } }
-                }
-                .onAppear { web.show(server: model.server, hash: "#office") }
-        }
-    }
-}
-
-@MainActor
-@Observable
-final class CanvasWeb: NSObject, WKNavigationDelegate, WKUIDelegate {
-    let webView: WKWebView
-    private(set) var loading = false
-    private(set) var loadedOnce = false
-    private(set) var failure: String?
-    private var server: URL?
-
-    // Hides the web app's top bar (its tabs, environment and account live natively in the app) and
-    // tightens a few things for touch. The page's own logic is untouched.
-    private static let appStyle = """
-    #top{display:none!important}
-    html,body{-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
-    """
-
-    override init() {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        config.allowsInlineMediaPlayback = true
-        let css = CanvasWeb.appStyle.replacingOccurrences(of: "\n", with: " ")
-        let js = "(function(){var s=document.createElement('style');s.id='flow-ios';s.textContent=\(String(reflecting: css));(document.head||document.documentElement).appendChild(s);document.documentElement.classList.add('flow-ios');})();"
-        config.userContentController.addUserScript(WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
-        webView = WKWebView(frame: .zero, configuration: config)
-        super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = false
-        webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        #if DEBUG
-        webView.isInspectable = true
-        #endif
-    }
-
-    func show(server: URL, hash: String) {
-        if self.server == server, webView.url != nil {
-            webView.evaluateJavaScript("location.hash = \(String(reflecting: hash))")
-            return
-        }
-        self.server = server
-        guard let url = URL(string: "/\(hash)", relativeTo: server)?.absoluteURL else { return }
-        webView.load(URLRequest(url: url))
-    }
-
-    func reload() { failure = nil; webView.reload() }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { loading = true }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; loadedOnce = true; failure = nil }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loading = false }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        loading = false
-        loadedOnce = true
-        failure = "Couldn't load Flow. Tap to retry."
-    }
-
-    // Links to other sites open in Safari; Flow's own pages (and OneProfileID sign-in) stay here.
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        guard let url = action.request.url, action.targetFrame?.isMainFrame != false else { return .allow }
-        if url.host == server?.host || url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
-        if action.navigationType == .linkActivated {
-            await UIApplication.shared.open(url)
-            return .cancel
-        }
-        return .allow
-    }
-
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = action.request.url { UIApplication.shared.open(url) }
-        return nil
-    }
-}
-
-struct CanvasWebView: UIViewRepresentable {
-    let web: CanvasWeb
-    func makeUIView(context: Context) -> WKWebView { web.webView }
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 // Find a card on the map by name (and jump to it).
