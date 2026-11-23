@@ -296,3 +296,32 @@ test('a long reporter request id comes back unchanged in the queued answer',asyn
   const a=st.answer({by:'ann@example.test',owner:'ann@example.test',source:'saguaro',agentId:'t1',requestId:rid,decision:'allow'});
   assert.equal(a.requestId,rid);
 });
+
+test('a conductor: role is kept for everyone, its reply only for its owner, masked and capped; it is private to others whatever its repo',()=>{
+  const r=cleanReport({source:'s',agents:[
+    {id:'cos',title:'[Flow] Chief of Staff · conductor',status:'idle',role:'Conductor',can:['message'],repo:{name:'flow',remote:'https://github.com/acme/flow'},
+      reply:{text:'Routed to Builder as #461 · token=ghp_abcdefghijklmnopqrstuvwxyz0123 '+'x'.repeat(900),at:'2026-11-22T10:00:00Z',cards:[461,'#12',461,-1,1.5,'x',...Array.from({length:20},(_,i)=>100+i)]},
+      transcript:[{role:'assistant',text:'hi'}]},
+    {id:'plain',status:'running',role:'boss',reply:{text:''}},
+    {id:'bad-reply',status:'running',reply:'just text'},
+  ]});
+  const [cos,plain,bad]=r.agents;
+  assert.equal(cos.role,'conductor');assert.deepEqual(cos.can,['message']);
+  assert.ok(!('role' in plain),'only known roles are kept');assert.ok(!('reply' in plain),'an empty reply is dropped');assert.ok(!('reply' in bad));
+  assert.ok(cos.reply.text.length<=600&&cos.reply.text.endsWith('…'));
+  assert.ok(!cos.reply.text.includes('ghp_abcdefghijklmnopqrstuvwxyz0123'),'secrets in a reply are masked');
+  assert.equal(cos.reply.at,'2026-11-22T10:00:00.000Z');
+  assert.deepEqual(cos.reply.cards.slice(0,3),[461,12,100]);assert.equal(cos.reply.cards.length,12);
+  const a={...cos,source:'s'};
+  const own=viewAgent(a,{owner:true});
+  assert.equal(own.role,'conductor');assert.equal(own.reply.text,cos.reply.text);assert.ok(own.transcript);assert.deepEqual(own.can,['message']);
+  for(const full of [true,false]){
+    const other=viewAgent(a,{full,key:()=>'opaque'});
+    assert.equal(other.role,'conductor','others know it is a conductor (it walks with its person)');
+    assert.equal(other.private,true,'a conductor is private to others even when its repo is visible');
+    for(const k of ['reply','transcript','title','activity','repo','can'])assert.ok(!(k in other),k+' never reaches someone else');
+    assert.equal(other.status,'idle');assert.equal(other.id,'opaque');
+  }
+  // An ordinary agent is unchanged: no role, no reply.
+  const o=viewAgent({...r.agents[1],source:'s'},{owner:true});assert.ok(!('role' in o)&&!('reply' in o));
+});
