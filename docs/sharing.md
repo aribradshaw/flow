@@ -4,13 +4,13 @@ Sharing lets the owner of an environment show part of it to another Flow user, w
 
 Code:
 - `lib/sharing-core.mjs`: the rules. Pure, with no storage or I/O, and unit-tested.
-- `lib/shares.mjs`: storage for shares, re-share requests, placements and field history. It uses Postgres when `DATABASE_URL` is set, otherwise JSON files in `BACKUP_DIR`.
+- `lib/shares.mjs`: storage for shares, re-share requests, placements, field history and proposed additions. It uses Postgres when `DATABASE_URL` is set, otherwise JSON files in `BACKUP_DIR`.
 - `test/sharing.test.mjs`: run with `node --test test/sharing.test.mjs`. It covers the core, the JSON-file store and an embedded Postgres store with the migrations run twice.
 
 ## Model
 
 ```
-share   = {id, ownerEnv, ownerEmail, recipientEmail, permission, scope, name, createdAt, createdBy, revokedAt, via}
+share   = {id, ownerEnv, ownerEmail, recipientEmail, permission, adds, scope, name, createdAt, createdBy, revokedAt, via}
 scope   = {kind:'environment'}
         | {kind:'person',  nodeId}          everything connected below a person (any node works)
         | {kind:'label',   label}           a DevOps label id, or a node tag (optional node.tags[])
@@ -18,6 +18,9 @@ scope   = {kind:'environment'}
         | {kind:'nodes',   nodeIds:[...]}   hand-picked, no walk
           + optional chartId: only that chart's nodes and edges
 permission = 'view' | 'comment' | 'edit'
+adds    = 'off' | 'approve' | 'direct'          what the recipient may add (edit shares only; see Additions)
+proposal = {id, shareId, ownerEnv, ownerEmail, proposedBy, envId, records:{node,edge,project,item,card}, status, createdAt, updatedAt, decidedAt, decidedBy, map?}
+          status: 'pending' | 'approved' | 'denied' | 'withdrawn' | 'applied' (added at once under 'direct')
 request = {id, shareId, ownerEmail, requestedBy, toEmail, permission, note, status:'pending'|'approved'|'denied', decidedAt, decidedBy, newShareId}
 placement = {shareId, envId, recordId (owner id), chartId, x, y, w, h}
 history = {shareId, envId (owner env), kind, recordId (owner id), field, old, new, by, at, over?}
@@ -75,6 +78,40 @@ This returns `{db, removed}`. Every `sh.<shareId>.*` record leaves the recipient
 ### Re-sharing
 Recipients cannot share: `createShare(env, user, ...)` only works for the environment's owner. Instead, `requestReshare(share, user, {toEmail, permission, note})` creates a pending request. The permission defaults to the recipient's own and cannot exceed it. `decideRequest(request, share, owner, approve, {permission})` lets the owner deny, or approve at an equal or lower permission. Approval returns a new share with the same scope and `via = request.id`.
 
+### Additions (`share.adds`)
+An edit share's owner decides whether its recipient may add records to the owner's data: **Recipients can add: Off / Needs your approval / Allowed**, in the Share dialog and on each outgoing share in Settings › Sharing (`PATCH /api/shares/<id> {adds}`).
+- `off` (the default, and what every share that existed before has): today's behaviour. A record the recipient makes next to shared ones stays their own, in their environment.
+- `approve`: the addition becomes a **proposal**. The recipient sees it as a linked copy marked **Pending approval** (`linked.pending`, and `shares[].pending` in `GET /api/workspace`) and can keep editing its fields. The owner sees it in Settings › Sharing under **Additions to approve**, with a short preview, and approves or denies it. Approving adds the records to the owner's data, owned by the owner (cards get the owner's next numbers), and they flow back to the recipient as ordinary linked copies. Denying removes the pending copy, and the recipient is told once (`shares[].decided`, a notice in the app; Settings › Sharing lists their additions with their state). A recipient can withdraw a pending one.
+- `direct`: the addition lands in the owner's data at once, with an `added` history entry by the recipient (so `agents.work` holds such a card until the owner changes it, as for any recipient edit).
+- View and comment shares are always `off` (`addsOf(share)`); a share lowered from edit stops adding, and is `off` again if raised back. Re-shares start `off`. Recipients still cannot share what is shared with them.
+
+**What counts as an addition** (`planAdditions`): a record that is new in a save (not in the recipient's stored data, not linked) and refers to the share's records and to nothing private of the recipient's:
+- a mind map card on the share's own chart ("Shared · …");
+- a connection whose two ends are the share's cards (linked or pending). A card of the recipient's own on the share's chart is promoted with the connection that joins it to the share;
+- a project whose entity is one of the share's cards;
+- a timeline item whose project tags are all the share's;
+- a DevOps card whose project and item are the share's (at least one of them), or that has neither and carries one of the share's labels.
+- A project, item or card of the recipient's that a save moves into the share (it did not refer to the share before) counts too. The app makes a card first and picks its project after, so this is how "put my card in their project" works. It is not recorded as a deleted card.
+- The API's create operations take an optional `share` (a share id) for records that refer to nothing, e.g. a project-less card for a whole-environment share. They get the id `sh.<share>.new-<id>`.
+
+References are turned into the owner's ids. The recipient's private labels and people are dropped (assignees follow the assignee rules above), and unknown values get defaults. The record keeps the recipient's id when it is free in the owner's data.
+
+**Scope rules** (`additionsInScope`): an addition is kept only when, once added, the share's scope (`resolveScope`) covers it, and it never brings an existing record of the owner's into the scope.
+- **Environment**: projects, DevOps cards, timeline items, and mind map cards and connections on its chart. A new card goes on the owner's chart of the card it is connected to, else the scope's `chartId`, else the owner's open chart. A connection between cards on two different owner charts is not added.
+- **Person**: a new card counts only together with an ownership or group connection from a card in the scope (so it falls below the person). Connections between cards in the scope, projects under them, and their items and cards also count. A connection to a co-owner stub or anything else outside the scope is never added: it would widen the share.
+- **Hand-picked cards**: connections between those cards, projects under them, and items and cards in those projects. No new mind map cards: the share names its cards.
+- **Project**: timeline items and DevOps cards in that project. No projects or mind map cards.
+- **Label**: DevOps cards with that label. Nothing else.
+- **chartId**: new mind map cards go on that chart.
+
+What the scope cannot hold stays the recipient's own record, as under `off`, in the app. Through the API and MCP it is refused instead (below). A record that builds on a pending one (a card in a pending project) joins that proposal. Approving re-checks the scope: one that no longer fits (what it was added to was removed or is no longer shared) is refused with 409 `proposal_out_of_scope`, and the owner can deny it.
+
+**API and MCP.** A recipient's key or connector creates records the same way: `nodes.create` on the share's chart, `edges.create` between shared cards, and `projects.create`, `items.create`, `cards.create` (with shared references or `share`). Under `approve` they answer 201 with the record (its linked id) and `pending: true`. Under `direct` they answer 201 with the plain record. Under `off`, and on view and comment shares, they answer 403 `share_adds_off`, and nothing is saved. A record marked with `share` that the scope cannot hold is 409 `share_add_out_of_scope`. Owners list, approve and deny with `proposals.list`, `proposals.approve` and `proposals.deny` (`GET /api/v1/envs/{env}/proposals`, `POST …/proposals/{proposal}/approve|deny`). `proposals.list` on a recipient's environment shows their own (`role: proposer`).
+
+**Limits.** At most 200 pending proposals per recipient and share, and 500 records in one save. Past them, additions stay the recipient's own in the app, and the API answers 429 `share_adds_full`. What the recipient is shown about their proposals (titles, connection names) only uses the owner's records the share covers.
+
+**Routes (the app).** `GET /api/shares?env=` also returns `proposals` (pending, for that environment). `GET /api/share-proposals` returns `{proposals (the owner's pending), mine (the caller's own)}`. `POST /api/share-proposals/<id> {approve}` is for the owner, and `DELETE /api/share-proposals/<id>` lets the recipient withdraw.
+
 ### Private data never crosses
 Projections are built only from the owner's data within the scope. The recipient's own nodes, edges and records never reach the owner: only whitelisted field edits on in-scope, non-stub records go back. The owner's private records (e.g. the "Private memo" note in the tests) are never projected and cannot be edited.
 
@@ -84,8 +121,9 @@ Projections are built only from the owner's data within the scope. The recipient
 - `flygon_flow_share_requests`
 - `flygon_flow_share_placements`: primary key (share_id, env_id, record_id). A row with `record_id = '*'` means "attached to this env".
 - `flygon_flow_share_history`
+- `flygon_flow_share_proposals`: additions waiting for the owner, and decided ones. `flygon_flow_shares` gains `adds text not null default 'off'` (`alter table … add column if not exists`), so every existing share is `off`.
 
-The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_share_placements.json` and `_share_history.json` (history keeps the newest 20,000 entries).
+The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_share_placements.json`, `_share_history.json` (history keeps the newest 20,000 entries) and `_share_proposals.json`.
 
 | Method | Use |
 |---|---|
@@ -94,6 +132,8 @@ The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_shar
 | `attach(shareId, envId)`, `detach(shareId, envId)`, `attachedTo(envId)`, `envsFor(shareId)` | which recipient environments a share is placed in |
 | `place(shareId, envId, [placement])`, `placements(shareId, envId)`, `dropPlacements(shareId, envId?)` | per-env layout |
 | `record(entries)`, `history({envId, kind, recordId, shareId, limit})` | field history and comments, newest first |
+| `setAdds(id, adds)` | what the recipient may add (`off`, `approve`, `direct`) |
+| `addProposal(p)`, `getProposal(id)`, `proposals({shareId, ownerEmail, ownerEnv, proposedBy, status, limit})`, `updateProposal(p)`, `decideProposal(p)` | proposed additions (`updateProposal` and `decideProposal` only change a pending one) |
 
 ## Decisions made where the brief was open
 - **"Tag/label"** means a DevOps label id. Node tags are supported through an optional `node.tags[]` that nothing writes yet. Timeline "project tags" are covered by the project scope.
@@ -104,7 +144,7 @@ The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_shar
 - **Members** are a share's owner plus the recipients of shares with the same scope (re-shares), not everyone who can see some card. So two recipients of the same records see each other's email as an assignable member, but recipients of other shares do not.
 - **Conflicts** are detected against what the editor's copy showed, not by time: an edit made after seeing the other person's value is never a conflict, however soon it comes. The notice lasts a day.
 - **Release references** are item ids (as the timeline stores them). The first projection treated them as titles, so they were always dropped. Now a shared release keeps its linked id.
-- **Edges**: only `percent` is editable on in-scope edges. Recipients cannot add or remove nodes or edges in the owner's data.
+- **Edges**: only `percent` is editable on in-scope edges. Recipients cannot remove nodes or edges in the owner's data. They can add them only when the share's `adds` setting allows it (Additions, below).
 - **Placement**: a linked edge is drawn only when both of its ends are placed in the same chart (charts cannot hold cross-chart edges).
 - **Card numbers**: a linked card may be renumbered by the recipient's `cleanDevops` when its number collides. That only affects the recipient's display, because `number` is not an editable field.
 - **Two shares** from the same owner that both cover a node produce two linked copies (one per share id).

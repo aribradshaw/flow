@@ -386,6 +386,9 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     const sr=t.closest?.('[data-sh-revoke]');if(sr){ask(`Stop sharing with ${sr.dataset.who}?\nThe shared cards disappear from their workspace. Their own data stays.`,{ok:'Revoke',danger:true}).then(ok=>{if(ok)shDo(()=>shareApi.revoke(sr.dataset.shRevoke))});return}
     const sa=t.closest?.('[data-sh-approve]');if(sa){shDo(()=>shareApi.decide(sa.dataset.shApprove,true,panel.querySelector(`[data-sh-req-perm="${sa.dataset.shApprove}"]`)?.value));return}
     const sd=t.closest?.('[data-sh-deny]');if(sd){shDo(()=>shareApi.decide(sd.dataset.shDeny,false));return}
+    const pa=t.closest?.('[data-sh-prop-approve]');if(pa){shDo(()=>shareApi.decideProposal(pa.dataset.shPropApprove,true),true);return}
+    const pd=t.closest?.('[data-sh-prop-deny]');if(pd){ask('Deny what they added?\nIt is removed from their copy, and they are told.',{ok:'Deny',danger:true}).then(ok=>{if(ok)shDo(()=>shareApi.decideProposal(pd.dataset.shPropDeny,false))});return}
+    const pw=t.closest?.('[data-sh-withdraw]');if(pw){shDo(()=>shareApi.withdraw(pw.dataset.shWithdraw),true);return}
     // Adding a share closes Settings and opens its chart, so the linked boxes are right there.
     const sat=t.closest?.('[data-sh-attach]');if(sat){const id=sat.dataset.shAttach;shareApi.attach(id,currentEnv()).then(()=>refresh()).then(()=>{
       closeDlg(d);const c=store.db.charts.find(x=>x.id===`sh.${id}.chart`)||store.db.charts.find(x=>x.nodes.some(n=>n.id.startsWith(`sh.${id}.`)));
@@ -416,7 +419,10 @@ function openSettings(tab=getPref('settingsTab')||'account'){
   d.addEventListener('keydown',ev=>ev.stopPropagation());
   d.addEventListener('change',ev=>{
     const p=ev.target.closest?.('[data-sh-perm]');
-    if(p)shareApi.setPermission(p.dataset.shPerm,p.value).catch(e=>alertBox(e.message));
+    // Only edit shares can add: the setting follows the permission (Settings › Sharing redraws).
+    if(p)shareApi.setPermission(p.dataset.shPerm,p.value).then(()=>drawTab('sharing')).catch(e=>alertBox(e.message));
+    const a=ev.target.closest?.('[data-sh-adds]');
+    if(a)shareApi.setAdds(a.dataset.shAdds,a.value).catch(e=>alertBox(e.message));
   });
   d.addEventListener('submit',async ev=>{
     ev.preventDefault();const f=ev.target,panel=d.querySelector('[role=tabpanel]');

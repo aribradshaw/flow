@@ -316,10 +316,15 @@ async function withShares(envId,user,data){
 async function project(envId,user,data){
   const own=stripLinked(data);let d=structuredClone(own);const sig=[],meta=[],conflicts=[],since=new Date(Date.now()-CONFLICT_MS).toISOString();
   for(const {share:s,home} of user.token?[]:await attachedShares(envId,user)){
-    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user)});
+    const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
+    const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),pending});
     d=core.applyProjection(d,p);seenBy(s.ownerEnv,user);
-    sig.push(`${s.id}:${s.permission}:${home.rev}`);
-    meta.push({id:s.id,permission:s.permission,ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members});
+    // Decided in the last week (the browser tells the recipient once): approved, denied.
+    const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
+      .map(x=>({id:x.id,status:x.status,at:x.decidedAt,titles:core.proposalPreview(inScope(home.data,s),x).map(r=>r.title).slice(0,5)}));
+    sig.push(`${s.id}:${s.permission}:${core.addsOf(s)}:${home.rev}:${pending.map(x=>x.id+'@'+x.updatedAt).join('+')}:${decided.length}`);
+    meta.push({id:s.id,permission:s.permission,adds:core.addsOf(s),ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members,
+      ...(p.share.pending.length?{pending:p.share.pending}:{}),...(decided.length?{decided}:{})});
     const sc=core.resolveScope(home.data,s);
     for(const e of await shares.history({envId:s.ownerEnv,over:user.email,since,limit:200}))
       if(sc[SCOPE_KEY[e.kind]]?.includes(e.recordId))conflicts.push(core.conflictView(e,{ownerDb:home.data,share:s,members}));
@@ -364,9 +369,14 @@ async function applyRecipientSave(envId,user,data,base){
     const members=await membersOf(s);
     for(let attempt=0;attempt<3;attempt++){
       const home=await workspaces.get(s.ownerEnv);if(!home?.data)break;
-      const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
-      const {placements,edits}=core.extractRecipientChanges(p,data,base||{});
-      if(attempt===0)await shares.place(s.id,envId,placements);
+      const pending=await shares.proposals({shareId:s.id,proposedBy:user.email,status:'pending'});
+      const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,pending});
+      const {placements,edits,pending:pendingEdits}=core.extractRecipientChanges(p,data,base||{});
+      if(attempt===0){
+        await shares.place(s.id,envId,placements);
+        // Edits of the recipient's pending additions change their proposal.
+        for(const e of pendingEdits){const cur=pending.find(x=>x.id===e.proposal),next=core.applyPendingEdit(home.data,s,cur,e,user,{members});if(next){await shares.updateProposal(next);Object.assign(cur,next)}}
+      }
       const patch=[],hist=[];
       for(const e of edits){
         const r=core.applyRecipientEdit(home.data,s,e,user,{members});if(!r.ok)continue;
@@ -391,6 +401,121 @@ async function applyRecipientSave(envId,user,data,base){
 // records is a client putting back an old copy (Nov 2026: 60 fields on 43 cards), not edits. Refused.
 const BULK_RECORDS=20;
 const bulkWrite=hist=>new Set(hist.filter(h=>h.field!=='comment').map(h=>h.kind+'|'+h.recordId)).size>=BULK_RECORDS;
+// ---- Additions (docs/sharing.md): records a recipient makes inside a share go to its owner, at once
+// (adds 'direct') or as a proposal the owner approves (adds 'approve'). planAdds runs before the recipient's own
+// data is saved (what it takes is not stored there), commitAdds after that save succeeded.
+// -> {data (submitted, without what the shares took), plans:[{share, mode, plan}], refusal?:{status, code, error}}
+// api: the caller is an API key or MCP: an addition the share does not allow is refused (403) instead of
+// staying the recipient's own, as it does in the app.
+async function planAdds(envId,user,submitted,stored,{api=false}={}){
+  let data=submitted;const plans=[];
+  if(user.token||!submitted)return {data,plans};
+  for(const {share:s,home} of await attachedShares(envId,user)){
+    const mode=core.addsOf(s),members=await membersOf(s),known=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:500});
+    const plan=core.planAdditions(home.data,s,data,stored,{pending:known.filter(x=>x.status==='pending'),known,members,promote:mode!=='off'});
+    const pendingNow=known.filter(x=>x.status==='pending').length,n=core.proposalSize(plan),what=['card','item','project','node','edge'].find(k=>plan.records[k].length||plan.refused.some(r=>r.kind===k));
+    const words={card:'DevOps cards',item:'timeline items',project:'projects',node:'mind map cards',edge:'connections'};
+    if(api&&mode==='off'&&(n||plan.refused.length))return {data,plans,refusal:{status:403,code:'share_adds_off',error:`This share does not let you add ${words[what]} to ${s.ownerEmail}'s environment. Ask them to allow additions (Settings › Sharing).`}};
+    if(n&&(n>MAX_ADD_RECORDS||(mode==='approve'&&!plan.joins.length&&pendingNow>=MAX_PENDING))){
+      if(api)return {data,plans,refusal:{status:429,code:'share_adds_full',error:n>MAX_ADD_RECORDS?`Add at most ${MAX_ADD_RECORDS} records at once to a share`:`${pendingNow} additions already wait for ${s.ownerEmail}'s approval. Wait until they decide.`}};
+      continue;
+    }
+    if(api&&plan.refused.length){const r=plan.refused[0];return {data,plans,refusal:r.reason==='out-of-scope'?{status:409,code:'share_add_out_of_scope',error:`That ${r.kind} cannot be added to this share: it would fall outside what is shared`}:{status:400,code:'share_add_refused',error:`That ${r.kind} cannot be added to this share (${r.reason})`}}}
+    if(mode==='off'){
+      // Additions stay the recipient's own, as before; only stale copies of records proposed earlier leave.
+      const stale=plan.taken.filter(t=>!Object.hasOwn(plan.map,t.id));
+      if(stale.length){data=core.takeAdditions(data,s.id,{taken:stale,map:{}});plans.push({share:s,mode,plan:{...plan,records:{node:[],edge:[],project:[],item:[],card:[]},map:{},joins:[]}})}
+      continue;
+    }
+    if(!plan.taken.length)continue;
+    data=core.takeAdditions(data,s.id,plan);plans.push({share:s,mode,plan});
+  }
+  return {data,plans};
+}
+// Cards that left the recipient's data for a share's owner are not deletions (lib/workspaces.mjs source.moved).
+const movedCards=adds=>{const ids=(adds?.plans||[]).flatMap(p=>p.plan.taken.filter(t=>t.kind==='card').map(t=>t.id));return ids.length?{moved:ids}:{}};
+// The owner's mind map cards a share covers, for naming connections in what its recipient is shown.
+const inScope=(db,s)=>{const ids=new Set(core.resolveScope(db,s).nodeIds);return {charts:[{nodes:(db.charts||[]).flatMap(c=>c.nodes||[]).filter(n=>ids.has(n.id))}]}};
+// A recipient's pending proposals per share, and records per save: past these, additions wait (they stay theirs).
+const MAX_PENDING=200,MAX_ADD_RECORDS=500;
+// One decision at a time per proposal (a double click must not add its records twice).
+const proposalTurns=new Map();
+function proposalTurn(id,fn){const run=(proposalTurns.get(id)||Promise.resolve()).then(fn),tail=run.catch(()=>{});proposalTurns.set(id,tail);tail.then(()=>{if(proposalTurns.get(id)===tail)proposalTurns.delete(id)});return run}
+const addedHistory=(s,records,map,by,note)=>Object.entries(records).flatMap(([kind,list])=>(list||[]).map(r=>({shareId:s.id,envId:s.ownerEnv,kind,recordId:map?.[r.id]||r.id,field:'added',old:null,new:note||r.name||r.title||'',by,at:new Date().toISOString()})));
+// -> {<the id the caller used>: {id (linked id in the recipient's environment), pending}}
+async function commitAdds(envId,user,plans){
+  const out={};
+  for(const {share:s,mode,plan} of plans){
+    const members=await membersOf(s);
+    // A stale copy sent a pending record again: its fields update the proposal.
+    for(const r of plan.resent){
+      const cur=await shares.getProposal(r.proposal),home=await workspaces.get(s.ownerEnv);if(!cur||!home?.data)continue;
+      const next=core.applyPendingEdit(home.data,s,cur,{kind:r.kind,id:r.id,fields:r.rec},user,{members});if(next)await shares.updateProposal(next);
+    }
+    if(!core.proposalSize(plan))continue;
+    const now=new Date().toISOString(),ids=(map,pending)=>{for(const [lid,oid] of Object.entries(plan.map))out[lid]={id:core.linkedId(s.id,map?.[oid]||oid),pending}};
+    const join=plan.joins.length?await shares.getProposal(plan.joins[0]):null;
+    if(mode==='direct'&&!(join?.status==='pending')){
+      let done=false;
+      for(let attempt=0;attempt<4&&!done;attempt++){
+        const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)break;
+        const {db,map}=core.applyAdditions(home.data,plan.records);
+        const w=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:db,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'share'}});
+        if(w.refused)break;if(w.conflict)continue;
+        await shares.addProposal({id:randomUUID(),shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,proposedBy:user.email,envId,records:plan.records,status:'applied',createdAt:now,decidedAt:now,decidedBy:user.email,map});
+        await shares.record(addedHistory(s,plan.records,map,user.email));
+        ids(map,false);done=true;
+      }
+      if(done)continue;
+      // The owner's workspace could not take it (a limit, or it kept changing): it waits as a proposal instead.
+    }
+    if(join?.status==='pending'){
+      const merged={...join,records:Object.fromEntries(Object.entries(join.records).map(([k,list])=>[k,[...list,...(plan.records[k]||[])]]))};
+      if(await shares.updateProposal(merged)){ids(null,true);continue}
+    }
+    await shares.addProposal({id:randomUUID(),shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,proposedBy:user.email,envId,records:plan.records,status:'pending',createdAt:now});
+    ids(null,true);
+  }
+  return out;
+}
+// A proposal as its owner sees it in Settings › Sharing and through the API: what it adds, from whom.
+const proposalView=(p,home,s)=>({id:p.id,shareId:p.shareId,env:p.ownerEnv,proposedBy:p.proposedBy,recipientEmail:s?.recipientEmail||p.proposedBy,status:p.status,createdAt:p.createdAt,updatedAt:p.updatedAt||p.createdAt,decidedAt:p.decidedAt||null,decidedBy:p.decidedBy||null,
+  preview:core.proposalPreview(home?.data,p),records:p.records});
+// The owner approves (the records land in their data, owned by them) or denies (the recipient's pending copy goes).
+// -> {status, body}
+async function decideShareProposal(id,user,approve,env=null){
+  return proposalTurn(id,async()=>{
+    for(let attempt=0;attempt<4;attempt++){
+      const p=await shares.getProposal(id);if(!p||!sameEmail(p.ownerEmail,user.email)||(env&&p.ownerEnv!==env))return {status:404,body:{error:'No such proposal in this environment',code:'proposal_not_found'}};
+      if(p.status!=='pending')return {status:409,body:{error:'Already decided',code:'proposal_decided',proposal:p.status}};
+      const s=await shares.get(p.shareId),home=await workspaces.get(p.ownerEnv);
+      if(!s||!home?.data)return {status:404,body:{error:'Not found',code:'not_found'}};
+      const r=core.decideProposal(home.data,s,p,user,approve);
+      if(!r.ok){
+        if(r.error==='out-of-scope')return {status:409,body:{error:'Part of this no longer fits the share (what it was added to was removed or is no longer shared). Deny it, or share that part again.',code:'proposal_out_of_scope'}};
+        return {status:r.error==='revoked'?410:403,body:{error:r.error==='revoked'?'This share was revoked':'Only the owner can decide',code:'proposal_'+r.error}};
+      }
+      if(approve){
+        const w=await workspaces.put(p.ownerEnv,{baseRev:home.rev,data:r.db,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'share'}});
+        if(w.refused)return {status:w.refused.status||403,body:{error:w.refused.error,code:w.refused.code||'limit'}};
+        if(w.conflict)continue;
+        await shares.record(addedHistory(s,p.records,r.map,user.email,`Proposed by ${p.proposedBy}`));
+      }
+      const done=await shares.decideProposal(r.proposal);
+      return {status:200,body:{proposal:proposalView(done||r.proposal,approve?{data:r.db}:home,s)}};
+    }
+    return {status:409,body:{error:'The workspace kept changing; try again',code:'conflict'}};
+  });
+}
+// Proposals for an environment: to its owner (from its shares' recipients), and the caller's own made from it.
+async function proposalsFor(envId,user,{status}={}){
+  const w=await workspaces.get(envId);if(!w)return [];
+  const out=[];
+  if(sameEmail(w.owner,user.email)){const list=await shares.list({ownerEnv:envId});
+    for(const p of await shares.proposals({ownerEnv:envId,ownerEmail:user.email,status:status||undefined,limit:200}))if(p.status!=='applied'||status==='applied')out.push({...proposalView(p,w,list.find(s=>s.id===p.shareId)),role:'owner'})}
+  for(const p of await shares.proposals({proposedBy:user.email,status:status||undefined,limit:200}))if(p.envId===envId){const h=await workspaces.get(p.ownerEnv),s=await shares.get(p.shareId);out.push({...proposalView(p,h&&s?{data:inScope(h.data,s)}:null,null),records:undefined,role:'proposer'})}
+  return out;
+}
 // The owner saved an environment that has shares: changes to shared records become field history (so
 // recipients see who changed what), and one that overwrote a recipient's unseen change records them as
 // `over` (they get a notice on that field).
@@ -550,6 +675,9 @@ async function workspace(req,res){
         if(w?.archivedAt){json(res,404,{error:'Not found'});return}
         const owner=w?.owner||reg?.ownerEmail||(envId===DEFAULT_ENV.id?auth.OWNER_EMAIL:user.email);
         if(!sameEmail(owner,user.email)){json(res,w&&(w.visibility==='public')?403:404,{error:w?.visibility==='public'?'This environment is read-only for you':'Not found'});return}
+        // Records made inside a share that lets its recipient add go to its owner (planAdds), not into this save.
+        const adds=user.token?null:await planAdds(envId,user,body.data,w?stripLinked(w.data):null).catch(e=>{console.error('share additions failed',e?.message);return null});
+        if(adds)body.data=adds.data;
         // Linked copies of shared records are not stored (they are re-projected on every read).
         const incoming=stripLinked(body.data),stored=w?stripLinked(w.data):null;
         if(w&&w.rev===body.baseRev&&shrinks(stored,incoming)&&!body.allowShrink){json(res,422,{error:`This save would remove most of the workspace (${size(stored)} → ${size(incoming)} things). Nothing was changed.`,shrink:true});return}
@@ -562,7 +690,7 @@ async function workspace(req,res){
         // Why cards left (lib/workspaces.mjs records each one): deleted on the board, an undo, or else a
         // snapshot (a restored or merged whole workspace). Tabs running older code send no intent: 'save'.
         const it=body.intent&&typeof body.intent==='object'&&!Array.isArray(body.intent)?body.intent:null;
-        const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
+        const source={...(it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'}),...movedCards(adds)};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source,opidUser:opidId(user)});
         if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code,limit:true});return}
         if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withCombined(envId,user,await withShares(envId,user,out.current.data),u.searchParams.get('combine')||'')).data:null});return}
@@ -571,6 +699,8 @@ async function workspace(req,res){
         // a merge that kept a value they never saw (conflict notices).
         const base=fieldMap(body.fieldBase);
         await recordOwnerChanges(envId,user,stored,data,base).catch(e=>console.error('share history failed',e?.message));
+        // Additions first (after the save, so a 409 changes nothing).
+        if(adds?.plans.length)await commitAdds(envId,user,adds.plans).catch(e=>console.error('share additions failed',e?.message));
         // Placements, and the edits of linked records this user actually made (sync-core noteEdits; after the
         // save, so a 409 changes nothing). Never the difference between the copy sent and the owner's: a
         // copy can be out of date (an old tab, a browser that could not store its latest copy), and a tab
@@ -868,12 +998,14 @@ async function membersApi(req,res){
 //   POST /api/shares/preview {env, scope}               owner: exactly what a share would show (before sharing)
 //   GET  /api/shares?env=<id>                           owner: shares of that environment + pending requests
 //   POST /api/shares {env, recipientEmail, scope, permission, name}       owner only (a recipient cannot re-share)
-//   PATCH /api/shares/<id> {permission}   DELETE /api/shares/<id> (revoke)          owner
+//   PATCH /api/shares/<id> {permission, adds}   DELETE /api/shares/<id> (revoke)    owner (adds: off|approve|direct)
 //   GET  /api/shares/<id>/preview                       owner or recipient
 //   GET  /api/shares/incoming                           recipient: shares with me, and where they are placed
 //   POST /api/shares/<id>/attach {env}   DELETE /api/shares/<id>/attach?env=<id>   recipient, own environment
 //   POST /api/shares/<id>/requests {toEmail, permission, note}   recipient asks the owner to share it on
 //   GET  /api/share-requests   POST /api/share-requests/<id> {approve, permission}   owner decides
+//   GET  /api/share-proposals                           owner: additions waiting for them; mine: the caller's own
+//   POST /api/share-proposals/<id> {approve}   owner decides   DELETE /api/share-proposals/<id>   recipient withdraws
 //   POST /api/shares/<id>/comments {kind, id, comment}  GET /api/shares/<id>/history?kind=&id=
 // Anything the user may not see answers 404. The owner token (tools/env.mjs) acts as the owner.
 function previewOf(db,share){
@@ -910,7 +1042,7 @@ function scopeLabel(db,scope){
 }
 async function sharesApi(req,res){
   const u=new URL(req.url,'http://x'),path=u.pathname;
-  if(path!=='/api/shares'&&!path.startsWith('/api/shares/')&&path!=='/api/share-requests'&&!path.startsWith('/api/share-requests/'))return false;
+  if(path!=='/api/shares'&&!path.startsWith('/api/shares/')&&path!=='/api/share-requests'&&!path.startsWith('/api/share-requests/')&&path!=='/api/share-proposals'&&!path.startsWith('/api/share-proposals/'))return false;
   const tok=tokenUser(req);
   if(!tok&&req.headers.authorization){json(res,401,{error:'Invalid token'});return true}
   if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
@@ -933,17 +1065,19 @@ async function sharesApi(req,res){
     if(path==='/api/shares'&&req.method==='GET'){
       const w=await ownEnv(u.searchParams.get('env'));if(!w)return nf(),true;
       const list=await shares.list({ownerEnv:w.envId});
-      json(res,200,{shares:list.map(s=>{const sum=shareSummary(w.data,s);return {...s,scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}}),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId))});return true;
+      json(res,200,{shares:list.map(s=>{const sum=shareSummary(w.data,s);return {...s,scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}}),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId)),
+        proposals:(await shares.proposals({ownerEnv:w.envId,ownerEmail:user.email,status:'pending'})).map(p=>proposalView(p,w,list.find(s=>s.id===p.shareId)))});return true;
     }
     if(path==='/api/shares'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
       // Linked copies are not the user's to share: they ask the owner instead (a share request).
       if(/"sh\./.test(JSON.stringify(b.scope??null)))return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
-      const r=core.createShare({id:w.envId,ownerEmail:w.owner},user,{recipientEmail:b.recipientEmail,scope:b.scope,permission:b.permission||'view',name:b.name});
+      const r=core.createShare({id:w.envId,ownerEmail:w.owner},user,{recipientEmail:b.recipientEmail,scope:b.scope,permission:b.permission||'view',name:b.name,adds:b.adds||'off'});
       if(!r.ok)return fail(r);
-      // Sharing the same thing with the same person again updates the permission instead of duplicating it.
+      // Sharing the same thing with the same person again updates the permission (and additions) instead of duplicating it.
       const dup=(await shares.list({ownerEnv:w.envId,recipientEmail:r.share.recipientEmail})).find(s=>JSON.stringify(s.scope)===JSON.stringify(r.share.scope));
-      const s=dup?(dup.permission===r.share.permission?dup:await shares.setPermission(dup.id,r.share.permission)):await shares.create(r.share);
+      let s=dup?(dup.permission===r.share.permission?dup:await shares.setPermission(dup.id,r.share.permission)):await shares.create(r.share);
+      if(dup&&b.adds!==undefined&&s.adds!==r.share.adds)s=await shares.setAdds(dup.id,r.share.adds);
       json(res,200,{share:await view(s),existing:!!dup,preview:previewOf(w.data,s)});
     });return true}
     if(path==='/api/shares/incoming'&&req.method==='GET'){
@@ -962,6 +1096,22 @@ async function sharesApi(req,res){
       if(out.share)await shares.create(out.share);
       json(res,200,{request:await shares.decide(out.request),share:out.share||null});
     });return true}
+    // Additions waiting for the owner (docs/sharing.md): the owner's to decide, the recipient's own to follow.
+    if(path==='/api/share-proposals'&&req.method==='GET'){
+      const pend=await shares.proposals({ownerEmail:user.email,status:'pending'}),homes=new Map(),shareOf=new Map();
+      for(const p of pend){if(!homes.has(p.ownerEnv))homes.set(p.ownerEnv,await workspaces.get(p.ownerEnv));if(!shareOf.has(p.shareId))shareOf.set(p.shareId,await shares.get(p.shareId))}
+      const mine=await shares.proposals({proposedBy:user.email,limit:50});
+      json(res,200,{proposals:pend.map(p=>proposalView(p,homes.get(p.ownerEnv),shareOf.get(p.shareId))),mine:mine.filter(p=>p.status!=='applied').map(p=>({...proposalView(p,null,null),records:undefined,preview:core.proposalPreview({},p)}))});return true;
+    }
+    m=/^\/api\/share-proposals\/([A-Za-z0-9-]{1,64})$/.exec(path);
+    if(m&&req.method==='POST'){readJson(req,res,async b=>{const r=await decideShareProposal(m[1],user,!!b?.approve);json(res,r.status,r.body)});return true}
+    // The recipient takes back one of their pending proposals.
+    if(m&&req.method==='DELETE'){
+      const p=await shares.getProposal(m[1]);if(!p||!sameEmail(p.proposedBy,user.email))return nf(),true;
+      const done=await shares.decideProposal({...p,status:'withdrawn',decidedBy:user.email,decidedAt:new Date().toISOString()});
+      if(!done)return json(res,409,{error:'Already decided'}),true;
+      json(res,200,{proposal:{...proposalView(done,null,null),records:undefined}});return true;
+    }
     m=/^\/api\/shares\/([A-Za-z0-9-]{1,64})(?:\/(preview|attach|requests|comments|history))?$/.exec(path);
     if(!m)return nf(),true;
     const s=await shares.get(m[1]),isOwner=s&&sameEmail(s.ownerEmail,user.email),isRecipient=s&&!s.revokedAt&&sameEmail(s.recipientEmail,user.email)&&!user.token;
@@ -969,9 +1119,14 @@ async function sharesApi(req,res){
     const sub=m[2]||'';
     if(!sub&&req.method==='GET'){json(res,200,{share:await view(s)});return true}
     if(!sub&&req.method==='PATCH'){if(!isOwner)return nf(),true;readJson(req,res,async b=>{
-      if(!core.PERMISSIONS.includes(b?.permission))return json(res,400,{error:'Pick view, comment or edit'});
+      if(b?.permission===undefined&&b?.adds===undefined)return json(res,400,{error:'Send permission or adds'});
+      if(b.permission!==undefined&&!core.PERMISSIONS.includes(b.permission))return json(res,400,{error:'Pick view, comment or edit'});
+      if(b.adds!==undefined&&!core.ADDS.includes(b.adds))return json(res,400,{error:'Pick off, approve or direct'});
       if(s.revokedAt)return fail({error:'revoked'});
-      json(res,200,{share:await view(await shares.setPermission(s.id,b.permission))});
+      let out=s;if(b.permission!==undefined)out=await shares.setPermission(s.id,b.permission);
+      // Only edit shares can add; view and comment shares are always off.
+      if(b.adds!==undefined||out.permission!=='edit')out=await shares.setAdds(s.id,out.permission==='edit'?b.adds??out.adds:'off');
+      json(res,200,{share:await view(out)});
     });return true}
     if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;const gone=await shares.revoke(s.id);photoCache.clear();json(res,200,{share:await view(gone),revoked:true});return true}
     if(sub==='preview'&&req.method==='GET'){
@@ -1079,9 +1234,14 @@ const apiStore=(key,user)=>{
       const seen=served.get(id);if(!seen)return workspaces.put(id,opts);
       const base=fieldBase(seen,opts.data),refused=await sharedRefusal(id,user,seen,opts.data,base);
       if(refused)return {refused};
-      const out=await workspaces.put(id,{...opts,data:stripLinked(opts.data)});
-      if(out.ok)await applyRecipientSave(id,user,opts.data,base).catch(e=>console.error('share write-back failed',e?.message));
-      return out;
+      // A record made inside a share: added to its owner's data, proposed, or refused (planAdds).
+      const adds=await planAdds(id,user,opts.data,stripLinked(seen),{api:true});
+      if(adds.refusal)return {refused:adds.refusal};
+      const out=await workspaces.put(id,{...opts,data:stripLinked(adds.data),source:{...opts.source,...movedCards(adds)}});
+      if(!out.ok)return out;
+      const added=adds.plans.length?await commitAdds(id,user,adds.plans).catch(e=>{console.error('share additions failed',e?.message);return {}}):{};
+      await applyRecipientSave(id,user,adds.data,base).catch(e=>console.error('share write-back failed',e?.message));
+      return Object.keys(added).length?{...out,added}:out;
     },
   };
 };
@@ -1151,18 +1311,20 @@ async function officeApi(req,res){
   return true;
 }
 const apiRateLimit=a=>a.operation?.tags?.includes('office')?officeLimit(a):apiLimit(a);
+// Share additions for the API and MCP (proposals.*): never for the owner token.
+const apiProposals={list:(envId,user,o)=>user.token?[]:proposalsFor(envId,user,o),decide:(id,user,approve,env)=>user.token?{status:404,body:{error:'Not found',code:'proposal_not_found'}}:decideShareProposal(id,user,approve,env)};
 async function apiV1Route(req,res){
   if(!req.url.startsWith('/api/v1'))return false;
   // One authentication per request (it also counts towards the key's rate limit).
   let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
   if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState});
+  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState}),
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState,proposals:apiProposals}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 

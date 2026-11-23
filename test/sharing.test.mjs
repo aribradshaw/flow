@@ -11,7 +11,8 @@ import {join} from 'node:path';
 import net from 'node:net';
 import {lockedChanges,resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
   createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
-  shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView} from '../lib/sharing-core.mjs';
+  shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView,
+  ADDS,addsOf,planAdditions,takeAdditions,applyAdditions,applyPendingEdit,additionsInScope,decideProposal,proposalPreview,newLinkedId,shareChartId} from '../lib/sharing-core.mjs';
 import {fieldBase,clashes,withHeld,linkedFields,noteEdits,settleEdits} from '../public/sync-core.js';
 import {shareStore,SCHEMA,migrate} from '../lib/shares.mjs';
 
@@ -269,6 +270,20 @@ describe('re-share requests',()=>{
 async function storageChecks(store){
   const s=share({kind:'person',nodeId:'bo'},'comment');
   await store.create(s);
+  // Additions: every share starts 'off'; proposals are stored, updated while pending, decided once.
+  assert.equal((await store.get(s.id)).adds,'off');
+  assert.equal((await store.setAdds(s.id,'approve')).adds,'approve');assert.equal((await store.list({ownerEnv:'default-workspace'}))[0].adds,'approve');
+  await assert.rejects(store.setAdds(s.id,'everything'));
+  const prop={id:'prop-1',shareId:s.id,ownerEnv:'default-workspace',ownerEmail:OWNER.toUpperCase(),proposedBy:BO,envId:'bo-env',records:{node:[],edge:[],project:[],item:[],card:[{id:'k-new',title:'New'}]},status:'pending'};
+  await store.addProposal(prop);
+  assert.equal((await store.proposals({ownerEmail:OWNER,status:'pending'})).length,1);
+  assert.equal((await store.proposals({shareId:s.id,proposedBy:BO.toUpperCase()}))[0].records.card[0].title,'New');
+  assert.equal((await store.updateProposal({...prop,records:{...prop.records,card:[{id:'k-new',title:'Renamed'}]}})).records.card[0].title,'Renamed');
+  assert.equal((await store.decideProposal({id:'prop-1',status:'denied',decidedBy:OWNER})).status,'denied');
+  assert.equal(await store.decideProposal({id:'prop-1',status:'approved',decidedBy:OWNER}),null,'a decided proposal does not change again');
+  assert.equal(await store.updateProposal({...prop,records:{}}),null,'nor do its records');
+  assert.equal((await store.getProposal('prop-1')).decidedBy,OWNER);
+  await store.setAdds(s.id,'off');
   assert.equal((await store.get(s.id)).recipientEmail,BO);
   assert.deepEqual((await store.get(s.id)).scope,{kind:'person',nodeId:'bo'});
   assert.equal((await store.list({recipientEmail:BO.toUpperCase()})).length,1);
@@ -458,7 +473,7 @@ describe('storage',()=>{
     test('migrations run twice, then the same checks pass',async()=>{
       await migrate(pool);await migrate(pool);
       const t=(await pool.query(`select table_name from information_schema.tables where table_name like 'flygon_flow_share%' order by 1`)).rows.map(r=>r.table_name);
-      assert.deepEqual(t,['flygon_flow_share_history','flygon_flow_share_placements','flygon_flow_share_requests','flygon_flow_shares']);
+      assert.deepEqual(t,['flygon_flow_share_history','flygon_flow_share_placements','flygon_flow_share_proposals','flygon_flow_share_requests','flygon_flow_shares']);
       assert.ok(SCHEMA.every(q=>/if not exists/.test(q)),'every statement is idempotent');
       await storageChecks(shareStore({dir,db:async()=>pool}));
     });
@@ -475,4 +490,146 @@ test('lockedChanges: deletes, stub edits and fields a share does not carry; layo
   assert.deepEqual(edit(d=>{d.charts[0].nodes[1].x=9}),[],'a stub can still be moved');
   assert.deepEqual(edit(d=>{d.charts[0].edges=[]}),[{kind:'edge',id:'sh.s1.e',field:'deleted'}]);
   assert.deepEqual(edit(d=>{d.devops.cards[0].project='mine'}),[{kind:'card',id:'sh.s1.k',field:'project'}]);
+});
+
+// ---- Additions: recipients adding records inside a share (share.adds) ----
+describe('additions',()=>{
+  const plan=(sh,sent,stored,opts={})=>planAdditions(owner(),sh,sent,stored,opts);
+  // Bo's copy as the browser has it: his own data with the share's projection merged in.
+  const copy=(sh,pending=[])=>applyProjection(recipient(),projectForRecipient(owner(),sh,[],{pending}));
+  const L=(sh,id)=>linkedId(sh.id,id);
+  const newCard=(sh,extra)=>({id:'k-bo1',number:7,title:'Bo’s idea',description:'',column:'requests',project:L(sh,'p-cb'),labels:[L(sh,'l-high')],points:null,due:'',assignees:[{node:L(sh,'bo'),role:'developer'},{node:'bo-own',role:'tester'}],checklist:[],links:[],item:'',...extra});
+  test('adds: off by default, only edit shares add; view and comment shares are always off',()=>{
+    assert.deepEqual(ADDS,['off','approve','direct']);
+    assert.equal(share({kind:'environment'}).adds,'off');
+    const r=createShare(env,{email:OWNER},{recipientEmail:BO,scope:{kind:'environment'},permission:'view',adds:'direct'});assert.equal(r.share.adds,'off');
+    assert.equal(createShare(env,{email:OWNER},{recipientEmail:BO,scope:{kind:'environment'},permission:'edit',adds:'sometimes'}).field,'adds');
+    assert.equal(addsOf({permission:'edit',adds:'approve'}),'approve');assert.equal(addsOf({permission:'comment',adds:'approve'}),'off');
+    assert.equal(addsOf({permission:'edit',adds:'direct',revokedAt:'x'}),'off');assert.equal(addsOf({permission:'edit'}),'off');
+  });
+  test('a new card in a shared project is an addition; its private references are dropped',()=>{
+    const sh={...share({kind:'person',nodeId:'bo'}),adds:'approve'},before=copy(sh),sent=structuredClone(before);
+    sent.devops.cards.push(newCard(sh));
+    const p=plan(sh,sent,recipient(),{members:[OWNER,BO]});
+    assert.deepEqual(p.taken,[{kind:'card',id:'k-bo1'}]);assert.equal(p.map['k-bo1'],'k-bo1');
+    const c=p.records.card[0];
+    assert.equal(c.project,'p-cb');assert.deepEqual(c.labels,['l-high']);assert.deepEqual(c.assignees,[{node:'bo',role:'developer'}],"Bo's private person never reaches the owner");
+    assert.equal(c.localNumber,7);
+    // What Bo stores: the card left; it comes back as a linked (pending) copy.
+    const kept=takeAdditions(sent,sh.id,p);assert.ok(!kept.devops.cards.some(x=>x.id==='k-bo1'));
+    // A card Bo had before is his own; editing it is not an addition.
+    const stored=structuredClone(recipient());stored.devops.cards.push(newCard(sh));
+    assert.equal(plan(sh,sent,stored).taken.length,0);
+    // A card in his own project, or in no project, stays his.
+    const mine=structuredClone(before);mine.projects.push({id:'p-mine',name:'Mine',color:'#7cb980',entity:''});mine.devops.cards.push(newCard(sh,{project:'p-mine'}),newCard(sh,{id:'k-bo2',project:'',labels:[]}));
+    assert.equal(plan(sh,mine,recipient()).taken.length,0);
+  });
+  test('scope limits: only what the scope can hold once added',()=>{
+    const base=s=>({...share(s),adds:'direct'});
+    const node=(sh,id='n-bo',name='Bo’s new node')=>({id,name,type:'entity',x:10,y:20});
+    // Whole environment: a node on the share's chart, an edge between shared nodes, a project under a shared node.
+    let sh=base({kind:'environment'}),d=copy(sh);
+    d.charts.find(c=>c.id===shareChartId(sh.id)).nodes.push(node(sh));
+    d.charts.find(c=>c.id===shareChartId(sh.id)).edges.push({id:'e-bo',from:L(sh,'marsh'),to:'n-bo',type:'ownership',percent:'20'},{id:'e-x',from:L(sh,'cleo'),to:L(sh,'labs'),type:'group',percent:''});
+    d.projects.push({id:'p-bo',name:'Bo project',color:'#7cb980',entity:'n-bo'});
+    d.timeline.push({id:'i-bo',title:'Bo date',kind:'milestone',status:'planned',start:'2026-12-02',end:'',priority:'',release:'',projects:['p-bo'],owner:'',link:'',notes:''});
+    let p=plan(sh,d,recipient());
+    assert.deepEqual(sorted(p.taken.map(t=>t.kind+':'+t.id)),['edge:e-bo','edge:e-x','item:i-bo','node:n-bo','project:p-bo']);
+    assert.equal(p.records.node[0].chart,'c1','placed on the chart of the node it is joined to');
+    // Person scope: a lone node is not in scope (it stays Bo's); joined under Marsh by ownership it is.
+    sh=base({kind:'person',nodeId:'bo'});d=copy(sh);const sc=d.charts.find(c=>c.id===shareChartId(sh.id));
+    sc.nodes.push(node(sh));
+    assert.equal(plan(sh,d,recipient()).taken.length,0,'a lone node is outside a person scope');
+    sc.edges.push({id:'e-bo',from:L(sh,'marsh'),to:'n-bo',type:'ownership',percent:''});
+    assert.deepEqual(sorted(plan(sh,d,recipient()).taken.map(t=>t.id)),['e-bo','n-bo']);
+    // ... and a node Bo already had on the share's chart is promoted when he joins it under Marsh.
+    const had=structuredClone(recipient());had.charts.push({id:shareChartId(sh.id),name:'x',nodes:[node(sh)],edges:[]});
+    assert.deepEqual(sorted(plan(sh,d,had).taken.map(t=>t.id)),['e-bo','n-bo']);
+    assert.equal(plan(sh,d,had,{promote:false}).taken.length,0,'never when additions are off');
+    // An edge pointing up at Kestrel Group (a stub, outside the scope) is not in scope.
+    const up=copy(sh);up.charts.find(c=>c.id===shareChartId(sh.id)).edges.push({id:'e-up',from:L(sh,'marsh'),to:L(sh,'flygon'),type:'group',percent:''});
+    assert.equal(plan(sh,up,recipient()).taken.length,0);
+    // Hand-picked nodes: edges between them yes, new nodes no.
+    sh=base({kind:'nodes',nodeIds:['marsh','campaign','bo']});d=copy(sh);
+    d.charts.find(c=>c.id===shareChartId(sh.id)).nodes.push(node(sh));
+    d.charts.find(c=>c.id===shareChartId(sh.id)).edges.push({id:'e-nb',from:L(sh,'bo'),to:L(sh,'campaign'),type:'ownership',percent:'5'},{id:'e-nn',from:L(sh,'bo'),to:'n-bo',type:'ownership',percent:''});
+    assert.deepEqual(plan(sh,d,recipient()).taken.map(t=>t.id),['e-nb']);
+    // Project scope: items and cards in the project; no projects or nodes.
+    sh=base({kind:'project',projectId:'p-cb'});d=copy(sh);
+    d.devops.cards.push(newCard(sh));d.timeline.push({id:'i-bo',title:'Bo date',kind:'milestone',status:'planned',start:'2026-12-02',end:'',priority:'',release:'',projects:[L(sh,'p-cb')],owner:'',link:'',notes:''});
+    assert.deepEqual(sorted(plan(sh,d,recipient()).taken.map(t=>t.id)),['i-bo','k-bo1']);
+    // Label scope: a card with the label; one without it is not in scope.
+    sh=base({kind:'label',label:'l-mkt'});d=copy(sh);
+    d.devops.cards.push(newCard(sh,{project:'',labels:[L(sh,'l-mkt')]}),newCard(sh,{id:'k-bo2',project:'',labels:[L(sh,'l-high')]}));
+    assert.deepEqual(plan(sh,d,recipient()).taken.map(t=>t.id),['k-bo1']);
+    // A chart-limited share puts new nodes on that chart.
+    sh=base({kind:'environment',chartId:'c1'});d=copy(sh);d.charts.find(c=>c.id===shareChartId(sh.id)).nodes.push(node(sh));
+    assert.equal(plan(sh,d,recipient()).records.node[0].chart,'c1');
+  });
+  test('explicitly marked records (sh.<share>.new-<id>): kept when the scope holds them, refused when not',()=>{
+    let sh={...share({kind:'environment'}),adds:'approve'},d=copy(sh);
+    d.devops.cards.push({...newCard(sh,{project:'',labels:[]}),id:newLinkedId(sh.id,'x1')});
+    let p=plan(sh,d,recipient());assert.equal(p.records.card[0].id,'x1');assert.equal(p.records.card[0].localId,newLinkedId(sh.id,'x1'));
+    sh={...share({kind:'project',projectId:'p-cb'}),adds:'approve'};d=copy(sh);
+    d.projects.push({id:newLinkedId(sh.id,'p9'),name:'Not here',color:'#7cb980',entity:''});
+    p=plan(sh,d,recipient());assert.equal(p.taken.length,0);assert.deepEqual(p.refused.map(r=>[r.kind,r.reason]),[['project','out-of-scope']]);
+  });
+  test('pending records: shown as linked copies marked pending; edits change the proposal; stale copies are not added twice',()=>{
+    const sh={...share({kind:'person',nodeId:'bo'}),adds:'approve'},d=copy(sh);d.devops.cards.push(newCard(sh));
+    const p=plan(sh,d,recipient(),{members:[OWNER,BO]});
+    const prop={id:'q1',shareId:sh.id,ownerEnv:sh.ownerEnv,ownerEmail:OWNER,proposedBy:BO,records:p.records,status:'pending',createdAt:'2026-11-22T00:00:00.000Z'};
+    const proj=projectForRecipient(owner(),sh,[],{pending:[prop],members:[OWNER,BO]});
+    const c=proj.cards.find(x=>x.id===L(sh,'k-bo1'));
+    assert.equal(c.linked.pending,'q1');assert.equal(c.project,L(sh,'p-cb'));assert.deepEqual(c.labels,[L(sh,'l-high')]);assert.deepEqual(proj.share.pending,[L(sh,'k-bo1')]);
+    // Bo renames it in his copy: a pending edit, not an edit of the owner's data.
+    const mine=applyProjection(recipient(),proj),sent=structuredClone(mine);sent.devops.cards.find(x=>x.id===L(sh,'k-bo1')).title='Better idea';
+    const ch=extractRecipientChanges(proj,sent);
+    assert.deepEqual(ch.edits,[]);assert.deepEqual(ch.pending,[{proposal:'q1',kind:'card',id:'k-bo1',fields:{title:'Better idea'}}]);
+    const next=applyPendingEdit(owner(),sh,prop,ch.pending[0],{email:BO},{members:[OWNER,BO]});
+    assert.equal(next.records.card[0].title,'Better idea');
+    assert.equal(applyPendingEdit(owner(),sh,{...prop,status:'denied'},ch.pending[0],{email:BO}),null);
+    // A stale copy still holding k-bo1 under its own id: taken out again, its fields update the proposal.
+    const stale=structuredClone(d);stale.devops.cards.find(x=>x.id==='k-bo1').title='Typed late';
+    const again=plan(sh,stale,recipient(),{pending:[prop],known:[prop]});
+    assert.deepEqual(again.taken,[{kind:'card',id:'k-bo1'}]);assert.equal(again.records.card.length,0);assert.equal(again.resent[0].proposal,'q1');
+    assert.equal(plan(sh,stale,recipient(),{known:[{...prop,status:'denied'}]}).resent.length,0,'a denied one is just dropped');
+    // A new card in a pending project joins that proposal.
+    const p2={...prop,records:{node:[],edge:[],project:[{id:'p-new',name:'New',color:'',entity:'marsh'}],item:[],card:[]}};
+    const withP=applyProjection(recipient(),projectForRecipient(owner(),sh,[],{pending:[p2]}));withP.devops.cards.push(newCard(sh,{project:L(sh,'p-new'),labels:[]}));
+    const j=plan(sh,withP,recipient(),{pending:[p2],known:[p2]});assert.deepEqual(j.joins,['q1']);assert.equal(j.records.card[0].project,'p-new');
+  });
+  test('approve adds the records to the owner, owned by the owner; deny adds nothing; both decide once',()=>{
+    const sh={...share({kind:'person',nodeId:'bo'}),adds:'approve'},d=copy(sh);d.devops.cards.push(newCard(sh));
+    const prop={id:'q1',shareId:sh.id,ownerEnv:sh.ownerEnv,ownerEmail:OWNER,proposedBy:BO,records:plan(sh,d,recipient(),{members:[OWNER,BO]}).records,status:'pending'};
+    assert.equal(decideProposal(owner(),sh,prop,{email:BO},true).error,'forbidden','only the owner decides');
+    const yes=decideProposal(owner(),sh,prop,{email:OWNER},true);
+    assert.equal(yes.proposal.status,'approved');
+    const c=yes.db.devops.cards.find(x=>x.id==='k-bo1');
+    assert.equal(c.number,5,"the owner's next number");assert.equal(c.project,'p-cb');assert.equal(yes.db.devops.nextNumber,6);
+    assert.ok(!('localNumber' in c)&&!('localId' in c));
+    assert.ok(resolveScope(yes.db,sh).cardIds.includes('k-bo1'),'it flows back as a normal linked copy');
+    assert.equal(decideProposal(owner(),sh,yes.proposal,{email:OWNER},true).error,'decided');
+    const no=decideProposal(owner(),sh,prop,{email:OWNER},false);assert.equal(no.proposal.status,'denied');assert.equal(no.db,undefined);
+    // Its project is gone by the time the owner decides: approving is refused.
+    const gone=owner();gone.projects=gone.projects.filter(x=>x.id!=='p-cb');
+    assert.equal(decideProposal(gone,sh,prop,{email:OWNER},true).error,'out-of-scope');
+    // An id taken in the meantime gets a new one.
+    const taken=owner();taken.devops.cards.push({...taken.devops.cards[0],id:'k-bo1',number:9});
+    const r=applyAdditions(taken,prop.records);assert.notEqual(r.map['k-bo1'],'k-bo1');assert.equal(r.db.devops.cards.filter(x=>x.id==='k-bo1').length,1);
+    assert.deepEqual(proposalPreview(owner(),prop),[{kind:'card',id:'k-bo1',title:'Bo’s idea',detail:'Studio launch'}]);
+  });
+  test('a card of theirs moved into a shared project is an addition (made first, project picked after); not when off',()=>{
+    const sh={...share({kind:'person',nodeId:'bo'}),adds:'approve'},stored=structuredClone(recipient());stored.devops.cards.push(newCard(sh,{project:'',labels:[]}));
+    const sent=applyProjection(stored,projectForRecipient(owner(),sh));sent.devops.cards.find(c=>c.id==='k-bo1').project=L(sh,'p-cb');
+    assert.deepEqual(plan(sh,sent,stored).taken,[{kind:'card',id:'k-bo1'}]);
+    assert.equal(plan(sh,sent,stored,{promote:false}).taken.length,0);
+    // One that was in the shared project already (made while additions were off) stays his.
+    const old=structuredClone(recipient());old.devops.cards.push(newCard(sh));
+    assert.equal(plan(sh,applyProjection(old,projectForRecipient(owner(),sh)),old).taken.length,0);
+  });
+  test('additionsInScope drops dependents of what falls out',()=>{
+    const sh=share({kind:'person',nodeId:'bo'});
+    const r=additionsInScope(owner(),sh,{node:[{id:'n1',name:'Lone',type:'entity',x:0,y:0,chart:'c1'}],edge:[],project:[{id:'p1',name:'P',color:'',entity:'n1'}],item:[],card:[{id:'k1',title:'K',project:'p1',labels:[],assignees:[]}]});
+    assert.deepEqual(r.dropped.map(x=>x.id).sort(),['k1','n1','p1']);
+  });
 });

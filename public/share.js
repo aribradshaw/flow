@@ -13,6 +13,10 @@
 //   shareOf(x) / members(x)    the share a linked record came from; its members (owner and recipients).
 //   clashHtml / clashClick     the "Changed by X just now — see previous" notice on a field whose value
 //                        someone else overwrote (store.conflicts from sync.js), with a one-click restore.
+//   Additions (share.adds): a record the recipient added that waits for the owner is linked with pending
+//                        (linkOf(x).pending) and marked "Pending approval"; decisionNotice() says once when
+//                        the owner approved or denied some. The owner sets "Recipients can add" per edit share
+//                        and decides in Settings › Sharing.
 import {store} from './store.js';
 import {esc,hint} from './ui.js';
 import {icon} from './icons.js';
@@ -35,15 +39,19 @@ export function linkOf(x){
   const f=parseForeign(x?.id);if(f)return foreignLink(x,f);
   const m=SH.exec(String(x?.id||''));if(!m)return null;
   const meta=(store.db.shares||[]).find(s=>s.id===m[1])||{},l=x.linked||{};
-  return {shareId:m[1],id:m[2],permission:l.permission||meta.permission||'view',ownerEmail:meta.ownerEmail||'',ownerEnvName:meta.ownerEnvName||'',stub:!!l.stub,readOnly:!!(l.readOnly||l.stub)};
+  return {shareId:m[1],id:m[2],permission:l.permission||meta.permission||'view',ownerEmail:meta.ownerEmail||'',ownerEnvName:meta.ownerEnvName||'',stub:!!l.stub,readOnly:!!(l.readOnly||l.stub),
+    pending:!!(l.pending||meta.pending?.includes(x.id))};
 }
+// What a share lets its recipient add: 'off', 'approve' (the owner approves each addition) or 'direct'.
+export const ADDS=[['off','Off'],['approve','Needs your approval'],['direct','Allowed']];
+const PENDING_TIP=l=>`Pending approval: you added this to ${l.ownerEmail||'the owner'}’s environment. It is theirs once they approve it; if they deny it, it goes.`;
 export const canEdit=x=>{const l=linkOf(x);return !l||(!l.readOnly&&RANK[l.permission]>=2)};
 export const canComment=x=>{const l=linkOf(x);return !!l&&!l.foreign&&!l.readOnly&&RANK[l.permission]>=1};
 export const locked=x=>!canEdit(x);
 const PERM_WORDS={view:'view only',comment:'can comment',edit:'can edit'};
 // Timeline items and DevOps cards: who shared it and what this user may do with it.
 const foreignTip=l=>`From ${l.envName}, shown combined with this environment. ${l.innerShare?`Shared with you there${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. `:''}Edits go back to ${l.envName}; open it to delete, add or re-file.`;
-export const linkedTip=l=>l.foreign?foreignTip(l):l.stub?sharedTip(l):`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. ${l.permission==='edit'?'Fields the owner allows are editable; the rest are locked.':l.permission==='comment'?'You can comment; its fields are locked.':'Its fields are locked.'}`;
+export const linkedTip=l=>l.foreign?foreignTip(l):l.pending?PENDING_TIP(l):l.stub?sharedTip(l):`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. ${l.permission==='edit'?'Fields the owner allows are editable; the rest are locked.':l.permission==='comment'?'You can comment; its fields are locked.':'Its fields are locked.'}`;
 export const lockedMsg=x=>{const l=linkOf(x);return !l?'':l.foreign&&!l.innerShare?`This is in ${l.envName}. Open it there to change that.`:l.stub?'Co-owner cards are read-only.':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. Ask the owner for edit access.`};
 // The link badge of the chart's linked boxes, for timeline items and DevOps cards. inline: in a row.
 // Where a record that is not this environment's own belongs, for a refusal (delete, duplicate, re-file).
@@ -51,10 +59,10 @@ export const ownerMsg=(x,what='It')=>{const l=linkOf(x);return l?.foreign?`${wha
 export function sharedBadge(x,{inline=false,tip=true}={}){
   const l=linkOf(x);if(!l)return '';
   if(l.foreign)return envBadge(x,{inline,tip:tip?linkedTip(l):'',shared:!!l.innerShare});
-  const label=l.stub?'Co-owner stub, read-only':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`;
-  return `<span class="sh-badge${inline?' in':''}${l.stub?' stub':''}" role="img" aria-label="${esc(label)}"${tip?` data-tip="${esc(linkedTip(l))}"`:''}>${icon(l.stub?'ban':'link',inline?9:11)}</span>`;
+  const label=l.pending?'Pending approval':l.stub?'Co-owner stub, read-only':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`;
+  return `<span class="sh-badge${inline?' in':''}${l.stub?' stub':''}${l.pending?' pending':''}" role="img" aria-label="${esc(label)}"${tip?` data-tip="${esc(linkedTip(l))}"`:''}>${icon(l.pending?'clock':l.stub?'ban':'link',inline?9:11)}</span>`;
 }
-export const sharedChip=x=>{const l=linkOf(x);return l?.foreign?envBadge(x,{tip:linkedTip(l),shared:!!l.innerShare}):l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(linkedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''};
+export const sharedChip=x=>{const l=linkOf(x);return l?.foreign?envBadge(x,{tip:linkedTip(l),shared:!!l.innerShare}):l?`<span class="sh-chip${l.stub?' stub':''}${l.pending?' pending':''}" data-tip="${esc(linkedTip(l))}">${icon(l.pending?'clock':l.stub?'ban':'link',11)}${l.pending?'Pending approval':l.stub?'Co-owner':'Shared'}</span>`:''};
 export const sharedNote=x=>{const l=linkOf(x);return l?`<p class="sh-note">${esc(linkedTip(l))}</p>`:''};
 // Two records from the same place: both one's own, or both from the same share.
 export const sameSource=(x,y)=>(linkOf(x)?.shareId||'')===(linkOf(y)?.shareId||'');
@@ -65,7 +73,7 @@ export const shareOf=x=>{const l=linkOf(x);if(!l)return null;
   return (store.db.shares||[]).find(s=>s.id===l.shareId)||null};
 // Members of the share a linked record came from: [{id ('@email' or a linked person card), name, image?, owner}].
 export const members=x=>shareOf(x)?.members||[];
-export const sharedTip=l=>l.stub?`Co-owner of a card shared with you${l.ownerEmail?' by '+l.ownerEmail:''}. Name only; read-only.`:`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERMS.find(p=>p[0]===l.permission)?.[1].toLowerCase()||l.permission}. Your layout is your own.`;
+export const sharedTip=l=>l.pending?PENDING_TIP(l):l.stub?`Co-owner of a card shared with you${l.ownerEmail?' by '+l.ownerEmail:''}. Name only; read-only.`:`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERMS.find(p=>p[0]===l.permission)?.[1].toLowerCase()||l.permission}. Your layout is your own.`;
 
 const call=async(method,path,body)=>{
   const r=await fetch(path,{method,cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body&&JSON.stringify(body)});
@@ -77,6 +85,10 @@ export const api={
   list:env=>call('GET','/api/shares?env='+encodeURIComponent(env)),
   incoming:()=>call('GET','/api/shares/incoming'),
   setPermission:(id,permission)=>call('PATCH','/api/shares/'+id,{permission}),
+  setAdds:(id,adds)=>call('PATCH','/api/shares/'+id,{adds}),
+  proposals:()=>call('GET','/api/share-proposals'),
+  decideProposal:(id,approve)=>call('POST','/api/share-proposals/'+id,{approve}),
+  withdraw:id=>call('DELETE','/api/share-proposals/'+id),
   revoke:id=>call('DELETE','/api/shares/'+id),
   attach:(id,env)=>call('POST',`/api/shares/${id}/attach`,{env}),
   detach:(id,env)=>call('DELETE',`/api/shares/${id}/attach?env=${encodeURIComponent(env)}`),
@@ -132,7 +144,8 @@ function previewHtml(p){
     +list('DevOps cards',cards.concat(more((p.cards||[]).length,24)),'None — pick “The whole environment” to share the full board')
     +`<p class="acct-muted">${p.items.length} timeline item${p.items.length===1?'':'s'} · ${p.cards.length} DevOps card${p.cards.length===1?'':'s'}. Nothing else in this environment is shared.</p>`;
 }
-export function openShareDialog({nodeId=null,scope=null,from=null,email='',permission='view'}={}){
+const addsSelect=(attrs,cur='off',disabled=false)=>`<select ${attrs} aria-label="Recipients can add"${disabled?' disabled title="Only edit shares can add"':''}>${ADDS.map(([v,t])=>`<option value="${v}"${v===(cur||'off')?' selected':''}>${t}</option>`).join('')}</select>`;
+export function openShareDialog({nodeId=null,scope=null,from=null,email='',permission='view',adds='off'}={}){
   const opts=scopeOptions(nodeId),first=scope?JSON.stringify(scope):opts[0][0];
   if(scope&&!opts.some(o=>o[0]===first))opts.unshift([first,scope.kind==='environment'?`The whole environment (${store.db.environment?.name||'workspace'})`:'Selected']);
   // Prefer the whole-environment option near the top when sharing from Settings (no card picked).
@@ -141,15 +154,16 @@ export function openShareDialog({nodeId=null,scope=null,from=null,email='',permi
   }
   let seq=0,shown=null;
   const m=detailModal({cls:'share-modal',label:'Share',from,events:{
-    change:e=>{if(e.target.id==='shScope')refresh()},
+    change:e=>{if(e.target.id==='shScope')refresh();if(e.target.id==='shPerm')m.body.querySelector('[data-sh-adds-row]').hidden=e.target.value!=='edit'},
     click:e=>{if(e.target.closest('[data-sh-close]'))m.close()},
     submit:async e=>{
       e.preventDefault();const b=m.body,msg=b.querySelector('[data-sh-msg]'),btn=b.querySelector('[type=submit]');
       msg.className='sh-msg';msg.textContent='';btn.disabled=true;
       try{
-        const d=await api.create({env:envId(),scope:JSON.parse(b.querySelector('#shScope').value),recipientEmail:b.querySelector('#shEmail').value.trim(),permission:b.querySelector('#shPerm').value});
-        const n=d.preview?.summary?.cards??d.preview?.cards?.length;
-        msg.className='sh-msg ok';msg.textContent=`${d.existing?'Updated the share with':'Shared with'} ${d.share.recipientEmail} (${d.share.permission})${n!=null?` · ${n} DevOps card${n===1?'':'s'}`:''}. They add it to their workspace from Settings › Sharing.`;
+        const perm=b.querySelector('#shPerm').value;
+        const d=await api.create({env:envId(),scope:JSON.parse(b.querySelector('#shScope').value),recipientEmail:b.querySelector('#shEmail').value.trim(),permission:perm,adds:perm==='edit'?b.querySelector('#shAdds').value:'off'});
+        const n=d.preview?.summary?.cards??d.preview?.cards?.length,adds=d.share.adds&&d.share.adds!=='off'?` · they can add (${ADDS.find(a=>a[0]===d.share.adds)[1].toLowerCase()})`:'';
+        msg.className='sh-msg ok';msg.textContent=`${d.existing?'Updated the share with':'Shared with'} ${d.share.recipientEmail} (${d.share.permission}${adds})${n!=null?` · ${n} DevOps card${n===1?'':'s'}`:''}. They add it to their workspace from Settings › Sharing.`;
       }catch(err){msg.className='sh-msg err';msg.textContent=err.message}
       finally{btn.disabled=false}
     }}});
@@ -159,6 +173,7 @@ export function openShareDialog({nodeId=null,scope=null,from=null,email='',permi
       <label for="shScope">What</label><select id="shScope">${opts.map(([v,t])=>`<option value="${esc(v)}"${v===first?' selected':''}>${esc(t)}</option>`).join('')}</select>
       <div class="sh-two"><div><label for="shEmail">With <em>their OneProfileID email</em></label><input id="shEmail" type="email" required placeholder="name@example.com" value="${esc(email)}"></div>
         <div><label for="shPerm">Permission</label><select id="shPerm">${PERMS.map(([v,t])=>`<option value="${v}"${v===(permission||'view')?' selected':''}>${t}</option>`).join('')}</select></div></div>
+      <div data-sh-adds-row${permission==='edit'?'':' hidden'}><label for="shAdds">Recipients can add <em>cards, items, projects and mind map cards inside what you share</em></label>${addsSelect('id="shAdds"',adds)}</div>
       <label>They will see exactly this</label><div class="sh-pv" data-sh-pv aria-live="polite"><p class="acct-muted">Loading…</p></div>
       <p class="sh-msg" data-sh-msg role="status"></p>
       <div class="ask-b"><button type="button" class="txt" data-sh-close>Close</button><button type="submit" class="txt primary">Share</button></div>
@@ -175,7 +190,7 @@ export function openShareDialog({nodeId=null,scope=null,from=null,email='',permi
 
 // ---- Settings › Sharing ----
 export async function sharingPane(currentEnvId,ownEnvs){
-  const [mine,incoming,reqs]=await Promise.all([api.list(currentEnvId).catch(()=>null),api.incoming().catch(()=>({shares:[]})),api.requests().catch(()=>({requests:[],mine:[]}))]);
+  const [mine,incoming,reqs,props]=await Promise.all([api.list(currentEnvId).catch(()=>null),api.incoming().catch(()=>({shares:[]})),api.requests().catch(()=>({requests:[],mine:[]})),api.proposals().catch(()=>({proposals:[],mine:[]}))]);
   const permSel=(attr,id,cur,max='edit')=>`<select ${attr}="${esc(id)}" aria-label="Permission">${PERMS.filter(([v])=>RANK[v]<=RANK[max]).map(([v,t])=>`<option value="${v}"${v===cur?' selected':''}>${t}</option>`).join('')}</select>`;
   const sec=(title,tip='',action='')=>`<div class="acct-sec"><h3 class="acct-sub">${esc(title)}</h3>${tip?hint(tip,title):''}${action?`<span class="acct-sec-a">${action}</span>`:''}</div>`;
   const sumLine=s=>{const u=s.summary;if(!u)return '';
@@ -184,17 +199,30 @@ export async function sharingPane(currentEnvId,ownEnvs){
   const widenBtn=s=>s.scope?.kind==='environment'?'':`<button type="button" class="txt primary" data-sh-widen="${esc(s.id)}" data-email="${esc(s.recipientEmail)}" data-perm="${esc(s.permission)}" title="Share the whole environment with them so they get every DevOps card and mind map card">Widen to whole environment</button>`;
   const by=mine?`${sec(`Shared by you from ${store.db.environment?.name||'this environment'}`,'Mind map shares only include DevOps cards whose project is linked to a shared card. Use Widen or Share whole environment when someone should see the full board.','<span class="sh-acts"><button type="button" class="txt primary" id="shEnvTop" data-sh-env>Share whole environment…</button><button type="button" class="txt" id="shNew" data-sh-new>Share something…</button></span>')}
     <ul class="env-list sh-out">${mine.shares.map(s=>`<li class="sh-out-row"><div class="sh-out-main"><span class="env-n">${esc(s.recipientEmail)}<em class="sh-sub">${esc(s.scopeLabel)}</em>${sumLine(s)}${s.tip?`<em class="sh-sub sh-tip">${esc(s.tip)}</em>`:''}</span>
-      <div class="sh-out-actions">${permSel('data-sh-perm',s.id,s.permission)}${widenBtn(s)}<button type="button" class="txt" data-sh-revoke="${esc(s.id)}" data-who="${esc(s.recipientEmail)}">Revoke</button></div></div></li>`).join('')||'<li class="acct-muted">Not shared with anyone</li>'}</ul>`:'';
+      <div class="sh-out-actions">${permSel('data-sh-perm',s.id,s.permission)}<label class="sh-adds"><span>Recipients can add</span>${addsSelect(`data-sh-adds="${esc(s.id)}"`,s.permission==='edit'?s.adds:'off',s.permission!=='edit')}</label>${widenBtn(s)}<button type="button" class="txt" data-sh-revoke="${esc(s.id)}" data-who="${esc(s.recipientEmail)}">Revoke</button></div></div></li>`).join('')||'<li class="acct-muted">Not shared with anyone</li>'}</ul>`:'';
   const pending=reqs.requests||[];
   const asks=pending.length?`${sec('Requests to share')}<ul class="env-list">${pending.map(r=>`<li><span class="env-n">${esc(r.requestedBy)} asks to share with ${esc(r.toEmail)}${r.note?`<em class="sh-sub">${esc(r.note)}</em>`:''}</span>${permSel('data-sh-req-perm',r.id,r.permission,r.permission)}<button type="button" class="txt primary" data-sh-approve="${esc(r.id)}">Approve</button><button type="button" class="txt" data-sh-deny="${esc(r.id)}">Deny</button></li>`).join('')}</ul>`:'';
+  // Additions waiting for the owner, from the recipients of their shares: what each adds, Approve and Deny.
+  const waiting=mine?.proposals||[];
+  const kindWord={node:'Mind map',edge:'Connection',project:'Project',item:'Timeline',card:'DevOps card'};
+  const previewList=p=>`<ul class="sh-prop-l">${p.preview.slice(0,8).map(r=>`<li><em>${kindWord[r.kind]||r.kind}</em> ${esc(r.title)}${r.detail?` <span class="acct-muted">${esc(r.detail)}</span>`:''}</li>`).join('')}${p.preview.length>8?`<li class="acct-muted">…and ${p.preview.length-8} more</li>`:''}</ul>`;
+  const adds=waiting.length?`${sec('Additions to approve','Records the people you share with added inside their share. Approving adds them to this environment, owned by you; denying removes them from their copy.')}
+    <ul class="env-list sh-props">${waiting.map(p=>`<li class="sh-prop"><div class="sh-prop-main"><span class="env-n">${esc(p.proposedBy)} added ${p.preview.length} thing${p.preview.length===1?'':'s'}<em class="sh-sub">${esc(when(p.updatedAt||p.createdAt))}</em></span>${previewList(p)}</div>
+      <div class="sh-out-actions"><button type="button" class="txt primary" data-sh-prop-approve="${esc(p.id)}">Approve</button><button type="button" class="txt" data-sh-prop-deny="${esc(p.id)}">Deny</button></div></li>`).join('')}</ul>`:'';
   const own=new Map(ownEnvs.map(e=>[e.id,e.name]));
+  // The recipient's own additions (pending, or decided lately) under the share they belong to.
+  const myProps=new Map();for(const p of props.mine||[])if(p.status==='pending'||p.status==='denied'||p.status==='approved')(myProps.get(p.shareId)||myProps.set(p.shareId,[]).get(p.shareId)).push(p);
+  const statusWord={pending:'Pending approval',approved:'Approved',denied:'Denied'};
+  const myAdds=s=>{const l=(myProps.get(s.id)||[]).slice(0,6);return l.length?`<ul class="sh-mine">${l.map(p=>`<li><span class="sh-st ${esc(p.status)}">${statusWord[p.status]}</span> ${esc(p.preview.map(r=>r.title).slice(0,3).join(', '))}${p.status==='pending'?` <button type="button" class="txt" data-sh-withdraw="${esc(p.id)}">Withdraw</button>`:''}</li>`).join('')}</ul>`:''};
+  const addsWord=s=>s.permission!=='edit'||!s.adds||s.adds==='off'?'':s.adds==='approve'?' · you can add (they approve)':' · you can add';
   const withMe=`${sec('Shared with you','Add a share to one of your environments: its cards appear there as linked boxes with your own layout. Co-owners show as read-only name stubs.')}
-    <ul class="env-list sh-in">${incoming.shares.map(s=>`<li><div class="sh-in-h"><span class="env-n">${esc(s.scopeLabel)}<em class="sh-sub">from ${esc(s.ownerEmail)} · ${esc(s.ownerEnvName||'')} · ${esc(PERMS.find(p=>p[0]===s.permission)?.[1]||s.permission)}</em></span>
+    <ul class="env-list sh-in">${incoming.shares.map(s=>`<li><div class="sh-in-h"><span class="env-n">${esc(s.scopeLabel)}<em class="sh-sub">from ${esc(s.ownerEmail)} · ${esc(s.ownerEnvName||'')} · ${esc(PERMS.find(p=>p[0]===s.permission)?.[1]||s.permission)}${esc(addsWord(s))}</em></span>
         ${s.envs.includes(currentEnvId)?`<button type="button" class="txt" data-sh-detach="${esc(s.id)}">Remove from this environment</button>`:`<button type="button" class="txt primary" data-sh-attach="${esc(s.id)}">Add to ${esc(own.get(currentEnvId)||'this environment')}</button>`}</div>
         ${s.envs.filter(e=>e!==currentEnvId).length?`<span class="acct-muted">Also in: ${s.envs.filter(e=>e!==currentEnvId).map(e=>esc(own.get(e)||e)).join(', ')}</span>`:''}
+        ${myAdds(s)}
         <form class="env-row" data-sh-ask="${esc(s.id)}"><input type="email" required placeholder="Ask ${esc(s.ownerEmail)} to share it with…" aria-label="Email to ask the owner to share with"><button type="submit" class="txt">Ask</button></form></li>`).join('')||'<li class="acct-muted">Nothing is shared with you yet</li>'}</ul>`;
   const sent=(reqs.mine||[]).filter(r=>r.status==='pending');
-  return by+asks+withMe+(sent.length?`<p class="acct-muted">Waiting for the owner: ${sent.map(r=>esc(r.toEmail)).join(', ')}</p>`:'')+'<p class="acct-err" data-sh-err hidden></p>';
+  return by+adds+asks+withMe+(sent.length?`<p class="acct-muted">Waiting for the owner: ${sent.map(r=>esc(r.toEmail)).join(', ')}</p>`:'')+'<p class="acct-err" data-sh-err hidden></p>';
 }
 
 // ---- Conflicts (docs/sharing.md): last write wins; the person who lost sees it on the field ----
@@ -225,4 +253,17 @@ export function clashClick(b,x,apply,rerender){
   forget(c);
   if(b.dataset.clashRestore&&canEdit(x))apply(f,structuredClone(c.previous));else rerender();
   return true;
+}
+
+// ---- Additions: tell the recipient once when the owner approved or denied what they added ----
+const DECIDED='flygon-flow-decided-seen';
+let told;try{told=new Set(JSON.parse(localStorage.getItem(DECIDED))||[])}catch{told=new Set()}
+// -> a message for the toast, or '' (each decision is told once per browser).
+export function decisionNotice(){
+  const fresh=(store.db.shares||[]).flatMap(s=>(s.decided||[]).map(d=>({...d,owner:s.ownerEmail}))).filter(d=>!told.has(d.id));
+  if(!fresh.length)return '';
+  for(const d of fresh)told.add(d.id);
+  try{localStorage.setItem(DECIDED,JSON.stringify([...told].slice(-300)))}catch{}
+  const say=d=>`${d.owner||'The owner'} ${d.status==='approved'?'approved':'denied'} ${d.titles?.length?`“${d.titles.slice(0,2).join('”, “')}”${d.titles.length>2?' and more':''}`:'what you added'}`;
+  return fresh.slice(0,2).map(say).join('. ')+(fresh.length>2?` (and ${fresh.length-2} more)`:'')+(fresh.some(d=>d.status==='denied')?'. Denied additions were removed.':'.');
 }

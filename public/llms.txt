@@ -100,6 +100,12 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [office.actions.wait](/docs/office.html#op-office-actions-wait): `GET /api/v1/office/actions` (write). Wait for answers to your agents' prompts
 - [office.actions.result](/docs/office.html#op-office-actions-result): `POST /api/v1/office/actions/{id}` (write). Say how an answer went
 
+## API: Sharing
+
+- [proposals.list](/docs/sharing.html#op-proposals-list): `GET /api/v1/envs/{env}/proposals` (read). List share additions
+- [proposals.approve](/docs/sharing.html#op-proposals-approve): `POST /api/v1/envs/{env}/proposals/{proposal}/approve` (write). Approve a share addition
+- [proposals.deny](/docs/sharing.html#op-proposals-deny): `POST /api/v1/envs/{env}/proposals/{proposal}/deny` (write). Deny a share addition
+
 ## Optional
 
 - [Full text for LLMs](/llms-full.txt): every concept and the whole API reference in one file

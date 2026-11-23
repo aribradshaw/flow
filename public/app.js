@@ -22,7 +22,7 @@ import {ask} from './modal.js';
 import {openMenu} from './menu.js';
 import {edgeGeometry,tidyLayout} from './mindmap-layout.js';
 import {firstRun,canvasHint} from './first-run.js';
-import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick} from './share.js';
+import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick,decisionNotice} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
 fetch('/api/instance').then(r=>r.ok?r.json():null).then(v=>{
@@ -318,9 +318,9 @@ ${group?'Grouping only · no ownership implied':e.percent===''?'Ownership · per
 function nodeHtml(n){
   const [w,h]=size(n),k=KINDS[n.type],notes=(n.notes||'').trim();
   const l=linkOf(n);
-  const cls=`node ${n.type}${selected===n.id?' selected':''}${source===n.id?' source':''}${drag?.mode==='link'&&drag.over===n.id?' drop':''}${l?' linked':''}${l?.stub?' stub':''}`;
+  const cls=`node ${n.type}${selected===n.id?' selected':''}${source===n.id?' source':''}${drag?.mode==='link'&&drag.over===n.id?' drop':''}${l?' linked':''}${l?.stub?' stub':''}${l?.pending?' pending':''}`;
   const tip=(notes?`${n.name}\n${notes.length>280?notes.slice(0,280)+'…':notes}`:'')+(l?(notes?'\n\n':`${n.name}\n`)+sharedTip(l):'');
-  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}">${n.type==='person'&&personPhoto(n)?personAvatar(n,{size:22,cls:'k-av'}):`<span class="k">${icon(k.icon,14)}</span>`}<span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge" aria-label="${l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
+  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}">${n.type==='person'&&personPhoto(n)?personAvatar(n,{size:22,cls:'k-av'}):`<span class="k">${icon(k.icon,14)}</span>`}<span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge${l.pending?' pending':''}" aria-label="${l.pending?'Pending approval':l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.pending?'clock':l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
 }
 function renderCanvas(){
   const c=chart(),cv=$('#canvas');
@@ -725,7 +725,8 @@ function render(){
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
   if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
-store.onChange=render;
+// The owner approved or denied additions this user made inside a share: say so once (share.js).
+store.onChange=()=>{render();const m=decisionNotice();if(m)toast(m,m.includes('denied'))};
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 store.onLimit=msg=>{if(msg)toast(msg)};

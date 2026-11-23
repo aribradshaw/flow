@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (44)
+## Operations (47)
 
 ### Environments
 
@@ -130,6 +130,14 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | `office.agents.list` | `office_agents_list` | `GET /api/v1/office/agents` | read | List your reported agents |
 | `office.actions.wait` | `office_actions_wait` | `GET /api/v1/office/actions` | write | Wait for answers to your agents' prompts |
 | `office.actions.result` | `office_actions_result` | `POST /api/v1/office/actions/{id}` | write | Say how an answer went |
+
+### Sharing
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `proposals.list` | `proposals_list` | `GET /api/v1/envs/{env}/proposals` | read | List share additions |
+| `proposals.approve` | `proposals_approve` | `POST /api/v1/envs/{env}/proposals/{proposal}/approve` | write | Approve a share addition |
+| `proposals.deny` | `proposals_deny` | `POST /api/v1/envs/{env}/proposals/{proposal}/deny` | write | Deny a share addition |
 
 ## Examples
 
@@ -653,6 +661,39 @@ curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"ok":true,"message":"Approved in T3"}'
+```
+
+### Waiting for you
+
+MCP: call `proposals_list` with `{"env":"default-workspace"}`
+
+```sh
+flow proposals list --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/proposals" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Approve
+
+MCP: call `proposals_approve` with `{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}`
+
+```sh
+flow proposals approve --input '{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/approve" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Deny
+
+MCP: call `proposals_deny` with `{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}`
+
+```sh
+flow proposals deny --input '{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/deny" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 
 ## More

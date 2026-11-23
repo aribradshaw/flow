@@ -709,7 +709,7 @@ Create a node
 
 `POST /api/v1/envs/{env}/charts/{chart}/nodes` · scope `write` · MCP tool `nodes_create`
 
-Add a card to a chart. Without x/y it is placed at the origin, stepping 32px diagonally past occupied spots (as the app does).
+Add a card to a chart. Without x/y it is placed at the origin, stepping 32px diagonally past occupied spots (as the app does). On a share's chart ("Shared · …") it is added to the share's owner when the share lets you add (pending: true while it waits for their approval); a share that does not is refused with 403 share_adds_off.
 
 **Input**
 
@@ -744,6 +744,7 @@ Add a card to a chart. Without x/y it is placed at the origin, stepping 32px dia
 | `node.image` | string |  | Person photo: an https URL or a data:image/(png\|jpeg\|webp);base64 URL. |
 | `node.email` | string |  | Person email, matching them to an account. |
 | `node.opidUser` | string |  | Read only: the OneProfileID account the person linked this card to, so it shows their account photo. Only that person can link it, from the app. Changing or removing the card's email unlinks it. |
+| `pending` | boolean |  | Only when true: the record was added inside a share whose owner approves additions, and waits for them (docs/sharing.md). It shows as "Pending approval" until they approve or deny it. |
 
 **Example: Add a person**
 
@@ -953,7 +954,7 @@ Create an edge
 
 `POST /api/v1/envs/{env}/charts/{chart}/edges` · scope `write` · MCP tool `edges_create`
 
-Connect two cards on the same chart. A second edge between the same pair (same direction) is refused with 409.
+Connect two cards on the same chart. A second edge between the same pair (same direction) is refused with 409. Joining two cards of the same share adds the connection to its owner, as nodes.create does.
 
 **Input**
 
@@ -977,6 +978,7 @@ Connect two cards on the same chart. A second edge between the same pair (same d
 | `edge.to` | string | yes |  |
 | `edge.type` | enum | yes | One of `ownership`, `group`. |
 | `edge.percent` | string | yes |  |
+| `pending` | boolean |  | Only when true: the record was added inside a share whose owner approves additions, and waits for them (docs/sharing.md). It shows as "Pending approval" until they approve or deny it. |
 
 **Example: 50% ownership**
 
@@ -1097,7 +1099,7 @@ Create a project
 
 `POST /api/v1/envs/{env}/projects` · scope `write` · MCP tool `projects_create`
 
-Add a project. Names are unique (case-insensitive); a duplicate gets 409. Without a colour the next palette colour is used.
+Add a project. Names are unique (case-insensitive); a duplicate gets 409. Without a colour the next palette colour is used. Under a shared entity, or with share, it is added to that share's owner when the share lets you add (pending: true while it waits for their approval).
 
 **Input**
 
@@ -1108,6 +1110,7 @@ Add a project. Names are unique (case-insensitive); a duplicate gets 409. Withou
 | `color` | string |  | Hex colour, e.g. #7cb980. |
 | `entity` | string |  | The chart entity or area it sits under: node id or name; "" for none. |
 | `repos` | string[] |  | Code repositories that belong to the project: a name ("flow"), owner/name ("acme/flow") or a git remote URL. The 3D office shows a teammate's live agent working in one of them to everyone who can see this project. Replaces the list; [] clears it. |
+| `share` | string |  | Add it to the owner of a share placed in this environment (the <share> in its sh.<share>.<id> ids), when that share lets you add. Without it, a record that refers to a share's records (a card in a shared project, say) goes to that share's owner anyway. |
 
 **Output**
 
@@ -1120,6 +1123,7 @@ Add a project. Names are unique (case-insensitive); a duplicate gets 409. Withou
 | `project.color` | string | yes |  |
 | `project.entity` | string | yes |  |
 | `project.repos` | string[] |  | Code repositories that belong to the project (absent when none). |
+| `pending` | boolean |  | Only when true: the record was added inside a share whose owner approves additions, and waits for them (docs/sharing.md). It shows as "Pending approval" until they approve or deny it. |
 
 **Example: Under Kestrel Group**
 
@@ -1337,7 +1341,7 @@ Create a timeline item
 
 `POST /api/v1/envs/{env}/items` · scope `write` · MCP tool `items_create`
 
-Add a timeline item. Without a start date it is backlog (Board and List only). Kind defaults to milestone when dated, feature otherwise.
+Add a timeline item. Without a start date it is backlog (Board and List only). Kind defaults to milestone when dated, feature otherwise. Tagged only with shared projects, or with share, it is added to that share's owner when the share lets you add (pending: true while it waits for their approval).
 
 **Input**
 
@@ -1355,6 +1359,7 @@ Add a timeline item. Without a start date it is backlog (Board and List only). K
 | `owner` | string |  |  |
 | `link` | string |  |  |
 | `notes` | string |  |  |
+| `share` | string |  | Add it to the owner of a share placed in this environment (the <share> in its sh.<share>.<id> ids), when that share lets you add. Without it, a record that refers to a share's records (a card in a shared project, say) goes to that share's owner anyway. |
 
 **Output**
 
@@ -1374,6 +1379,7 @@ Add a timeline item. Without a start date it is backlog (Board and List only). K
 | `item.owner` | string |  |  |
 | `item.link` | string |  |  |
 | `item.notes` | string |  |  |
+| `pending` | boolean |  | Only when true: the record was added inside a share whose owner approves additions, and waits for them (docs/sharing.md). It shows as "Pending approval" until they approve or deny it. |
 
 **Example: A release**
 
@@ -1683,7 +1689,7 @@ Create a DevOps card
 
 `POST /api/v1/envs/{env}/cards` · scope `write` · MCP tool `cards_create`
 
-Add a card (it gets the next #number). Lands in Requests / Sprinted unless `column` says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400.
+Add a card (it gets the next #number). Lands in Requests / Sprinted unless `column` says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400. In a shared project, or with share, it is added to that share's owner when the share lets you add (pending: true while it waits for their approval; the owner numbers it); a share that does not is refused with 403 share_adds_off.
 
 **Input**
 
@@ -1712,6 +1718,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `links[].url` | string | yes |  |
 | `item` | string |  | Timeline item id or title; "" for none. |
 | `agents` | string[] |  | Delegate the card to these agents (replaces the list; [] for none). It joins each one's work queue (agents.work). |
+| `share` | string |  | Add it to the owner of a share placed in this environment (the <share> in its sh.<share>.<id> ids), when that share lets you add. Without it, a record that refers to a share's records (a card in a shared project, say) goes to that share's owner anyway. |
 
 **Output**
 
@@ -1738,6 +1745,7 @@ Add a card (it gets the next #number). Lands in Requests / Sprinted unless `colu
 | `card.updated` | string |  |  |
 | `card.moved` | string |  |  |
 | `card.agents` | string[] |  | AgentFlow agents the card is delegated to (ids). |
+| `pending` | boolean |  | Only when true: the record was added inside a share whose owner approves additions, and waits for them (docs/sharing.md). It shows as "Pending approval" until they approve or deny it. |
 
 **Example: New card**
 
@@ -3984,6 +3992,253 @@ curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
       "ok": true,
       "message": "Approved in T3",
       "at": "2026-10-29T17:00:00.000Z"
+    }
+  }
+}
+```
+
+## Sharing
+
+### `proposals.list`
+
+List share additions
+
+`GET /api/v1/envs/{env}/proposals` · scope `read` · MCP tool `proposals_list`
+
+Records that recipients of this environment's edit shares added while their share needs your approval (role owner), and the ones you added from this environment to someone else's share (role proposer). status: pending (the default), approved, denied, withdrawn, or applied (added at once by a share that allows it). preview says what each one adds. Decide with proposals.approve or proposals.deny; set what a share allows in the app (Settings › Sharing).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `status` | enum |  | One of `pending`, `approved`, `denied`, `applied`, `withdrawn`. |
+| `limit` | integer |  | Page size (1-200, default 50). |
+| `cursor` | string |  | nextCursor from the previous page. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | object[] | yes |  |
+| `items[].id` | string | yes |  |
+| `items[].shareId` | string | yes |  |
+| `items[].env` | string | yes | The environment of the share's owner. |
+| `items[].proposedBy` | string | yes | Who added them (the share's recipient). |
+| `items[].status` | enum | yes | One of `pending`, `approved`, `denied`, `applied`, `withdrawn`. |
+| `items[].role` | enum |  | owner: yours to approve or deny; proposer: you added it to someone else's share. One of `owner`, `proposer`. |
+| `items[].createdAt` | string | yes |  |
+| `items[].updatedAt` | string |  |  |
+| `items[].decidedAt` | string | null |  |  |
+| `items[].decidedBy` | string | null |  |  |
+| `items[].preview` | object[] | yes |  |
+| `items[].records` | object |  | The records as they would land in the owner's data, by kind (node, edge, project, item, card). Owner only. |
+| `nextCursor` | string | null | yes |  |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+
+**Example: Waiting for you**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/proposals" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a",
+      "shareId": "9a7e3c1b-2d4f-4b6a-8c0e-1f3a5b7d9e2c",
+      "env": "default-workspace",
+      "proposedBy": "kim@example.test",
+      "status": "pending",
+      "role": "owner",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "updatedAt": "2026-10-29T17:00:00.000Z",
+      "decidedAt": null,
+      "decidedBy": null,
+      "preview": [
+        {
+          "kind": "card",
+          "id": "k9",
+          "title": "Draft the launch email",
+          "detail": "Lantern"
+        }
+      ],
+      "records": {
+        "node": [],
+        "edge": [],
+        "project": [],
+        "item": [],
+        "card": [
+          {
+            "id": "k9",
+            "title": "Draft the launch email",
+            "column": "requests",
+            "project": "p1"
+          }
+        ]
+      }
+    }
+  ],
+  "nextCursor": null,
+  "rev": 42
+}
+```
+
+### `proposals.approve`
+
+Approve a share addition
+
+`POST /api/v1/envs/{env}/proposals/{proposal}/approve` · scope `write` · MCP tool `proposals_approve`
+
+Add a pending proposal's records to this environment, owned by you (cards get your next numbers). The recipient then sees them as ordinary shared records. Only the environment's owner can; a decided one is refused with 409 proposal_decided, and one that no longer fits its share (what it was added to is gone or no longer shared) with 409 proposal_out_of_scope.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `proposal` | string | yes | Proposal id (proposals.list). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `proposal` | object | yes |  |
+| `proposal.id` | string | yes |  |
+| `proposal.shareId` | string | yes |  |
+| `proposal.env` | string | yes | The environment of the share's owner. |
+| `proposal.proposedBy` | string | yes | Who added them (the share's recipient). |
+| `proposal.status` | enum | yes | One of `pending`, `approved`, `denied`, `applied`, `withdrawn`. |
+| `proposal.role` | enum |  | owner: yours to approve or deny; proposer: you added it to someone else's share. One of `owner`, `proposer`. |
+| `proposal.createdAt` | string | yes |  |
+| `proposal.updatedAt` | string |  |  |
+| `proposal.decidedAt` | string | null |  |  |
+| `proposal.decidedBy` | string | null |  |  |
+| `proposal.preview` | object[] | yes |  |
+| `proposal.records` | object |  | The records as they would land in the owner's data, by kind (node, edge, project, item, card). Owner only. |
+
+**Example: Approve**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/approve" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "proposal": {
+    "id": "5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a",
+    "shareId": "9a7e3c1b-2d4f-4b6a-8c0e-1f3a5b7d9e2c",
+    "env": "default-workspace",
+    "proposedBy": "kim@example.test",
+    "status": "approved",
+    "role": "owner",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "updatedAt": "2026-10-29T17:00:00.000Z",
+    "decidedAt": "2026-10-29T17:00:00.000Z",
+    "decidedBy": "owner@example.test",
+    "preview": [
+      {
+        "kind": "card",
+        "id": "k9",
+        "title": "Draft the launch email",
+        "detail": "Lantern"
+      }
+    ],
+    "records": {
+      "node": [],
+      "edge": [],
+      "project": [],
+      "item": [],
+      "card": [
+        {
+          "id": "k9",
+          "title": "Draft the launch email",
+          "column": "requests",
+          "project": "p1"
+        }
+      ]
+    }
+  }
+}
+```
+
+### `proposals.deny`
+
+Deny a share addition
+
+`POST /api/v1/envs/{env}/proposals/{proposal}/deny` · scope `write` · MCP tool `proposals_deny`
+
+Turn down a pending proposal. Nothing is added; the recipient's pending copy disappears and they are told it was denied. A decided one is refused with 409 proposal_decided.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `proposal` | string | yes | Proposal id (proposals.list). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `proposal` | object | yes |  |
+| `proposal.id` | string | yes |  |
+| `proposal.shareId` | string | yes |  |
+| `proposal.env` | string | yes | The environment of the share's owner. |
+| `proposal.proposedBy` | string | yes | Who added them (the share's recipient). |
+| `proposal.status` | enum | yes | One of `pending`, `approved`, `denied`, `applied`, `withdrawn`. |
+| `proposal.role` | enum |  | owner: yours to approve or deny; proposer: you added it to someone else's share. One of `owner`, `proposer`. |
+| `proposal.createdAt` | string | yes |  |
+| `proposal.updatedAt` | string |  |  |
+| `proposal.decidedAt` | string | null |  |  |
+| `proposal.decidedBy` | string | null |  |  |
+| `proposal.preview` | object[] | yes |  |
+| `proposal.records` | object |  | The records as they would land in the owner's data, by kind (node, edge, project, item, card). Owner only. |
+
+**Example: Deny**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/deny" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "proposal": {
+    "id": "5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a",
+    "shareId": "9a7e3c1b-2d4f-4b6a-8c0e-1f3a5b7d9e2c",
+    "env": "default-workspace",
+    "proposedBy": "kim@example.test",
+    "status": "denied",
+    "role": "owner",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "updatedAt": "2026-10-29T17:00:00.000Z",
+    "decidedAt": "2026-10-29T17:00:00.000Z",
+    "decidedBy": "owner@example.test",
+    "preview": [
+      {
+        "kind": "card",
+        "id": "k9",
+        "title": "Draft the launch email",
+        "detail": "Lantern"
+      }
+    ],
+    "records": {
+      "node": [],
+      "edge": [],
+      "project": [],
+      "item": [],
+      "card": [
+        {
+          "id": "k9",
+          "title": "Draft the launch email",
+          "column": "requests",
+          "project": "p1"
+        }
+      ]
     }
   }
 }

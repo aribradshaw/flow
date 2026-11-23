@@ -475,3 +475,127 @@ test('a stale copy of shared cards never reverts the owner; real edits and confl
   assert.deepEqual([(await own(10)).column,(await own(6)).column],['done','doing'],'a bulk rewrite of shared cards is refused');
   await owner('DELETE',`/api/shares/${s.id}`);
 });
+
+// Additions (share.adds): a recipient adds records inside a share; the owner approves them, or they land at once.
+test('additions: off, needs approval, allowed; app saves, the API and MCP; scope limits; approve and deny',async()=>{
+  const {fieldBase,noteEdits,linkedFields}=await import('../public/sync-core.js');
+  const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json'});
+  const v1=(k,method,path,body)=>fetch(BASE+'/api/v1'+path,{method,headers:bearer(k),body:body&&JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  const mcp=(k,name,args)=>fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(k),accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}).then(x=>x.json());
+  const kimEnv=(await kim('GET','/api/workspace')).data.env;assert.ok(kimEnv&&kimEnv!=='default-workspace'&&kimEnv!==boEnv);
+  const home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data.data;
+  const mine=async()=>(await kim('GET','/api/workspace?env='+kimEnv)).data;
+  const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'edit',adds:'approve'})).data.share;
+  assert.equal(s.adds,'approve');
+  assert.equal((await kim('POST',`/api/shares/${s.id}/attach`,{env:kimEnv})).status,200);
+  const L=id=>`sh.${s.id}.${id}`,SC=L('chart');
+  const card=(id,title,extra={})=>({id,number:50,title,description:'',column:'requests',project:L('p-cb'),labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',created:new Date().toISOString(),updated:new Date().toISOString(),moved:new Date().toISOString(),...extra});
+  const appAdd=async f=>{const r=await kim('GET','/api/workspace?env='+kimEnv),d=structuredClone(r.data.data);f(d);
+    // As the browser saves: with the edits of linked (and pending) records its user made.
+    const x=await kim('PUT','/api/workspace?env='+kimEnv,{baseRev:r.data.rev,data:d,fieldBase:fieldBase(r.data.data,d),sharedEdits:noteEdits({},linkedFields(r.data.data),d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
+  const kimCard=(d,id)=>d.devops.cards.find(c=>c.id===id);
+
+  // Needs approval, from the app: a card in a shared project and a mind map card on the share's chart.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim1','Kim idea'));d.charts.find(c=>c.id===SC).nodes.push({id:'n-kim1',name:'Kim Node',type:'entity',x:40,y:40})});
+  let h=await home();
+  assert.ok(!h.devops?.cards?.some(c=>c.title==='Kim idea')&&!h.charts[0].nodes.some(n=>n.name==='Kim Node'),'nothing reaches the owner before approval');
+  let k=await mine();
+  assert.ok(kimCard(k.data,L('k-kim1')),'Kim sees her card as a linked copy');assert.ok(!kimCard(k.data,'k-kim1'),'and not as her own');
+  const meta=k.data.shares.find(x=>x.id===s.id);assert.equal(meta.adds,'approve');assert.ok(meta.pending.includes(L('k-kim1'))&&meta.pending.includes(L('n-kim1')),'both are marked pending');
+  let list=(await owner('GET','/api/shares?env=default-workspace')).data;
+  const prop=list.proposals.find(p=>p.proposedBy===KIM);assert.ok(prop,'the owner sees the proposal next to share requests');
+  assert.deepEqual(prop.preview.map(r=>r.title).sort(),['Kim Node','Kim idea']);
+  // Kim renames the pending card: the proposal changes, the owner still has nothing.
+  await appAdd(d=>{kimCard(d,L('k-kim1')).title='Kim better idea'});
+  assert.equal((await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.id===prop.id).records.card[0].title,'Kim better idea');
+  assert.equal((await kim('POST',`/api/share-proposals/${prop.id}`,{approve:true})).status,404,'only the owner decides');
+  let r=await owner('POST',`/api/share-proposals/${prop.id}`,{approve:true});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal((await owner('POST',`/api/share-proposals/${prop.id}`,{approve:true})).status,409,'decided once');
+  h=await home();
+  const added=h.devops.cards.find(c=>c.id==='k-kim1');assert.equal(added?.title,'Kim better idea');assert.equal(added.project,'p-cb');
+  assert.ok(h.charts[0].nodes.some(n=>n.id==='n-kim1'),"the node is the owner's now");
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim1')),'it flows back as a normal linked copy');assert.ok(!(k.data.shares.find(x=>x.id===s.id).pending||[]).length);
+  assert.ok(k.data.shares.find(x=>x.id===s.id).decided.some(x=>x.id===prop.id&&x.status==='approved'));
+
+  // Deny: the pending copy goes, and Kim is told.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim2','Kim maybe'))});
+  const p2=(await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.proposedBy===KIM);
+  assert.equal((await owner('POST',`/api/share-proposals/${p2.id}`,{approve:false})).data.proposal.status,'denied');
+  k=await mine();assert.ok(!kimCard(k.data,L('k-kim2'))&&!kimCard(k.data,'k-kim2'),'gone from Kim');
+  assert.ok(k.data.shares.find(x=>x.id===s.id).decided.some(x=>x.id===p2.id&&x.status==='denied'&&x.titles.includes('Kim maybe')));
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='Kim maybe'));
+  // A stale copy that still holds the denied card does not propose it again.
+  const stale=structuredClone(k.data);stale.devops.cards.push(card('k-kim2','Kim maybe'));
+  assert.equal((await kim('PUT','/api/workspace?env='+kimEnv,{baseRev:k.rev,data:stale})).status,200);
+  assert.ok(!(await owner('GET','/api/share-proposals')).data.proposals.some(p=>p.proposedBy===KIM),'no new proposal');
+
+  // A card Kim made on her board first and put in the shared project after: proposed then, not recorded as deleted.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim5','Kim later',{project:''}))});
+  assert.ok(kimCard((await mine()).data,'k-kim5'),'her own card first');
+  const moved=await appAdd(d=>{kimCard(d,'k-kim5').project=L('p-cb')});assert.equal(moved.data.removedCards,undefined,'not a deletion');
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim5'))&&k.data.shares.find(x=>x.id===s.id).pending.includes(L('k-kim5')));
+  const p5=(await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.records.card.some(c=>c.id==='k-kim5'));
+  assert.equal((await kim('DELETE',`/api/share-proposals/${p5.id}`)).data.proposal.status,'withdrawn','Kim can take it back');
+  assert.ok(!kimCard((await mine()).data,L('k-kim5')));
+  // Allowed: it lands at once, with history.
+  assert.equal((await owner('PATCH',`/api/shares/${s.id}`,{adds:'direct'})).data.share.adds,'direct');
+  assert.equal((await kim('PATCH',`/api/shares/${s.id}`,{adds:'direct'})).status,404,'the recipient cannot change it');
+  await appAdd(d=>{d.devops.cards.push(card('k-kim3','Kim direct'))});
+  assert.ok((await home()).devops.cards.some(c=>c.id==='k-kim3'),'in the owner data at once');
+  assert.ok((await owner('GET',`/api/shares/${s.id}/history?kind=card&id=k-kim3`)).data.history.some(e=>e.field==='added'&&e.by===KIM));
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim3'))&&!(k.data.shares.find(x=>x.id===s.id).pending||[]).includes(L('k-kim3')));
+
+  // Off: from the app it stays Kim's own card, as before.
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'off'});
+  await appAdd(d=>{d.devops.cards.push(card('k-kim4','Kim private'))});
+  k=await mine();assert.ok(kimCard(k.data,'k-kim4'),'stays her own');assert.ok(!(await home()).devops.cards.some(c=>c.id==='k-kim4'));
+
+  // The API and MCP: 403 under off, 201 pending under approve, 201 plain under direct.
+  const kw=(await kim('POST','/api/keys',{name:'kim-rw',env:kimEnv,scopes:['read','write']})).data.key;
+  const ow=(await owner('POST','/api/keys',{name:'owner-rw',env:'default-workspace',scopes:['read','write']})).data.key;
+  assert.ok(!(await v1(kw,'GET',`/envs/${kimEnv}/deleted-cards`)).data.items.some(e=>e.cardId==='k-kim5'),'a card moved to the owner is not in Recently deleted');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API off',project:'Studio launch'});
+  assert.equal(r.status,403,JSON.stringify(r.data));assert.equal(r.data.code,'share_adds_off');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(SC)}/nodes`,{name:'API off node',type:'entity'});assert.equal(r.status,403);
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'approve'});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API pending',project:L('p-cb')});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,true);assert.ok(r.data.card.id.startsWith(`sh.${s.id}.`),r.data.card.id);
+  const pendingId=r.data.card.id;
+  r=await v1(kw,'PATCH',`/envs/${kimEnv}/cards/${encodeURIComponent(pendingId)}`,{description:'More detail'});assert.equal(r.status,200,JSON.stringify(r.data));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API explicit',share:s.id});assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,true);
+  r=await v1(ow,'GET','/envs/default-workspace/proposals');assert.equal(r.status,200,JSON.stringify(r.data));
+  const apiProps=r.data.items.filter(p=>p.role==='owner'&&p.proposedBy===KIM);assert.equal(apiProps.length,2);
+  const pend=apiProps.find(p=>p.preview.some(x=>x.title==='API pending'));assert.equal(pend.records.card[0].description,'More detail');
+  assert.equal((await v1(kw,'GET',`/envs/${kimEnv}/proposals`)).data.items.filter(p=>p.role==='proposer').length,2,'Kim follows her own');
+  assert.equal((await v1(kw,'POST',`/envs/${kimEnv}/proposals/${pend.id}/approve`)).status,404,'Kim cannot approve');
+  let m=await mcp(ow,'proposals_approve',{env:'default-workspace',proposal:pend.id});assert.ok(!m.result.isError,JSON.stringify(m).slice(0,400));
+  assert.ok((await home()).devops.cards.some(c=>c.title==='API pending'&&c.description==='More detail'));
+  m=await mcp(ow,'proposals_deny',{env:'default-workspace',proposal:apiProps.find(p=>p!==pend).id});assert.ok(!m.result.isError,JSON.stringify(m).slice(0,400));
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='API explicit'));
+  m=await mcp(kw,'cards_create',{env:kimEnv,title:'MCP pending',project:L('p-cb')});
+  assert.ok(!m.result.isError&&JSON.stringify(m.result).includes('"pending":true'),JSON.stringify(m).slice(0,400));
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'direct'});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API direct',project:L('p-cb')});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,undefined);assert.ok(r.data.card.id.startsWith(`sh.${s.id}.`));
+  assert.ok((await home()).devops.cards.some(c=>c.title==='API direct'));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(SC)}/edges`,{from:L('marsh'),to:L('labs'),type:'group'});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.ok((await home()).charts[0].edges.some(e=>e.from==='marsh'&&e.to==='labs'),'an edge between shared cards');
+  await owner('DELETE',`/api/shares/${s.id}`);
+
+  // Scope limits: a project share holds cards and items of that project, nothing else.
+  const ps=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'project',projectId:'p-cb'},permission:'edit',adds:'direct'})).data.share;
+  await kim('POST',`/api/shares/${ps.id}/attach`,{env:kimEnv});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/items`,{title:'Project date',projects:[`sh.${ps.id}.p-cb`],start:'2026-12-09'});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.ok((await home()).timeline.some(i=>i.title==='Project date'&&i.projects.includes('p-cb')));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/projects`,{name:'Not in this share',share:ps.id});
+  assert.equal(r.status,409,JSON.stringify(r.data));assert.equal(r.data.code,'share_add_out_of_scope');
+  await owner('DELETE',`/api/shares/${ps.id}`);
+  // View and comment shares never add, whatever was asked.
+  const vs=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'comment',adds:'direct'})).data.share;
+  assert.equal(vs.adds,'off');
+  await kim('POST',`/api/shares/${vs.id}/attach`,{env:kimEnv});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'Comment only',project:`sh.${vs.id}.p-cb`});assert.equal(r.status,403);
+  await owner('DELETE',`/api/shares/${vs.id}`);
+  // A recipient still cannot share what is shared with them.
+  assert.equal((await kim('POST','/api/shares',{env:kimEnv,recipientEmail:BO,scope:{kind:'nodes',nodeIds:[L('marsh')]}})).status,400);
+});

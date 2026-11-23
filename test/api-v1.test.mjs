@@ -27,6 +27,13 @@ const seed=()=>({active:'c1',charts:[{id:'c1',name:'Brainstorm',nodes:[
 
 let dir,store,server,base;
 const office=officeState();
+// Share additions (server.mjs keeps them with the share store): one pending proposal of the owner's, decided once.
+const PROP={id:'prop-1',shareId:'share-1',env:ENV,proposedBy:'kim@example.test',status:'pending',role:'owner',createdAt:'2026-11-22T00:00:00.000Z',updatedAt:'2026-11-22T00:00:00.000Z',decidedAt:null,decidedBy:null,
+  preview:[{kind:'card',id:'k9',title:'Kim idea'}],records:{node:[],edge:[],project:[],item:[],card:[{id:'k9',title:'Kim idea'}]}};
+let propState='pending';
+const proposals={list:async(env,user,{status})=>env===ENV&&user.email===OWNER.email&&status===propState?[{...PROP,status:propState}]:[],
+  decide:async(id,user,approve,env)=>id!==PROP.id||env!==ENV||user.email!==OWNER.email?{status:404,body:{error:'Not found',code:'proposal_not_found'}}
+    :propState!=='pending'?{status:409,body:{error:'Already decided',code:'proposal_decided'}}:(propState=approve?'approved':'denied',{status:200,body:{proposal:{...PROP,status:propState,decidedAt:'2026-11-22T01:00:00.000Z',decidedBy:OWNER.email}}})};
 const called=new Set();
 async function call(method,path,{key='flow_rw',body,headers={}}={}){
   const r=await fetch(base+path,{method,headers:{...(key?{authorization:'Bearer '+key}:{}),...(body!==undefined?{'content-type':'application/json'}:{}),...headers},body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});
@@ -52,7 +59,7 @@ before(async()=>{
   const limit=memoryRateLimit({perMinute:3});
   limiter=({req,user,operation})=>user.email==='lim@example.com'?limit({req,user,operation}):{ok:true};
   server=http.createServer(async(req,res)=>{
-    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter,office}))return;
+    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter,office,proposals}))return;
     res.writeHead(418);res.end();
   });
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
@@ -84,7 +91,7 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result'];
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -606,6 +613,16 @@ test('projects carry repos; the office operations report agents, long-poll answe
   assert.equal((await op('office.actions.result',{id:a.id,ok:true,message:'Approved'},{key:'flow_bob'})).status,404,'only the owner reports a result');
   r=await op('office.actions.result',{id:a.id,ok:true,message:'Approved'});assert.equal(r.body.action.result.message,'Approved');
   assert.equal((await op('office.actions.wait',{source:'bridge:test',wait:31})).body.code,'invalid_input');
+});
+
+test('share additions: owners list, approve and deny proposals; others cannot',async()=>{
+  let r=await op('proposals.list',{env:ENV});assert.equal(r.status,200,JSON.stringify(r.body));assert.deepEqual(r.body.items.map(p=>p.id),['prop-1']);
+  assert.equal((await op('proposals.list',{env:ENV},{key:'flow_bob'})).status,404,"Bob cannot read the owner's environment");
+  assert.equal((await op('proposals.approve',{env:ENV,proposal:'prop-1'},{key:'flow_ro'})).status,403,'a read key cannot decide');
+  assert.equal((await op('proposals.approve',{env:ENV,proposal:'nope'})).body.code,'proposal_not_found');
+  r=await op('proposals.approve',{env:ENV,proposal:'prop-1'});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.proposal.status,'approved');
+  r=await op('proposals.deny',{env:ENV,proposal:'prop-1'});assert.equal(r.status,409);assert.equal(r.body.code,'proposal_decided');
+  assert.deepEqual((await op('proposals.list',{env:ENV,status:'approved'})).body.items.map(p=>p.status),['approved']);
 });
 
 test('every operation was exercised over HTTP',()=>{
