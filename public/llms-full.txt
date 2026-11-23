@@ -350,6 +350,7 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **Press E.** Walk up to an agent, a person or a board and a prompt says what **E** does there ("E Talk to Chief of Staff", "E Wave at Joe"); on a gamepad it is X / Square, and on a touch screen you tap the prompt. E again, Esc or walking away closes what it opened. The camera turns with **Z** and **C**.
 - **Status.** Each person sets Available, Focus, Do not disturb or Away. It shows on their avatar, name tag and door sign. See [Status](#status).
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
+- **Worlds.** The office can be the classic **Office** or a **Yacht**. See [Worlds](#worlds).
 - **Several offices.** If shares from other people's environments are placed in yours, the office's title becomes a menu: pick a shared environment to enter its office as a member. The shared office opens first, until you pick another.
 - **One office for a shared environment.** When you open an environment shared with you as a whole (see [Sharing](#sharing)), its 3D office is the owner environment's office: the same rooms, the same chat and the same people, so the owner and everyone it is shared with see each other live. Your own coding agents show in your room there, as in every office you are a member of.
 - **Doors.** Each office has a glowing door, in a gap between the rooms, for every other office sharing connects you to and that you can enter, labelled with whose office it is ("Avery's office") and its environment's name: the offices of environments shared with you, the offices of your own environments that you share (where the people you share them with meet you), and, while you visit someone else's office, a door back to your own (**Your office**). Walk through a door, or click it or its label, to go there. You only ever see doors to offices you can enter.
@@ -385,6 +386,19 @@ The header has a status control: **Available**, **Focus**, **Do not disturb** or
 Away is also set on its own after 10 minutes with no input while the tab is hidden, and clears when you come back (the tab is visible again, or you press a key or click). An Away you picked yourself stays until you change it.
 
 While someone is in **Do not disturb**, waiting-agent pings and notifications are held and only the badge shows, until they leave it. That includes the browser notification from **Notify me when agents wait**: the badge on the **3D** button still counts them, and the notifications show when they leave Do not disturb. Activity code checks `status.isQuiet(userId)` from `public/office-status.js` before it pings. `userId` is the office member key. When that is true, call `status.notePing(userId, ping)` instead of announcing; it returns `{held: true, count}`. `status.takeHeld(userId)` returns what was held once they leave. The same check on the server is `officeHub.isQuiet(userId)`, and there `userId` may be the member key or the person's email. Pings the office already knows about (an agent that starts waiting) go through this hook on their own.
+
+### Worlds
+
+An environment's office is drawn as one of two worlds. Everyone who enters sees the same one.
+
+- **Office** (the default). Rooms in a ring on one floor, with the common area in the middle.
+- **Yacht.** A superyacht under way at sea. The AgentFlow org stands in the sunken seating of the main-deck lounge, with the main board on the wall ahead of it. Stairs lead up to the upper deck, where each member has a cabin with their name at the door and their board on its back wall. The environment's owner has the bridge at the front. Above the cabins is the sundeck with a pool and a bar, forward of the bridge is the helipad, and at the stern steps go down to the swim platform, where doors to other offices stand. Rails keep you on board unless you jump them. Jump a rail or walk off the swim platform's open end and you fall in with a splash, then come back on the nearest deck.
+
+To change the world, open the office of your own environment and pick **Office** or **Yacht** in the menu beside the environment's name. The choice is saved with the environment (in its AgentFlow data, as `office.world`), so it syncs like any other edit and applies to everyone, within about 15 seconds for people already inside. When you visit a shared environment's office you see the world its owner picked, and the menu is hidden.
+
+The yacht's deck sways a little. **Sea motion** in the controls panel (**?**) turns that off; it starts off when your system asks for reduced motion. The setting is kept in this browser.
+
+The yacht's decks are terraced and never stacked, so each spot has exactly one floor height and everyone agrees where a person stands.
 
 ### Who sees what
 

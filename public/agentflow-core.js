@@ -129,8 +129,12 @@ export function cleanAgentflow(d,db={}){
       }),
       ...links(w),created:iso(w.created,now),updated:iso(w.updated,now)};
   });
-  return {agents,workflows,runners:cleanRunners(d.runners)};
+  return {agents,workflows,runners:cleanRunners(d.runners),...cleanOffice(d.office)};
 }
+// The 3D office's settings: {world} is the world everyone in this environment's office stands in
+// (docs/concepts/12-office.md). Stored only when it is not the default, so older saves read the same.
+export const OFFICE_WORLDS={classic:'Office',yacht:'Yacht'};
+export function cleanOffice(o){const world=typeof o?.world==='string'?pick(o.world,OFFICE_WORLDS,'classic'):'classic';return world==='classic'?{}:{office:{world}}}
 // models wins over model; older saves with only model get models=[model]. model mirrors models[0].
 function cleanModels(a){
   const models=strs(Array.isArray(a.models)&&a.models.length?a.models:typeof a.model==='string'?[a.model]:[],LIMITS.agentModels,120);

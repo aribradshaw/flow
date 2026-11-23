@@ -217,11 +217,13 @@ export const WALK_SPEED = 5.2;
 export const RUN_SPEED = 8.5;
 export const FIXED_STEP = 1 / 120;
 const BODY_RADIUS = 0.32, GRAVITY = 19, COYOTE_TIME = 0.11, JUMP_BUFFER = 0.14;
-const SKIN = 0.0001, LIMIT = 110;
+const SKIN = 0.0001, LIMIT = 110, STEP_DOWN = 0.3;
 const INTERPOLATED_FIELDS = ['x', 'y', 'z', 'speed', 'squash'];
 
-function supportBelow(state, boxes) {
-  let floor = 0;
+// The floor under the body: the ground (zero in the flat office, a deck's height in a world
+// with terrain), or the top of a box it stands on.
+function supportBelow(state, boxes, ground = 0) {
+  let floor = ground;
   for (const b of boxes) {
     if (b.height > state.y + SKIN || b.height <= floor) continue;
     const x = state.x - b.x, z = state.z - b.z;
@@ -234,7 +236,7 @@ function supportBelow(state, boxes) {
 
 // Resolve a moving circle against the closest point of each oriented box. Push along
 // the contact normal and remove only the inward component so tangential motion survives.
-function slideAgainstOffice(state, boxes) {
+function slideAgainstOffice(state, boxes, limit = LIMIT) {
   for (let pass = 0; pass < 3; pass++) {
     let hit = false;
     for (const b of boxes) {
@@ -271,10 +273,10 @@ function slideAgainstOffice(state, boxes) {
   }
 
   const radius = Math.hypot(state.x, state.z);
-  if (radius > LIMIT) {
+  if (radius > limit) {
     const x = state.x / radius, z = state.z / radius;
-    state.x = LIMIT * x;
-    state.z = LIMIT * z;
+    state.x = limit * x;
+    state.z = limit * z;
     const outward = Math.max(0, state.vx * x + state.vz * z);
     state.vx -= outward * x;
     state.vz -= outward * z;
@@ -286,7 +288,9 @@ export function createOfficeCharacter() {
   const before = {...state}, rendered = {...state};
   let time = 0, grace = COYOTE_TIME, buffer = 0, airJump = true, flipTime = 0;
 
-  function step(dt, {x, z, sprint, jumpHeld}, boxes) {
+  // terrain (optional, from the world): {ground(x, z) -> floor height or null, floor (what is
+  // under everything, for a fall), limit}. Decks are terraced, so stairs are slopes in ground().
+  function step(dt, {x, z, sprint, jumpHeld}, boxes, terrain) {
     Object.assign(before, state);
     state.squash *= Math.exp(-13 * dt);
     buffer = Math.max(0, buffer - dt);
@@ -328,8 +332,8 @@ export function createOfficeCharacter() {
 
     state.x += state.vx * dt;
     state.z += state.vz * dt;
-    slideAgainstOffice(state, boxes);
-    const floor = supportBelow(state, boxes);
+    slideAgainstOffice(state, boxes, terrain?.limit);
+    const floor = supportBelow(state, boxes, terrain ? terrain.ground(state.x, state.z) ?? terrain.floor : 0);
     state.vy -= GRAVITY * dt;
     state.y += state.vy * dt;
     if (state.y <= floor && state.vy <= 0) {
@@ -341,6 +345,10 @@ export function createOfficeCharacter() {
       airJump = true;
       // A buffered press with both jumps spent can fire as soon as the feet land.
       jump();
+    } else if (terrain && state.grounded && state.vy <= 0 && state.y - floor < STEP_DOWN) {
+      // Walking down stairs keeps the feet on them.
+      state.y = floor;
+      state.vy = 0;
     } else {
       state.grounded = false;
     }
@@ -368,10 +376,10 @@ export function createOfficeCharacter() {
     },
     jump() { buffer = JUMP_BUFFER; },
     clearJump() { buffer = 0; },
-    advance(dt, input, boxes) {
+    advance(dt, input, boxes, terrain) {
       time += clamp(dt, 0, 0.05);
       while (time >= FIXED_STEP) {
-        step(FIXED_STEP, input, boxes);
+        step(FIXED_STEP, input, boxes, terrain);
         time -= FIXED_STEP;
       }
       const alpha = time / FIXED_STEP;

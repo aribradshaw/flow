@@ -572,6 +572,8 @@ async function openOffice(link={}){
     agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
     ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
     overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,
+    // The office's world (Office or Yacht) is this environment's to choose; a shared one shows its owner's choice.
+    ...(o?{}:{world:()=>af().office?.world,setWorld:world=>change(()=>{if(world==='classic')delete af().office;else af().office={world}})}),
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).

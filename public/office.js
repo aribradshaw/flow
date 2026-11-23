@@ -12,7 +12,7 @@ import {officeOverlayActions} from './office-overlays-core.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
 import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
-import {classicLayout,toWorld,ROOM_W,ROOM_D,WALL_T,WALL_H,BACK_WALL_H,DOOR_W} from './office-layout.js';
+import {toWorld,ROOM_W,ROOM_D,WALL_T,WALL_H,BACK_WALL_H,DOOR_W} from './office-layout.js';
 import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
@@ -27,6 +27,7 @@ import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
 import {attachOfficeStatus} from './office-status.js';
+import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -44,6 +45,7 @@ export function openOffice(opts){
   root.innerHTML=`<div class="of-top">
       <span class="of-title">${icon('cube3d',16)}<b>3D office</b></span>
       ${opts.offices.length>1?`<select class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
+      <select class="of-world" aria-label="World" data-tip="World" hidden>${WORLDS.map(w=>`<option value="${w.id}">${w.name}</option>`).join('')}</select>
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
@@ -77,11 +79,12 @@ export function openOffice(opts){
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
+      <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
   root.tabIndex=-1;document.body.append(root);
   S={opts,root,overlays:[],overlaySession:uid(),lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
-    input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
+    input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
   // Browser automation only (navigator.webdriver): end-to-end checks can place the avatar and read the office.
@@ -91,6 +94,8 @@ export function openOffice(opts){
   bindHud(root,{icon,notify:{on:notifyOn,toggle:toggleNotify},toast:opts.toast});
   root.addEventListener('focusin',e=>{if(isTyping(e.target))clearKeys()});
   root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
+  const motion=root.querySelector('.of-motion');motion.checked=S.motion;motion.addEventListener('change',()=>{S.motion=motion.checked;try{localStorage.setItem(MOTION_KEY,S.motion?'1':'0')}catch{}});
+  root.querySelector('.of-world').addEventListener('change',e=>{const id=worldId(e.target.value);S.opts.setWorld?.(id);usePlace(id)});
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
@@ -100,13 +105,14 @@ export function openOffice(opts){
   if(opts.cardId)openOverlay('card',opts.cardId);
 }
 export const officeOpen=()=>!!S;
+export const officePeek=()=>S; // the open office's state, for tests and the screenshot harness
 export function closeOffice(){
   if(!S)return;const s=S;S=null;
   s.presence?.destroy();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();clearInterval(s.answerTick);
-  try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
+  try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
@@ -211,7 +217,7 @@ function connect(){
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
-  on('members',({members,agentflow})=>{updateRooms(members,agentflow);refreshPanel()});
+  on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
   on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
   on('result',a=>{if(S.steer.isSteer(a)){S.steer.track(a,'done');S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)}else answerResult(a)});
@@ -251,6 +257,7 @@ function snapshot(d){
   const previous=S.live;
   if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
   S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.portalList=d.portals||[];
+  S.serverWorld=d.env?.world;if(S.world)usePlace(wantedWorld());
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
@@ -261,9 +268,7 @@ function snapshot(d){
     for(const key of changed.remove)buildDesks(key);
     if(changed.upsert.length||changed.remove.length)seatsChanged();
     if(!S.placed){
-      S.placed=true;const r=S.rooms.get(S.meKey),heading=r?.facing??0;
-      if(r)S.pos.copy(r.door);
-      S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading);
+      S.placed=true;arrive();
     }
     const {x,y,z,heading}=S.controller.state;
     if(!S.people.has(S.meKey))upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x,y,z,heading,moving:false},true);
@@ -327,19 +332,15 @@ function initScene(){
   const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'low-power'});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
   S.stage.prepend(renderer.domElement);renderer.domElement.className='of-canvas';
-  const scene=new THREE.Scene();scene.background=new THREE.Color('#eef2ef');scene.fog=new THREE.Fog('#eef2ef',45,110);
-  const camera=new THREE.PerspectiveCamera(45,1,0.08,1400);
-  scene.add(new THREE.HemisphereLight('#ffffff','#b9c4bf',2.2));
-  const sun=new THREE.DirectionalLight('#ffffff',1.6);sun.position.set(12,30,18);scene.add(sun);
-  const ground=new THREE.Mesh(new THREE.CircleGeometry(120,48),mat('#dfe6e2'));ground.rotation.x=-Math.PI/2;ground.name='ground';scene.add(ground);
-  const rug=new THREE.Mesh(new THREE.CircleGeometry(1,40),mat('#cfe3d2'));rug.rotation.x=-Math.PI/2;rug.position.y=0.01;rug.scale.setScalar(10);scene.add(rug);S.rug=rug;
+  const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(45,1,0.08,1400);
   Object.assign(M,{
     box:new THREE.BoxGeometry(1,1,1),ico:new THREE.IcosahedronGeometry(1,0),ico1:new THREE.IcosahedronGeometry(1,1),oct:new THREE.OctahedronGeometry(1,0),
     cyl:new THREE.CylinderGeometry(1,1,1,7),cone:new THREE.ConeGeometry(1,1,6),torus:new THREE.TorusGeometry(0.62,0.12,5,14),disc:new THREE.CircleGeometry(1,16),
     wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:mat('#3d4c56'),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
   });
   S.world=new THREE.Group();scene.add(S.world);
-  Object.assign(S,{renderer,scene,camera,ground,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
+  Object.assign(S,{renderer,scene,camera,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
+  usePlace(wantedWorld());
   S.activity=createActivity({THREE,part,M,roomW:ROOM_W,roomD:ROOM_D,person:key=>S.people.get(key)});
   const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
@@ -383,10 +384,41 @@ function clear(group){group.removeFromParent();group.traverse(o=>{if(o.material&
 // top: the label hangs below its point (a plate on a wall) instead of standing on it.
 function label(obj,html,{y=1.6,cls='',near=0,show=null,top=false}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show,top};S.labelList.push(l);return l}
 
+// ---------- the world ----------
+// What everyone stands in (office-world.js): the classic office, or the yacht. The environment says which
+// (its AgentFlow data's office.world); in your own environment the picker in the top bar changes it for
+// everyone. S.world is the group that holds rooms, people and agents; S.place is the world around them.
+const MOTION_KEY='flow.office.seaMotion';
+function seaMotion(){try{const v=localStorage.getItem(MOTION_KEY);if(v)return v==='1'}catch{}return !matchMedia('(prefers-reduced-motion: reduce)').matches}
+const mine=()=>S.env===S.opts.current;
+const wantedWorld=()=>worldId(mine()&&S.opts.world?S.opts.world():S.serverWorld);
+function usePlace(id){
+  if(S.place?.id===id)return;
+  S.place?.dispose();S.place=createWorld(id,{scene:S.scene,deck:S.world});
+  S.root.style.background=S.place.background;S.root.dataset.world=id;S.place.common(S.commonR||10);
+  const pick=S.root.querySelector('.of-world');pick.value=id;pick.hidden=!(mine()&&S.opts.setWorld);
+  S.root.querySelector('.of-motion-row').hidden=S.place.sea===-Infinity;
+  if(!S.placed)return;
+  buildRooms();arrive();S.boards?.invalidate();sendPresence(true);
+}
+// Stand at my room's door (or where this world lets people in).
+function arrive(){
+  const r=S.rooms.get(S.meKey),at=S.place.spawn,heading=r?r.facing:at.heading;
+  if(r)S.pos.copy(r.door);else S.pos.set(at.x,at.y,at.z);
+  S.floor=S.pos.y;S.target=S.follow=null;S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading);
+}
+// Walls as the camera needs them: measured up from the deck I stand on.
+function cameraWalls(){
+  const c=S.camWalls;
+  if(!c||c.src!==S.walls||c.n!==S.walls.length||Math.abs(c.floor-S.floor)>0.04)S.camWalls=Object.assign(wallsFrom(S.walls,S.floor),{src:S.walls,n:S.walls.length,floor:S.floor});
+  return S.camWalls;
+}
+
 // ---------- rooms ----------
 // The world (office-layout.js) places the rooms and the main board's feature wall. A room has low walls so
 // you can see in, a tall back wall its whiteboard hangs on, and a door with its name plate beside it.
 function buildRooms(){
+  if(S.signs)clear(S.signs);
   const previous=S.rooms;
   S.rooms=new Map();
   for(const r of previous.values())clear(r.group);
@@ -394,11 +426,14 @@ function buildRooms(){
   S.walls=[];
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
   const byKey=new Map(list.map(m=>[m.key,m]));
-  S.worldLayout=classicLayout(list.map(m=>m.key),{commonR:S.commonR||10});
+  S.worldLayout=S.place.layout(list.map(m=>m.key),{commonR:S.commonR||10});
   S.overviewRadius=Math.max(12,S.worldLayout.radius+8);
-  const boxAt=(frame,x,z,w,d,h)=>{const p=toWorld(frame,x,z);S.walls.push(officeBox(p.x,p.z,frame.facing,w,d,h))};
+  // Boxes are solid from their top down, so one on a raised deck is that much taller.
+  const boxAt=(frame,x,z,w,d,h)=>{const p=toWorld(frame,x,z);S.walls.push(officeBox(p.x,p.z,frame.facing,w,d,h+(frame.y||0)))};
+  S.signs=new THREE.Group();S.world.add(S.signs);
+  for(const n of S.place.signs){const o=new THREE.Object3D();o.position.set(n.x,n.y,n.z);S.signs.add(o);label(o,`<span class="of-sign">${esc(n.text)}</span>`,{y:0,cls:'sign',near:26})}
   for(const slot of S.worldLayout.rooms){
-    const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,0,slot.z),facing=slot.facing;
+    const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,slot.y||0,slot.z),facing=slot.facing;
     const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
     const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
     const wall=(x,z,w,d,h=WALL_H)=>{g.add(part(M.box,M.wall,[x,h/2,z],[w,h,d]));boxAt(slot,x,z,w,d,h)};
@@ -421,6 +456,7 @@ function buildRooms(){
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
   buildMainWall();
+  S.walls.push(...S.place.walls);
   buildDoors();
   S.presence?.syncDoors();
   updateColliders();
@@ -437,14 +473,14 @@ function buildRooms(){
 }
 // The main board's feature wall: a freestanding wall on a plinth, with a planter at each end.
 function buildMainWall(){
-  const w=S.worldLayout.mainWall,g=new THREE.Group();g.position.set(w.x,0,w.z);g.rotation.y=w.facing;S.mainWall=g;
+  const w=S.worldLayout.mainWall,y=w.y||0,g=new THREE.Group();g.position.set(w.x,y,w.z);g.rotation.y=w.facing;S.mainWall=g;
   g.add(part(M.box,M.wall,[0,w.height/2,0],[w.width,w.height,w.depth]));
   g.add(part(M.box,M.plinth,[0,0.09,0],[w.width+0.3,0.18,w.depth+0.3]));
   g.add(part(M.box,M.trim,[0,w.height+0.04,0],[w.width+0.1,0.08,w.depth+0.1]));
-  S.walls.push(officeBox(w.x,w.z,w.facing,w.width+0.3,w.depth+0.3,w.height));
+  S.walls.push(officeBox(w.x,w.z,w.facing,w.width+0.3,w.depth+0.3,w.height+y));
   for(const x of [-w.width/2-0.75,w.width/2+0.75]){
     g.add(part(M.cyl,M.pot,[x,0.3,0.4],[0.4,0.6,0.4]),part(M.cone,M.leaf,[x,1.15,0.4],[0.62,1.25,0.62]),part(M.cone,M.leaf,[x,1.75,0.4],[0.45,0.95,0.45]));
-    const p=toWorld(w,x,0.4);S.walls.push(officeBox(p.x,p.z,w.facing,0.85,0.85,0.6));
+    const p=toWorld(w,x,0.4);S.walls.push(officeBox(p.x,p.z,w.facing,0.85,0.85,0.6+y));
   }
   S.world.add(g);
 }
@@ -476,7 +512,7 @@ function buildDesks(key,refresh=true){
   const g=room.desks,{entries}=g.userData;g.position.copy(room.center);g.rotation.y=room.facing;
   room.boxes=[];
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
-  for(const b of g.userData.lounge)room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
+  for(const b of g.userData.lounge)room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h+room.center.y));
   // Sessions seated at an AgentFlow agent's desk sit in the common area instead (buildSeats).
   const all=S.live.get(key)||[],agents=all.filter(a=>!isSeated(a,S.afPlaced)),away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
   room.note=agents.length?`${agents.length} ${agents.length===1?'agent':'agents'}`:away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'no agents running';
@@ -485,7 +521,7 @@ function buildDesks(key,refresh=true){
   agents.slice(0,16).forEach((a,i)=>{
     const col=i%cols,row=Math.floor(i/cols),x=(col-(cols-1)/2)*sx,z=-ROOM_D/2+1.4+row*2.1,id=deskKey(key,a);
     visible.add(id);
-    room.boxes.push(officeBox(room.center.x+x*cos+z*sin,room.center.z-x*sin+z*cos,room.facing,1.7,0.8,0.76));
+    room.boxes.push(officeBox(room.center.x+x*cos+z*sin,room.center.z-x*sin+z*cos,room.facing,1.7,0.8,0.76+room.center.y));
     entries.set(id,makeDesk(g,a,key,x,z,a.private?'Private project':seatTag(a,'',a.title||VENDOR[a.vendor]?.name||'Agent'),{phase:(i*1.7+key.length)%6.28},entries.get(id)));
   });
   for(const [id,d] of entries)if(!visible.has(id)){clear(d);entries.delete(id)}
@@ -560,7 +596,7 @@ function buildAgentflow(){
   const was=[...S.afPlaced||[]].join('\n');S.afPlaced=new Set(list.filter(a=>pos.has(a.id)).map(a=>a.id));S.afPos=pos;
   if(S.rooms.size&&[...S.afPlaced].join('\n')!==was){for(const k of S.rooms.keys())buildDesks(k,false);updateColliders()}
   const seats=seatsByAgent(S.live,S.afPlaced);S.seatSig=seatSig(seats);
-  if(S.commonR!==radius){S.commonR=radius;S.rug.scale.setScalar(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
+  if(S.commonR!==radius){S.commonR=radius;S.place.common(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
   const items=[],people=[];
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
@@ -671,7 +707,7 @@ function hitAt(e){
     if(board&&board.distance<h.distance)break;
     if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
     let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
-  const g=S.ray.intersectObject(S.ground)[0];
+  const g=S.ray.intersectObjects(S.place.floors)[0];
   return board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point}:g?{kind:'',point:g.point}:null;
 }
 function cardTargetAt(e){
@@ -717,7 +753,8 @@ function pick(e){
   if(hit.kind==='af'){showAf(hit.id);return}
   if(hit.kind==='person'){openMenu(hit.obj.userData.key,e);return}
   if(hit.kind==='portal'){goDoor(hit.obj.userData.portal);return}
-  S.follow=null;S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);
+  const at=S.world.worldToLocal(hit.point.clone());if(S.place.ground(at.x,at.z)===null)return;
+  S.follow=null;S.target=at;
 }
 // ---------- doors to other offices (office-portals.js; docs/concepts/12-office.md) ----------
 function buildDoors(){
@@ -725,7 +762,10 @@ function buildDoors(){
   const rooms=[...S.rooms.values()],ring=rooms.length?Math.hypot(rooms[0].center.x,rooms[0].center.z):(S.commonR||10)+7;
   // The main board's wall holds a slot in the ring too: doors go in the gaps either side of it.
   const wall=S.worldLayout?.mainWall,taken=wall?[...rooms,{center:{x:wall.x,z:wall.z}}]:rooms;
-  const d=buildDoors3d(doorSpots(S.portalList,{rooms:taken,ringRadius:ring}));S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
+  // A world may have its own places for doors (the yacht: the swim platform); the office puts them in the ring's gaps.
+  const spots=S.worldLayout?.doors?.(S.portalList)||doorSpots(S.portalList,{rooms:taken,ringRadius:ring});
+  const d=buildDoors3d(spots);S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
+  d.spots.forEach((sp,i)=>{sp.anchor.parent.position.y=spots[i].y||0});
   for(const sp of d.spots){S.clickables.push(sp.hit);label(sp.anchor,`<button type="button" class="of-tag of-portal" data-door="${esc(sp.portal.env)}"><b>${esc(sp.portal.label)}</b>${sp.portal.sub?`<small>${esc(sp.portal.sub)}</small>`:''}</button>`,{y:3.25,cls:'portal click'})}
 }
 const buildDoors3d=spots=>doorMeshes(THREE,spots,{box:M.box,mat});
@@ -937,6 +977,7 @@ function remoteMotion(p, now){
   return out;
 }
 
+const rigPos=new THREE.Vector3();
 function frame(dt,t){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
   const paused=overlayOpen();
@@ -961,9 +1002,16 @@ function frame(dt,t){
     }
   }
   S.presence?.beforeMove();
-  const player=controller.advance(dt,{...input,x,z},S.colliders);
+  let player=controller.advance(dt,{...input,x,z},S.colliders,S.place.terrain);
+  // In the water: a splash, then back on the nearest deck.
+  if(player.y<S.place.sea-1.1){
+    S.place.splash(player,t);const r=S.place.respawn(player);
+    controller.reset(r,r.heading);S.target=S.follow=null;S.input.clear();player=controller.advance(0,{...input,x:0,z:0},S.colliders,S.place.terrain);
+  }
   S.presence?.afterMove(player);
   S.pos.set(player.x,player.y,player.z);checkDoor();
+  // The deck I stand on (or last stood on, in the air), for the camera.
+  const deck=S.place.ground(player.x,player.z);if(deck!==null&&player.grounded)S.floor+=(Math.min(deck,player.y)-S.floor)*Math.min(1,dt*8);
   if(S.meKey)sendPresence(false);
   for(const p of S.people.values()){
     // The figure animation can use the same motion fields for local and remote avatars.
@@ -996,9 +1044,14 @@ function frame(dt,t){
   // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
   S.activity?.tick(dt,t);
   if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,t)}
-  if(!paused)S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
-    {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
-  S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
+  if(!paused){
+    // The camera works as if my deck were the ground, then rides up to it; the overview frames the whole world.
+    S.rig.update(dt,rigPos.set(S.pos.x,S.pos.y-S.floor,S.pos.z),player.heading,player.vx,player.vz,cameraWalls(),S.overviewRadius,
+      {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
+    S.ov+=((S.rig.overview?1:0)-S.ov)*Math.min(1,dt*9);
+    S.camera.position.x+=S.place.center.x*S.ov;S.camera.position.y+=S.floor*(1-S.ov);S.camera.position.z+=S.place.center.z*S.ov;
+  }
+  S.place.update(t,dt,{camera:S.camera,motion:S.motion});
   S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);
   S.interact?.update();

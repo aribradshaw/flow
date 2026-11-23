@@ -184,3 +184,8 @@
 .of-toast{pointer-events:auto;padding:10px 12px;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.16);font-size:13px}
 .of-toast.bad{color:var(--danger)}
 @media (max-width:520px){.of-presence-text{width:5.5rem}}
+/* Worlds (public/office-world.js): the picker, place names, and the sea-motion switch */
+.of-world{height:28px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;padding:0 6px;font-weight:600}
+.of-world[hidden],.of-motion-row[hidden]{display:none}
+.of-sign{display:inline-block;padding:2px 9px;border-radius:10px;background:rgba(24,40,48,.62);color:#fff;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.of-controls label+label{margin-top:8px}

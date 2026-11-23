@@ -1356,6 +1356,7 @@ async function officeEnv(envId){
   const members=await Promise.all(emails.map(async email=>{const u=await users.get(email).catch(()=>null);return {email,name:u?.name||await personName(email),lastSeen:u?.lastSeen||'',personIds:people.filter(p=>sameEmail(p.email,email)).map(p=>p.id)}}));
   return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,members,
     projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
+    world:data?.agentflow?.office?.world||'classic',
     agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[],
       ...(a.kind==='human'?{memberEmail:humanMember(a,data,members)}:{})})),
     // For seats (lib/office-seats.mjs): which card a live session works on, and each agent's queue.
