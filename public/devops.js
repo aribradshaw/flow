@@ -636,6 +636,8 @@ function agentRow(c){
 // Delegate a card to exactly these agents (ids). One undo step; nothing changes when an agent's queue is full.
 function setAgents(c,ids){
   if(isForeign(c.id)){toast(ownerMsg(c,'This card'),true);return}
+  // An opened shared environment's agents are its owner's: delegating needs an edit share (docs/sharing.md).
+  const o=store.db.opened;if(o&&o.permission!=='edit'){toast(`Shared with you by ${o.ownerName||o.ownerEmail} to ${o.permission==='comment'?'comment on':'view'}: ask them for edit access to delegate cards.`,true);rerender();return}
   // Check room before recording an undo step: delegate() changes nothing when an agent is full.
   const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,ids);
   if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}

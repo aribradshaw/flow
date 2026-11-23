@@ -55,8 +55,13 @@ function mergeById(b,l,r){
 // Shared records (docs/sharing.md): the fields another person may change too, by kind.
 export const SHARED_FIELDS={node:['name','notes'],edge:['percent'],project:['name','color'],
   item:['title','kind','status','priority','start','end','owner','link','notes','release'],
-  card:['title','description','column','points','actual','due','labels','checklist','links','assignees','snoozedUntil']};
-const recordsOf=d=>({node:(d?.charts||[]).flatMap(c=>c.nodes||[]),edge:(d?.charts||[]).flatMap(c=>c.edges||[]),project:d?.projects||[],item:d?.timeline||[],card:d?.devops?.cards||[]});
+  card:['title','description','column','points','actual','due','labels','checklist','links','assignees','snoozedUntil'],
+  // AgentFlow, in an opened shared environment (lib/sharing-core.mjs FIELDS; live, runtime, models and the rest of
+  // what runs on the owner's machines are not among them).
+  agent:['name','title','status','purpose','inputs','outputs','reportsTo','supervisor','projects','cards','items'],
+  workflow:['name','description','status','trigger','schedule','steps','projects','cards','items']};
+const recordsOf=d=>({node:(d?.charts||[]).flatMap(c=>c.nodes||[]),edge:(d?.charts||[]).flatMap(c=>c.edges||[]),project:d?.projects||[],item:d?.timeline||[],card:d?.devops?.cards||[],
+  agent:d?.agentflow?.agents||[],workflow:d?.agentflow?.workflows||[]});
 // For each record a save changes, the value each changed field had in the copy it started from:
 // {node|edge|project|item|card:{id:{field:value}}}. The server tells a real edit of a shared record from
 // a copy that is only out of date, and notices an edit that overwrote someone else's change.

@@ -731,6 +731,10 @@ store.onChange=()=>{render();const m=decisionNotice();if(m)toast(m,m.includes('d
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 store.onLimit=msg=>{if(msg)toast(msg)};
+// An opened shared environment (share-<shareId>, docs/sharing.md): a save the share could not take all of, and the
+// share being revoked (the app then opens the user's own workspace).
+store.onShareNotice=msg=>{if(msg)toast(msg,true)};
+store.onShareGone=({name,owner})=>toast(`${name||'That environment'} is no longer shared with you${owner?` by ${owner}`:''}. Opened your own workspace.`,true);
 // Your edit of a card replaced a change made elsewhere (an agent, another tab) that this browser had not shown yet.
 store.onCardClash=list=>{
   const name=c=>`Card ${c.number!=null?'#'+c.number+' ':''}“${c.title}”`,kept=list.filter(c=>c.fields.includes('removed')),edited=list.filter(c=>!c.fields.includes('removed'));

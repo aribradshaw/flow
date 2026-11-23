@@ -12,7 +12,8 @@ import net from 'node:net';
 import {lockedChanges,resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
   createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
   shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView,
-  ADDS,addsOf,planAdditions,takeAdditions,applyAdditions,applyPendingEdit,additionsInScope,decideProposal,proposalPreview,newLinkedId,shareChartId} from '../lib/sharing-core.mjs';
+  ADDS,addsOf,planAdditions,takeAdditions,applyAdditions,applyPendingEdit,additionsInScope,decideProposal,proposalPreview,newLinkedId,shareChartId,
+  openedProjection,openedDb,openedEnvId,parseOpenedEnv,canOpen,OWNER_ONLY} from '../lib/sharing-core.mjs';
 import {fieldBase,clashes,withHeld,linkedFields,noteEdits,settleEdits} from '../public/sync-core.js';
 import {shareStore,SCHEMA,migrate} from '../lib/shares.mjs';
 
@@ -631,5 +632,63 @@ describe('additions',()=>{
     const sh=share({kind:'person',nodeId:'bo'});
     const r=additionsInScope(owner(),sh,{node:[{id:'n1',name:'Lone',type:'entity',x:0,y:0,chart:'c1'}],edge:[],project:[{id:'p1',name:'P',color:'',entity:'n1'}],item:[],card:[{id:'k1',title:'K',project:'p1',labels:[],assignees:[]}]});
     assert.deepEqual(r.dropped.map(x=>x.id).sort(),['k1','n1','p1']);
+  });
+});
+
+// Opening a shared environment (docs/sharing.md): the owner's environment through a whole-environment share.
+describe('opened environments',()=>{
+  const withAf=()=>{const d=owner();d.charts.push({id:'c2',name:'Private chart',nodes:[{...N('secret','Secret Holdings'),notes:'Chart two only'}],edges:[]});
+    d.charts[0].nodes[0].email='bo.private@example.test';
+    d.agentflow={agents:[{id:'bot',name:'Builder',kind:'agent',title:'',status:'active',live:true,reportsTo:'',supervisor:'bo',purpose:'Builds',instructions:'Secret sauce',runtime:'homebox',models:['claude:opus'],model:'claude:opus',auto:false,schedule:'daily',inputs:[],outputs:[],tools:['git'],projects:['p-cb'],cards:['k-cb','sh.other.k9'],items:[]},
+      {id:'boss',name:'Boss',kind:'team',title:'',status:'active',live:false,reportsTo:'',supervisor:'',purpose:'',instructions:'',runtime:'',models:[],model:'',auto:false,schedule:'',inputs:[],outputs:[],tools:[],projects:[],cards:[],items:[]}],
+      workflows:[{id:'wf',name:'Ship',description:'',status:'active',trigger:'manual',schedule:'',steps:[{id:'s1',agent:'bot',action:'Build',output:''}],projects:[],cards:[],items:[]}],
+      runners:[{name:'homebox',models:[{id:'claude:opus',label:'Opus'}],jobs:[{id:'j',name:'Nightly',source:'cron',schedule:'',command:'secret-cmd --key x',ai:false,enabled:true,lastStatus:'ok'}],reported:'2026-11-01T00:00:00.000Z'}]};
+    return d};
+  test('ids: share-<shareId>; only active whole-environment shares open',()=>{
+    const s=share({kind:'environment'});
+    assert.equal(parseOpenedEnv(openedEnvId(s.id)),s.id);assert.equal(parseOpenedEnv('default-workspace'),null);assert.equal(parseOpenedEnv('share-'),null);
+    assert.ok(canOpen(s));assert.ok(!canOpen({...s,revokedAt:'2026-11-01'}));assert.ok(!canOpen(share({kind:'person',nodeId:'bo'})));
+    assert.equal(openedProjection(owner(),share({kind:'project',projectId:'p-cb'})),null);
+  });
+  test('every chart of the scope, AgentFlow with references in the share’s ids, nothing private',()=>{
+    const db=withAf(),s=share({kind:'environment',chartId:'c1'}),L=id=>linkedId(s.id,id);
+    const p=openedProjection(db,s,[{recordId:'bo',chartId:'elsewhere',x:5,y:6}]),d=openedDb(p,{name:'Harbor'}),text=JSON.stringify(d);
+    assert.deepEqual(d.charts.map(c=>c.id),[L('c1')]);assert.equal(d.active,L('c1'));assert.equal(d.environment.id,openedEnvId(s.id));assert.equal(d.environment.name,'Harbor');
+    const bo=d.charts[0].nodes.find(n=>n.id===L('bo'));assert.deepEqual([bo.x,bo.y],[5,6],'layout is the recipient’s; the chart stays the owner’s');
+    assert.equal(d.charts[0].edges.length,db.charts[0].edges.length);
+    for(const x of ['Secret Holdings','Chart two only','bo.private@example.test','secret-cmd','sh.other.'])assert.ok(!text.includes(x),x);
+    const bot=d.agentflow.agents.find(a=>a.id===L('bot'));
+    assert.deepEqual([bot.supervisor,bot.projects,bot.cards,bot.live,bot.runtime],[L('bo'),[L('p-cb')],[L('k-cb')],true,'homebox']);
+    assert.equal(d.agentflow.workflows[0].steps[0].agent,L('bot'));
+    assert.deepEqual(d.devops.labels.map(l=>l.id).sort(),[L('l-high'),L('l-mkt')]);
+    // A placed (non-opened) projection carries no AgentFlow.
+    assert.equal(projectForRecipient(db,s).agents,undefined);
+  });
+  test('agent edits: whitelisted fields only; live, runtime, models and the rest of what runs stay the owner’s',()=>{
+    const db=withAf(),s=share({kind:'environment'}),L=id=>linkedId(s.id,id),me={email:BO};
+    for(const f of OWNER_ONLY.agent){const r=applyRecipientEdit(db,s,{kind:'agent',id:L('bot'),fields:{[f]:f==='live'||f==='auto'?false:f==='models'||f==='tools'?['x']:'x'}},me);assert.deepEqual([r.ok,r.error,r.field],[false,'owner-only',f],f)}
+    const r=applyRecipientEdit(db,s,{kind:'agent',id:L('bot'),fields:{purpose:'Tests too',cards:[L('k-cb'),L('k-marsh')],reportsTo:L('boss'),supervisor:'',status:'paused'}},me);
+    assert.ok(r.ok,JSON.stringify(r));const o=applyOwnerPatch(db,r.ownerDbPatch).agentflow.agents.find(a=>a.id==='bot');
+    assert.deepEqual([o.purpose,o.cards,o.reportsTo,o.supervisor,o.status,o.live],['Tests too',['sh.other.k9','k-cb','k-marsh'],'boss','','paused',true],'hidden references stay');
+    assert.equal(applyRecipientEdit(db,s,{kind:'agent',id:L('bot'),fields:{cards:['k-nope']}},me).error,'invalid');
+    assert.equal(applyRecipientEdit(db,s,{kind:'agent',id:L('bot'),fields:{reportsTo:L('bot')}},me).error,'invalid','not its own boss');
+    assert.equal(applyRecipientEdit(db,s,{kind:'agent',id:L('bot'),fields:{supervisor:L('marsh')}},me).error,'invalid','a supervisor is a person');
+    assert.equal(applyRecipientEdit(db,{...s,permission:'view'},{kind:'agent',id:L('bot'),fields:{purpose:'x'}},me).error,'permission');
+    const w=applyRecipientEdit(db,s,{kind:'workflow',id:L('wf'),fields:{steps:[{id:'s1',agent:L('boss'),action:'Plan'}],description:'New'}},me);
+    assert.ok(w.ok);assert.deepEqual(applyOwnerPatch(db,w.ownerDbPatch).agentflow.workflows[0].steps,[{id:'s1',agent:'boss',action:'Plan',output:''}]);
+    // Other scopes do not carry AgentFlow.
+    assert.equal(applyRecipientEdit(db,share({kind:'person',nodeId:'bo'}),{kind:'agent',id:'bot',fields:{purpose:'x'}},me).error,'out-of-scope');
+  });
+  test('a save of an opened environment: only the edits made, on any chart; new records are additions on their chart',()=>{
+    const db=withAf(),s=share({kind:'environment'}),L=id=>linkedId(s.id,id);
+    const p=openedProjection(db,s),d=openedDb(p),sub=structuredClone(d);
+    sub.agentflow.agents[0].purpose='Changed';sub.agentflow.agents[0].live=false;sub.charts.find(c=>c.id===L('c2')).nodes[0].name='Renamed';
+    const x=extractRecipientChanges(p,sub,{agent:{[L('bot')]:{purpose:'Builds',live:true}},node:{[L('secret')]:{name:'Secret Holdings'}}});
+    assert.deepEqual(x.edits.map(e=>[e.kind,e.id,Object.keys(e.fields)]),[['node','secret',['name']],['agent','bot',['purpose']]],'live is not a field a save carries');
+    assert.deepEqual(x.placements,[],'nothing moved');
+    sub.charts.find(c=>c.id===L('c2')).nodes.push(N('fresh','New card on c2'));
+    const plan=planAdditions(db,{...s,adds:'direct'},sub,{},{opened:true});
+    assert.deepEqual(plan.records.node.map(n=>[n.name,n.chart]),[['New card on c2','c2']]);
+    assert.equal(planAdditions(db,{...s,adds:'direct'},sub,{}).records.node.length,0,'without opened it is not for the share');
   });
 });

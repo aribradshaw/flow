@@ -1,6 +1,7 @@
 import {icon,makerIcon} from './icons.js';
 import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed,sessionPhoto} from './ui.js';
-import {currentEnv} from './sync.js';
+import {currentEnv,isOpenedEnv} from './sync.js';
+import {linkOf,canEdit} from './share.js';
 import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
@@ -543,7 +544,7 @@ function action(name,b){
     addAgent:()=>addAgent(),
     addWorkflow:()=>addWorkflow(),
     office:()=>openOffice(),
-    starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
+    starter(){if(sharedEnv()){toast(NO_ADD,true);return}if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
   })[name]?.();
 }
 // The 3D office (office.js, loaded on first use with Three.js): this environment's, or the office of an
@@ -566,13 +567,16 @@ async function openOffice(link={}){
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
+const NO_ADD='Agents and workflows in a shared environment are added by its owner.';
 function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){
+  if(sharedEnv()){toast(NO_ADD,true);return}
   const no=full(af(),'agents');if(no){toast(no,true);return}
   if(ui.view!=='org'){ui.view='org';keepUi()}
   change(()=>{if(at)pin(af());const a=newAgent(af(),{reportsTo,...(at||{})});selected={type:'agent',id:a.id}});
   focusName();
 }
 function addWorkflow(first=selected?.type==='agent'?selected.id:''){
+  if(sharedEnv()){toast(NO_ADD,true);return}
   const no=full(af(),'workflows');if(no){toast(no,true);return}
   ui.view='workflows';keepUi();
   change(()=>{const w=newWorkflow(af(),{steps:[newStep({agent:first})]});selected={type:'workflow',id:w.id}});
@@ -581,6 +585,7 @@ function addWorkflow(first=selected?.type==='agent'?selected.id:''){
 const focusName=()=>requestAnimationFrame(()=>{const i=$('#af-name');i?.focus();i?.select()});
 async function removeSelected(){
   const x=sel();if(!x)return;
+  if(linkOf(x)&&!linkOf(x).foreign){toast(`Only ${linkOf(x).ownerEmail||'its owner'} can delete it.`,true);return}
   if(selected.type==='agent'){
     const reps=reportsOf(af(),x.id).length,flows=workflowsFor(af(),x.id).length;
     const more=[reps&&`Its ${plural(reps,'direct report')} will report to ${agent(x.reportsTo)?.name||'nobody'}.`,flows&&`Its steps in ${plural(flows,'workflow')} become unassigned.`].filter(Boolean);
@@ -1025,11 +1030,29 @@ function openInstructions(btn){
 }
 // Autosaves like the panel's own fields: same undo step, and the short field and its count follow.
 function setInstructions(a,v){
-  if(!a)return;autosave(a,()=>{a.instructions=v});
+  if(!a||sharedLock(a))return;autosave(a,()=>{a.instructions=v});
   const t=$('#af-instr');if(t&&t.value!==v)t.value=v;
   countInstructions(v);
 }
 const countInstructions=v=>{const c=$('#af-instr-n'),n=lineCount(v);if(c)c.textContent=n?plural(n,'line'):'Empty'};
+// An opened shared environment's agents and workflows (docs/sharing.md, linked ids sh.<share>.<id>): what the share
+// does not let this user change is locked here, and the server refuses it anyway. An edit share changes the design;
+// what runs on the owner's machines (Live, runner, models, Auto, schedule, instructions, tools, kind) stays theirs.
+const OWNER_ONLY_SEL='#af-live,#af-auto,#af-runtime,#af-schedule,#af-instr,#af-new-tools,[data-af-del="tools"],[data-picker="af-runner"],[data-af-models],[data-af-mup],[data-af-mdn],[data-af-mdel],[data-af-kind],[data-afi="delete"],[data-afi="addReport"]';
+const EDIT_SEL='input,textarea,select,[data-picker],[data-af-status],[data-af-trigger],[data-af-add],[data-af-del],[data-step-del],[data-step-up],[data-step-down],[data-afi="addStep"]';
+const OWNER_TEXT=new Set(['schedule','runtime','instructions']);
+function sharedLock(x){
+  const l=x?linkOf(x):null;if(!l||l.foreign)return null;
+  const all=!canEdit(x),who=l.ownerEmail||'its owner';
+  return {all,sel:all?`${EDIT_SEL},${OWNER_ONLY_SEL}`:OWNER_ONLY_SEL,
+    msg:all?`Shared with you by ${who} to ${l.permission==='comment'?'comment on':'view'}: ask them for edit access.`:`Only ${who} can change that: it decides what runs on their machines.`};
+}
+function lockShared(pane,x){
+  const lock=sharedLock(x);if(!lock)return;
+  for(const el of pane.querySelectorAll(lock.sel)){if(el.matches('input,textarea'))el.readOnly=true;el.disabled=true}
+  pane.querySelector('.af-top')?.insertAdjacentHTML('afterbegin',`<p class="af-shared" role="note">${icon('link',12)}<span>${esc(lock.all?lock.msg:`Shared by ${linkOf(x).ownerEmail||'its owner'}. You can change its design and delegate cards; Live, runner, models, schedule, instructions and tools stay theirs.`)}</span></p>`);
+}
+const sharedEnv=()=>isOpenedEnv(currentEnv());
 export function renderInspector(pane){
   const x=sel();
   if(mp&&(!x||x.id!==mp.id))closeModels();
@@ -1037,7 +1060,7 @@ export function renderInspector(pane){
   if(!x)return;
   // Keep focus and caret when the panel is redrawn after a change.
   const a=document.activeElement,had=pane.contains(a),keep=had&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null,top=pane.scrollTop;
-  pane.innerHTML=selected.type==='agent'?agentHtml(x):workflowHtml(x);
+  pane.innerHTML=selected.type==='agent'?agentHtml(x):workflowHtml(x);lockShared(pane,x);
   pane.scrollTop=top;
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
@@ -1064,6 +1087,7 @@ export function inspectorClick(e){
   const box=e.target.closest('.af-chips');if(box&&e.target===box){box.querySelector('input')?.focus();return}
   const b=e.target.closest('button');if(!b)return;
   const x=sel();if(!x)return;
+  const lock=sharedLock(x);if(lock&&b.matches(lock.sel)){toast(lock.msg,true);return}
   if(b.dataset.afTab){showTab(b.dataset.afTab);return}
   if(b.dataset.afSetup){goSetup(b.dataset.afSetup);return}
   if(b.dataset.afJobMore!==undefined){jobOpen=!jobOpen;const box=$('#af-job-more-b');if(box)box.hidden=!jobOpen;b.setAttribute('aria-expanded',jobOpen);return}
@@ -1118,6 +1142,7 @@ export function inspectorInput(e){
   const t=e.target,x=sel(),form=$('#afedit');if(!x||!form)return;
   const key=TEXT[t.id],sa=t.dataset.stepAction,so=t.dataset.stepOutput;
   if(!key&&!sa&&!so)return;
+  const lock=sharedLock(x);if(lock&&(lock.all||OWNER_TEXT.has(key)&&selected.type==='agent'))return;
   if(key==='name'&&!t.value.trim())return;
   autosave(x,()=>{
     if(key)x[key]=key==='name'?t.value.trim():t.value;
@@ -1129,6 +1154,7 @@ export function inspectorInput(e){
 }
 export function inspectorChange(e){
   const t=e.target,x=sel();if(!x)return;
+  const lock=sharedLock(x);if(lock&&(lock.all||t.matches(lock.sel))){rerender();return}
   const set=(k,v)=>change(()=>{x[k]=v;touch(x)});
   if(t.id==='af-live')set('live',t.checked);
   else if(t.id==='af-auto')set('auto',t.checked);

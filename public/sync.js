@@ -122,6 +122,9 @@ export async function pull(){
     // A browser that could not store its copy (store.lost) reopens the environment it was in.
     const env=blank?(store.lost&&st.env)||'':st.env||store.db.environment.id;
     let r;try{r=await get(env,!blank&&st.env&&st.rev?st.rev:0)}catch{status('warn','Offline · changes stay in this browser and sync when the server is back');return}
+    // An opened shared environment whose share was revoked (or whose owner archived it): say so, then open the
+    // user's own workspace. The owner's data leaves this browser's copy with it.
+    if(r.status===410&&env){gone(r.data);const d=await get('',0).catch(()=>null);if(d?.status===200&&d.data.env&&d.data.data)take(d.data.data,d.data.rev,d.data.env,d.data.shared,d.data.conflicts);else stopped=true;return}
     if(r.status===404&&env){
       // Not this user's environment (another person's cache in this browser, or an archived one):
       // switch to the user's own default. The other copy stays in the disk backup.
@@ -188,6 +191,9 @@ async function push(){
         // cardsKept: cards this copy differed on without changing them (out of date) stayed as the server has them.
         if(d.runnersKept||d.countersKept||d.opidRefused||d.cardsKept){st.shared='\u0000';setTimeout(pull,400)}
         if(d.publicRefused){st.shared='\u0000';setTimeout(pull,400);store.onLimit?.(d.publicRefused)}
+        // An opened shared environment: new records the share does not take, and a save refused for changing too many shared records.
+        if(d.notAdded)store.onShareNotice?.(`${d.notAdded===1?'One new thing was':`${d.notAdded} new things were`} not added: this share does not let you add ${d.notAdded===1?'it':'them'}. Ask its owner to allow additions.`);
+        if(d.bulkRefused)store.onShareNotice?.('Nothing was written back: that change touched 20 or more shared records at once. Change fewer at a time.');
         persist();status('ok',`Saved to ${via||'the server'} · rev ${d.rev} · ${time()}`);if(st.dirty)retry=1;
         // Cards this save removed other than by Delete (an undo, a restored snapshot): say where to get them back.
         if(Array.isArray(d.removedCards)&&d.removedCards.length)store.onRemoved?.(d.removedCards);
@@ -199,6 +205,8 @@ async function push(){
         hold(st.base,store.db,d.data);
         adopt(merged);st.rev=d.rev;st.base=d.data;st.dirty=true;persist();continue;
       }
+      // No longer shared: these edits have nowhere to go. The next read says so and opens the user's own workspace.
+      if(r?.status===410){st.dirty=false;persist();setTimeout(pull,0);return}
       if(r?.status===422){status('warn',d.error||'The server refused a save that would remove most of the workspace');return}
       // Over a limit (size, things, storage, environments): nothing was saved; the edits stay here and the
       // next change tries again, so removing something gets it saved.
@@ -210,9 +218,18 @@ async function push(){
   }finally{busy=false;if(retry)schedule(retry);else if(again){again=false;schedule(0)}}
 }
 
+// An opened shared environment (share-<shareId>, docs/sharing.md) that is no longer shared: the app hears it once.
+function gone(d){status('warn','No longer shared with you');store.onShareGone?.({name:store.db.environment?.name||'',owner:store.db.opened?.ownerName||store.db.opened?.ownerEmail||'',error:d?.error})}
 // Environments: list the user's own, switch, create, rename, archive.
 export const currentEnv=()=>st.env||store.db.environment?.id;
-export async function listEnvironments(){try{const r=await fetch('/api/environments',{cache:'no-store'});return r.ok?(await r.json()).environments:[]}catch{return []}}
+// Opened shared environments have ids share-<shareId>: the owner's environment, through a whole-environment share.
+export const isOpenedEnv=id=>/^share-[A-Za-z0-9_-]+$/.test(String(id||''));
+let envCache=null;
+async function envList(){try{const r=await fetch('/api/environments',{cache:'no-store'});envCache=r.ok?await r.json():{environments:[],shared:[]}}catch{envCache={environments:[],shared:[]}}return envCache}
+export async function listEnvironments(){return (await envList()).environments||[]}
+// Environments shared with this user as a whole, to open: [{id (share-<shareId>), shareId, name, ownerName, ownerEmail, permission, adds}].
+// fresh=false reuses the list the last listEnvironments() read.
+export async function listSharedEnvironments(fresh=true){return ((fresh||!envCache?await envList():envCache).shared)||[]}
 export async function switchEnvironment(id){
   if(st.dirty){clearTimeout(timer);await push()}
   if(st.dirty)throw Error('Your latest changes are not saved to the server yet. Try again in a moment.');

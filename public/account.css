@@ -158,6 +158,13 @@ button.sc-k:hover{border-color:var(--line2);background:#fff}
 .acct-cx{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--faint)}
 .acct-cx:hover,.acct-cx:focus-visible{background:var(--hover);color:var(--ink)}
 .acct-cx.on{color:var(--flygon-dark)}
+/* Environments shared with you as a whole (share-<shareId>): the owner's environment, with what you may do there. */
+.acct-envrow .sh-perm{flex:none;margin-right:4px}
+.acct-item.sh-env span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-item.sh-env small{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:11px;font-weight:400;line-height:1.2}
+.acct-vis.sh-perm{color:var(--muted)}
+.acct-vis.sh-perm[data-perm="edit"]{color:var(--flygon-dark)}
+.env-list li.sh-env .env-n{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-cx-n{grid-column:1/-1;color:var(--flygon-dark);font-size:11px;font-weight:600}
 /* the one section header of Settings: title, optional hint, optional action on the right */
 .acct-sec{display:flex;align-items:center;gap:5px;min-height:26px;margin:14px 0 6px}

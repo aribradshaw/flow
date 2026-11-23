@@ -19,7 +19,7 @@ import {logoMark} from './logo-mark.js';
 import {loadDevlog,currentVersion,mountDevlog} from './devlog.js';
 import {SCOPES,SHORTCUTS,keysFor,showCombo,comboOf,rebind,resetShortcut,resetAll,isCustom} from './shortcuts.js';
 import {getPref,setPref,onPrefs} from './prefs.js';
-import {currentEnv,listEnvironments,switchEnvironment,createEnvironment,renameEnvironment,archiveEnvironment,refresh} from './sync.js';
+import {currentEnv,listEnvironments,listSharedEnvironments,isOpenedEnv,switchEnvironment,createEnvironment,renameEnvironment,archiveEnvironment,refresh} from './sync.js';
 import {sharingPane,openShareDialog,api as shareApi} from './share.js';
 import {combinedIds,setCombined,pruneCombined} from './combined.js';
 import {renderApiKeysTab} from './apikeys.js';
@@ -115,9 +115,16 @@ addEventListener('focus',refreshSession);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshSession()});
 
 // ---- menu ----
+// Opened shared environments (share-<shareId>): whose they are and what this user may do there.
+const PERM_LABEL={view:'Can view',comment:'Can comment',edit:'Can edit'};
+const permBadge=p=>`<span class="acct-vis sh-perm" data-perm="${esc(p)}">${icon(p==='edit'?'pencil':p==='comment'?'note':'info',11)}${esc(PERM_LABEL[p]||p)}</span>`;
+const sharedName=x=>`${x.name} · shared by ${x.ownerName||x.ownerEmail}`;
 function envRow(){
   const e=env();if(!e)return '';
-  const pub=e.visibility==='public';
+  const pub=e.visibility==='public',o=store.db.opened;
+  if(o)return `<div class="acct-env" role="presentation"><span class="acct-env-k">Shared environment</span>
+    <span class="acct-env-n" title="${esc(sharedName({name:e.name,...o}))}">${esc(sharedName({name:e.name,...o}))}</span>${permBadge(o.permission)}</div>
+    <div class="acct-envs" data-envs></div>`;
   return `<div class="acct-env" role="presentation"><span class="acct-env-k">Environment</span>
     <span class="acct-env-n">${esc(e.name)}</span>
     <span class="acct-vis ${pub?'pub':''}">${svg(pub?'globe':'lock',11)}${pub?'Public':'Private'}</span>${cxCount()}</div>
@@ -129,10 +136,13 @@ const cxCount=()=>{const n=combinedIds().length;return `<span class="acct-cx-n" 
 // beside each one shows its cards and items combined with this environment's (combined.js) instead.
 async function fillMenuEnvs(){
   const box=menu?.querySelector('[data-envs]');if(!box)return;
-  const list=await listEnvironments(),cur=currentEnv();if(!menu)return;
-  pruneCombined(list);
-  const on=new Set(combinedIds()),others=list.filter(x=>x.id!==cur).filter((x,i)=>i<6||on.has(x.id));
-  box.innerHTML=others.map(x=>`<div class="acct-envrow"><button type="button" role="menuitem" class="acct-item sub" data-acct="env" data-id="${esc(x.id)}" data-tip="Open ${esc(x.name)}">${svg('swap',14)}<span>${esc(x.name)}</span></button>${cxToggle(x,on.has(x.id))}</div>`).join('')
+  const list=await listEnvironments(),shared=await listSharedEnvironments(false),cur=currentEnv();if(!menu)return;
+  // In an opened shared environment nothing of the user's own is combined in.
+  const opened=isOpenedEnv(cur);if(!opened)pruneCombined(list);
+  const on=new Set(opened?[]:combinedIds()),others=list.filter(x=>x.id!==cur).filter((x,i)=>i<6||on.has(x.id));
+  box.innerHTML=others.map(x=>`<div class="acct-envrow"><button type="button" role="menuitem" class="acct-item sub" data-acct="env" data-id="${esc(x.id)}" data-tip="Open ${esc(x.name)}">${svg('swap',14)}<span>${esc(x.name)}</span></button>${opened?'':cxToggle(x,on.has(x.id))}</div>`).join('')
+    // Environments shared with this user as a whole: the owner's environment itself, with its office.
+    +shared.filter(x=>x.id!==cur).slice(0,8).map(x=>`<div class="acct-envrow"><button type="button" role="menuitem" class="acct-item sub sh-env" data-acct="env" data-id="${esc(x.id)}" data-tip="Open ${esc(x.name)}, shared with you by ${esc(x.ownerName||x.ownerEmail)}">${icon('link',14)}<span>${esc(x.name)}<small>shared by ${esc(x.ownerName||x.ownerEmail)}</small></span></button>${permBadge(x.permission)}</div>`).join('')
     +`<button type="button" role="menuitem" class="acct-item sub" data-acct="env-new">${svg('plus',14)}<span>New environment</span></button>`;
 }
 const cxToggle=(x,on)=>`<button type="button" role="menuitemcheckbox" class="acct-cx${on?' on':''}" aria-checked="${on}" data-cx-env="${esc(x.id)}" aria-label="${esc(`Show ${x.name} combined with this environment`)}" data-tip="${on?'Shown combined here\nClick to stop':'Show its DevOps cards and timeline\nhere, combined with this environment'}">${svg(on?'boxOn':'box',15)}</button>`;
@@ -297,6 +307,8 @@ let renamingEnv=null;
 // The open environment's details sit on its row, so its name is not repeated above the list.
 function envBadges(){
   const u=user(),e=env();if(!e)return '';
+  const o=store.db.opened;
+  if(o)return `<span class="env-badges"><span class="acct-vis">${icon('check',11)}Current</span>${permBadge(o.permission)}<span class="acct-vis env-owner">Shared by ${esc(o.ownerName||o.ownerEmail)}</span></span>`;
   const pub=e.visibility==='public',owner=e.ownerEmail?(e.ownerEmail===u?.email?'You':e.ownerEmail):'Not set';
   return `<span class="env-badges"><span class="acct-vis">${icon('check',11)}Current</span><span class="acct-vis ${pub?'pub':''}">${svg(pub?'globe':'lock',11)}${pub?'Public':'Private'}${hint(pub?'Anyone signed in can view it; only the owner can edit.':'Only the owner can see it.','Visibility')}</span><span class="acct-vis env-owner">Owner: ${esc(owner)}</span></span>`;
 }
@@ -307,6 +319,9 @@ async function fillEnvList(panel){
   const rows=list.some(x=>x.id===cur)||!env()?list:[{id:cur,name:env().name,notListed:true},...list];
   box.innerHTML=rows.map(x=>`<li data-env="${esc(x.id)}"${x.id===cur?' class="cur"':''}>${renamingEnv===x.id?`<form class="env-row grow" data-env-rename-form="${esc(x.id)}"><input id="envRenameInput" value="${esc(x.name)}" maxlength="80" aria-label="Environment name" data-env-rename-input><button type="submit" class="txt">Save</button></form>`
     :`<span class="env-n">${esc(x.name)}</span>${x.id===cur?envBadges():`<button type="button" class="txt" id="envOpen-${esc(x.id)}" data-env-open="${esc(x.id)}">Open</button>`}${x.notListed?'':`<span class="env-acts"><button type="button" class="txt" id="envRename-${esc(x.id)}" data-env-rename="${esc(x.id)}">Rename</button>${x.id!=='default-workspace'&&list.length>1?`<button type="button" class="txt" id="envArchive-${esc(x.id)}" data-env-archive="${esc(x.id)}">Archive</button>`:''}</span>`}`}</li>`).join('')||'<li class="acct-muted">None yet</li>';
+  // Environments shared with you as a whole (share-<shareId>): open the owner's environment itself.
+  const shared=(await listSharedEnvironments(false)).filter(x=>x.id!==cur);
+  if(shared.length&&box.isConnected)box.insertAdjacentHTML('beforeend',shared.map(x=>`<li data-env="${esc(x.id)}" class="sh-env"><span class="env-n" title="${esc(sharedName(x))}">${icon('link',12)}${esc(sharedName(x))}</span>${permBadge(x.permission)}<button type="button" class="txt" id="envOpen-${esc(x.id)}" data-env-open="${esc(x.id)}">Open</button></li>`).join(''));
   box.querySelector('[data-env-rename-input]')?.focus();
 }
 async function openEnv(id){
