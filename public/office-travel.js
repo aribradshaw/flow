@@ -66,15 +66,17 @@ export function createTravel(o){
     <div class="of-map-l" aria-hidden="true"><span><i class="me"></i>You</span><span><i></i>People</span><span><i class="w"></i>Waiting on someone</span></div>`;
   o.stage.append(map);
   const cv=map.querySelector('canvas'),ctx=cv.getContext('2d');
-  let on=true;try{on=localStorage.getItem(MAP_KEY)!=='0'}catch{}
-  let fit=null,base=null,dirty=true,drawnAt=-1,named=[];
+  // On: unless you turned it off. A phone-sized stage starts without it (it would cover the view) until you ask for it.
+  const narrow=()=>(o.stage.clientWidth||innerWidth)<700;
+  let on=!narrow();try{const v=localStorage.getItem(MAP_KEY);if(v==='0')on=false;else if(v==='1')on=true}catch{}
+  let fit=null,base=null,dirty=true,drawnAt=-1,builtAt=-9,named=[];
   const paintToggle=()=>{map.hidden=!on;o.root.querySelector('[data-of="map"]')?.setAttribute('aria-pressed',String(on))};
   function toggleMap(){on=!on;try{localStorage.setItem(MAP_KEY,on?'1':'0')}catch{}paintToggle();dirty=true}
   // The plan that does not move: floors by height, what stops you, rooms, tables, the board. Drawn once per layout.
   function rebuild(){
     dirty=false;const plan=o.plan();if(!plan?.bounds){fit=null;return}
-    const narrow=o.stage.clientWidth<700;
-    fit=mapFit(plan.bounds,narrow?{maxW:210,maxH:130}:{maxW:Math.min(430,o.stage.clientWidth*0.36),maxH:210});
+    const wide=o.stage.clientWidth||innerWidth;
+    fit=mapFit(plan.bounds,narrow()?{maxW:Math.min(300,wide-30),maxH:120}:{maxW:Math.min(430,wide*0.36),maxH:210});
     const dpr=Math.min(2,devicePixelRatio||1);
     cv.width=Math.round(fit.w*dpr);cv.height=Math.round(fit.h*dpr);cv.style.width=fit.w+'px';cv.style.height=fit.h+'px';
     base=document.createElement('canvas');base.width=cv.width;base.height=cv.height;
@@ -116,7 +118,8 @@ export function createTravel(o){
   }
   function frame(t){
     if(!on||map.hidden)return;
-    if(dirty)rebuild();
+    // The plan is drawn again when something moved, at most twice a second (a busy office changes often).
+    if(dirty&&(!fit||t-builtAt>0.5)){builtAt=t;rebuild()}
     if(!fit||t-drawnAt<0.1)return;drawnAt=t;
     const dpr=cv.width/fit.w;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(base,0,0);ctx.setTransform(dpr,0,0,dpr,0,0);
     const r=o.route?.();
@@ -142,7 +145,7 @@ export function createTravel(o){
   paintToggle();
   return {
     open,close,toggle:()=>menu.hidden?open():close(),get isOpen(){return !menu.hidden},escape:close,
-    toggleMap,get mapOn(){return on},invalidate(){dirty=true},frame,
+    toggleMap,get mapOn(){return on},invalidate(){dirty=true},resize(){dirty=true},frame,
     // For tests and the screenshot harness.
     debug:()=>({shown:shown.map(p=>p.id),input:o.places(),fit:fit&&{w:fit.w,h:fit.h,turned:fit.turned,scale:fit.scale}}),
     dispose(){o.root.removeEventListener('pointerdown',outside,true);menu.remove();map.remove()},

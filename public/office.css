@@ -351,6 +351,12 @@ body.office-open .cm,body.office-open .picker,body.office-open .tip,body.office-
 .of-fading .of-stage::after{opacity:1}
 @media (prefers-reduced-motion:reduce){.of-stage::after{transition:none}}
 .of-replaying .of-map,.of-board-focus .of-map,.of-board-focus .of-goto{visibility:hidden}
+@media (max-width:700px){.of-map-l{display:none}}
+/* From above, the yacht's lounge is small on screen: agents' own name tags step aside, table names and signs shrink. */
+.of[data-world=yacht].of-overview .of-label.agent,.of[data-world=yacht].of-overview .of-label.npc-say{visibility:hidden}
+.of[data-world=yacht].of-overview .of-label.click .of-table{font-size:10px;padding:1px 6px}
+.of[data-world=yacht].of-overview .of-table small{display:none}
+.of[data-world=yacht].of-overview .of-sign{font-size:9.5px;padding:2px 7px}
 /* A team table's name (office-tables-core.js). */
 .of-label.click .of-table{display:inline-flex;align-items:center;gap:6px;max-width:220px;padding:2px 8px 2px 9px;border-radius:10px;background:rgba(255,255,255,.94);color:#1d2725;font-size:11.5px;box-shadow:0 1px 5px rgba(0,0,0,.18);border:1.5px solid #3d8f66}
 .of-table b{font-weight:700;overflow:hidden;text-overflow:ellipsis}

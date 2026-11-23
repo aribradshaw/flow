@@ -539,7 +539,7 @@ function initScene(){
     // Its width follows the screen's shape: the office meter beside it moves along.
     onResize:()=>office.meters?.rebuild(office.rooms,{commonRadius:office.commonR||10,roomD:ROOM_D})});
   usePlace(wantedWorld());
-  const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();S.devops.resize(w,h)};
+  const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();S.devops.resize(w,h);S.travel?.resize()};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
   const cv=renderer.domElement;
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
