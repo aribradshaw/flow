@@ -16,6 +16,11 @@
 .of-label.click button{pointer-events:auto;cursor:pointer;border:0;font:inherit}
 .of-label.click .of-tag{font-size:10.5px}
 .of-room{display:inline-block;padding:3px 9px;border-radius:12px;background:#fff;border:2px solid var(--c);font-weight:700;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.of-room b{font-weight:700}
+.of-room small{font-weight:500;color:var(--muted)}
+.of-label.off .of-room{border-color:var(--line2);color:var(--muted)}
+.of-tag.af.person{background:rgba(29,39,37,.8)}
+.of-tag.off{background:rgba(102,114,110,.7)}
 .of-name{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 2px;border-radius:12px;background:rgba(255,255,255,.92);font-size:11.5px;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .of-name.me{outline:2px solid var(--accent-line)}
 .of-name i{position:relative;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--bg);color:var(--fg);font-style:normal;font-size:9px;font-weight:700;overflow:hidden}
@@ -64,6 +69,7 @@
 .of-pb>.txt{display:inline-flex;align-items:center;gap:4px;margin-top:6px}
 .of-menu{position:absolute;z-index:4;min-width:160px;padding:4px;border-radius:8px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.16)}
 .of-mh{padding:4px 8px 6px;font-size:11px;font-weight:700;color:var(--muted)}
+.of-mh small{display:block;font-weight:500}
 .of-menu button{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 8px;border:0;border-radius:5px;background:transparent;text-align:left}
 .of-menu button:hover,.of-menu button:focus-visible{background:var(--hover)}
 .of-controls{position:absolute;top:56px;right:12px;width:min(310px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;box-sizing:border-box;padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.14);z-index:5;font-size:12px}

@@ -10,8 +10,10 @@ import {esc} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
 import {openBridgeDialog} from './office-connect.js';
+import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
+import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 
-const VENDOR={claude:{name:'Claude',color:'#d97757'},codex:{name:'Codex',color:'#2b2f33'},gemini:{name:'Gemini',color:'#4c7cf0'},other:{name:'Agent',color:'#5f9e6e'}};
+const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
 const EMOTES=[['wave','👋','Wave'],['thumbs','👍','Thumbs up'],['clap','👏','Clap'],['heart','❤️','Heart']];
 const SAY_RADIUS=14,SEND_MS=75,ROOM_W=12,ROOM_D=9;
@@ -70,46 +72,59 @@ export function openOffice(opts){
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
-  connect();
+  connect();S.watch=setInterval(watch,1000);
   root.focus({preventScroll:true});
 }
 export const officeOpen=()=>!!S;
 export function closeOffice(){
   if(!S)return;const s=S;S=null;
-  s.es?.close();cancelAnimationFrame(s.raf);s.resize?.disconnect();
+  s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
-  try{s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
+  try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
 }
-function switchTo(env){if(!S||env===S.env)return;const opts={...S.opts,env};closeOffice();openOffice(opts)}
+function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env};closeOffice();openOffice(opts)}
 const status=t=>{const el=S?.root.querySelector('.of-status');if(el)el.textContent=t};
 
 // ---------- the network ----------
 const api=(path,body)=>fetch(`/api/office/${encodeURIComponent(S.env)}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
   .then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.error||'Something went wrong'),{code:d.code,status:r.status});return d});
+// EventSource retries by itself after a dropped connection, but not after an error answer (a deploy
+// restarting the server): then we open a new one, backing off up to 10 s. "Reconnecting…" shows only
+// after 4 s without the stream; a stream that has said nothing for 40 s (heartbeats come every 15 s) is replaced.
 function connect(){
-  const es=new EventSource(`/api/office/${encodeURIComponent(S.env)}/events`);S.es=es;let fails=0;
-  const on=(type,f)=>es.addEventListener(type,e=>{if(S?.es!==es)return;try{f(JSON.parse(e.data))}catch(err){console.error('office',type,err)}});
-  on('snapshot',d=>{fails=0;updateSources(d.yourSources||[]);snapshot(d)});
+  S.es?.close();clearTimeout(S.retry);
+  const es=new EventSource(`/api/office/${encodeURIComponent(S.env)}/events`);S.es=es;S.heard=Date.now();
+  const on=(type,f)=>es.addEventListener(type,e=>{if(S?.es!==es)return;S.heard=Date.now();try{f(JSON.parse(e.data))}catch(err){console.error('office',type,err)}});
+  on('snapshot',d=>{S.tries=0;S.down=0;updateSources(d.yourSources||[]);snapshot(d)});
   on('yourSources',updateSources);
-  on('join',p=>{if(S.world)upsertPerson(p)});on('move',p=>{if(S.world)upsertPerson(p)});
-  on('leave',({key})=>removePerson(key));
+  on('hb',()=>{});
+  on('join',p=>{if(S.world){upsertPerson(p);presenceChanged(p.key)}});on('move',p=>{if(S.world)upsertPerson(p)});
+  on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel()});
-  on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildRooms();buildAgentflow()}refreshPanel()});
+  on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildAgentflow();buildRooms()}refreshPanel()});
   on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
   on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
-  es.onopen=()=>status('Live');
-  es.onerror=()=>{if(S?.es!==es)return;fails++;status(es.readyState===EventSource.CLOSED||fails>5?'Could not reach the office. Close and try again.':'Reconnecting…')};
+  es.onerror=()=>{
+    if(S?.es!==es)return;S.down||=Date.now();
+    if(es.readyState===EventSource.CLOSED){const wait=Math.min(10000,800*2**(S.tries||0));S.tries=(S.tries||0)+1;S.retry=setTimeout(()=>{if(S?.es===es)connect()},wait)}
+  };
+}
+function watch(){
+  if(!S)return;
+  if(Date.now()-S.heard>40000&&S.es?.readyState===EventSource.OPEN){S.down||=Date.now();connect()}
+  const down=S.down?Date.now()-S.down:0;
+  if(down>60000)status('Cannot reach the office. Still trying…');else if(down>4000)status('Reconnecting…');
+  else if(!S.down&&S.me)status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'} · ${S.people.size} here`);
 }
 function snapshot(d){
   S.meKey=d.me.key;S.me=d.me;S.members=d.members;S.snapAgentflow=d.agentflow;S.live=new Map(Object.entries(d.live||{}));
   S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
-  status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'}`);
   if(!S.world)return;
-  buildRooms();buildAgentflow();
+  buildAgentflow();buildRooms();
   if(!S.placed){
     S.placed=true;const r=S.rooms.get(S.meKey),heading=r?.facing??0;
     if(r)S.pos.copy(r.door);
@@ -119,7 +134,7 @@ function snapshot(d){
   upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x,y,z,heading,moving:false},true);
   for(const p of d.people)if(p.key!==S.meKey)upsertPerson(p);
   S.lines.innerHTML='';S.chat=[];for(const l of d.chat||[])addLine(l,{quiet:true});
-  sendPresence(true);
+  watch();sendPresence(true);presenceChanged();
 }
 function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
@@ -167,7 +182,7 @@ function initScene(){
   scene.add(new THREE.HemisphereLight('#ffffff','#b9c4bf',2.2));
   const sun=new THREE.DirectionalLight('#ffffff',1.6);sun.position.set(12,30,18);scene.add(sun);
   const ground=new THREE.Mesh(new THREE.CircleGeometry(120,48),mat('#dfe6e2'));ground.rotation.x=-Math.PI/2;ground.name='ground';scene.add(ground);
-  const rug=new THREE.Mesh(new THREE.CircleGeometry(10,32),mat('#cfe3d2'));rug.rotation.x=-Math.PI/2;rug.position.y=0.01;scene.add(rug);
+  const rug=new THREE.Mesh(new THREE.CircleGeometry(1,40),mat('#cfe3d2'));rug.rotation.x=-Math.PI/2;rug.position.y=0.01;rug.scale.setScalar(10);scene.add(rug);S.rug=rug;
   Object.assign(M,{
     box:new THREE.BoxGeometry(1,1,1),ico:new THREE.IcosahedronGeometry(1,0),ico1:new THREE.IcosahedronGeometry(1,1),oct:new THREE.OctahedronGeometry(1,0),
     cyl:new THREE.CylinderGeometry(1,1,1,7),cone:new THREE.ConeGeometry(1,1,6),torus:new THREE.TorusGeometry(0.62,0.12,5,14),disc:new THREE.CircleGeometry(1,16),
@@ -181,7 +196,7 @@ function initScene(){
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
   S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,
-    hover:e=>{cv.style.cursor=hitAt(e)?.kind?'pointer':'default'}});
+    hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);frame(Math.min(.05,S.clock.getDelta()),S.clock.elapsedTime)};loop();
 }
 function toggleOverview(){
@@ -200,11 +215,11 @@ function toggleControls(){
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
 function clear(group){S.world.remove(group);group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
-function label(obj,html,{y=1.6,cls='',near=0}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,near};S.labelList.push(l);return l}
+function label(obj,html,{y=1.6,cls='',near=0,show=null}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,near,show};S.labelList.push(l);return l}
 
 // ---------- rooms ----------
 function layout(n){
-  const R=Math.max(17,n*(ROOM_W+3)/(2*Math.PI)+6),out=[];
+  const R=Math.max(17,(S.commonR||10)+ROOM_D/2+5,n*(ROOM_W+3)/(2*Math.PI)+6),out=[];
   for(let i=0;i<n;i++){const a=-Math.PI/2+i/n*Math.PI*2,c=new THREE.Vector3(Math.cos(a)*R,0,Math.sin(a)*R),facing=Math.atan2(-c.x,-c.z);out.push({c,facing})}
   return out;
 }
@@ -214,7 +229,7 @@ function buildRooms(){
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
   layout(list.length).forEach(({c,facing},i)=>{
     const m=list[i],[bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
-    const floor=part(M.box,mat(bg),[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
+    const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
     const cos=Math.cos(facing),sin=Math.sin(facing);
     S.overviewRadius=Math.max(S.overviewRadius,Math.hypot(c.x,c.z)+8);
     const wall=(x,z,w,d)=>{
@@ -226,13 +241,22 @@ function buildRooms(){
     const stripe=part(M.box,mat(fg),[0,1.12,-ROOM_D/2],[ROOM_W,0.06,0.24]);stripe.userData.own=true;g.add(stripe);
     S.world.add(g);
     const sign=new THREE.Object3D();sign.position.set(3.4,0,ROOM_D/2);g.add(sign);
-    label(sign,`<span class="of-room" style="--c:${fg}">${esc(m.name)}${m.me?' · your room':''}</span>`,{y:1.45,cls:'room'});
+    const tag=label(sign,`<span class="of-room" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:1.45,cls:'room'});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:null,boxes:[]});
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:null,boxes:[],floorMat,bg,tag});roomLook(m.key);
     buildDesks(m.key,false);
   });
   updateColliders();
 }
+// A room is lit while its member has the office open; otherwise dimmed, with when they were last here.
+const ago=iso=>{const t=Date.parse(iso);if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} d ago`};
+function roomLook(key){
+  const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||r.member.me;
+  r.floorMat.color.set(r.bg);if(!on)r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);
+  r.tag.el.classList.toggle('off',!on);
+  const seen=ago(r.member.lastSeen);r.tag.el.querySelector('small').textContent=on?'':` · offline${seen?` · last seen ${seen}`:''}`;
+}
+function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
 function updateColliders(){
   S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes)];
@@ -252,88 +276,60 @@ function buildDesks(key,refresh=true){
     d.add(part(M.box,M.desk,[0,0.72,0],[1.7,0.08,0.8]),part(M.box,M.desk,[0,0.36,-0.25],[1.5,0.7,0.12]));
     const scr=new THREE.MeshLambertMaterial({color:'#3b4542',emissive:'#000000',flatShading:true});
     const screen=part(M.box,scr,[0,1.08,-0.25],[0.8,0.5,0.06]);screen.userData.own=true;d.add(screen);
-    const mascot=makeMascot(a.vendor,1);mascot.position.set(0,0,0.85);mascot.rotation.y=Math.PI;d.add(mascot);
-    mascot.userData={kind:'agent',member:key,id:a.id,base:0,screen:scr,status:a.status,mats:mascot.userData.mats};
+    // The mascot faces the room's back wall (its desk) and so the camera, which looks in from outside.
+    const m=createMascot(mascotKind(a.vendor,a.model),{color:VENDOR_COLOR[a.vendor],scale:.52}),mascot=new THREE.Group();
+    m.group.position.y=0.62;mascot.add(m.group);mascot.position.set(0,0,0.85);mascot.rotation.y=Math.PI;d.add(mascot);
+    mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase:(i*1.7+key.length)%6.28};
     mascot.add(shadow(0.45));
-    mascot.userData.kids=(a.children||[]).slice(0,8).map((c,j,all)=>{const k=makeMascot(c.vendor,.32);k.userData.orbit={r:0.95,a:j/all.length*Math.PI*2,y:1.25+((j%2)*.15)};d.add(k);return k});
     mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
     const name=a.private?'Private project':a.title||VENDOR[a.vendor]?.name||'Agent',at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`;
     label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}" ${at}>${esc(name)}</button>`,{y:1.75,cls:'agent click',near:16});
     if(a.status==='waiting')label(mascot,`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`,{y:2.25,cls:'bang click'});
-    setLook(mascot,a.status);
+    scr.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
   });
   if(refresh)updateColliders();
 }
-function setLook(m,st){
-  const u=m.userData;for(const x of u.mats||[]){x.emissive.set(st==='waiting'?'#ffb020':'#000000');x.emissiveIntensity=st==='waiting'?0.35:0;x.opacity=st==='idle'?0.5:1;x.transparent=st==='idle'}
-  u.screen?.emissive.set(st==='running'?'#5fd38a':st==='waiting'?'#ffb020':'#000000');
-}
-// Low-poly vendor mascots: Claude a warm round critter with a sunburst, Codex a dark knot-ringed gem,
-// Gemini a blue spark, anything else a green box robot.
-function makeMascot(vendor,s){
-  const v=VENDOR[vendor]?vendor:'other',g=new THREE.Group(),body=new THREE.MeshLambertMaterial({color:VENDOR[v].color,flatShading:true}),mats=[body];
-  if(v==='claude'){
-    g.add(part(M.ico1,body,[0,0.62,0],[0.42,0.4,0.38]));
-    const ray=new THREE.MeshLambertMaterial({color:'#f0a07e',flatShading:true});mats.push(ray);
-    for(let i=0;i<6;i++){const c=part(M.cone,ray,[Math.cos(i/6*Math.PI*2)*0.16,1.06,Math.sin(i/6*Math.PI*2)*0.16],[0.06,0.22,0.06]);c.rotation.z=-Math.cos(i/6*Math.PI*2)*.5;c.rotation.x=Math.sin(i/6*Math.PI*2)*.5;g.add(c)}
-    g.add(part(M.box,body,[-0.2,0.18,0],[0.1,0.3,0.1]),part(M.box,body,[0.2,0.18,0],[0.1,0.3,0.1]));
-  }else if(v==='codex'){
-    g.add(part(M.oct,body,[0,0.66,0],[0.36,0.46,0.36]));
-    const ring=new THREE.MeshLambertMaterial({color:'#e9ece9',flatShading:true});mats.push(ring);
-    const t=part(M.torus,ring,[0,0.66,0],[0.72,0.72,0.72]);t.rotation.x=Math.PI/2.4;g.add(t);
-    g.add(part(M.box,body,[0,0.12,0],[0.3,0.24,0.2]));
-  }else if(v==='gemini'){
-    const glow=new THREE.MeshLambertMaterial({color:'#8fb0ff',flatShading:true});mats.push(glow);
-    g.add(part(M.oct,body,[0,0.68,0],[0.2,0.52,0.2]),part(M.oct,glow,[0,0.68,0],[0.46,0.2,0.2]),part(M.cyl,body,[0,0.12,0],[0.16,0.24,0.16]));
-  }else{
-    g.add(part(M.box,body,[0,0.44,0],[0.5,0.5,0.4]),part(M.box,body,[0,0.86,0],[0.4,0.3,0.34]),part(M.cyl,M.dark,[0,1.1,0],[0.025,0.18,0.025]),part(M.ico,M.white,[0,1.2,0],[0.05,0.05,0.05]));
-  }
-  g.add(part(M.ico,M.dark,[-0.11,0.72,0.33*(v==='claude'?1.08:1)],[0.05,0.06,0.04]),part(M.ico,M.dark,[0.11,0.72,0.33*(v==='claude'?1.08:1)],[0.05,0.06,0.04]));
-  g.scale.setScalar(s);g.userData.mats=mats;for(const m of mats)m.userData={};g.traverse(o=>{if(o.material&&mats.includes(o.material))o.userData.own=true});
-  return g;
-}
-
 // ---------- AgentFlow agents in the common area ----------
-function afAgents(){return S.env===S.opts.current&&S.opts.agentflow?S.opts.agentflow():S.snapAgentflow||[]}
-function buildAgentflow(){
-  if(S.afGroup)clear(S.afGroup);const g=new THREE.Group();S.afGroup=g;S.world.add(g);S.afFigures=[];
-  const list=afAgents(),byId=new Map(list.map(a=>[a.id,a])),depth=a=>{let d=0,x=a,seen=new Set();while(x?.reportsTo&&byId.has(x.reportsTo)&&!seen.has(x.id)){seen.add(x.id);x=byId.get(x.reportsTo);d++}return d};
-  const rows=new Map();for(const a of list){const d=Math.min(4,depth(a));(rows.get(d)||rows.set(d,[]).get(d)).push(a)}
-  const near=list.length>24?11:30;
-  [...rows.keys()].sort().forEach(d=>{
-    const row=rows.get(d),per=Math.min(row.length,8);
-    row.slice(0,40).forEach((a,i)=>{
-      const line=Math.floor(i/per),n=Math.min(per,row.length-line*per),x=(i%per-(n-1)/2)*2.1,z=-6+d*3.1+line*1.6;
-      const f=makeFigure(a);f.position.set(x,0,z);f.userData={kind:'af',id:a.id};f.add(part(M.box,M.hit,[0,0.8,0],[1,1.6,1]));g.add(f);S.clickables.push(f);S.afFigures.push(f);
-      label(f,`<button type="button" class="of-tag af" data-af-id="${esc(a.id)}">${esc(a.name)}</button>`,{y:a.kind==='team'?0.9:1.85,cls:'af click',near});
-    });
-  });
+// Laid out like the org chart. AI agents are robots, teams round tables, automations little machines (all
+// instanced); human agents are people. A human agent that is a member (a.member) is that member's avatar
+// while they are here, and stands at its place in the org, dimmed and marked offline, while they are not.
+function afAgents(){
+  const local=S.env===S.opts.current&&S.opts.agentflow?S.opts.agentflow():null,server=S.snapAgentflow||[];
+  if(!local)return server;
+  const link=new Map(server.map(a=>[a.id,a.member]));return local.map(a=>({...a,member:link.get(a.id)||''}));
 }
-function makeFigure(a){
-  const g=new THREE.Group(),dim=a.status==='retired'||a.status==='paused',c=a.kind==='human'?'#8a6f5c':a.kind==='team'?'#88a374':a.kind==='automation'?'#7f8c88':'#3d8f66';
-  const m=new THREE.MeshLambertMaterial({color:c,flatShading:true,transparent:dim,opacity:dim?.55:1});
-  if(a.kind==='team'){g.add(part(M.cyl,m,[0,0.2,0],[0.9,0.4,0.9]))}
-  else if(a.kind==='automation'){g.add(part(M.cyl,m,[0,0.5,0],[0.32,1,0.32]));const t=part(M.torus,m,[0,1.15,0],[0.5,0.5,0.5]);t.rotation.x=Math.PI/2;g.add(t)}
-  else if(a.kind==='human'){g.add(part(M.cyl,m,[0,0.55,0],[0.28,0.9,0.24]),part(M.ico,M.white,[0,1.25,0],[0.24,0.26,0.24]))}
-  else{g.add(part(M.box,m,[0,0.5,0],[0.5,0.7,0.36]),part(M.box,m,[0,1.12,0],[0.44,0.36,0.36]),part(M.ico,M.white,[-0.1,1.14,0.19],[0.05,0.05,0.03]),part(M.ico,M.white,[0.1,1.14,0.19],[0.05,0.05,0.03]))}
-  m.userData={};g.traverse(o=>{if(o.material===m)o.userData.own=true});g.add(shadow(0.5));
-  return g;
+const afOf=id=>afAgents().find(a=>a.id===id);
+const afFor=key=>afAgents().find(a=>a.member&&a.member===key);
+function buildAgentflow(){
+  if(S.afGroup){clear(S.afGroup);S.org?.dispose();S.org=null}
+  const g=new THREE.Group();S.afGroup=g;S.world.add(g);
+  const list=afAgents().slice(0,200),{pos,radius}=orgLayout(list);
+  if(S.commonR!==radius){S.commonR=radius;S.rug.scale.setScalar(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
+  const items=[],people=[];
+  for(const a of list){
+    const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
+    if(a.kind==='human'){if(a.member&&S.people.has(a.member))continue;people.push({a,p,offline:!!a.member,dim})}
+    else items.push({id:a.id,kind:a.kind==='team'?'team':a.kind==='automation'?'automation':'agent',x:p.x,z:p.z,dim});
+  }
+  S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
+  for(const it of items){const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);const a=afOf(it.id);
+    label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
+  S.afPeople=people.map(({a,p,offline,dim})=>{
+    const f=makeHuman(lookFor(a.member||a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.userData={kind:'af',id:a.id,rig:f.userData.rig};f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
+    g.add(f);S.clickables.push(f);
+    label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
+    return f;
+  });
 }
 
 // ---------- people ----------
-function makeAvatar(key){
-  const [bg,fg]=memberColor(key),g=new THREE.Group(),body=new THREE.MeshLambertMaterial({color:fg,flatShading:true}),skin=new THREE.MeshLambertMaterial({color:bg,flatShading:true});
-  const legs=part(M.cyl,M.dark,[0,0.3,0],[0.22,0.6,0.18]),torso=part(M.cyl,body,[0,0.92,0],[0.32,0.7,0.26]),head=part(M.ico,skin,[0,1.52,0],[0.27,0.29,0.27]);
-  g.add(legs,torso,head,part(M.box,M.dark,[0,1.55,0.24],[0.18,0.05,0.04]));
-  for(const o of [torso,head])o.userData.own=true;g.userData.parts={torso,head};
-  return g;
-}
+function makeAvatar(key){const g=makeHuman(lookFor(key));return g}
 function upsertPerson(p,self=false){
   if(!S)return;let a=S.people.get(p.key);
   if(!a){
     const obj=new THREE.Group(),pose=new THREE.Group(),figure=makeAvatar(p.key),shade=shadow(0.45);
     figure.position.y=-0.88;pose.add(figure);pose.position.y=0.88;obj.add(pose,shade);
-    obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key};S.world.add(obj);
+    obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
     if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
     const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
     const tag=label(obj,`<span class="of-name${self?' me':''}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
@@ -370,7 +366,7 @@ function say(){
 function emote(k){api('emote',{emote:k}).catch(e=>S.opts.toast?.(e.message,true))}
 function showEmote(key,k){
   const p=S.people.get(key),e=EMOTES.find(x=>x[0]===k);if(!p||!e)return;
-  const l=label(p.obj,`<span class="of-emote">${e[1]}</span>`,{y:2.5,cls:'emote'});p.hop=performance.now();
+  const l=label(p.obj,`<span class="of-emote">${e[1]}</span>`,{y:p.bubble?3.6:2.6,cls:'emote'});p.emote={kind:k,at:performance.now()};
   setTimeout(()=>{l.el.remove();if(S)S.labelList=S.labelList.filter(x=>x!==l)},2400);
 }
 
@@ -378,19 +374,22 @@ function showEmote(key,k){
 function hitAt(e){
   if(!S.camera)return null;const r=S.renderer.domElement.getBoundingClientRect();
   S.ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),S.camera);
-  for(const h of S.ray.intersectObjects(S.clickables,true)){let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,obj:o,point:h.point}}
+  for(const h of S.ray.intersectObjects(S.clickables,true)){
+    if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
+    let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
   const g=S.ray.intersectObject(S.ground)[0];return g?{kind:'',point:g.point}:null;
 }
 function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
-  if(hit.kind==='af'){showAf(hit.obj.userData.id);return}
+  if(hit.kind==='af'){showAf(hit.id);return}
   if(hit.kind==='person'){openMenu(hit.obj.userData.key,e);return}
   S.follow=null;S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);
 }
 function openMenu(key,e){
   const r=S.root.getBoundingClientRect();S.menu.hidden=false;S.menu.dataset.key=key;
-  S.menu.innerHTML=`<div class="of-mh">${esc(nameOf(key))}</div><button type="button" role="menuitem" data-of="wave">👋 Wave</button><button type="button" role="menuitem" data-of="follow">${icon('arrowR',13)}${S.follow===key?'Stop following':'Follow'}</button><button type="button" role="menuitem" data-of="message">${icon('send',13)}Message</button>`;
+  const af=afFor(key);
+  S.menu.innerHTML=`<div class="of-mh">${esc(nameOf(key))}${af?.title?`<small>${esc(af.title)}</small>`:''}</div>${af?`<button type="button" role="menuitem" data-of="afInfo" data-id="${esc(af.id)}">${icon('user',13)}AgentFlow role</button>`:''}<button type="button" role="menuitem" data-of="wave">👋 Wave</button><button type="button" role="menuitem" data-of="follow">${icon('arrowR',13)}${S.follow===key?'Stop following':'Follow'}</button><button type="button" role="menuitem" data-of="message">${icon('send',13)}Message</button>`;
   S.menu.style.left=Math.min(e.clientX-r.left,r.width-180)+'px';S.menu.style.top=Math.min(e.clientY-r.top,r.height-150)+'px';
   S.menu.querySelector('button').focus({preventScroll:true});
 }
@@ -406,6 +405,7 @@ function onClick(e){
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
     allow:()=>decide('allow'),deny:()=>decide('deny'),
+    afInfo(){closeMenu();showAf(b.dataset.id)},
   })[b.dataset.of]?.();
 }
 function agentOf(member,id){return (S.live.get(member)||[]).find(a=>a.id===id)}
@@ -554,14 +554,15 @@ function frame(dt,t){
     p.pose.rotation.x=motion.flip|| (motion.jumping?-0.17:stride*(0.05+run*0.13));
     p.pose.rotation.z=motion.grounded?Math.sin(p.phase)*stride*0.045:0;
     p.shade.position.y=0.02-o.position.y;
+    animateHuman(o.userData.rig,t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9});
   }
+  for(const f of S.afPeople||[])animateHuman(f.userData.rig,t,{phase:(f.id%7)*0.9});
   // Agents: running bob and type, waiting hop and glow, idle still; subagents circle.
   for(const c of S.clickables){
     const u=c.userData;if(u.kind!=='agent')continue;
-    if(u.status==='running'){c.position.y=Math.abs(Math.sin(t*7+c.id))*0.06;c.rotation.z=Math.sin(t*14+c.id)*0.04}
-    else if(u.status==='waiting'){c.position.y=Math.abs(Math.sin(t*3.2+c.id))*0.38;for(const m of u.mats||[])m.emissiveIntensity=0.25+Math.abs(Math.sin(t*3.2))*0.35}
-    for(const k of u.kids||[]){const o=k.userData.orbit;o.a+=dt*(u.status==='idle'?0.3:1.6);k.position.set(c.position.x+Math.cos(o.a)*o.r,o.y+Math.sin(t*5+o.a)*0.06,c.position.z+Math.sin(o.a)*o.r);k.rotation.y=-o.a}
+    u.mascot?.update(t,{status:u.status,children:u.children,phase:u.phase});
   }
+  pulseMascots(t);
   S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
     {held:S.pointer.orbiting||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
@@ -571,7 +572,7 @@ function frame(dt,t){
 function placeLabels(){
   const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3();
   for(const l of S.labelList){
-    l.obj.getWorldPosition(p);const far=l.near&&p.distanceTo(S.pos)>l.near;p.y+=l.y;p.project(S.camera);
+    l.obj.getWorldPosition(p);const far=(l.near&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show());p.y+=l.y;p.project(S.camera);
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}
