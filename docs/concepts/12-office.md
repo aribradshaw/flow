@@ -24,6 +24,12 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **No longer shared.** If the share is revoked while you are in its office, the office says it is no longer shared with you, you leave it at once (everyone else sees you go), and it does not reconnect.
 - **Local mode.** Without sign-in, the office opens with just you and your AgentFlow agents, and your own reported agents.
 
+## Day replay
+
+Flow keeps up to 14 days of office history. It records agent arrival and departure, running, waiting and idle states, activity kinds, desk assignments and card numbers. It also records when people enter or leave, samples their movement at most once every two seconds, and marks card column moves, emotes, Allow or Deny decisions, and that a chat message was sent. Busy offices keep fewer movement samples so the log stays bounded.
+
+The history stores no prompts, transcripts, agent messages or chat text. Only office members can read it. When you open a day, Flow uses your current access to decide which desks and cards you can see. Private agents show as mascots with their status and activity kind, as in the live office. Revoking a share also ends access to the recording through that share.
+
 ## Office controls
 
 Open **?** in the office header for the control list and the option to turn off automatic recentering.

@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from 'node:util';
 import http from 'node:http';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync,copyFileSync,readdirSync,unlinkSync,statSync} from 'node:fs';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -232,7 +233,9 @@ async function inbox(req,res){
 // (OWNER_EMAIL) for imports and for a local app syncing to production.
 // With FLOW_SYNC_URL + FLOW_SYNC_TOKEN set (e.g. Owner's local app), these calls are relayed to that
 // server; the local file copy is the offline fallback.
-const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null)});
+let officeHistory;
+const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null),
+  onSaved:(env,before,after)=>officeHistory?.cards(env,before,after)});
 const CAPS=auth.CAPS,isOwnerEmail=e=>sameEmail(e,auth.OWNER_EMAIL),limitsOf=email=>limitsMod.limitsFor(CAPS,{owner:isOwnerEmail(email)});
 const users=userStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Someone with no row yet who already owns data used Flow before people were recorded: not new.
@@ -1119,9 +1122,9 @@ async function membersApi(req,res){
 const shareSvc=(await import('./lib/share-service.mjs')).shareServices({shares,workspaces,onRevoke:()=>shareRevoked()});
 // A revoke takes effect at once: photos, the office's access cache, and open office streams (lib/office.mjs
 // recheck closes the ones that lost access, with a 'gone' event).
-function shareRevoked(){photoCache.clear();officeSeen.clear();officeHub.recheck({portals:true}).catch(()=>{})}
+function shareRevoked(){photoCache.clear();officeSeen.clear();historyRooms.clear();officeHub.recheck({portals:true}).catch(()=>{})}
 // A new share: its recipient's open offices get a door to the shared office.
-function shareMade(){officeSeen.clear();officeHub.recheck({portals:true}).catch(()=>{})}
+function shareMade(){officeSeen.clear();historyRooms.clear();officeHub.recheck({portals:true}).catch(()=>{})}
 const {previewOf,shareSummary,scopeLabel,saveShare,updateShare,shareView}=shareSvc;
 async function sharesApi(req,res){
   const u=new URL(req.url,'http://x'),path=u.pathname;
@@ -1337,12 +1340,15 @@ const {officeStorage:openOfficeStorage}=await import('./lib/office-storage.mjs')
 const officeStorage=await openOfficeStorage({db:await cloud(),dir:fileURLToPath(backupRoot),secret:officeSecretSeed}).catch(e=>{
   throw Error('Could not initialize office storage: '+cloudError(e));
 });
+const {createOfficeHistory,openOfficeHistoryStore}=await import('./lib/office-history.mjs');
+const officeHistoryStore=await openOfficeHistoryStore({db:await cloud(),dir:fileURLToPath(backupRoot)});
 const officeState=officeMod.officeState({storage:officeStorage});
 await officeState.refresh().catch(e=>{throw Error('Could not load office reports: '+cloudError(e))});
 const officeLimit=memoryRateLimit({perMinute:600});
 const personName=async email=>(await users.get(email).catch(()=>null))?.name||(auth.mode==='local'&&sameEmail(email,auth.localUser?.email)?auth.localUser.name:'')||String(email).split('@')[0];
 async function officeEnv(envId){
   const w=await workspaces.get(envId).catch(()=>null),e=envs.get(envId),data=w?.data?normalizeDb(structuredClone(stripLinked(w.data))):null;
+  if(w?.archivedAt)return {id:envId,members:[],projects:[],agents:[],cards:[]};
   const owner=String(w?.owner||e?.ownerEmail||'').toLowerCase();
   const recipients=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt).map(s=>s.recipientEmail);
   const emails=[...new Set([owner,...(e?.members||[]),...(data?.environment?.members||[]),...recipients].map(x=>String(x||'').toLowerCase()).filter(Boolean))];
@@ -1370,7 +1376,8 @@ function humanMember(a,data,members){
 async function officeAccessNow(envId,user){
   const w=await workspaces.get(envId).catch(()=>null);if(w?.archivedAt)return {ok:false};
   const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[]}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
-  const full=canRead(e,user);
+  const members=w?.data?.environment?.members;
+  const full=canRead(e,user)||(Array.isArray(members)&&members.some(m=>sameEmail(m,user.email)));
   if(sameEmail(e.ownerEmail,user.email))return {ok:true,all:true,projectIds:new Set()};
   const active=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt);
   const mine=active.filter(s=>sameEmail(s.recipientEmail,user.email));
@@ -1407,8 +1414,23 @@ async function officePortals(envId,user){
   if(!sameEmail(here?.owner,user.email)){const mine=await workspaces.ownedBy(user.email).catch(()=>null);if(mine?.envId)await add(mine.envId,'Your office',true)}
   return out;
 }
-const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
-// /api/office/{env}/events (SSE), presence, status, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
+const historyError=e=>console.error('Office history:',cloudError(e));
+const historyRooms=new Map();
+async function historyEnvironments(email){
+  const hit=historyRooms.get(email);if(hit&&Date.now()-hit.at<5000)return hit.contexts;
+  const [ownedOrMember,shared]=await Promise.all([rawWorkspaces.memberEnvs(email),shares.list({recipientEmail:email})]);
+  const registered=envs.list().filter(e=>[e.ownerEmail,...e.members].some(m=>sameEmail(m,email))).map(e=>e.id);
+  const ids=new Set([...ownedOrMember,...shared.map(s=>s.ownerEnv),...registered]);
+  const contexts=await Promise.all([...ids].map(officeEnv));
+  const visible=contexts.filter(ctx=>ctx.members.some(m=>sameEmail(m.email,email)));
+  if(historyRooms.size>=2000)historyRooms.clear();
+  historyRooms.set(email,{at:Date.now(),contexts:visible});return visible;
+}
+const officeHub=officeMod.officeHub({history:()=>officeHistory,state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
+officeHistory=createOfficeHistory({store:officeHistoryStore,state:officeState,environments:historyEnvironments,context:officeEnv,
+  memberKey:officeHub.memberKey,agentKey:officeHub.agentKey,onError:historyError});
+officeHistory.start();
+// /api/office/{env}/events (SSE), history, presence, status, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
 // the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
@@ -1421,7 +1443,7 @@ async function officeApi(req,res){
     catch(e){console.error('office alerts failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open office alerts'});else res.end()}
     return true;
   }
-  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status)$/.exec(u.pathname);
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status|history)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
   // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
   const keyed=m[2]==='events'&&!!req.headers.authorization;
@@ -1430,10 +1452,27 @@ async function officeApi(req,res){
   if(keyed){const a=await apiAuth(req);if(!a||!a.scopes.some(x=>x==='read'||x==='write'||x==='admin')||(a.user.key&&!keyAllows(a.user.key,'read',m[1]))){json(res,401,{error:'Invalid or expired API key'});return true}user={...a.user,name:(await personName(a.user.email))}}
   else{user=await requireUser(req,res);if(!user)return true}
   let [,envId,what]=m;
+  if(what==='history'&&(user.token||user.key)){json(res,401,{error:'Sign in to continue'});return true}
   // An opened shared environment's office (share-<shareId>) is its owner environment's office: one office for everyone.
-  if(core.parseOpenedEnv(envId)){const o=keyed?null:await openedShare(envId,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
-  const access=await officeAccess(envId,user);
+  const virtual=core.parseOpenedEnv(envId)?envId:null;
+  if(virtual){const o=keyed?null:await openedShare(virtual,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
+  const access=await (what==='history'?officeAccessNow:officeAccess)(envId,user);
   if(!access.ok){json(res,404,{error:'Not found'});return true}
+  if(what==='history'){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    res.setHeader('Cache-Control','private, no-store');
+    try{
+      const data=await officeHistory.page(envId,user,access,u.searchParams.get('day'),u.searchParams.get('tz'),u.searchParams.get('cursor'));
+      const current=data&&await officeAccessNow(envId,user);
+      if(!current?.ok||(virtual&&!(await openedShare(virtual,user))?.share))json(res,404,{error:'Not found'});
+      else if(!isDeepStrictEqual(current,access))json(res,409,{error:'Office access changed. Reload the day.'});
+      else json(res,200,data);
+    }catch(e){
+      if(e instanceof RangeError)json(res,400,{error:e.message});
+      else{historyError(e);json(res,500,{error:'Could not load office history'})}
+    }
+    return true;
+  }
   if(what==='events'){
     if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
     try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
@@ -1598,6 +1637,7 @@ process.on('SIGTERM',()=>{
   deadline.unref();
   server.close(async error=>{
     await officeHub.flush();
+    await officeHistory.close();
     await pool?.end().catch(()=>{});
     clearTimeout(deadline);
     process.exit(error?1:0);

@@ -7,6 +7,7 @@ import {createServer} from 'node:net';
 import EmbeddedPostgres from 'embedded-postgres';
 import pg from 'pg';
 import {officeStorage} from '../lib/office-storage.mjs';
+import {openOfficeHistoryStore} from '../lib/office-history.mjs';
 import {officeState,STALE_MS} from '../lib/office.mjs';
 
 const email='member@example.test',source='fixture',env='workspace',member='member';
@@ -82,4 +83,15 @@ test('Postgres keeps office state and arbitrates overlapping action claims',{tim
   t.after(async()=>{await db.end();await postgres.stop().catch(()=>{});await rm(dir,{recursive:true,force:true})});
   await postgres.initialise();await postgres.start();
   await verify(secret=>officeStorage({db,secret}),{overlap:true});
+
+  const options={db,dir,hourLimits:[2,2]};
+  const [first,second]=await Promise.all([openOfficeHistoryStore(options),openOfficeHistoryStore(options)]);
+  const hour=Math.floor(Date.now()/3600000)*3600000;
+  const mark=at=>({type:'message',at});
+  const counts=await Promise.all([first.append(env,hour,0,[mark(hour),mark(hour+1)]),second.append(env,hour,0,[mark(hour+2),mark(hour+3)])]);
+  assert.equal(counts.reduce((a,b)=>a+b),2);
+  assert.equal(await second.append(env,hour,1,[{type:'pose',at:hour+4}]),1);
+  assert.equal((await first.read(env,hour,hour+500,[hour-1,'0'],10)).length,3);
+  await second.prune(hour+500);
+  assert.deepEqual(await first.read(env,hour,hour+500,[hour-1,'0'],10),[]);
 });

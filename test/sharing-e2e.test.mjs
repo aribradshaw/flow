@@ -665,3 +665,23 @@ test('additions: off, needs approval, allowed; app saves, the API and MCP; scope
   // A recipient still cannot share what is shared with them.
   assert.equal((await kim('POST','/api/shares',{env:kimEnv,recipientEmail:BO,scope:{kind:'nodes',nodeIds:[L('marsh')]}})).status,400);
 });
+
+test('only office members can read history, including the active recipient of an opened environment',async()=>{
+  const today=new Date().toISOString().slice(0,10),suffix='/history?day='+today+'&tz=UTC';
+  const canonical='/api/office/default-workspace'+suffix;
+  assert.equal((await agent()('GET',canonical)).status,401);
+  assert.equal((await owner('GET',canonical)).status,200);
+  assert.equal((await kim('GET',canonical)).status,404);
+  const r=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'view'});
+  assert.equal(r.status,200,JSON.stringify(r.data));
+  const id=r.data.share.id,virtual='/api/office/share-'+id+suffix;
+  try{
+    const direct=await kim('GET',canonical),opened=await kim('GET',virtual);
+    assert.equal(direct.status,200);assert.equal(opened.status,200);assert.deepEqual(opened.data.events,direct.data.events);
+    assert.equal((await bo('GET',virtual)).status,404);
+  }finally{
+    assert.equal((await owner('DELETE','/api/shares/'+id)).status,200);
+  }
+  assert.equal((await kim('GET',virtual)).status,404);
+  assert.equal((await kim('GET',canonical)).status,404);
+});
