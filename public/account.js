@@ -21,6 +21,7 @@ import {SCOPES,SHORTCUTS,keysFor,showCombo,comboOf,rebind,resetShortcut,resetAll
 import {getPref,setPref,onPrefs} from './prefs.js';
 import {currentEnv,listEnvironments,listSharedEnvironments,isOpenedEnv,switchEnvironment,createEnvironment,renameEnvironment,archiveEnvironment,refresh} from './sync.js';
 import {sharingPane,openShareDialog,api as shareApi} from './share.js';
+import {addsHelp} from './share-words.js';
 import {combinedIds,setCombined,pruneCombined} from './combined.js';
 import {renderApiKeysTab} from './apikeys.js';
 import {ask} from './modal.js';
@@ -401,7 +402,14 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     const sr=t.closest?.('[data-sh-revoke]');if(sr){ask(`Stop sharing with ${sr.dataset.who}?\nThe shared cards disappear from their workspace. Their own data stays.`,{ok:'Revoke',danger:true}).then(ok=>{if(ok)shDo(()=>shareApi.revoke(sr.dataset.shRevoke))});return}
     const sa=t.closest?.('[data-sh-approve]');if(sa){shDo(()=>shareApi.decide(sa.dataset.shApprove,true,panel.querySelector(`[data-sh-req-perm="${sa.dataset.shApprove}"]`)?.value));return}
     const sd=t.closest?.('[data-sh-deny]');if(sd){shDo(()=>shareApi.decide(sd.dataset.shDeny,false));return}
-    const pa=t.closest?.('[data-sh-prop-approve]');if(pa){shDo(()=>shareApi.decideProposal(pa.dataset.shPropApprove,true),true);return}
+    // Approve what the card shows: a recipient's later saves join the same pending addition, so when it
+    // grew since this tab was drawn, redraw it to show everything instead of approving unseen records.
+    const pa=t.closest?.('[data-sh-prop-approve]');if(pa){const id=pa.dataset.shPropApprove,n=Number(pa.dataset.n);
+      (async()=>{try{
+        const now=(await shareApi.list(currentEnv()).catch(()=>null))?.proposals?.find(p=>p.id===id);
+        if(now&&n&&now.preview.length!==n){await drawTab('sharing');return shErr('They added more since this list was shown. Check what it adds now, then approve again.')}
+        await shareApi.decideProposal(id,true);await refresh();await drawTab('sharing');
+      }catch(e){shErr(e.message)}})();return}
     const pd=t.closest?.('[data-sh-prop-deny]');if(pd){ask('Deny what they added?\nIt is removed from their copy, and they are told.',{ok:'Deny',danger:true}).then(ok=>{if(ok)shDo(()=>shareApi.decideProposal(pd.dataset.shPropDeny,false))});return}
     const pw=t.closest?.('[data-sh-withdraw]');if(pw){shDo(()=>shareApi.withdraw(pw.dataset.shWithdraw),true);return}
     // Adding a share closes Settings and opens its chart, so the linked boxes are right there.
@@ -437,7 +445,8 @@ function openSettings(tab=getPref('settingsTab')||'account'){
     // Only edit shares can add: the setting follows the permission (Settings › Sharing redraws).
     if(p)shareApi.setPermission(p.dataset.shPerm,p.value).then(()=>drawTab('sharing')).catch(e=>alertBox(e.message));
     const a=ev.target.closest?.('[data-sh-adds]');
-    if(a)shareApi.setAdds(a.dataset.shAdds,a.value).catch(e=>alertBox(e.message));
+    if(a){shareApi.setAdds(a.dataset.shAdds,a.value).catch(e=>alertBox(e.message));
+      const h=a.closest('.sh-card')?.querySelector('[data-sh-adds-help]');if(h)h.textContent=addsHelp(a.value)}
   });
   d.addEventListener('submit',async ev=>{
     ev.preventDefault();const f=ev.target,panel=d.querySelector('[role=tabpanel]');
