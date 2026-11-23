@@ -5,10 +5,10 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import {yachtWorld,YACHT} from './office-world-core.js';
 
-const PAL={navy:'#1e3446',stripe:'#3d8f66',keel:'#5d3b38',white:'#f4f7f5',shade:'#dde5e1',teak:'#c99b6c',teak2:'#a97d50',carpet:'#cfe3d2',dark:'#182830',steel:'#c5cecc',
+const PAL={navy:'#1e3446',stripe:'#3d8f66',keel:'#5d3b38',white:'#f4f7f5',shade:'#dde5e1',teak:'#c99b6c',teak2:'#a97d50',teakLight:'#d9b68a',teakGrey:'#b89878',gold:'#d8b46a',carpet:'#cfe3d2',dark:'#182830',steel:'#c5cecc',
   cushion:'#fbfbf7',green:'#3d8f66',amber:'#e9a23b',teal:'#2f8f8a',coral:'#d9785f',pad:'#39484d',yellow:'#f2c94c',leaf:'#4f9a5d',leaf2:'#37774a',trunk:'#96764f',
   pool:'#63dbe6',warm:'#ffdca6',red:'#e5484d',lime:'#46c46a',glass:'#bfe3ea',sand:'#e6d6ac',rock:'#8f9a8c',hill:'#6aa56f',hill2:'#4d8a5c',cloud:'#ffffff'};
-const SKY={zenith:'#4f9fe0',horizon:'#d8eef5',haze:'#f6efe0',deep:'#14607c',shallow:'#2c9bb4',sun:'#fff1cf'};
+const SKY={zenith:'#3d8fdc',horizon:'#cfe8f3',haze:'#f7eedc',deep:'#0f5676',shallow:'#2aa0b6',mirror:'#8fc6e6',sun:'#fff1cf'};
 const SUN_DIR=new THREE.Vector3(0.42,0.62,0.66).normalize();
 
 // ---------- a small mesh builder: flat faces with a colour per vertex ----------
@@ -94,26 +94,34 @@ function buildYacht(W){
     S.prism([[-wa,za],[wa,za],[wb,zb],[-wb,zb]],y-thick,y,PAL.white,{top:color})}};
   const E=HB-0.04;
   // swim platform, and its inlay
-  strips(zL1,zSw,5,SWIM,0.5,PAL.teak);
+  // fore-and-aft plank seams on the open decks
+  const planks=(x0,x1,z0,z1,y,every=1.3)=>{for(let x=x0+every/2;x<x1;x+=every)S.box(x,y,(z0+z1)/2,0.05,0.012,z1-z0,PAL.teak2,{ao:1})};
+  strips(zL1,zSw,5,SWIM,0.5,PAL.teakGrey);
   S.box(0,SWIM,zL1+swimRamp+1.4,(HB-3)*2,0.02,1.7,PAL.teak2,{ao:1});
   // lounge: the deck round the sunken seating, the seating's floor, margin boards
   slab(-E,E,zL0,-pz,MAIN,0.6);slab(-E,E,pz,zL1,MAIN,0.6);slab(-E,-px,-pz,pz,MAIN,0.6);slab(px,E,-pz,pz,MAIN,0.6);
   S.box(0,PIT-0.3,0,px*2,0.3,pz*2,PAL.teak2,{top:PAL.carpet});
   for(const s of [-1,1]){S.box(0,MAIN,s*(pz+0.2),px*2+0.8,0.02,0.4,PAL.teak2,{ao:1});S.box(s*(px+0.2),MAIN,0,0.4,0.02,pz*2,PAL.teak2,{ao:1})}
   // upper deck, the aft terrace between the stair trenches, and the bridge front
-  slab(-E,E,zB0,zL0-upRamp,UPPER,0.35);
-  S.box(0,MAIN,zL0-upRamp/2,(HB-3.6)*2,UPPER-MAIN,upRamp,PAL.white,{top:PAL.teak});
+  slab(-E,E,zB0,zL0-upRamp,UPPER,0.35,PAL.teakLight);
+  S.box(0,MAIN,zL0-upRamp/2,(HB-3.6)*2,UPPER-MAIN,upRamp,PAL.white,{top:PAL.teakLight});
+  planks(-(HB-3.8),HB-3.8,zS1,zL0-0.3,UPPER);
+  for(const s of [-1,1]){planks(s>0?SB+0.4:-(HB-0.8),s>0?HB-0.8:-(SB+0.4),zB1,zS1,UPPER);planks(s>0?px+0.5:-(HB-0.8),s>0?HB-0.8:-(px+0.5),-pz,pz,MAIN);planks(s>0?0.4:-(HB-5),s>0?HB-5:-0.4,pz+0.5,zL1-0.2,MAIN)}
+  // a green line along the upper deck's edge, and a gold cove line on the hull
+  for(const s of [-1,1]){S.box(s*(HB+0.01),UPPER-0.34,(zB0+zL0)/2,0.06,0.2,zL0-zB0,PAL.stripe,{ao:1});S.box(s*(HB+0.03),MAIN+0.62,(zB0+12+zL1)/2,0.05,0.09,zL1-zB0-12,PAL.gold,{ao:1})}
   for(const s of [-1,1])S.box(s*(HB-0.06),MAIN,(zB0+zL0)/2,0.1,UPPER-MAIN,zL0-zB0,PAL.white);      // superstructure sides
   S.box(0,FORE-0.4,zB0+0.1,E*2,UPPER-FORE+0.4,0.2,PAL.white);                                      // bridge front
   // foredeck
-  strips(zBow+0.2,zB0,12,FORE,0.5,PAL.teak);
+  strips(zBow+0.2,zB0,12,FORE,0.5,PAL.teakGrey);
   // sundeck block: body, deck round the pool, an eyebrow all round
   const bodyTop=SUN-0.6;
   S.box(0,UPPER,(zS0+zS1-sunRamp)/2,SB*2,bodyTop-UPPER,zS1-sunRamp-zS0,PAL.white);
   for(const s of [-1,1])S.box(s*(slot+SB)/2,UPPER,zS1-sunRamp/2,SB-slot,bodyTop-UPPER,sunRamp,PAL.white);
   const pz0=pool.z-pool.halfZ,pz1=pool.z+pool.halfZ;
-  slab(-SB,SB,zS0,pz0,SUN,0.6);slab(-SB,SB,pz1,zS1-sunRamp,SUN,0.6);slab(-SB,-pool.halfX,pz0,pz1,SUN,0.6);slab(pool.halfX,SB,pz0,pz1,SUN,0.6);
-  for(const s of [-1,1])slab(s>0?slot:-SB,s>0?SB:-slot,zS1-sunRamp,zS1,SUN,0.6);
+  slab(-SB,SB,zS0,pz0,SUN,0.6,PAL.teakLight);slab(-SB,SB,pz1,zS1-sunRamp,SUN,0.6,PAL.teakLight);slab(-SB,-pool.halfX,pz0,pz1,SUN,0.6,PAL.teakLight);slab(pool.halfX,SB,pz0,pz1,SUN,0.6,PAL.teakLight);
+  for(const s of [-1,1]){slab(s>0?slot:-SB,s>0?SB:-slot,zS1-sunRamp,zS1,SUN,0.6,PAL.teakLight);planks(s>0?pool.halfX+0.3:-SB+0.3,s>0?SB-0.3:-pool.halfX-0.3,zS0+0.4,zS1-0.4,SUN)}
+  // a white coaming round the pool
+  for(const s of [-1,1]){S.box(s*(pool.halfX+0.12),SUN,pool.z,0.26,0.1,pool.halfZ*2+0.5,PAL.white,{ao:1});S.box(0,SUN,pool.z+s*(pool.halfZ+0.12),pool.halfX*2+0.5,0.1,0.26,PAL.white,{ao:1})}
   S.box(0,SUN-0.62,pool.z,pool.halfX*2,0.12,pool.halfZ*2,PAL.teal,{top:PAL.teal});
   L.box(0,SUN-0.22,pool.z,pool.halfX*2,0.04,pool.halfZ*2,PAL.pool,{ao:1});
   for(const s of [-1,1]){S.box(s*(SB+0.2),SUN-0.16,(zS0+zS1)/2,0.5,0.14,zS1-zS0+0.9,PAL.shade);S.box(0,SUN-0.16,s>0?zS1+0.2:zS0-0.2,SB*2,0.14,0.5,PAL.shade)}
@@ -230,13 +238,31 @@ function buildYacht(W){
   // terrace over the lounge
   for(const s of [-1,1])for(let i=0;i<2;i++)lounger(s*(2.2+i*2.4),zL0-2.4,UPPER,Math.PI);
 
+  // ----- the lines that make it a yacht: wings sweeping from the upper deck down to the lounge's bulwark,
+  // fins at the sundeck's after corners, and one long deckhouse where cabins stand side by side -----
+  for(const s of [-1,1]){
+    const x=s*(HB-0.05),from=[0,2,(zL0+zL1)/2],a=[x,UPPER+RAIL+0.1,zL0-1.2],b=[x,MAIN+RAIL-0.02,zL0+9.5],c=[x,MAIN+RAIL-0.02,zL0-1.2];
+    S.face(a,b,c,null,PAL.white,[x-s,2,zL0]);S.face(a,b,c,null,PAL.white,[x+s,2,zL0]);
+    S.face([x+s*0.03,UPPER+RAIL-0.5,zL0-0.7],[x+s*0.03,MAIN+RAIL+0.35,zL0+5.6],[x+s*0.03,MAIN+RAIL+0.35,zL0-0.7],null,PAL.dark,[x-s,2,zL0]);
+    const fx=s*(SB+0.02),fa=[fx,SUN+RAIL+1.5,zS1-5.5],fb=[fx,SUN,zS1+0.2],fc=[fx,SUN,zS1-5.5];
+    S.face(fa,fb,fc,null,PAL.white,[fx-s,SUN,zS1]);S.face(fa,fb,fc,null,PAL.white,[fx+s,SUN,zS1]);
+    const ga=[fx,SUN+RAIL+1.5,zS1-5.5],gb=[fx,SUN+RAIL+1.5,zS1-9],gc=[fx,SUN,zS1-12],gd=[fx,SUN,zS1-5.5];
+    S.face(ga,gb,gc,gd,PAL.white,[fx-s,SUN,zS1]);S.face(ga,gb,gc,gd,PAL.white,[fx+s,SUN,zS1]);
+    S.face([fx+s*0.03,SUN+RAIL+1,zS1-6],[fx+s*0.03,SUN+RAIL+1,zS1-8.6],[fx+s*0.03,SUN+0.5,zS1-10.4],[fx+s*0.03,SUN+0.5,zS1-6],PAL.dark,[fx-s,SUN,zS1]);
+  }
+  for(const b of W.walls)if(b.kind==='infill'){
+    S.box(b.x,b.y,b.z,0.2,b.height-b.y,b.halfZ*2,PAL.white);
+    S.box(b.x+Math.sign(b.x)*0.12,b.y+1.5,b.z,0.06,1.5,b.halfZ*2-0.5,PAL.dark,{ao:.9});
+    S.box(b.x-Math.sign(b.x)*0.55,b.height+0.06,b.z,1.9,0.14,b.halfZ*2,PAL.white,{top:PAL.shade,bottom:true});
+  }
   // ----- bridge: the walk round the wheelhouse front has a solid bulwark -----
   S.box(0,UPPER,zB0+0.14,13.4,RAIL-0.05,0.3,PAL.white,{top:PAL.teak2});
   // ----- radar arch and mast on the sundeck -----
   const ax=SB-0.55,az=zS0+4.2,AH=3.9;
-  for(const s of [-1,1]){S.box(s*ax,SUN,az,0.9,AH+0.3,1.9,PAL.white,{tilt:-0.16});L.box(s*(ax+0.5),SUN+AH-0.2,az-0.6,0.12,0.3,0.3,s>0?PAL.lime:PAL.red,{ao:1})}
+  for(const s of [-1,1]){S.box(s*ax,SUN,az,0.9,AH+0.3,2.6,PAL.white,{tilt:-0.2});S.box(s*ax,SUN,az+3.4,0.5,AH*0.62,1.5,PAL.white,{tilt:-0.75});L.box(s*(ax+0.5),SUN+AH-0.2,az-0.6,0.12,0.3,0.3,s>0?PAL.lime:PAL.red,{ao:1})}
   S.box(0,SUN+AH,az-1.1,ax*2+1.6,0.24,4.6,PAL.white,{top:PAL.shade,bottom:true});
-  S.cyl(0,SUN+AH+0.24,az-1.2,0.22,2.6,6,PAL.white,{r2:0.1});L.box(0,SUN+AH+2.85,az-1.2,0.16,0.16,0.16,PAL.warm,{ao:1});
+  S.box(0,SUN+AH+0.24,az-0.6,1.5,1.5,2.6,PAL.white,{tilt:0.18});S.cyl(0,SUN+AH+1.6,az-0.5,0.2,3.4,6,PAL.white,{r2:0.07});L.box(0,SUN+AH+5.05,az-0.5,0.16,0.16,0.16,PAL.warm,{ao:1});
+  S.box(0,SUN+AH+3.6,az-0.5,3.4,0.07,0.07,PAL.steel);for(const s of [-1,1])S.cyl(s*1.6,SUN+AH+3.6,az-0.5,0.03,0.9,4,PAL.steel);
   for(const s of [-1,1]){S.ball(s*3.2,SUN+AH+0.75,az-1,0.7,PAL.white);S.cyl(s*5.4,SUN+AH+0.24,az-1.6,0.04,1.9,4,PAL.steel)}
   S.box(0,SUN+AH+1.5,az-1.2,2.6,0.08,0.08,PAL.steel);
 
@@ -294,12 +320,14 @@ void main(){
   // foam along the hull, a V from the bow, and the wash astern
   float u=clamp((uHull.y-p.y)/(uHull.y-uHull.x-7.0),0.0,1.0),hw=uHull.w*0.9*(1.0-pow(u,1.7));
   float d=max(abs(p.x)-hw,max(uHull.x+7.0-p.y,p.y-uHull.z));
-  float foam=smoothstep(2.8,0.2,d+nz*2.2);
+  float foam=smoothstep(2.2,0.1,d+nz*2.6)*0.9;
   float s2=p.y-(uHull.x+7.0);
   if(s2>0.0){float arm=abs(abs(p.x)-(1.5+s2*0.33));foam=max(foam,smoothstep(1.2+s2*0.02,0.0,arm)*exp(-s2/95.0)*smoothstep(0.34,0.66,nz)*0.55);}
   float s=p.y-uHull.z;
-  if(s>0.0){float w0=uHull.w*0.6+s*0.11;foam=max(foam,smoothstep(w0,w0*0.3,abs(p.x))*exp(-s/90.0)*smoothstep(0.26,0.6,nz+0.25*exp(-s/22.0)));}
-  col=mix(col,vec3(0.96,0.99,1.0),clamp(foam,0.0,1.0)*0.92);
+  if(s>0.0){float w0=uHull.w*0.55+s*0.1;foam=max(foam,smoothstep(w0,w0*0.25,abs(p.x))*exp(-s/75.0)*smoothstep(0.4,0.72,nz+0.2*exp(-s/12.0))*0.9);}
+  col=mix(col,mix(uShallow,vec3(0.97,0.99,1.0),0.82),clamp(foam,0.0,1.0)*0.9);
+  // lighter, greener water where the hull has just passed
+  if(s>0.0)col=mix(col,uShallow*1.25,smoothstep(uHull.w+s*0.16,0.0,abs(p.x))*exp(-s/120.0)*0.35);
   col+=vec3(0.05,0.5,0.6)*exp(-distance(p,vec2(0.0,uHull.z+1.0))*0.2)*0.55;
   col=mix(col,uHorizon,smoothstep(200.0,1050.0,length(vP.xz-cameraPosition.xz))*0.97);
   gl_FragColor=vec4(col,1.0);
@@ -330,7 +358,7 @@ export function createYachtWorld({scene,deck}){
   sun.position.copy(SUN_DIR).multiplyScalar(60);scene.add(hemi,sun);
   const tU={value:0};
   const sea=keep(new THREE.Mesh(seaGeometry(),new THREE.ShaderMaterial({vertexShader:WATER_VERT,fragmentShader:WATER_FRAG,uniforms:{uT:tU,uSpeed:{value:3.2},uAmp:{value:0.55},uSea:{value:YACHT.SEA},
-    uDeep:{value:col(SKY.deep)},uShallow:{value:col(SKY.shallow)},uSkyCol:{value:col(SKY.horizon)},uHorizon:{value:horizon},uSunDir:{value:SUN_DIR},uSunCol:{value:col(SKY.sun)},uHull:{value:new THREE.Vector4()}}})));
+    uDeep:{value:col(SKY.deep)},uShallow:{value:col(SKY.shallow)},uSkyCol:{value:col(SKY.mirror)},uHorizon:{value:horizon},uSunDir:{value:SUN_DIR},uSunCol:{value:col(SKY.sun)},uHull:{value:new THREE.Vector4()}}})));
   sea.position.y=YACHT.SEA;sea.frustumCulled=false;scene.add(sea);
   const sky=keep(new THREE.Mesh(new THREE.SphereGeometry(1200,24,12),new THREE.ShaderMaterial({vertexShader:SKY_VERT,fragmentShader:SKY_FRAG,side:THREE.BackSide,depthWrite:false,depthTest:false,
     uniforms:{uZenith:{value:col(SKY.zenith)},uHorizon:{value:horizon},uHaze:{value:col(SKY.haze)},uSunDir:{value:SUN_DIR},uSunCol:{value:col(SKY.sun)}}})));
@@ -357,7 +385,7 @@ export function createYachtWorld({scene,deck}){
     meshes=[new THREE.Mesh(g.solid,paint),new THREE.Mesh(g.lights,lightMat),new THREE.Mesh(g.glass,glassMat),new THREE.Mesh(g.floors,pickMat)];
     meshes[2].renderOrder=2;floor=meshes[3];for(const m of meshes)group.add(m);
     const P=core.plan;sea.material.uniforms.uHull.value.set(P.zBow,P.zB0,P.zSw,P.HB);
-    radar.position.set(0,YACHT.SUN+3.9+1.62,P.zS0+4.2-1.2);
+    radar.position.set(0,YACHT.SUN+3.9+1.9,P.zS0+4.2-0.6);
     return core;
   }
   function update(t,dt,{camera,motion=true}={}){

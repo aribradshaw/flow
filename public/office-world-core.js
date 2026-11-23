@@ -10,7 +10,7 @@
 // stacked. So a box is solid from its top down, a wall between two heights stops walkers on both of
 // them, and office-controls.js needs only ground() to walk the decks and the stairs between them.
 import {officeBox} from './office-controls.js';
-import {classicLayout,toWorld,ROOM_W,ROOM_D,WALL_T,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
+import {classicLayout,toWorld,ROOM_W,ROOM_D,WALL_T,BACK_WALL_H,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
 export {ROOM_W,ROOM_D};
 
 export const WORLDS=[{id:'classic',name:'Office'},{id:'yacht',name:'Yacht'}];
@@ -133,6 +133,8 @@ export function yachtWorld(members,{commonR=10}={}){
 
   // ----- collision: rails, bulkheads and the big furniture -----
   const walls=[],T=0.24;
+  // Between two cabins on the same side the deckhouse wall carries on, so from the sea it is one long house.
+  for(let i=2;i<n-1;i++){const r=rooms[i+1],prev=rooms[i-1];walls.push(wallBox(r.x+Math.sign(r.x)*roomD/2,(r.z+prev.z)/2,0,WALL_T,pitch-roomW,BACK_WALL_H,UPPER,'infill'))}
   // slope: the heights a handrail starts and ends at, where it follows stairs (for drawing).
   const rail=(x1,z1,x2,z2,y,kind='rail',tall=RAIL,slope=null)=>walls.push(Object.assign(along(x1,z1,x2,z2,T,tall,y,kind),slope?{slope}:{}));
   for(const s of [-1,1]){
