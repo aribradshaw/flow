@@ -2,7 +2,7 @@
 // relative times, live lines, the Chief's bubble, work summaries, chat blocks and page merging.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {sectionsOf,relTime,liveLine,chiefBubble,workSummary,blocksOf,mergeItems,projectHue} from '../public/office-threads-core.js';
+import {sectionsOf,relTime,liveLine,chiefBubble,workSummary,blocksOf,chatBlocks,mergeItems,projectHue} from '../public/office-threads-core.js';
 
 const T0=Date.parse('2026-11-22T12:00:00Z'),at=m=>new Date(T0+m*60e3).toISOString();
 const SOURCES=[{source:'bridge:a',counts:{snoozed:7,settled:231},items:[
@@ -47,6 +47,22 @@ test('chat blocks: messages on their own, the steps between them in one work blo
   const b=blocksOf(items);
   assert.deepEqual(b.map(x=>x.type),['user','work','assistant','work']);
   assert.equal(b[1].summary,'Ran 1 command');assert.equal(b[1].items.length,2);
+});
+
+test('agent panel chat: messages stay, a run of tool calls is one line and the commands are the tooltip',()=>{
+  const lines=[
+    {role:'user',text:'Ship the panel',at:'2026-11-23T17:52:00Z'},
+    {role:'tool',text:'Run: rg -n "refreshPanel" public/office.js'},
+    {role:'tool',text:'Read public/office.js'},
+    {role:'assistant',text:'The header is a dot and chips.'},
+  ];
+  const b=chatBlocks(lines);
+  assert.deepEqual(b.map(x=>x.type),['user','work','assistant']);
+  assert.equal(b[1].summary,'Ran 1 command and looked at 1 thing');
+  assert.match(b[1].tip,/^Run: rg/);
+  assert.doesNotMatch(b[1].summary,/rg -n|Read \//);
+  assert.equal(chatBlocks([]).length,0);
+  assert.equal(chatBlocks([{role:'tool',text:''}])[0].summary,'Worked');
 });
 
 test('pages merge by item id: older first, the newest page wins',()=>{

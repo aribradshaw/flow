@@ -1,5 +1,5 @@
 // Talking to your own coding agent from the 3D office's agent panel (docs/concepts/12-office.md): its
-// transcript tail, a message box ("Send to agent": Enter sends, Shift+Enter is a new line) and Stop, with
+// conversation (chat bubbles; a run of tool calls is one line), a message box (Enter sends, Shift+Enter is a new line) and Stop, with
 // a confirm. Only for the agent's owner: the server sends the transcript and can only to them.
 //
 //   createSteer({post, toast})   one per open office. post(body) -> POST /api/office/{env}/steer
@@ -12,16 +12,21 @@
 // that is moved into each new panel, never rebuilt: the draft and the caret survive the redraws.
 import {icon} from './icons.js';
 import {esc} from './ui.js';
-import {liveLine} from './office-threads-core.js';
+import {chatBlocks, liveLine} from './office-threads-core.js';
 
 export const MESSAGE_MAX=2000;
-const ROLE={user:'You',assistant:'Agent',tool:'Tool'};
 const KEEP=3; // the latest messages and stops shown under the box
 const time=at=>{const d=new Date(at);return Number.isFinite(d.getTime())?d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):''};
 
 export function transcriptHtml(lines){
-  if(!lines?.length)return '<p class="of-note">No transcript yet.</p>';
-  return `<ol class="of-tx">${lines.map(l=>`<li class="of-tx-${esc(l.role)}"><span class="of-tx-who">${ROLE[l.role]||esc(l.role)}${l.at?` · ${esc(time(l.at))}`:''}</span><div class="of-tx-text">${esc(l.text)}</div></li>`).join('')}</ol>`;
+  const blocks=chatBlocks(lines);
+  if(!blocks.length)return '<p class="of-note">No messages yet.</p>';
+  return `<ol class="of-tx">${blocks.map(b=>{
+    if(b.type==='work')return `<li class="of-tx-work"${b.tip?` data-tip="${esc(b.tip)}"`:''}>${esc(b.summary)}</li>`;
+    const when=b.at?time(b.at):'';
+    const tip=(b.type==='user'?'You':'Agent')+(when?` · ${when}`:'');
+    return `<li class="of-tx-${esc(b.type)}" data-tip="${esc(tip)}"><div class="of-tx-text">${esc(b.text)}</div></li>`;
+  }).join('')}</ol>`;
 }
 // One message or stop as its owner sees it: pending (being sent) -> sent (waiting for the reporter) -> its result.
 export function stepHtml(x,host){
@@ -52,7 +57,7 @@ export function createSteer({post,toast=()=>{}}){
     // What it is doing this moment (its live steps: owner only), like T3's thread view.
     const now=b.el.querySelector('.of-now'),live=a.status!=='idle'&&a.live;
     now.hidden=!live;
-    if(live){const html=`<div class="of-pk">Now</div><div class="of-now-line">${esc(liveLine(live))}</div>${live.phase!=='tool'&&live.text?`<div class="of-now-text">${esc(live.text)}</div>`:''}${live.steps?.length>1?`<ol class="of-now-steps">${live.steps.slice(-5,-1).map(x=>`<li>${esc(x.text)}</li>`).join('')}</ol>`:''}`;if(now.innerHTML!==html)now.innerHTML=html}
+    if(live){const line=liveLine(live);const html=`<span class="of-dot"></span><span class="of-now-line" data-tip="${esc(line)}">${esc(line)}</span>`;if(now.innerHTML!==html)now.innerHTML=html}
     const can=a.can||[],stop=b.el.querySelector('.of-stop');
     b.el.querySelector('.of-msg').hidden=!can.includes('message');
     const stopping=l.some(x=>x.kind==='stop'&&(x.state==='pending'||x.state==='sent'));
@@ -75,10 +80,10 @@ export function createSteer({post,toast=()=>{}}){
   function box(a){
     let b=boxes.get(a.id);if(b)return b;
     const el=document.createElement('div');el.className='of-steer';
-    el.innerHTML=`<div class="of-now" hidden aria-live="polite"></div><div class="of-pk">Transcript</div><div class="of-tx-wrap" tabindex="0" aria-label="Transcript, newest last"></div>
-      <form class="of-msg"><label class="of-pk" for="of-steer-${esc(a.id)}">Send to agent</label>
-        <textarea id="of-steer-${esc(a.id)}" rows="2" maxlength="${MESSAGE_MAX}" placeholder="Message your agent… (Enter to send, Shift+Enter for a new line)" autocomplete="off"></textarea>
-        <div class="of-msg-row"><span class="of-count" aria-live="polite"></span><button type="submit" class="txt primary" data-steer="send">${icon('send',13)}Send</button></div></form>
+    el.innerHTML=`<div class="of-now" hidden aria-live="polite"></div><div class="of-tx-wrap" tabindex="0" aria-label="Conversation, newest last"></div>
+      <form class="of-msg"><label class="of-sr" for="of-steer-${esc(a.id)}">Message</label>
+        <textarea id="of-steer-${esc(a.id)}" rows="2" maxlength="${MESSAGE_MAX}" placeholder="Message… Enter sends" autocomplete="off"></textarea>
+        <div class="of-msg-row"><span class="of-count" aria-live="polite"></span><button type="submit" class="txt primary" data-steer="send" data-tip="Send">${icon('send',13)}Send</button></div></form>
       <div class="of-stop"></div><ul class="of-steps" aria-live="polite"></ul>`;
     b={el,agent:a,input:el.querySelector('textarea'),confirm:false,sig:''};
     b.input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send(b,'message')}});

@@ -1,14 +1,13 @@
 /* The 3D office's steer section in your own agent's panel (public/office-steer.js): transcript, message box, Stop. */
-.of-steer{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
-.of-steer .of-pk{display:block;color:var(--muted);margin-bottom:4px}
-.of-tx-wrap{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fafafa;padding:2px 0;outline-offset:2px}
-.of-tx{list-style:none;margin:0;padding:0}
-.of-tx li{padding:5px 8px;font-size:12px;line-height:1.4}
-.of-tx li+li{border-top:1px solid var(--line)}
-.of-tx-who{display:block;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.of-steer{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+.of-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.of-tx-wrap{flex:1;min-height:72px;overflow:auto;outline-offset:2px}
+.of-tx{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.of-tx-user,.of-tx-assistant{padding:6px 8px;border-radius:10px;font-size:12.5px;line-height:1.35}
+.of-tx-user{align-self:flex-end;max-width:92%;background:#e7f0ff}
+.of-tx-assistant{align-self:flex-start;max-width:96%;background:#f4f5f6}
+.of-tx-work{align-self:flex-start;padding:1px 2px;color:var(--muted);font-size:11px}
 .of-tx-text{white-space:pre-wrap;overflow-wrap:anywhere}
-.of-tx-user .of-tx-who{color:var(--primary)}
-.of-tx-tool .of-tx-text{font:11.5px/1.4 ui-monospace,Consolas,monospace;color:#444}
 .of-msg{margin-top:10px}
 .of-msg[hidden],.of-stop[hidden]{display:none}
 .of-msg textarea{box-sizing:border-box;width:100%;min-height:52px;max-height:160px;resize:vertical;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:13px/1.4 inherit;font-family:inherit;background:#fff;color:inherit}
@@ -33,8 +32,6 @@
 @keyframes of-steer-pulse{from{opacity:.25}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.of-step-state::before{animation:none}}
 /* Now: an agent's live steps (office-steer.js), streamed while it works. */
-.of-now{margin:0 0 8px;padding:8px 10px;border-radius:8px;background:#f2f6ff}
-.of-now .of-pk{margin-top:0}
-.of-now-line{font-weight:600;color:#2b56b8;overflow-wrap:anywhere}
-.of-now-text{margin-top:4px;max-height:96px;overflow:auto;white-space:pre-wrap;color:#44506a;font-size:12px;line-height:1.4}
-.of-now-steps{margin:4px 0 0;padding-left:16px;color:var(--muted);font-size:11.5px}
+.of-now{display:flex;align-items:center;gap:6px;margin:0 0 6px;min-width:0}
+.of-now .of-dot{background:#3cba6a}
+.of-now-line{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#2b56b8}
