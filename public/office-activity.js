@@ -156,6 +156,7 @@ export function createActivity(office){
   const inRoom=p=>Math.abs(p.x)<W/2&&p.z>-D/2&&p.z<D/2+0.6;
   // The next point towards goal, through the room's door when one end is inside and the other is not.
   function waypoint(u,goal,out){
+    if(!u.lounge)return out.copy(goal); // a seat in the common area: no room, no door
     u.root.worldToLocal(lp.copy(u.pos));u.root.worldToLocal(lg.copy(goal));
     const pin=inRoom(lp),gin=inRoom(lg);
     if(pin===gin)return out.copy(goal);

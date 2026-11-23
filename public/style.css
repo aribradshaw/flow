@@ -746,6 +746,9 @@ body[data-tab=agentflow] #inspector{width:320px}
 .txt.primary-txt{display:inline-flex;align-items:center;gap:4px;border-color:var(--primary);background:var(--primary);color:#fff}
 .txt.primary-txt:hover{background:var(--primary-hover)}
 .af-bar>.txt{display:inline-flex;align-items:center;gap:4px;height:28px}
+/* The 3D button: how many of your agents wait (office-alerts.js). */
+.af-office{position:relative}
+.af-badge{position:absolute;top:-6px;right:-7px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#e8590c;color:#fff;font-size:10.5px;font-weight:700;line-height:17px;text-align:center;box-shadow:0 0 0 2px var(--bg,#fff)}
 .af-scroll{flex:1;min-height:0;overflow:auto;background:var(--bg)}
 /* The org canvas: pan, zoom and drag, like the MindMap canvas. */
 .af-canvas{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none;background-color:var(--bg);background-image:radial-gradient(circle at 1px 1px,#c5cfcb 1px,transparent 1.4px)}

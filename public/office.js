@@ -20,6 +20,7 @@ import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from '
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
+import {notifyOn,toggleNotify} from './office-alerts.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -40,7 +41,7 @@ export function openOffice(opts){
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
-      ${hudHtml(icon)}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
+      ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
       <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
@@ -78,7 +79,7 @@ export function openOffice(opts){
   S.controller.reset(S.pos,0);
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
-  bindHud(root,{icon,toast:opts.toast});
+  bindHud(root,{icon,notify:{on:notifyOn,toggle:toggleNotify},toast:opts.toast});
   root.addEventListener('focusin',e=>{if(isTyping(e.target))clearKeys()});
   root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});

@@ -18,6 +18,7 @@ import {localTarget,refFromSearch,validRef} from './chat-core.js';
 import {loadDevlog} from './devlog.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {onPrefs,syncPrefs} from './prefs.js';
+import {startOfficeAlerts} from './office-alerts.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
 import {edgeGeometry,tidyLayout} from './mindmap-layout.js';
@@ -812,6 +813,9 @@ async function openOfficeLink(){
 }
 window.addEventListener('flow:session',()=>openOfficeLink());
 window.addEventListener('popstate',()=>openOfficeLink());
+// Notifications when your own agents wait, while the 3D office is closed (office-alerts.js; off until turned
+// on in the office). Clicking one opens the office on that agent, as #office/<id> does.
+startOfficeAlerts({open:({id})=>{history.replaceState(null,'','#office/'+encodeURIComponent(id));openOfficeLink()}});
 // Chat with OneProfileID friends (chat.js): the launcher shows only when it is available.
 window.addEventListener('flow:chat',()=>render());
 startChat({openLink:openRef,toast});

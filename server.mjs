@@ -1306,9 +1306,17 @@ async function officeAccess(envId,user){
   const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
 }
 const officeHub=officeMod.officeHub({state:officeState,context:{env:officeEnv,access:officeAccessNow},secret:officeSecret});
-// /api/office/{env}/events (SSE), presence, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs): the app's page only, signed in (local mode too).
+// /api/office/{env}/events (SSE), presence, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), and /api/office/alerts (SSE, per person):
+// the app's page only, signed in (local mode too).
 async function officeApi(req,res){
   const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
+  // Your own agents' waits, for alerts while the office is closed (lib/office.mjs hub.alerts): the app's page only.
+  if(u.pathname==='/api/office/alerts'){
+    if(!trusted(req)){res.writeHead(403);res.end();return true}
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    const user=await requireUser(req,res);if(!user)return true;
+    officeHub.alerts(user,req,res);return true;
+  }
   const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
   // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.

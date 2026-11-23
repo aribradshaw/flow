@@ -13,6 +13,7 @@ import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,
   canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem,modelChoices,modelMaker,
   jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,JOB_ORIGINS,JOB_TRIGGERS,cardH} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
+import {badgeHtml} from './office-alerts.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
 // tied to Flow projects, DevOps cards and timeline items. Data rules live in agentflow-core.js;
@@ -107,7 +108,7 @@ function toolbar(){
     <input id="af-q" type="search" placeholder="Search agents and workflows" value="${esc(ui.q)}" aria-label="Search agents and workflows">
     ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
-    <button type="button" class="txt af-office" data-af="office" data-tip="3D office" aria-label="3D office">${icon('cube3d',14)}3D</button>
+    <button type="button" class="txt af-office" data-af="office" data-tip="3D office" aria-label="3D office">${icon('cube3d',14)}3D${badgeHtml()}</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
 // A person's photo: their own, or the signed-in account's when the card is theirs (ui.js personPhoto).

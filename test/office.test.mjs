@@ -69,6 +69,27 @@ test('activityKind: a valid reported kind is kept, anything else is inferred fro
   for(const v of [viewAgent(a,{owner:true}),viewAgent(a,{full:true}),viewAgent(a,{})]){assert.equal(v.activityKind,'search');assert.equal(v.children[0].activityKind,'read')}
 });
 
+test('waiting: an agent starting to wait (or on a new prompt) is an event for its owner; a first report or a steady wait is not',()=>{
+  const st=officeState(),ev=[];st.on(e=>{if(e.type==='waiting')ev.push(e)});
+  const ag=(id,status,requestId)=>({id,status,vendor:'claude',title:'T '+id,pending:requestId?{requestId,summary:'Run: x',can:['allow']}:null});
+  st.report('Ann@example.test',{source:'s',agents:[ag('1','waiting','r1'),ag('2','running')]});
+  assert.deepEqual(ev,[],'a source\'s first report alerts nobody');
+  st.report('ann@example.test',{source:'s',agents:[ag('1','waiting','r1'),ag('2','waiting','r2')]});
+  assert.deepEqual(ev.map(e=>[e.email,e.agent.id,e.agent.source,e.agent.pending.requestId]),[['ann@example.test','2','s','r2']]);
+  st.report('ann@example.test',{source:'s',agents:[ag('1','waiting','r1'),{...ag('2','waiting','r2'),activity:'still'}]});
+  assert.equal(ev.length,1,'still waiting on the same prompt');
+  st.report('ann@example.test',{source:'s',agents:[ag('1','waiting','r9'),ag('2','waiting')]});
+  assert.deepEqual(ev.slice(1).map(e=>e.agent.id),['1'],'a new prompt alerts again; losing the prompt does not');
+  st.report('ann@example.test',{source:'s',agents:[ag('1','waiting','r9'),ag('2','waiting'),ag('3','waiting')]});
+  assert.deepEqual(ev.slice(2).map(e=>e.agent.id),['3'],'a new agent already waiting');
+  st.report('ann@example.test',{source:'s',agents:[ag('1','running'),ag('2','idle'),ag('3','waiting')]});st.report('ann@example.test',{source:'s',agents:[ag('1','waiting'),ag('2','idle'),ag('3','waiting')]});
+  assert.deepEqual(ev.slice(3).map(e=>e.agent.id),['1'],'back to waiting');
+  st.close();
+  let t=0;const s2=officeState({now:()=>t}),ev2=[];s2.on(e=>{if(e.type==='waiting')ev2.push(e)});
+  s2.report('ann@example.test',{source:'s',agents:[ag('1','running')]});t=95e3;s2.report('ann@example.test',{source:'s',agents:[ag('1','waiting','r1')]});
+  assert.deepEqual(ev2,[],'a source back after going stale is a first report');s2.close();
+});
+
 const AGENT={id:'host:t3:1',title:'Fix the login bug',vendor:'claude',model:'Opus 5.5',status:'waiting',activity:'Waiting for approval',host:'laptop',hostLabel:'laptop · T3',
   repo:{name:'flow',remote:'https://github.com/acme/flow.git'},children:[{id:'c1',title:'Explore',vendor:'claude',status:'running'}],
   pending:{requestId:'req-1',kind:'approval',summary:'Run: rm -rf build',can:['allow','deny']}};
@@ -218,5 +239,46 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     const again=sse(url('cy'));await again.ready;const snap=await again.next('snapshot');
     assert.deepEqual(snap.chat.map(c=>c.text),['hello team']);assert.ok(!snap.people.some(p=>p.key===sb.me.key));
     ann.close();cy.close();again.close();
+  }finally{hub.close();st.close();server.close()}
+});
+
+test('alert streams: only the owner hears that their agent waits, never a viewer who can see its project',async()=>{
+  const st=officeState();
+  const users={ann:{email:'ann@example.test',name:'Ann'},bo:{email:'bo@example.test',name:'Bo'}};
+  const ctx={id:'env1',name:'Studio',ownerEmail:users.ann.email,members:Object.values(users).map(u=>({email:u.email,name:u.name})),projects:[{id:'p-flow',name:'Flow',repos:['acme/flow']}],agents:[]};
+  const access={ann:{ok:true,all:true,projectIds:new Set()},bo:{ok:true,all:false,projectIds:new Set(['p-flow'])}};
+  const hub=officeHub({state:st,context:{env:async()=>ctx},heartbeatMs:60e3});
+  const server=http.createServer(async(req,res)=>{
+    const u=new URL(req.url,'http://x'),who=u.searchParams.get('as');
+    if(u.pathname==='/events'){await hub.connect('env1',users[who],access[who],req,res);return}
+    if(u.pathname==='/alerts'){hub.alerts(users[who],req,res);return}
+    res.writeHead(404);res.end();
+  });
+  await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
+  const url=(path,who)=>`http://127.0.0.1:${server.address().port}/${path}?as=${who}`;
+  const running={...AGENT,status:'running',pending:null,activity:'Bash: npm test'};
+  st.report(users.ann.email,{source:'bridge:laptop',agents:[running]});
+  try{
+    const annAlerts=sse(url('alerts','ann')),boAlerts=sse(url('alerts','bo')),boOffice=sse(url('events','bo')),annOffice=sse(url('events','ann'));
+    await Promise.all([annAlerts.ready,boAlerts.ready,boOffice.ready,annOffice.ready]);
+    assert.deepEqual(await annAlerts.next('mine'),{waiting:[]});assert.deepEqual(await boAlerts.next('mine'),{waiting:[]});
+    await boOffice.next('snapshot');await annOffice.next('snapshot');
+    assert.equal(hub.alertClients(),2);
+    st.report(users.ann.email,{source:'bridge:laptop',agents:[AGENT]});
+    const w=await annAlerts.next('waiting');
+    assert.deepEqual(w,{id:AGENT.id,source:'bridge:laptop',title:'Fix the login bug',vendor:'claude',activityKind:'think',host:'laptop · T3',pending:{requestId:'req-1',kind:'approval',summary:'Run: rm -rf build'}});
+    assert.deepEqual((await annAlerts.next('mine')).waiting.map(a=>a.id),[AGENT.id]);
+    // Bo sees the agent wait in the office (his share covers its project), but gets no alert of any kind.
+    const seen=await boOffice.next('agents');assert.equal(seen.agents[0].status,'waiting');
+    await annOffice.next('agents');
+    await new Promise(r=>setTimeout(r,80));
+    assert.deepEqual(boAlerts.events,[],'nothing on Bo\'s alert stream');
+    assert.ok(![...boOffice.events,...annOffice.events].some(e=>e.type==='waiting'||e.type==='mine'),'office streams carry no alerts');
+    // Answered elsewhere: it stops waiting, and the owner's list empties.
+    st.report(users.ann.email,{source:'bridge:laptop',agents:[running]});
+    assert.deepEqual(await annAlerts.next('mine'),{waiting:[]});
+    assert.ok(!annAlerts.events.some(e=>e.type==='waiting'));
+    annAlerts.close();await new Promise(r=>setTimeout(r,50));assert.equal(hub.alertClients(),1);
+    boAlerts.close();boOffice.close();annOffice.close();
   }finally{hub.close();st.close();server.close()}
 });
