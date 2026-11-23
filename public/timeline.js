@@ -291,6 +291,7 @@ export function addProject(name,entity){
   change(()=>{const p=projectByName(name);if(!p.entity)p.entity=entity});
 }
 // Called after switching to the Timeline tab from the chart.
+export function focusProjects(){selected='projects'}
 export function focus({projects,itemId,view='gantt'}={}){
   ui.view=view;jump=true;
   if(projects)ui.projects=projects;

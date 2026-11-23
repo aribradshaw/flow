@@ -42,7 +42,9 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');return `<span class="pill" style="background:${bg};color:${fg}">${esc(names[s]||s)}</span>`};
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
+let openProjects;
 export function mount(opts){
+  openProjects=opts.openProjects;
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
@@ -552,6 +554,7 @@ async function openOffice(){
   const offices=[{id:env,name:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
   const u=sessionUser();
   m.openOffice({env,current:env,offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
+    openProjects,
     focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).

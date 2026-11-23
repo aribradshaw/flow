@@ -39,7 +39,23 @@ flow projects update Lantern --repos acme/lantern,acme/lantern-site
 - **T3 Code.** It reads T3's state database (`~/.t3/userdata/statev2.sqlite`, read-only) for threads with a running turn: title, model, the project folder's git remote, latest activity, subagents and open approval requests. Allow and Deny go through T3's own API (a short-lived token from `t3 auth session issue`), after checking that the request is still open. Questions are answered in T3.
 - **Claude Code** in a terminal. Running sessions (`~/.claude/sessions/` and their transcripts under `~/.claude/projects/`) are reported with their status and latest activity. Their prompts cannot be answered from outside, so they show without buttons. Sessions T3 runs are reported once, as T3 agents.
 
-To join the office:
+Open **AgentFlow › 3D › Connect your agents**. Choose the operating system on the machine that runs your agents, then create a bridge key. Copy the terminal commands or paste the setup prompt into a local coding agent such as Claude Code, Codex or Cursor. The dialog confirms the first report from a new source, even if no agents are running yet.
+
+You can also give your coding agent this prompt and supply the server URL and a key when it asks.
+
+```text
+Connect my local coding agents to the Flow 3D office. Detect the operating system on this machine.
+
+Ask me for my Flow server URL and have me create a dedicated API key in Settings › Connect. Choose the current environment and Read & write. Ask me to provide the key privately.
+
+1. On this machine, install the Flow CLI with `npm install -g github:aribradshaw/flow` (requires Node.js 24 or newer and Git).
+2. Use a dedicated XDG_CONFIG_HOME for the office bridge so my normal Flow CLI login is preserved. Sign in to the Flow server I provide using `flow login --url <server> --key-stdin` and pass the key privately on stdin. Keep the key in the CLI config only. Never write it into a repo, command arguments, a service definition, logs or shell history. Don't print it again.
+3. In the same configuration, run `flow office bridge --once --dry-run`. Show me what the bridge would send and wait for my approval before sending a report.
+4. Set up `flow office bridge` as a background service that starts at login (launchd LaunchAgent on macOS, Task Scheduler on Windows, systemd user service on Linux). Use the same XDG_CONFIG_HOME, clear FLOW_URL and FLOW_API_KEY overrides, and ensure the service can find Node.js, Git and the Flow CLI. Start it now.
+5. Verify that the reporter appears in the 3D office by checking `flow office agents list --json` with the same configuration and telling me which source and how many agents are connected.
+```
+
+To set it up manually:
 
 - Install the CLI (Node 22.13 or newer): `npm install -g github:aribradshaw/flow` gives you `flow`. From a checkout of Flow, `npm link` does the same, or run `node tools/flow.mjs …`.
 - Create an API key in Flow under **Settings › Connect**: **New key**, any environment (or all), **Read & write**.
@@ -83,6 +99,6 @@ A source that has not reported for 90 seconds is gone, and its agents leave the 
 
 ## How it runs
 
-The office is live over Server-Sent Events: `GET /api/office/{env}/events` sends a snapshot (rooms, AgentFlow agents, live agents as this viewer may see them, who is here and the last 50 chat lines), then moves, chat, emotes, agent updates and answer results as they happen, with a heartbeat every 15 seconds. Moves, chat (up to 280 characters), emotes and answers are small POSTs to `/api/office/{env}/presence`, `say`, `emote` and `answer`, rate-limited per person. Only the app's own page can call them, signed in.
+The office is live over Server-Sent Events: `GET /api/office/{env}/events` sends a snapshot (rooms, AgentFlow agents, live agents as this viewer may see them, who is here and the last 50 chat lines, and the viewer's own live reporter sources), then moves, chat, emotes, agent updates and answer results as they happen, with a heartbeat every 15 seconds. Moves, chat (up to 280 characters), emotes and answers are small POSTs to `/api/office/{env}/presence`, `say`, `emote` and `answer`, rate-limited per person. Only the app's own page can call them, signed in.
 
 Everything about the office is kept in memory on the server: reported agents, presence and chat (which is not saved). Flow runs as a single server instance, so this works as is; a restart empties the office and reporters fill it again within seconds. Running several Flow instances behind a load balancer would need shared state for it. The office is drawn with [Three.js](https://threejs.org) (MIT), vendored in `public/vendor/three` and loaded only when the office opens.

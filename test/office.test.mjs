@@ -110,7 +110,8 @@ function sse(url,{headers={}}={}){
 }
 
 test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live agent updates, answers and leave',async()=>{
-  const st=officeState();
+  let time=0;
+  const st=officeState({now:()=>time,staleMs:1000});
   const users={ann:{email:'ann@example.test',name:'Ann'},bo:{email:'bo@example.test',name:'Bo'},cy:{email:'cy@example.test',name:'Cy'}};
   const ctx={id:'env1',name:'Studio',ownerEmail:users.ann.email,members:Object.values(users).map(u=>({email:u.email,name:u.name})),
     projects:[{id:'p-flow',name:'Flow',repos:['acme/flow']},{id:'p-site',name:'Site',repos:['site']}],agents:[{id:'af1',name:'Researcher',kind:'agent',reportsTo:'',projects:[]},{id:'af2',name:'Site bot',kind:'agent',reportsTo:'',projects:['p-site']}]};
@@ -125,10 +126,20 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
   const url=who=>`http://127.0.0.1:${server.address().port}/events?as=${who}`;
   st.report(users.ann.email,{source:'bridge:laptop',agents:[AGENT,{...AGENT,id:'side',title:'Side project',repo:{name:'secret-thing'},pending:null,status:'running'}]});
+  st.report(users.bo.email,{source:'bridge:empty',agents:[]});
   try{
     const ann=sse(url('ann')),bo=sse(url('bo')),cy=sse(url('cy'));await Promise.all([ann.ready,bo.ready,cy.ready]);
     const [sa,sb,sc]=await Promise.all([ann.next('snapshot'),bo.next('snapshot'),cy.next('snapshot')]);
     const annKey=sa.me.key;
+    assert.deepEqual(sa.yourSources.map(s=>[s.source,s.agents]),[['bridge:laptop',2]]);
+    assert.deepEqual(sb.yourSources.map(s=>[s.source,s.agents]),[['bridge:empty',0]]);
+    assert.deepEqual(sc.yourSources,[]);
+    st.report(users.cy.email,{source:'bridge:desk',agents:[]});
+    assert.deepEqual((await cy.next('yourSources')).map(s=>[s.source,s.agents]),[['bridge:desk',0]]);
+    await ann.next('agents');await bo.next('agents');await cy.next('agents');
+    assert.ok(!ann.events.some(e=>e.type==='yourSources'));
+    assert.ok(!bo.events.some(e=>e.type==='yourSources'));
+
     assert.equal(sa.members.length,3);assert.ok(sa.members.find(m=>m.key===annKey).owner);assert.ok(!JSON.stringify(sa).includes('@example.test'),'no emails reach the browser');
     assert.deepEqual(sa.agentflow.map(a=>a.name),['Researcher','Site bot']);
     assert.deepEqual(sb.agentflow,[],'a project share shows only the AgentFlow agents of its projects');assert.deepEqual(sc.agentflow.map(a=>a.name),['Site bot']);
@@ -164,6 +175,11 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     st.result(users.ann.email,act.id,{ok:true,message:'Approved in T3'});
     assert.equal((await ann.next('result')).result.message,'Approved in T3');
     await new Promise(r=>setTimeout(r,50));assert.ok(!bo.events.some(e=>e.type==='action'||e.type==='result'));
+    time=1001;st.sweep();
+    assert.deepEqual(await cy.next('yourSources'),[],'stale sources disappear over SSE');
+    const reconnect=sse(url('cy'));await reconnect.ready;
+    assert.deepEqual((await reconnect.next('snapshot')).yourSources,[],'stale sources stay out of snapshots');
+    reconnect.close();
     // Leaving removes the avatar.
     bo.close();assert.equal((await ann.next('leave')).key,sb.me.key);
     const again=sse(url('cy'));await again.ready;const snap=await again.next('snapshot');

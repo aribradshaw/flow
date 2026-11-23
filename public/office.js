@@ -9,6 +9,7 @@ import {icon} from './icons.js';
 import {esc} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {bindOfficePointer,createOfficeCamera,officeBox} from './office-controls.js';
+import {openBridgeDialog} from './office-connect.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97757'},codex:{name:'Codex',color:'#2b2f33'},gemini:{name:'Gemini',color:'#4c7cf0'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -26,12 +27,17 @@ export function openOffice(opts){
       <span class="of-title">${icon('cube3d',16)}<b>3D office</b></span>
       ${opts.offices.length>1?`<select class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
+      <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <span class="of-keys">WASD · middle/right drag · scroll to zoom</span>
       <button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
       <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
-    <div class="of-stage"><div class="of-labels" aria-hidden="true"></div></div>
+    <div class="of-stage"><div class="of-labels" aria-hidden="true"></div>
+      <aside class="of-connect-callout" hidden><strong>Your agents aren’t connected yet</strong>
+        <button type="button" class="txt primary" data-of="connect">Connect your agents</button>
+      </aside>
+    </div>
     <div class="of-dock">
       <div class="of-log" aria-label="Chat"><div class="of-lines" role="log" aria-live="polite"></div></div>
       <form class="of-say"><input class="of-input" maxlength="280" placeholder="Say something… (Enter)" aria-label="Chat message" autocomplete="off"><button type="submit" class="ib" aria-label="Send" data-tip="Send">${icon('send')}</button></form>
@@ -53,7 +59,7 @@ export function openOffice(opts){
   S={opts,root,lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     keys:new Set(),walls:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     me:null,meKey:'',pos:new THREE.Vector3(0,0,6),heading:0,target:null,follow:null,sentAt:0,moving:false,lastSent:'',chat:[],opener:document.activeElement};
-  try{initScene()}catch(e){S.stage.innerHTML='<p class="of-fail">This browser could not start 3D graphics, so the office cannot open here.</p>';status('3D is not available')}
+  try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
   root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
@@ -68,7 +74,7 @@ export function closeOffice(){
   s.es?.close();cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   try{s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
-  s.root.remove();s.opener?.focus?.({preventScroll:true});
+  s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
 }
 function switchTo(env){if(!S||env===S.env)return;const opts={...S.opts,env};closeOffice();openOffice(opts)}
 const status=t=>{const el=S?.root.querySelector('.of-status');if(el)el.textContent=t};
@@ -79,13 +85,14 @@ const api=(path,body)=>fetch(`/api/office/${encodeURIComponent(S.env)}/${path}`,
 function connect(){
   const es=new EventSource(`/api/office/${encodeURIComponent(S.env)}/events`);S.es=es;let fails=0;
   const on=(type,f)=>es.addEventListener(type,e=>{if(S?.es!==es)return;try{f(JSON.parse(e.data))}catch(err){console.error('office',type,err)}});
-  on('snapshot',d=>{fails=0;snapshot(d)});
-  on('join',p=>upsertPerson(p));on('move',p=>upsertPerson(p));
+  on('snapshot',d=>{fails=0;updateSources(d.yourSources||[]);snapshot(d)});
+  on('yourSources',updateSources);
+  on('join',p=>{if(S.world)upsertPerson(p)});on('move',p=>{if(S.world)upsertPerson(p)});
   on('leave',({key})=>removePerson(key));
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel()});
-  on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;buildRooms();buildAgentflow();refreshPanel()});
+  on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildRooms();buildAgentflow()}refreshPanel()});
   on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
   on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
   es.onopen=()=>status('Live');
@@ -95,12 +102,36 @@ function snapshot(d){
   S.meKey=d.me.key;S.me=d.me;S.members=d.members;S.snapAgentflow=d.agentflow;S.live=new Map(Object.entries(d.live||{}));
   S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
+  status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'}`);
+  if(!S.world)return;
   buildRooms();buildAgentflow();
   if(!S.placed){S.placed=true;const r=S.rooms.get(S.meKey);if(r){S.pos.copy(r.door);S.heading=r.facing}S.rig?.reset(S.pos,S.heading)}
   upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x:S.pos.x,z:S.pos.z,heading:S.heading,moving:false},true);
   for(const p of d.people)if(p.key!==S.meKey)upsertPerson(p);
   S.lines.innerHTML='';S.chat=[];for(const l of d.chat||[])addLine(l,{quiet:true});
-  status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'}`);sendPresence(true);
+  sendPresence(true);
+}
+function updateSources(sources){
+  S.sources=sources;S.bridge?.updateSources(sources);
+  const empty=!sources.length;
+  S.root.querySelector('.of-connect-callout').hidden=!empty;
+  S.root.querySelector('.of-connect-link').hidden=empty;
+}
+function connectAgents(opener){
+  const office=S;
+  // The current workspace owns the key even when visiting another workspace's office.
+  const env=office.opts.current,name=office.opts.offices.find(o=>o.id===env)?.name;
+  const bridge=openBridgeDialog({env,envName:name,sources:office.sources,openProjects:()=>{
+    closeOffice();office.opts.openProjects?.();
+  }});
+  office.bridge=bridge;
+  clearKeys();
+  office.root.append(bridge.dialog);bridge.dialog.showModal();
+  bridge.dialog.addEventListener('close',()=>{
+    if(S!==office||office.bridge!==bridge)return;
+    office.bridge=null;
+    (opener.hidden||opener.closest('[hidden]')?office.root.querySelector('[data-of="connect"]:not([hidden])'):opener).focus();
+  },{once:true});
 }
 function sendPresence(force){
   const t=performance.now(),sig=[S.pos.x.toFixed(2),S.pos.z.toFixed(2),S.heading.toFixed(2),S.moving].join();
@@ -333,7 +364,7 @@ function onClick(e){
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
-  ({close:closeOffice,zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
+  ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
@@ -388,6 +419,7 @@ function decide(decision){
 const MOVE={w:[0,-1],arrowup:[0,-1],s:[0,1],arrowdown:[0,1],a:[-1,0],arrowleft:[-1,0],d:[1,0],arrowright:[1,0]};
 function onKey(e){
   if(!S)return;
+  if(S.bridge?.dialog.open){e.stopPropagation();return}
   const typing=e.target.closest?.('input,textarea,select,[contenteditable]:not([contenteditable=false])');
   if(e.key==='Escape'){e.preventDefault();if(closeMenu())return;if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}closeOffice();return}
   if(typing)return;
