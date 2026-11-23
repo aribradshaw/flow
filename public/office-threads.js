@@ -33,7 +33,8 @@ export function createThreads(o){
   // ---------- the DOM: a header button, the sidebar and the sheet ----------
   const button=document.createElement('button');
   button.type='button';button.className='ib of-th-toggle';button.setAttribute('aria-label','Threads (Y)');button.dataset.tip='Threads (Y)';
-  const top=o.root.querySelector('.of-top');top?.insertBefore(button,top.querySelector('[data-of="controls"]')||null);
+  const top=o.root.querySelector('.of-top'),anchor=top?.querySelector('[data-of="controls"]');
+  (anchor?.parentElement||top)?.insertBefore(button,anchor||null);
   const side=document.createElement('aside');side.className='of-th';side.setAttribute('aria-label','Threads');
   side.innerHTML=`<div class="of-th-head"><b>Threads</b><span class="sp"></span><button type="button" class="ib" data-th-act="close" aria-label="Hide threads (Y)">${icon('x',14)}</button></div>
     <label class="of-th-search">${icon('filter',13)}<input type="search" placeholder="Search threads" aria-label="Search threads" autocomplete="off"></label>

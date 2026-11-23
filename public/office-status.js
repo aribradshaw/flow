@@ -143,7 +143,9 @@ export function attachOfficeStatus(office, {officeBox, refreshColliders} = {}) {
       return `<li role="none"><button type="button" role="option" data-presence-status="${id}"><i style="background:${meta.color}"></i>${esc(meta.label)}</button></li>`;
     }).join('')}</ul>
     <input class="of-presence-text" maxlength="60" placeholder="Add a note" aria-label="Status note" autocomplete="off">`;
-  top.querySelector('.of-keys')?.before(hud);
+  const slot = top.querySelector('.of-presence-slot');
+  if (slot) slot.append(hud);
+  else top.querySelector('.of-keys')?.before(hud);
   const button = hud.querySelector('.of-presence-btn');
   const menu = hud.querySelector('.of-presence-menu');
   const note = hud.querySelector('.of-presence-text');
