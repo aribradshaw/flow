@@ -93,18 +93,27 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 
 - [search](/docs/search.html#op-search): `GET /api/v1/envs/{env}/search` (read). Search an environment
 
+## API: Sharing
+
+- [shares.list](/docs/sharing.html#op-shares-list): `GET /api/v1/envs/{env}/shares` (read). List shares of an environment
+- [shares.preview](/docs/sharing.html#op-shares-preview): `POST /api/v1/envs/{env}/shares/preview` (read). Preview what a share would show
+- [shares.create](/docs/sharing.html#op-shares-create): `POST /api/v1/envs/{env}/shares` (write). Share part of an environment with someone
+- [shares.update](/docs/sharing.html#op-shares-update): `PATCH /api/v1/shares/{share}` (write). Change a share's permission
+- [shares.revoke](/docs/sharing.html#op-shares-revoke): `DELETE /api/v1/shares/{share}` (write). Revoke a share
+- [shares.incoming](/docs/sharing.html#op-shares-incoming): `GET /api/v1/shares/incoming` (read). List shares with you
+- [shares.requests.list](/docs/sharing.html#op-shares-requests-list): `GET /api/v1/share-requests` (read). List re-share requests
+- [shares.requests.create](/docs/sharing.html#op-shares-requests-create): `POST /api/v1/shares/{share}/requests` (write). Ask the owner to share it on
+- [shares.requests.decide](/docs/sharing.html#op-shares-requests-decide): `POST /api/v1/share-requests/{request}` (write). Approve or deny a re-share request
+- [proposals.list](/docs/sharing.html#op-proposals-list): `GET /api/v1/envs/{env}/proposals` (read). List share additions
+- [proposals.approve](/docs/sharing.html#op-proposals-approve): `POST /api/v1/envs/{env}/proposals/{proposal}/approve` (write). Approve a share addition
+- [proposals.deny](/docs/sharing.html#op-proposals-deny): `POST /api/v1/envs/{env}/proposals/{proposal}/deny` (write). Deny a share addition
+
 ## API: 3D office
 
 - [office.agents.report](/docs/office.html#op-office-agents-report): `PUT /api/v1/office/agents` (write). Report your live coding agents
 - [office.agents.list](/docs/office.html#op-office-agents-list): `GET /api/v1/office/agents` (read). List your reported agents
 - [office.actions.wait](/docs/office.html#op-office-actions-wait): `GET /api/v1/office/actions` (write). Wait for answers to your agents' prompts
 - [office.actions.result](/docs/office.html#op-office-actions-result): `POST /api/v1/office/actions/{id}` (write). Say how an answer went
-
-## API: Sharing
-
-- [proposals.list](/docs/sharing.html#op-proposals-list): `GET /api/v1/envs/{env}/proposals` (read). List share additions
-- [proposals.approve](/docs/sharing.html#op-proposals-approve): `POST /api/v1/envs/{env}/proposals/{proposal}/approve` (write). Approve a share addition
-- [proposals.deny](/docs/sharing.html#op-proposals-deny): `POST /api/v1/envs/{env}/proposals/{proposal}/deny` (write). Deny a share addition
 
 ## Optional
 

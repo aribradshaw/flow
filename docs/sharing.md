@@ -160,6 +160,27 @@ The file fallback uses `BACKUP_DIR/_shares.json`, `_share_requests.json`, `_shar
 - **Timeline and DevOps** (card #63): shared items and cards carry the chart's link badge, in the board corner and inline in list rows, Gantt bars and calendar chips. The tooltip and the panel name the owner and the permission. Panels lock what the permission does not allow. **View** locks every field. **Comment** locks every field and adds a comment box. **Edit** unlocks the whitelisted fields only. A card's project and timeline item, an item's projects and a project's entity always stay with the owner, and so does deleting or duplicating. Dragging a locked card between columns, or a locked item on the Gantt, calendar or board, is refused with a notice. Shared cards take only their own share's labels (no new labels), and shared items only target shared releases. The server still enforces every rule.
 - **Assignees** (card #63): pickers on a shared card offer its share's in-scope person cards and its members, and never the owner's other people. On the owner's side, `GET /api/workspace` adds `shareMembers: [{id:'@email', email, name, cards:[ids]}]` for recipients without a person card of their own. The owner can assign them on the cards shared with them. Stored workspaces drop `shareMembers` along with `shares`. The API and MCP take the same people: an assignee (cards.create, cards.update, cards.move's developer) is a person card or a member, as `@email`, the email or the member's name. On a linked card that means the members of its share. On the owner's own card it means the recipients whose shares cover it.
 
+## Sharing by API key and MCP (Nov 2026)
+Everything Settings › Sharing does for your own environments is also in `/api/v1` and MCP, so an agent signed in with your API key (or an MCP connector that uses one) can share for you. The operations are `shares.*` in `lib/registry.mjs`; the rules live in `lib/share-service.mjs` (`forUser`), which the app's `POST /api/shares` shares (`saveShare`), on top of `lib/sharing-core.mjs`.
+
+| Operation | REST | Scope |
+|---|---|---|
+| `shares.list` | `GET /api/v1/envs/{env}/shares` | read |
+| `shares.preview` | `POST /api/v1/envs/{env}/shares/preview` | read |
+| `shares.create` | `POST /api/v1/envs/{env}/shares` | write |
+| `shares.update` | `PATCH /api/v1/shares/{share}` | write |
+| `shares.revoke` | `DELETE /api/v1/shares/{share}` | write |
+| `shares.incoming` | `GET /api/v1/shares/incoming` | read |
+| `shares.requests.list` | `GET /api/v1/share-requests` | read |
+| `shares.requests.create` | `POST /api/v1/shares/{share}/requests` | write |
+| `shares.requests.decide` | `POST /api/v1/share-requests/{request}` | write |
+
+- **Preview, then confirm.** `shares.create` without `confirm: true` answers with the preview (what the recipient would see, `created: false`, status 200) and stores nothing. With `confirm: true` it creates the share (201), or changes the permission (and `adds`, when sent) of the same scope already shared with the same person (`existing: true`). `adds` (edit shares: off, approve, direct) can be set on create and with `shares.update`, as in Settings › Sharing; additions waiting for approval are `proposals.*`. The tool description tells agents to show the preview to their user and ask first. Approving a re-share request grants access too, and its description says the same.
+- **Scopes take names.** `scope` is `{kind, project | label | node | nodes, chart?}`; each reference is an id or a name, matched like the other tools (id first, then the name ignoring case), against your own records before linked copies. It is stored in the usual form (`projectId`, `label`, `nodeId`, `nodeIds`, `chartId`). A reference to a linked record (`sh.…`) is refused with `share_linked`: ask its owner with `shares.requests.create`.
+- **Keys.** Read-only keys can list and preview but not create, update, revoke, ask or decide (403 `insufficient_scope`). `/api/v1` checks the operation's scope; the registry's `invoke` checks it again for MCP. A key made for one environment can only list, share, change or revoke that environment's shares, and decide requests on them; other environments are 404. The owner rules are unchanged: only the environment's owner shares it (anyone else gets 404), and only the recipient asks to re-share.
+- **Created by.** A share made with a key records the key's name in `actor` (column `actor` on `flygon_flow_shares`, additive), including a share approved from a request by key. Settings › Sharing shows it as "Created by <key name>". `createdBy` stays the owner's email, and `via` stays the request it was approved from.
+- **Tests**: `test/api-v1.test.mjs` (the operations against file stores) and `test/sharing-e2e.test.mjs` (keys and MCP on the real server: preview then confirm, read-only refused, a recipient's key refused on a linked record and asking instead, approve and revoke by key).
+
 ## INTEGRATION (for the main agent, as written by the worker)
 
 ### server.mjs

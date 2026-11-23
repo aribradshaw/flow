@@ -3819,61 +3819,633 @@ curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
 }
 ```
 
-## 3D office
+## Sharing
 
-### `office.agents.report`
+### `shares.list`
 
-Report your live coding agents
+List shares of an environment
 
-`PUT /api/v1/office/agents` · scope `write` · MCP tool `office_agents_report`
+`GET /api/v1/envs/{env}/shares` · scope `read` · MCP tool `shares_list`
 
-A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
+Who you share this environment (or parts of it) with: each share's recipient, permission, scope in words and counts, plus the pending re-share requests on them (approve or deny with shares.requests.decide). Only the environment's owner can list them; anyone else gets 404.
 
 **Input**
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
-| `at` | string |  | When the reporter read its agents (ISO time). |
-| `agents` | any[] | yes |  |
+| `env` | string | yes | Environment id (see envs.list). |
 
 **Output**
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `actions` | object[] | yes |  |
-| `actions[].id` | string | yes |  |
-| `actions[].agentId` | string | yes |  |
-| `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
-| `actions[].at` | string | yes |  |
-| `actions[].result` | object |  |  |
-| `accepted` | integer |  | How many agents were kept. |
+| `shares` | object[] | yes |  |
+| `shares[].id` | string | null | yes | null in a preview of a share that does not exist yet. |
+| `shares[].ownerEnv` | string | yes |  |
+| `shares[].ownerEnvName` | string |  |  |
+| `shares[].ownerEmail` | string | yes |  |
+| `shares[].recipientEmail` | string | yes |  |
+| `shares[].permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `shares[].adds` | enum |  | What the recipient may add (edit shares only). One of `off`, `approve`, `direct`. |
+| `shares[].scope` | object | yes |  |
+| `shares[].name` | string |  |  |
+| `shares[].createdAt` | string | yes |  |
+| `shares[].createdBy` | string |  | Email of the owner who shared it. |
+| `shares[].actor` | string | null |  | The API key (or MCP connector) that created it, by name; null when made in the app. Settings › Sharing shows it as "Created by". |
+| `shares[].via` | string | null |  | The re-share request it was approved from, if any. |
+| `shares[].revokedAt` | string | null | yes |  |
+| `shares[].scopeLabel` | string | yes | What it holds, in words. |
+| `shares[].summary` | union |  |  |
+| `shares[].tip` | string | null |  | A note when the scope may not hold what people expect (e.g. mind map cards but no DevOps cards). |
+| `requests` | object[] | yes |  |
+| `requests[].id` | string | yes |  |
+| `requests[].shareId` | string | yes |  |
+| `requests[].ownerEmail` | string | yes |  |
+| `requests[].requestedBy` | string | yes |  |
+| `requests[].toEmail` | string | yes |  |
+| `requests[].permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `requests[].note` | string |  |  |
+| `requests[].status` | enum | yes | One of `pending`, `approved`, `denied`. |
+| `requests[].createdAt` | string | yes |  |
+| `requests[].decidedAt` | string | null |  |  |
+| `requests[].decidedBy` | string | null |  |  |
+| `requests[].newShareId` | string | null |  |  |
 
-**Example: One agent waiting on a prompt**
+**Example: Shares of the default workspace**
 
 ```sh
-curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
-  -H "Authorization: Bearer $FLOW_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12}}]}'
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 
 ```json
 {
-  "actions": [],
-  "accepted": 1
+  "shares": [
+    {
+      "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "ownerEnv": "default-workspace",
+      "ownerEnvName": "Default workspace",
+      "ownerEmail": "owner@example.test",
+      "recipientEmail": "bo@example.com",
+      "permission": "edit",
+      "adds": "off",
+      "scope": {
+        "kind": "project",
+        "projectId": "p1"
+      },
+      "name": "",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "createdBy": "owner@example.test",
+      "actor": "Laptop agent",
+      "via": null,
+      "revokedAt": null,
+      "scopeLabel": "Project Lantern",
+      "summary": {
+        "nodes": 0,
+        "stubs": 0,
+        "projects": 1,
+        "items": 1,
+        "cards": 4
+      },
+      "tip": null
+    }
+  ],
+  "requests": [
+    {
+      "id": "0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77",
+      "shareId": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "ownerEmail": "owner@example.test",
+      "requestedBy": "bo@example.com",
+      "toEmail": "kim@example.com",
+      "permission": "view",
+      "note": "Kim helps with the launch",
+      "status": "pending",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "decidedAt": null,
+      "decidedBy": null,
+      "newShareId": null
+    }
+  ]
 }
 ```
 
-### `office.agents.list`
+### `shares.preview`
 
-List your reported agents
+Preview what a share would show
 
-`GET /api/v1/office/agents` · scope `read` · MCP tool `office_agents_list`
+`POST /api/v1/envs/{env}/shares/preview` · scope `read` · MCP tool `shares_preview`
 
-Your live agents as Flow holds them (every source that reported in the last 90 seconds), in full, and the sources.
+Exactly what a recipient would see for a scope, before you share: chart cards, co-owner stubs (name only), projects, timeline items and DevOps cards, with counts and a tip when the scope may surprise people. Nothing is stored. Owner only.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `scope` | object | yes | What to share. Names are matched like everywhere else (id first, then the name, ignoring case), against your own records. |
+| `scope.kind` | enum | yes | environment (everything in it), project (a project with its timeline items and DevOps cards), label (the DevOps cards with a label), person (a chart card and everything connected below it, with their projects) or nodes (hand-picked chart cards, nothing below them). One of `environment`, `project`, `label`, `person`, `nodes`. |
+| `scope.project` | string |  | For kind project: the project, id or name. |
+| `scope.label` | string |  | For kind label: the DevOps label, id or name. |
+| `scope.node` | string |  | For kind person: the chart card to start from (a person or any card), id or name. |
+| `scope.nodes` | string[] |  | For kind nodes: the chart cards, ids or names. |
+| `scope.chart` | string |  | Optional: only this chart's cards and lines (chart id or name, or "active"). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `preview` | object | yes |  |
+| `preview.nodes` | object[] | yes | Chart cards the recipient will see. |
+| `preview.stubs` | object[] | yes | Co-owners shown by name only (read only). |
+| `preview.projects` | object[] | yes |  |
+| `preview.items` | object[] | yes |  |
+| `preview.cards` | object[] | yes |  |
+| `preview.summary` | object | yes |  |
+| `preview.tip` | string | null | yes |  |
+| `label` | string | yes | The scope in words, as Settings › Sharing shows it. |
+
+**Example: Project Lantern by name**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares/preview" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":{"kind":"project","project":"Lantern"}}'
+```
+
+```json
+{
+  "preview": {
+    "nodes": [],
+    "stubs": [],
+    "projects": [
+      {
+        "id": "p1",
+        "name": "Lantern",
+        "color": "#7cb980"
+      }
+    ],
+    "items": [
+      {
+        "id": "i1",
+        "title": "Public beta",
+        "kind": "release",
+        "start": "2026-12-01"
+      }
+    ],
+    "cards": [
+      {
+        "id": "k1",
+        "number": 12,
+        "title": "Build sign-up form",
+        "project": "p1"
+      }
+    ],
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 1
+    },
+    "tip": null
+  },
+  "label": "Project Lantern"
+}
+```
+
+### `shares.create`
+
+Share part of an environment with someone
+
+`POST /api/v1/envs/{env}/shares` · scope `write` · MCP tool `shares_create`
+
+Gives another Flow user (by email) access to part of your environment: they see it as linked records they can add to their own environments, and edit or comment when the permission allows. Two steps, because this grants a person access to data: without confirm: true it only answers with the preview (what they would see) and stores nothing (200, created false). Show that preview to your user and ask them before you call again with confirm: true, which creates the share (201). Sharing the same scope with the same person again changes the permission instead (existing true). Only the environment's owner can share it; records shared with you (ids sh.…) cannot be shared on: ask their owner with shares.requests.create. Needs a key with write access to this environment. The share records the key's name, shown in Settings › Sharing as "Created by".
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `recipientEmail` | string | yes | Who to share with: their email (the account they sign in to Flow with). |
+| `scope` | object | yes | What to share. Names are matched like everywhere else (id first, then the name, ignoring case), against your own records. |
+| `scope.kind` | enum | yes | environment (everything in it), project (a project with its timeline items and DevOps cards), label (the DevOps cards with a label), person (a chart card and everything connected below it, with their projects) or nodes (hand-picked chart cards, nothing below them). One of `environment`, `project`, `label`, `person`, `nodes`. |
+| `scope.project` | string |  | For kind project: the project, id or name. |
+| `scope.label` | string |  | For kind label: the DevOps label, id or name. |
+| `scope.node` | string |  | For kind person: the chart card to start from (a person or any card), id or name. |
+| `scope.nodes` | string[] |  | For kind nodes: the chart cards, ids or names. |
+| `scope.chart` | string |  | Optional: only this chart's cards and lines (chart id or name, or "active"). |
+| `permission` | enum |  | view (read only), comment (read and comment) or edit (change the shared fields and comment). One of `view`, `comment`, `edit`. |
+| `adds` | enum |  | Edit shares only: what the recipient may add to your environment inside the share (cards, timeline items, projects, mind map cards). off (the default), approve (each addition waits for you: proposals.list, proposals.approve, proposals.deny) or direct (added at once). View and comment shares are always off. One of `off`, `approve`, `direct`. |
+| `name` | string |  | Optional label for the share. |
+| `confirm` | boolean |  | false (the default): preview only, nothing is shared. true: create the share. Only send true after your user has seen the preview and agreed. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `created` | boolean | yes | True when this call created a new share. |
+| `existing` | boolean | yes | The same scope is already shared with this person (its permission is changed on confirm). |
+| `confirmed` | boolean | yes | Whether confirm was true. false: nothing was stored. |
+| `share` | object | yes |  |
+| `share.id` | string | null | yes | null in a preview of a share that does not exist yet. |
+| `share.ownerEnv` | string | yes |  |
+| `share.ownerEnvName` | string |  |  |
+| `share.ownerEmail` | string | yes |  |
+| `share.recipientEmail` | string | yes |  |
+| `share.permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `share.adds` | enum |  | What the recipient may add (edit shares only). One of `off`, `approve`, `direct`. |
+| `share.scope` | object | yes |  |
+| `share.name` | string |  |  |
+| `share.createdAt` | string | yes |  |
+| `share.createdBy` | string |  | Email of the owner who shared it. |
+| `share.actor` | string | null |  | The API key (or MCP connector) that created it, by name; null when made in the app. Settings › Sharing shows it as "Created by". |
+| `share.via` | string | null |  | The re-share request it was approved from, if any. |
+| `share.revokedAt` | string | null | yes |  |
+| `share.scopeLabel` | string | yes | What it holds, in words. |
+| `share.summary` | union |  |  |
+| `share.tip` | string | null |  | A note when the scope may not hold what people expect (e.g. mind map cards but no DevOps cards). |
+| `preview` | object | yes |  |
+| `preview.nodes` | object[] | yes | Chart cards the recipient will see. |
+| `preview.stubs` | object[] | yes | Co-owners shown by name only (read only). |
+| `preview.projects` | object[] | yes |  |
+| `preview.items` | object[] | yes |  |
+| `preview.cards` | object[] | yes |  |
+| `preview.summary` | object | yes |  |
+| `preview.tip` | string | null | yes |  |
+| `label` | string | yes |  |
+
+**Example: Preview first: project Lantern with edit access**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}'
+```
+
+```json
+{
+  "created": false,
+  "existing": false,
+  "confirmed": false,
+  "share": {
+    "id": null,
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "bo@example.com",
+    "permission": "edit",
+    "adds": "off",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": null,
+    "revokedAt": null,
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  },
+  "preview": {
+    "nodes": [],
+    "stubs": [],
+    "projects": [
+      {
+        "id": "p1",
+        "name": "Lantern",
+        "color": "#7cb980"
+      }
+    ],
+    "items": [
+      {
+        "id": "i1",
+        "title": "Public beta",
+        "kind": "release",
+        "start": "2026-12-01"
+      }
+    ],
+    "cards": [
+      {
+        "id": "k1",
+        "number": 12,
+        "title": "Build sign-up form",
+        "project": "p1"
+      }
+    ],
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 1
+    },
+    "tip": null
+  },
+  "label": "Project Lantern"
+}
+```
+
+**Example: Then, once your user agrees, share it**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit","confirm":true}'
+```
+
+```json
+{
+  "created": true,
+  "existing": false,
+  "confirmed": true,
+  "share": {
+    "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "bo@example.com",
+    "permission": "edit",
+    "adds": "off",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": null,
+    "revokedAt": null,
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  },
+  "preview": {
+    "nodes": [],
+    "stubs": [],
+    "projects": [
+      {
+        "id": "p1",
+        "name": "Lantern",
+        "color": "#7cb980"
+      }
+    ],
+    "items": [
+      {
+        "id": "i1",
+        "title": "Public beta",
+        "kind": "release",
+        "start": "2026-12-01"
+      }
+    ],
+    "cards": [
+      {
+        "id": "k1",
+        "number": 12,
+        "title": "Build sign-up form",
+        "project": "p1"
+      }
+    ],
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 1
+    },
+    "tip": null
+  },
+  "label": "Project Lantern"
+}
+```
+
+### `shares.update`
+
+Change a share's permission
+
+`PATCH /api/v1/shares/{share}` · scope `write` · MCP tool `shares_update`
+
+Set what the recipient may do: permission view, comment or edit, and for edit shares adds (whether they may add records). Send either or both. Lowering an edit share to view or comment turns additions off. Owner only (anyone else gets 404); a revoked share gets 409.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `share` | string | yes | Share id (from shares.list or shares.incoming). |
+| `permission` | enum |  | view (read only), comment (read and comment) or edit (change the shared fields and comment). One of `view`, `comment`, `edit`. |
+| `adds` | enum |  | Edit shares only: what the recipient may add to your environment inside the share (cards, timeline items, projects, mind map cards). off (the default), approve (each addition waits for you: proposals.list, proposals.approve, proposals.deny) or direct (added at once). View and comment shares are always off. One of `off`, `approve`, `direct`. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `share` | object | yes |  |
+| `share.id` | string | null | yes | null in a preview of a share that does not exist yet. |
+| `share.ownerEnv` | string | yes |  |
+| `share.ownerEnvName` | string |  |  |
+| `share.ownerEmail` | string | yes |  |
+| `share.recipientEmail` | string | yes |  |
+| `share.permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `share.adds` | enum |  | What the recipient may add (edit shares only). One of `off`, `approve`, `direct`. |
+| `share.scope` | object | yes |  |
+| `share.name` | string |  |  |
+| `share.createdAt` | string | yes |  |
+| `share.createdBy` | string |  | Email of the owner who shared it. |
+| `share.actor` | string | null |  | The API key (or MCP connector) that created it, by name; null when made in the app. Settings › Sharing shows it as "Created by". |
+| `share.via` | string | null |  | The re-share request it was approved from, if any. |
+| `share.revokedAt` | string | null | yes |  |
+| `share.scopeLabel` | string | yes | What it holds, in words. |
+| `share.summary` | union |  |  |
+| `share.tip` | string | null |  | A note when the scope may not hold what people expect (e.g. mind map cards but no DevOps cards). |
+
+**Example: Down to view**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"permission":"view"}'
+```
+
+```json
+{
+  "share": {
+    "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "bo@example.com",
+    "permission": "view",
+    "adds": "off",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": null,
+    "revokedAt": null,
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  }
+}
+```
+
+**Example: Let them add, with your approval**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"adds":"approve"}'
+```
+
+```json
+{
+  "share": {
+    "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "bo@example.com",
+    "permission": "edit",
+    "adds": "approve",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": null,
+    "revokedAt": null,
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  }
+}
+```
+
+### `shares.revoke`
+
+Revoke a share
+
+`DELETE /api/v1/shares/{share}` · scope `write` · MCP tool `shares_revoke`
+
+Stop sharing: the linked records leave every environment of the recipient's on their next read (their own records stay). The share and its history are kept, marked revoked. Owner only.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `share` | string | yes | Share id (from shares.list or shares.incoming). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `share` | object | yes |  |
+| `share.id` | string | null | yes | null in a preview of a share that does not exist yet. |
+| `share.ownerEnv` | string | yes |  |
+| `share.ownerEnvName` | string |  |  |
+| `share.ownerEmail` | string | yes |  |
+| `share.recipientEmail` | string | yes |  |
+| `share.permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `share.adds` | enum |  | What the recipient may add (edit shares only). One of `off`, `approve`, `direct`. |
+| `share.scope` | object | yes |  |
+| `share.name` | string |  |  |
+| `share.createdAt` | string | yes |  |
+| `share.createdBy` | string |  | Email of the owner who shared it. |
+| `share.actor` | string | null |  | The API key (or MCP connector) that created it, by name; null when made in the app. Settings › Sharing shows it as "Created by". |
+| `share.via` | string | null |  | The re-share request it was approved from, if any. |
+| `share.revokedAt` | string | null | yes |  |
+| `share.scopeLabel` | string | yes | What it holds, in words. |
+| `share.summary` | union |  |  |
+| `share.tip` | string | null |  | A note when the scope may not hold what people expect (e.g. mind map cards but no DevOps cards). |
+| `revoked` | boolean | yes |  |
+
+**Example: Revoke**
+
+```sh
+curl -sS -X DELETE "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "share": {
+    "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "bo@example.com",
+    "permission": "edit",
+    "adds": "off",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": null,
+    "revokedAt": "2026-10-29T17:00:00.000Z",
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  },
+  "revoked": true
+}
+```
+
+### `shares.incoming`
+
+List shares with you
+
+`GET /api/v1/shares/incoming` · scope `read` · MCP tool `shares_incoming`
+
+What others share with you: owner, scope, permission, and envs, the environments of yours it is placed in (where its linked records show, with ids sh.<share>.<id>). To have it shared with someone else, ask its owner with shares.requests.create.
 
 **Input**: see schema
 
@@ -3881,181 +4453,294 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `agents` | object[] | yes |  |
-| `agents[].id` | string | yes | Stable and unique within the source, e.g. "laptop:t3:thread-abc". |
-| `agents[].title` | string |  | What it is working on (up to 200 characters). |
-| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one). |
-| `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
-| `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
-| `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests". |
-| `agents[].host` | string |  | The machine, e.g. "laptop". |
-| `agents[].hostLabel` | string |  | How to show where it runs, e.g. "laptop · T3". |
-| `agents[].repo` | object | null |  | The repository it works in: matched against projects' repos to decide who may see the details. |
-| `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
-| `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
-| `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
-| `sources` | object[] | yes |  |
-| `sources[].source` | string | yes |  |
-| `sources[].at` | string | yes |  |
-| `sources[].agents` | integer | yes |  |
+| `shares` | object[] | yes |  |
+| `shares[].id` | string | null | yes | null in a preview of a share that does not exist yet. |
+| `shares[].ownerEnv` | string | yes |  |
+| `shares[].ownerEnvName` | string |  |  |
+| `shares[].ownerEmail` | string | yes |  |
+| `shares[].recipientEmail` | string | yes |  |
+| `shares[].permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `shares[].adds` | enum |  | What the recipient may add (edit shares only). One of `off`, `approve`, `direct`. |
+| `shares[].scope` | object | yes |  |
+| `shares[].name` | string |  |  |
+| `shares[].createdAt` | string | yes |  |
+| `shares[].createdBy` | string |  | Email of the owner who shared it. |
+| `shares[].actor` | string | null |  | The API key (or MCP connector) that created it, by name; null when made in the app. Settings › Sharing shows it as "Created by". |
+| `shares[].via` | string | null |  | The re-share request it was approved from, if any. |
+| `shares[].revokedAt` | string | null | yes |  |
+| `shares[].scopeLabel` | string | yes | What it holds, in words. |
+| `shares[].summary` | union |  |  |
+| `shares[].tip` | string | null |  | A note when the scope may not hold what people expect (e.g. mind map cards but no DevOps cards). |
+| `shares[].envs` | string[] |  | Your environments it is placed in. |
 
-**Example: Yours**
+**Example: Shared with you**
 
 ```sh
-curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
+curl -sS -X GET "$FLOW_URL/api/v1/shares/incoming" \
   -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 
 ```json
 {
-  "agents": [
+  "shares": [
     {
-      "id": "laptop:t3:thread-abc",
-      "title": "Fix login bug",
-      "vendor": "claude",
-      "model": "Opus 5.5",
-      "status": "waiting",
-      "activity": "Waiting for approval",
-      "host": "laptop",
-      "hostLabel": "laptop · T3",
-      "repo": {
-        "name": "flow",
-        "remote": "https://github.com/acme/flow.git"
+      "id": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "ownerEnv": "default-workspace",
+      "ownerEnvName": "Default workspace",
+      "ownerEmail": "cleo@example.com",
+      "recipientEmail": "owner@example.test",
+      "permission": "edit",
+      "adds": "off",
+      "scope": {
+        "kind": "project",
+        "projectId": "p1"
       },
-      "children": [],
-      "pending": {
-        "requestId": "req-1",
-        "kind": "approval",
-        "summary": "Run: npm test",
-        "can": [
-          "allow",
-          "deny"
-        ]
+      "name": "",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "createdBy": "owner@example.test",
+      "actor": "Laptop agent",
+      "via": null,
+      "revokedAt": null,
+      "scopeLabel": "Project Lantern",
+      "summary": {
+        "nodes": 0,
+        "stubs": 0,
+        "projects": 1,
+        "items": 1,
+        "cards": 4
       },
-      "agentflow": {
-        "agent": "Builder",
-        "card": 12
-      },
-      "source": "bridge:laptop"
+      "tip": null,
+      "envs": [
+        "default-workspace"
+      ]
+    }
+  ]
+}
+```
+
+### `shares.requests.list`
+
+List re-share requests
+
+`GET /api/v1/share-requests` · scope `read` · MCP tool `shares_requests_list`
+
+requests: pending requests from the recipients of your shares to share them on with someone else (decide with shares.requests.decide). mine: the requests you sent, with their status.
+
+**Input**: see schema
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `requests` | object[] | yes |  |
+| `requests[].id` | string | yes |  |
+| `requests[].shareId` | string | yes |  |
+| `requests[].ownerEmail` | string | yes |  |
+| `requests[].requestedBy` | string | yes |  |
+| `requests[].toEmail` | string | yes |  |
+| `requests[].permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `requests[].note` | string |  |  |
+| `requests[].status` | enum | yes | One of `pending`, `approved`, `denied`. |
+| `requests[].createdAt` | string | yes |  |
+| `requests[].decidedAt` | string | null |  |  |
+| `requests[].decidedBy` | string | null |  |  |
+| `requests[].newShareId` | string | null |  |  |
+| `mine` | object[] | yes |  |
+| `mine[].id` | string | yes |  |
+| `mine[].shareId` | string | yes |  |
+| `mine[].ownerEmail` | string | yes |  |
+| `mine[].requestedBy` | string | yes |  |
+| `mine[].toEmail` | string | yes |  |
+| `mine[].permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `mine[].note` | string |  |  |
+| `mine[].status` | enum | yes | One of `pending`, `approved`, `denied`. |
+| `mine[].createdAt` | string | yes |  |
+| `mine[].decidedAt` | string | null |  |  |
+| `mine[].decidedBy` | string | null |  |  |
+| `mine[].newShareId` | string | null |  |  |
+
+**Example: Waiting for you**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/share-requests" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "requests": [
+    {
+      "id": "0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77",
+      "shareId": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+      "ownerEmail": "owner@example.test",
+      "requestedBy": "bo@example.com",
+      "toEmail": "kim@example.com",
+      "permission": "view",
+      "note": "Kim helps with the launch",
+      "status": "pending",
+      "createdAt": "2026-10-29T17:00:00.000Z",
+      "decidedAt": null,
+      "decidedBy": null,
+      "newShareId": null
     }
   ],
-  "sources": [
-    {
-      "source": "bridge:laptop",
-      "at": "2026-10-29T17:00:00.000Z",
-      "agents": 1
-    }
-  ]
+  "mine": []
 }
 ```
 
-### `office.actions.wait`
+### `shares.requests.create`
 
-Wait for answers to your agents' prompts
+Ask the owner to share it on
 
-`GET /api/v1/office/actions` · scope `write` · MCP tool `office_actions_wait`
+`POST /api/v1/shares/{share}/requests` · scope `write` · MCP tool `shares_requests_create`
 
-Long-poll for the Allow / Deny answers given in the 3D office to this source's agents: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). Each answer is delivered once (here or in the office.agents.report answer). Carry it out, then send the result with office.actions.result.
+You cannot share what is shared with you, but you can ask its owner to share the same records with someone else. The permission defaults to yours and cannot be more than yours. The owner approves (maybe at a lower permission) or denies it in Settings › Sharing or with shares.requests.decide.
 
 **Input**
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
-| `wait` | integer |  | Seconds to wait for an answer (0-30). |
+| `share` | string | yes | Share id (from shares.list or shares.incoming). |
+| `toEmail` | string | yes | Who it should be shared with. |
+| `permission` | enum |  | view (read only), comment (read and comment) or edit (change the shared fields and comment). One of `view`, `comment`, `edit`. |
+| `note` | string |  | A note for the owner. |
 
 **Output**
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `actions` | object[] | yes |  |
-| `actions[].id` | string | yes |  |
-| `actions[].agentId` | string | yes |  |
-| `actions[].source` | string |  |  |
-| `actions[].requestId` | string | yes |  |
-| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
-| `actions[].at` | string | yes |  |
-| `actions[].result` | object |  |  |
+| `request` | object | yes |  |
+| `request.id` | string | yes |  |
+| `request.shareId` | string | yes |  |
+| `request.ownerEmail` | string | yes |  |
+| `request.requestedBy` | string | yes |  |
+| `request.toEmail` | string | yes |  |
+| `request.permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `request.note` | string |  |  |
+| `request.status` | enum | yes | One of `pending`, `approved`, `denied`. |
+| `request.createdAt` | string | yes |  |
+| `request.decidedAt` | string | null |  |  |
+| `request.decidedBy` | string | null |  |  |
+| `request.newShareId` | string | null |  |  |
 
-**Example: An answer**
-
-```sh
-curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
-  -H "Authorization: Bearer $FLOW_API_KEY"
-```
-
-```json
-{
-  "actions": [
-    {
-      "id": "act_1",
-      "agentId": "laptop:t3:thread-abc",
-      "source": "bridge:laptop",
-      "requestId": "req-1",
-      "decision": "allow",
-      "at": "2026-10-29T17:00:00.000Z"
-    }
-  ]
-}
-```
-
-### `office.actions.result`
-
-Say how an answer went
-
-`POST /api/v1/office/actions/{id}` · scope `write` · MCP tool `office_actions_result`
-
-The reporter carried out (or could not carry out) an answer from office.actions.wait: the person who answered sees the message in the office right away.
-
-**Input**
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `id` | string | yes | The action id (act_…). |
-| `ok` | boolean | yes |  |
-| `message` | string |  | e.g. "Approved in T3". |
-
-**Output**
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `action` | object | yes |  |
-| `action.id` | string | yes |  |
-| `action.agentId` | string | yes |  |
-| `action.source` | string |  |  |
-| `action.requestId` | string | yes |  |
-| `action.decision` | enum | yes | One of `allow`, `deny`. |
-| `action.at` | string | yes |  |
-| `action.result` | object |  |  |
-
-**Example: Done**
+**Example: Ask to share with Kim**
 
 ```sh
-curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
+curl -sS -X POST "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11/requests" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"ok":true,"message":"Approved in T3"}'
+  -d '{"toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}'
 ```
 
 ```json
 {
-  "action": {
-    "id": "act_1",
-    "agentId": "laptop:t3:thread-abc",
-    "source": "bridge:laptop",
-    "requestId": "req-1",
-    "decision": "allow",
-    "at": "2026-10-29T17:00:00.000Z",
-    "result": {
-      "ok": true,
-      "message": "Approved in T3",
-      "at": "2026-10-29T17:00:00.000Z"
-    }
+  "request": {
+    "id": "0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77",
+    "shareId": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEmail": "owner@example.test",
+    "requestedBy": "bo@example.com",
+    "toEmail": "kim@example.com",
+    "permission": "view",
+    "note": "Kim helps with the launch",
+    "status": "pending",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "decidedAt": null,
+    "decidedBy": null,
+    "newShareId": null
   }
 }
 ```
 
-## Sharing
+### `shares.requests.decide`
+
+Approve or deny a re-share request
+
+`POST /api/v1/share-requests/{request}` · scope `write` · MCP tool `shares_requests_decide`
+
+The owner's answer to a request from shares.requests.list. approve: true creates a new share of the same scope with the person asked for, at the requested permission or the lower one you pass; false denies it. Like shares.create, approving grants a person access: show the request to your user first. A request already decided gets 409.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | string | yes | Request id. |
+| `approve` | boolean | yes |  |
+| `permission` | enum |  | Optional: approve at this permission (not more than requested). One of `view`, `comment`, `edit`. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | object | yes |  |
+| `request.id` | string | yes |  |
+| `request.shareId` | string | yes |  |
+| `request.ownerEmail` | string | yes |  |
+| `request.requestedBy` | string | yes |  |
+| `request.toEmail` | string | yes |  |
+| `request.permission` | enum | yes | One of `view`, `comment`, `edit`. |
+| `request.note` | string |  |  |
+| `request.status` | enum | yes | One of `pending`, `approved`, `denied`. |
+| `request.createdAt` | string | yes |  |
+| `request.decidedAt` | string | null |  |  |
+| `request.decidedBy` | string | null |  |  |
+| `request.newShareId` | string | null |  |  |
+| `share` | union | yes | The new share when approved; null when denied. |
+
+**Example: Approve at view**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/share-requests/0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"approve":true,"permission":"view"}'
+```
+
+```json
+{
+  "request": {
+    "id": "0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77",
+    "shareId": "6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11",
+    "ownerEmail": "owner@example.test",
+    "requestedBy": "bo@example.com",
+    "toEmail": "kim@example.com",
+    "permission": "view",
+    "note": "Kim helps with the launch",
+    "status": "approved",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "decidedAt": "2026-10-29T17:00:00.000Z",
+    "decidedBy": "owner@example.test",
+    "newShareId": "9a3e2d8f-1b0c-4e11-8f1c-2a4e0b7d4c55"
+  },
+  "share": {
+    "id": "9a3e2d8f-1b0c-4e11-8f1c-2a4e0b7d4c55",
+    "ownerEnv": "default-workspace",
+    "ownerEnvName": "Default workspace",
+    "ownerEmail": "owner@example.test",
+    "recipientEmail": "kim@example.com",
+    "permission": "view",
+    "adds": "off",
+    "scope": {
+      "kind": "project",
+      "projectId": "p1"
+    },
+    "name": "",
+    "createdAt": "2026-10-29T17:00:00.000Z",
+    "createdBy": "owner@example.test",
+    "actor": "Laptop agent",
+    "via": "0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77",
+    "revokedAt": null,
+    "scopeLabel": "Project Lantern",
+    "summary": {
+      "nodes": 0,
+      "stubs": 0,
+      "projects": 1,
+      "items": 1,
+      "cards": 4
+    },
+    "tip": null
+  }
+}
+```
 
 ### `proposals.list`
 
@@ -4297,6 +4982,242 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d
           "project": "p1"
         }
       ]
+    }
+  }
+}
+```
+
+## 3D office
+
+### `office.agents.report`
+
+Report your live coding agents
+
+`PUT /api/v1/office/agents` · scope `write` · MCP tool `office_agents_report`
+
+A reporter on your machine (flow office bridge, or any integration) sends every coding agent running there, every few seconds. Agents belong to you (the key's owner) and show at your desk in the 3D office of every environment you are a member of, or, working on an AgentFlow agent's card (agentflow, or a title such as "[Flow] Builder: #12 …"), at that agent's desk in the common area. Each source replaces only its own set, and a source that has not reported for 90 seconds is gone. Others see an agent's details only when its repo belongs to a project they can see (projects.update repos); otherwise just its mascot and status, as "Private project". Up to 200 agents and 20 children each are kept, and long strings are cut. The answer holds the Allow / Deny answers given in the office that this source has not been sent yet (also served by office.actions.wait).
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
+| `at` | string |  | When the reporter read its agents (ISO time). |
+| `agents` | any[] | yes |  |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `actions` | object[] | yes |  |
+| `actions[].id` | string | yes |  |
+| `actions[].agentId` | string | yes |  |
+| `actions[].source` | string |  |  |
+| `actions[].requestId` | string | yes |  |
+| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].at` | string | yes |  |
+| `actions[].result` | object |  |  |
+| `accepted` | integer |  | How many agents were kept. |
+
+**Example: One agent waiting on a prompt**
+
+```sh
+curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12}}]}'
+```
+
+```json
+{
+  "actions": [],
+  "accepted": 1
+}
+```
+
+### `office.agents.list`
+
+List your reported agents
+
+`GET /api/v1/office/agents` · scope `read` · MCP tool `office_agents_list`
+
+Your live agents as Flow holds them (every source that reported in the last 90 seconds), in full, and the sources.
+
+**Input**: see schema
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agents` | object[] | yes |  |
+| `agents[].id` | string | yes | Stable and unique within the source, e.g. "laptop:t3:thread-abc". |
+| `agents[].title` | string |  | What it is working on (up to 200 characters). |
+| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one). |
+| `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
+| `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
+| `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests". |
+| `agents[].host` | string |  | The machine, e.g. "laptop". |
+| `agents[].hostLabel` | string |  | How to show where it runs, e.g. "laptop · T3". |
+| `agents[].repo` | object | null |  | The repository it works in: matched against projects' repos to decide who may see the details. |
+| `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
+| `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
+| `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
+| `sources` | object[] | yes |  |
+| `sources[].source` | string | yes |  |
+| `sources[].at` | string | yes |  |
+| `sources[].agents` | integer | yes |  |
+
+**Example: Yours**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "agents": [
+    {
+      "id": "laptop:t3:thread-abc",
+      "title": "Fix login bug",
+      "vendor": "claude",
+      "model": "Opus 5.5",
+      "status": "waiting",
+      "activity": "Waiting for approval",
+      "host": "laptop",
+      "hostLabel": "laptop · T3",
+      "repo": {
+        "name": "flow",
+        "remote": "https://github.com/acme/flow.git"
+      },
+      "children": [],
+      "pending": {
+        "requestId": "req-1",
+        "kind": "approval",
+        "summary": "Run: npm test",
+        "can": [
+          "allow",
+          "deny"
+        ]
+      },
+      "agentflow": {
+        "agent": "Builder",
+        "card": 12
+      },
+      "source": "bridge:laptop"
+    }
+  ],
+  "sources": [
+    {
+      "source": "bridge:laptop",
+      "at": "2026-10-29T17:00:00.000Z",
+      "agents": 1
+    }
+  ]
+}
+```
+
+### `office.actions.wait`
+
+Wait for answers to your agents' prompts
+
+`GET /api/v1/office/actions` · scope `write` · MCP tool `office_actions_wait`
+
+Long-poll for the Allow / Deny answers given in the 3D office to this source's agents: returns as soon as one is queued, or an empty list after wait seconds (0 to 30; 0 answers at once). Each answer is delivered once (here or in the office.agents.report answer). Carry it out, then send the result with office.actions.result.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
+| `wait` | integer |  | Seconds to wait for an answer (0-30). |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `actions` | object[] | yes |  |
+| `actions[].id` | string | yes |  |
+| `actions[].agentId` | string | yes |  |
+| `actions[].source` | string |  |  |
+| `actions[].requestId` | string | yes |  |
+| `actions[].decision` | enum | yes | One of `allow`, `deny`. |
+| `actions[].at` | string | yes |  |
+| `actions[].result` | object |  |  |
+
+**Example: An answer**
+
+```sh
+curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+```json
+{
+  "actions": [
+    {
+      "id": "act_1",
+      "agentId": "laptop:t3:thread-abc",
+      "source": "bridge:laptop",
+      "requestId": "req-1",
+      "decision": "allow",
+      "at": "2026-10-29T17:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `office.actions.result`
+
+Say how an answer went
+
+`POST /api/v1/office/actions/{id}` · scope `write` · MCP tool `office_actions_result`
+
+The reporter carried out (or could not carry out) an answer from office.actions.wait: the person who answered sees the message in the office right away.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | The action id (act_…). |
+| `ok` | boolean | yes |  |
+| `message` | string |  | e.g. "Approved in T3". |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `action` | object | yes |  |
+| `action.id` | string | yes |  |
+| `action.agentId` | string | yes |  |
+| `action.source` | string |  |  |
+| `action.requestId` | string | yes |  |
+| `action.decision` | enum | yes | One of `allow`, `deny`. |
+| `action.at` | string | yes |  |
+| `action.result` | object |  |  |
+
+**Example: Done**
+
+```sh
+curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"ok":true,"message":"Approved in T3"}'
+```
+
+```json
+{
+  "action": {
+    "id": "act_1",
+    "agentId": "laptop:t3:thread-abc",
+    "source": "bridge:laptop",
+    "requestId": "req-1",
+    "decision": "allow",
+    "at": "2026-10-29T17:00:00.000Z",
+    "result": {
+      "ok": true,
+      "message": "Approved in T3",
+      "at": "2026-10-29T17:00:00.000Z"
     }
   }
 }

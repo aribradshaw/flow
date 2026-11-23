@@ -136,6 +136,11 @@ flow refresh                       # refetch the API description
 - `flow office bridge` reports the coding agents running on this machine (T3 Code, Claude Code) to the
   3D office and carries out Allow / Deny answers given there; `--once --dry-run` prints what it would send.
   See the 3D office concept in `/docs/index.html#3d-office`.
+- **Sharing**: `shares_list`, `shares_preview`, `shares_create`, `shares_update`, `shares_revoke`,
+  `shares_incoming` and the re-share requests (`shares_requests_list`, `shares_requests_create`,
+  `shares_requests_decide`) do what Settings › Sharing does (`flow shares create …` on the CLI).
+  `shares_create` only previews until it gets `confirm: true`: show the preview to your user first.
+  Read-only keys cannot share. See `docs/sharing.md`.
 - `flow mcp` is a stdio MCP server (newline-delimited JSON-RPC on stdin/stdout, logs on stderr). It
   offers the same tools, built from the cached OpenAPI document, and forwards each call to REST. With a
   default environment set, `env` becomes optional in its tools.

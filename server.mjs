@@ -1040,38 +1040,10 @@ async function membersApi(req,res){
 //   POST /api/share-proposals/<id> {approve}   owner decides   DELETE /api/share-proposals/<id>   recipient withdraws
 //   POST /api/shares/<id>/comments {kind, id, comment}  GET /api/shares/<id>/history?kind=&id=
 // Anything the user may not see answers 404. The owner token (tools/env.mjs) acts as the owner.
-function previewOf(db,share){
-  const sc=core.resolveScope(db,share),nodes=new Map((db.charts||[]).filter(c=>!share.scope?.chartId||c.id===share.scope.chartId).flatMap(c=>c.nodes||[]).map(n=>[n.id,n]));
-  const items=new Map((db.timeline||[]).map(i=>[i.id,i])),cards=new Map((db.devops?.cards||[]).map(c=>[c.id,c]));
-  const out={nodes:sc.nodeIds.map(id=>nodes.get(id)).filter(Boolean).map(n=>({id:n.id,name:n.name,type:n.type})),
-    stubs:sc.stubs.map(t=>({id:t.nodeId,name:t.name,type:t.nodeType,owns:nodes.get(t.ownsNodeId)?.name||'',edge:t.type,percent:t.percent})),
-    projects:(db.projects||[]).filter(p=>sc.projectIds.includes(p.id)).map(p=>({id:p.id,name:p.name,color:p.color})),
-    items:sc.itemIds.map(id=>items.get(id)).filter(Boolean).map(i=>({id:i.id,title:i.title,kind:i.kind,start:i.start})),
-    cards:sc.cardIds.map(id=>cards.get(id)).filter(Boolean).map(c=>({id:c.id,number:c.number,title:c.title,project:c.project}))};
-  // Counts for Settings › Sharing rows (and the Share dialog tip) without a second round-trip.
-  out.summary={nodes:out.nodes.length,stubs:out.stubs.length,projects:out.projects.length,items:out.items.length,cards:out.cards.length};
-  // Mind-map-only scopes often surprise people: co-owner stubs show on the chart, but DevOps cards
-  // only follow projects linked by entity id. Call that out so the owner can widen to the whole env.
-  const kind=share.scope?.kind;
-  out.tip=kind==='environment'?null
-    :!out.nodes.length&&!out.projects.length&&!out.cards.length?'Nothing matches this scope yet.'
-    :out.nodes.length&&!out.cards.length?'Mind map cards are in this share, but no DevOps cards. Board cards only come along when their project’s entity is one of those mind map cards. To share the whole board, pick “The whole environment”.'
-    :out.nodes.length&&out.stubs.length&&out.cards.length?'Co-owner stubs (name only) do not bring their own DevOps cards. Widen to the whole environment if they should see the full board.'
-    :null;
-  return out;
-}
-function shareSummary(db,share){
-  const p=previewOf(db,share);return {scopeLabel:scopeLabel(db,share.scope),summary:p.summary,tip:p.tip};
-}
-function scopeLabel(db,scope){
-  const n=id=>(db?.charts||[]).flatMap(c=>c.nodes||[]).find(x=>x.id===id)?.name||'a card';
-  if(scope?.kind==='environment')return 'The whole environment';
-  if(scope?.kind==='person')return `${n(scope.nodeId)} and everything below`;
-  if(scope?.kind==='nodes')return scope.nodeIds.length<=3?scope.nodeIds.map(n).join(', '):`${scope.nodeIds.slice(0,2).map(n).join(', ')} and ${scope.nodeIds.length-2} more cards`;
-  if(scope?.kind==='project')return `Project ${(db?.projects||[]).find(p=>p.id===scope.projectId)?.name||''}`.trim();
-  if(scope?.kind==='label')return `Label ${(db?.devops?.labels||[]).find(l=>l.id===scope.label)?.name||scope.label}`;
-  return 'Shared';
-}
+// previewOf, scopeLabel and shareSummary: what a scope holds (lib/share-service.mjs). saveShare and
+// shareView: the one rule set for creating shares, here and in /api/v1 and MCP (shareService).
+const shareSvc=(await import('./lib/share-service.mjs')).shareServices({shares,workspaces,onRevoke:()=>photoCache.clear()});
+const {previewOf,shareSummary,scopeLabel,saveShare,updateShare,shareView}=shareSvc;
 async function sharesApi(req,res){
   const u=new URL(req.url,'http://x'),path=u.pathname;
   if(path!=='/api/shares'&&!path.startsWith('/api/shares/')&&path!=='/api/share-requests'&&!path.startsWith('/api/share-requests/')&&path!=='/api/share-proposals'&&!path.startsWith('/api/share-proposals/'))return false;
@@ -1085,8 +1057,7 @@ async function sharesApi(req,res){
   // The user's own (not archived) environment, or null.
   const ownEnv=async id=>{if(!ENV_ID.test(id||''))return null;const w=await workspaces.get(id);return w&&!w.archivedAt&&sameEmail(w.owner,user.email)?w:null};
   const ownShare=async id=>{const s=await shares.get(id);return s&&sameEmail(s.ownerEmail,user.email)?s:null};
-  const view=async s=>{const home=await workspaces.get(s.ownerEnv);const sum=home?.data?shareSummary(home.data,s):{scopeLabel:scopeLabel(null,s.scope),summary:null,tip:null};
-    return {...s,ownerEnvName:home?.name||home?.data?.environment?.name||'',scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}};
+  const view=shareView;
   try{
     if(path==='/api/shares/preview'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
@@ -1102,15 +1073,10 @@ async function sharesApi(req,res){
     }
     if(path==='/api/shares'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
-      // Linked copies are not the user's to share: they ask the owner instead (a share request).
-      if(/"sh\./.test(JSON.stringify(b.scope??null)))return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
-      const r=core.createShare({id:w.envId,ownerEmail:w.owner},user,{recipientEmail:b.recipientEmail,scope:b.scope,permission:b.permission||'view',name:b.name,adds:b.adds||'off'});
+      const r=await saveShare(w,user,b||{});
+      if(r.error==='linked')return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
       if(!r.ok)return fail(r);
-      // Sharing the same thing with the same person again updates the permission (and additions) instead of duplicating it.
-      const dup=(await shares.list({ownerEnv:w.envId,recipientEmail:r.share.recipientEmail})).find(s=>JSON.stringify(s.scope)===JSON.stringify(r.share.scope));
-      let s=dup?(dup.permission===r.share.permission?dup:await shares.setPermission(dup.id,r.share.permission)):await shares.create(r.share);
-      if(dup&&b.adds!==undefined&&s.adds!==r.share.adds)s=await shares.setAdds(dup.id,r.share.adds);
-      json(res,200,{share:await view(s),existing:!!dup,preview:previewOf(w.data,s)});
+      json(res,200,{share:await view(r.share),existing:r.existing,preview:previewOf(w.data,r.share)});
     });return true}
     if(path==='/api/shares/incoming'&&req.method==='GET'){
       const own=new Set((await workspaces.owned(user.email)).map(w=>w.envId)),out=[];
@@ -1155,10 +1121,7 @@ async function sharesApi(req,res){
       if(b.permission!==undefined&&!core.PERMISSIONS.includes(b.permission))return json(res,400,{error:'Pick view, comment or edit'});
       if(b.adds!==undefined&&!core.ADDS.includes(b.adds))return json(res,400,{error:'Pick off, approve or direct'});
       if(s.revokedAt)return fail({error:'revoked'});
-      let out=s;if(b.permission!==undefined)out=await shares.setPermission(s.id,b.permission);
-      // Only edit shares can add; view and comment shares are always off.
-      if(b.adds!==undefined||out.permission!=='edit')out=await shares.setAdds(s.id,out.permission==='edit'?b.adds??out.adds:'off');
-      json(res,200,{share:await view(out)});
+      json(res,200,{share:await view(await updateShare(s,b))});
     });return true}
     if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;const gone=await shares.revoke(s.id);photoCache.clear();json(res,200,{share:await view(gone),revoked:true});return true}
     if(sub==='preview'&&req.method==='GET'){
@@ -1377,13 +1340,13 @@ async function apiV1Route(req,res){
   // One authentication per request (it also counts towards the key's rate limit).
   let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
   if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals});
+  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals,sharing:u=>shareSvc.forUser(u,keyAllows)});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState,proposals:apiProposals}),
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState,proposals:apiProposals,sharing:shareSvc.forUser(user,keyAllows)}),
     origins:auth.appOrigin?[auth.appOrigin]:[]});
 }
 

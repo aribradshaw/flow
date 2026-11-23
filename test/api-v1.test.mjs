@@ -13,9 +13,14 @@ import {operations,getOperation,invoke} from '../lib/registry.mjs';
 import {check} from '../lib/json-schema.mjs';
 import * as cleaners from '../lib/cleaners.mjs';
 import {officeState} from '../lib/office.mjs';
+import {shareStore} from '../lib/shares.mjs';
+import {shareServices} from '../lib/share-service.mjs';
+import {allows as keyAllows} from '../lib/apikeys.mjs';
 
 const OWNER={id:'u-owner',email:'owner@example.test'},BOB={id:'u-bob',email:'bob@example.com'};
-const KEYS={flow_rw:{user:OWNER,scopes:['read','write']},flow_ro:{user:OWNER,scopes:['read']},flow_bob:{user:BOB,scopes:['read','write']},flow_limited:{user:{id:'u-lim',email:'lim@example.com'},scopes:['read']}};
+// flow_agent: a real-shaped API key of the owner's (user.key, as server.mjs apiAuth makes it), named like a connector.
+const AGENT_KEY={user:OWNER,envs:['test-env'],scopes:['read','write'],name:'Laptop agent'},AGENT_RO={user:OWNER,envs:['test-env'],scopes:['read'],name:'Read-only agent'};
+const KEYS={flow_agent:{user:{...OWNER,id:'key:a',key:AGENT_KEY},scopes:AGENT_KEY.scopes},flow_agent_ro:{user:{...OWNER,id:'key:r',key:AGENT_RO},scopes:AGENT_RO.scopes},flow_rw:{user:OWNER,scopes:['read','write']},flow_ro:{user:OWNER,scopes:['read']},flow_bob:{user:BOB,scopes:['read','write']},flow_limited:{user:{id:'u-lim',email:'lim@example.com'},scopes:['read']}};
 const ENV='test-env';
 const seed=()=>({active:'c1',charts:[{id:'c1',name:'Brainstorm',nodes:[
   {id:'flygon',name:'Kestrel Group',type:'entity',x:400,y:0,notes:''},{id:'cleo',name:'Cleo Park',type:'person',x:320,y:144,notes:'Engineer'},
@@ -25,7 +30,7 @@ const seed=()=>({active:'c1',charts:[{id:'c1',name:'Brainstorm',nodes:[
   timeline:[{id:'i1',title:'Public beta',kind:'release',status:'planned',start:'2026-12-01',end:'',projects:['p1']}],
   environment:{id:ENV,name:'Test',ownerEmail:OWNER.email,visibility:'private',members:[]}});
 
-let dir,store,server,base;
+let dir,store,server,base,sharing;
 const office=officeState();
 // Share additions (server.mjs keeps them with the share store): one pending proposal of the owner's, decided once.
 const PROP={id:'prop-1',shareId:'share-1',env:ENV,proposedBy:'kim@example.test',status:'pending',role:'owner',createdAt:'2026-11-22T00:00:00.000Z',updatedAt:'2026-11-22T00:00:00.000Z',decidedAt:null,decidedBy:null,
@@ -53,13 +58,14 @@ let limiter;
 before(async()=>{
   dir=mkdtempSync(join(tmpdir(),'flow-api-'));
   store=workspaceStore({dir,db:async()=>null});
+  sharing=shareServices({shares:shareStore({dir}),workspaces:store});
   await store.put(ENV,{baseRev:0,data:seed(),by:OWNER.email,owner:OWNER.email,name:'Test'});
   await store.put('bob-env',{baseRev:0,data:{...seed(),environment:{id:'bob-env',name:'Bob',ownerEmail:BOB.email,visibility:'private',members:[]}},by:BOB.email,owner:BOB.email,name:'Bob'});
   await store.put('bob-public',{baseRev:0,data:{...seed(),environment:{id:'bob-public',name:'Bob public',ownerEmail:BOB.email,visibility:'public',members:[]}},by:BOB.email,owner:BOB.email,name:'Bob public',visibility:'public'});
   const limit=memoryRateLimit({perMinute:3});
   limiter=({req,user,operation})=>user.email==='lim@example.com'?limit({req,user,operation}):{ok:true};
   server=http.createServer(async(req,res)=>{
-    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter,office,proposals}))return;
+    if(await apiV1(req,res,{authenticate:async r=>KEYS[/^Bearer\s+(\S+)$/.exec(r.headers.authorization||'')?.[1]]||null,userFor:async r=>r.headers.cookie==='session=owner'?OWNER:null,store,envCheck:envCheckFor(store),rateLimit:limiter,office,proposals,sharing:u=>sharing.forUser(u,keyAllows)}))return;
     res.writeHead(418);res.end();
   });
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
@@ -91,7 +97,8 @@ test('registry: every operation is documented, has examples and schemas, and the
   }
   const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
-    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny'];
+    'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny',
+    'shares.list','shares.preview','shares.create','shares.update','shares.revoke','shares.incoming','shares.requests.list','shares.requests.create','shares.requests.decide'];
   assert.deepEqual([...ids].sort(),want.sort());
   assert.equal(getOperation('nope'),null);
 });
@@ -623,6 +630,65 @@ test('share additions: owners list, approve and deny proposals; others cannot',a
   r=await op('proposals.approve',{env:ENV,proposal:'prop-1'});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.proposal.status,'approved');
   r=await op('proposals.deny',{env:ENV,proposal:'prop-1'});assert.equal(r.status,409);assert.equal(r.body.code,'proposal_decided');
   assert.deepEqual((await op('proposals.list',{env:ENV,status:'approved'})).body.items.map(p=>p.status),['approved']);
+});
+
+test('sharing: preview first, confirm to share, names resolve, owner only, re-share requests and revoke',async()=>{
+  const A={key:'flow_agent'},share={env:ENV,recipientEmail:BOB.email,scope:{kind:'project',project:'lantern'},permission:'edit'};
+  // Without confirm: the preview, and nothing is stored.
+  let r=await op('shares.create',share,A);
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.deepEqual([r.body.created,r.body.confirmed,r.body.existing,r.body.share.id],[false,false,false,null]);
+  assert.deepEqual(r.body.preview.projects.map(p=>p.name),['Lantern']);assert.equal(r.body.label,'Project Lantern');
+  assert.deepEqual((await op('shares.list',{env:ENV},A)).body.shares,[],'a preview stores nothing');
+  r=await op('shares.preview',{env:ENV,scope:{kind:'person',node:'kestrel group'}},A);
+  assert.equal(r.status,200);assert.deepEqual(r.body.preview.nodes.map(n=>n.name).sort(),['Kestrel Group','Quill Solutions']);
+  assert.equal((await op('shares.preview',{env:ENV,scope:{kind:'nodes',nodes:['Cleo Park','bo'],chart:'Brainstorm'}},A)).body.preview.summary.nodes,2);
+  assert.equal((await op('shares.preview',{env:ENV,scope:{kind:'project',project:'Nope'}},A)).body.code,'unknown_project');
+  assert.equal((await op('shares.preview',{env:ENV,scope:{kind:'project'}},A)).body.code,'invalid_scope');
+  // A read-only key previews and lists but cannot share, change or revoke.
+  const RO={key:'flow_agent_ro'};
+  assert.equal((await op('shares.preview',{env:ENV,scope:{kind:'environment'}},RO)).status,200);
+  r=await op('shares.create',{...share,confirm:true},RO);assert.deepEqual([r.status,r.body.code],[403,'insufficient_scope']);
+  // The registry checks a key's scopes too (MCP calls it without /api/v1's check).
+  await assert.rejects(invoke('shares.create',{...share,confirm:true},{user:KEYS.flow_agent_ro.user,store,envCheck:envCheckFor(store),sharing:sharing.forUser(KEYS.flow_agent_ro.user,keyAllows)}),{status:403,code:'insufficient_scope'});
+  // confirm: true shares it, with the key's name; the same again changes nothing.
+  r=await op('shares.create',{...share,confirm:true},A);
+  assert.equal(r.status,201,JSON.stringify(r.body));
+  const s=r.body.share;assert.deepEqual([r.body.created,s.actor,s.createdBy,s.recipientEmail,s.permission],[true,'Laptop agent',OWNER.email,BOB.email,'edit']);
+  assert.deepEqual(s.scope,{kind:'project',projectId:'p1'});
+  r=await op('shares.create',{...share,confirm:true},A);assert.deepEqual([r.status,r.body.created,r.body.existing,r.body.share.id],[200,false,true,s.id]);
+  assert.deepEqual((await op('shares.list',{env:ENV},RO)).body.shares.map(x=>x.id),[s.id]);
+  assert.equal((await op('shares.update',{share:s.id,permission:'view'},RO)).status,403);
+  assert.equal((await op('shares.revoke',{share:s.id},RO)).status,403);
+  // Nobody else can see or share the owner's environment.
+  assert.equal((await op('shares.list',{env:ENV},{key:'flow_bob'})).status,404);
+  assert.equal((await op('shares.create',{...share,recipientEmail:'kim@example.com',confirm:true},{key:'flow_bob'})).status,404);
+  assert.equal((await op('shares.update',{share:s.id,permission:'view'},{key:'flow_bob'})).status,404);
+  // Bob sees it and asks the owner to share it with Kim; the owner approves at view, by key.
+  r=await op('shares.incoming',{},{key:'flow_bob'});assert.deepEqual(r.body.shares.map(x=>[x.id,x.ownerEmail,x.ownerEnvName]),[[s.id,OWNER.email,'Test']]);
+  assert.deepEqual((await op('shares.incoming',{},A)).body.shares,[]);
+  assert.equal((await op('shares.requests.create',{share:s.id,toEmail:OWNER.email},{key:'flow_bob'})).body.code,'invalid_toEmail');
+  assert.equal((await op('shares.requests.create',{share:s.id,toEmail:'kim@example.com'},A)).status,404,'the owner is not a recipient');
+  r=await op('shares.requests.create',{share:s.id,toEmail:'kim@example.com',note:'Kim helps'},{key:'flow_bob'});
+  assert.equal(r.status,201,JSON.stringify(r.body));const rq=r.body.request;assert.deepEqual([rq.status,rq.permission],['pending','edit']);
+  assert.deepEqual((await op('shares.requests.list',{},A)).body.requests.map(x=>x.id),[rq.id]);
+  assert.deepEqual((await op('shares.requests.list',{},{key:'flow_bob'})).body.mine.map(x=>x.id),[rq.id]);
+  assert.deepEqual((await op('shares.list',{env:ENV},A)).body.requests.map(x=>x.id),[rq.id]);
+  assert.equal((await op('shares.requests.decide',{request:rq.id,approve:true},{key:'flow_bob'})).status,404);
+  assert.equal((await op('shares.requests.decide',{request:rq.id,approve:true},RO)).status,403);
+  r=await op('shares.requests.decide',{request:rq.id,approve:true,permission:'view'},A);
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.deepEqual([r.body.request.status,r.body.share.recipientEmail,r.body.share.permission,r.body.share.via,r.body.share.actor],['approved','kim@example.com','view',rq.id,'Laptop agent']);
+  assert.equal((await op('shares.requests.decide',{request:rq.id,approve:false},A)).body.code,'already_decided');
+  // Change and revoke.
+  assert.equal((await op('shares.update',{share:s.id,adds:'approve'},A)).body.share.adds,'approve','an edit share can let them add');
+  assert.equal((await op('shares.update',{share:s.id},A)).body.code,'invalid_input');
+  r=await op('shares.update',{share:s.id,permission:'comment'},A);assert.deepEqual([r.body.share.permission,r.body.share.adds],['comment','off'],'a comment share adds nothing');
+  r=await op('shares.revoke',{share:s.id},A);assert.ok(r.body.revoked&&r.body.share.revokedAt);
+  assert.equal((await op('shares.update',{share:s.id,permission:'edit'},A)).body.code,'share_revoked');
+  assert.deepEqual((await op('shares.incoming',{},{key:'flow_bob'})).body.shares,[]);
+  await op('shares.revoke',{share:r.body.share.id},A);
+  for(const x of (await op('shares.list',{env:ENV},A)).body.shares)await op('shares.revoke',{share:x.id},A);
 });
 
 test('every operation was exercised over HTTP',()=>{

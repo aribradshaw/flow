@@ -330,6 +330,65 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   await owner('DELETE',`/api/shares/${s.data.share.id}`);
 });
 
+// Sharing by API key and MCP (shares.* in lib/registry.mjs): the same rules as the app, a preview before
+// anything is shared, read-only keys refused, and the key's name on the share.
+test('API keys and MCP share: preview first, then confirm; read-only refused; recipients ask instead; approve and revoke by key',async()=>{
+  const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json',accept:'application/json, text/event-stream'});
+  const v1=(k,method,path,body)=>fetch(BASE+'/api/v1'+path,{method,headers:bearer(k),body:body&&JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  let n=100;const tool=(k,name,args)=>fetch(BASE+'/mcp',{method:'POST',headers:bearer(k),body:JSON.stringify({jsonrpc:'2.0',id:n++,method:'tools/call',params:{name,arguments:args}})}).then(x=>x.json()).then(m=>m.result);
+  const key=async(who,name,env,scopes)=>{const r=await who('POST','/api/keys',{name,env,scopes});assert.equal(r.status,201,JSON.stringify(r.data));return r.data.key};
+  const rw=await key(owner,'Laptop agent','default-workspace',['read','write']),ro=await key(owner,'Read-only agent','default-workspace',['read']);
+  const list=await fetch(BASE+'/mcp',{method:'POST',headers:bearer(ro),body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}).then(x=>x.json());
+  const names=list.result.tools.map(t=>t.name);
+  for(const t of ['shares_list','shares_preview','shares_create','shares_update','shares_revoke','shares_incoming','shares_requests_list','shares_requests_create','shares_requests_decide'])assert.ok(names.includes(t),t+' is listed');
+  assert.match(list.result.tools.find(t=>t.name==='shares_create').description,/confirm: true/);
+  const mine=async()=>(await owner('GET','/api/shares?env=default-workspace')).data.shares;
+  const before=(await mine()).length;
+  // Preview first: nothing is shared.
+  const args={env:'default-workspace',recipientEmail:BO,scope:{kind:'project',project:'studio launch'},permission:'edit'};
+  let r=await tool(rw,'shares_create',args);
+  assert.ok(!r.isError,JSON.stringify(r));assert.deepEqual([r.structuredContent.created,r.structuredContent.confirmed],[false,false]);
+  assert.deepEqual(r.structuredContent.preview.projects.map(p=>p.name),['Studio launch']);
+  for(const p of PRIVATE)assert.ok(!JSON.stringify(r).includes(p),p+' must not be in the preview');
+  assert.equal((await mine()).length,before,'a preview shares nothing');
+  // A read-only key cannot share, through MCP or REST.
+  r=await tool(ro,'shares_create',{...args,confirm:true});assert.ok(r.isError&&/insufficient_scope/.test(r.content[0].text),JSON.stringify(r));
+  assert.equal((await v1(ro,'POST','/envs/default-workspace/shares',{...args,confirm:true})).status,403);
+  assert.equal((await mine()).length,before);
+  // confirm: true shares it, under the key's name.
+  r=await tool(rw,'shares_create',{...args,confirm:true});
+  assert.ok(!r.isError&&r.structuredContent.created,JSON.stringify(r));
+  const s=r.structuredContent.share;assert.deepEqual([s.actor,s.createdBy,s.permission,s.scope],['Laptop agent',OWNER,'edit',{kind:'project',projectId:'p-cb'}]);
+  assert.equal((await mine()).find(x=>x.id===s.id)?.actor,'Laptop agent','Settings › Sharing gets the key name');
+  r=await tool(ro,'shares_revoke',{share:s.id});assert.ok(r.isError,'a read-only key cannot revoke');
+  r=await tool(ro,'shares_update',{share:s.id,permission:'view'});assert.ok(r.isError,'or change it');
+  r=await tool(ro,'shares_list',{env:'default-workspace'});assert.ok(!r.isError&&r.structuredContent.shares.some(x=>x.id===s.id),'but can list it');
+  // Bo adds it to his environment. His key cannot share the linked project on; it asks the owner instead.
+  assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
+  const bw=await key(bo,'Bo agent',boEnv,['read','write']),br=await key(bo,'Bo reader',boEnv,['read']);
+  r=await v1(bw,'POST',`/envs/${boEnv}/shares`,{recipientEmail:KIM,scope:{kind:'project',project:'Studio launch'},permission:'view',confirm:true});
+  assert.deepEqual([r.status,r.data.code],[400,'share_linked'],JSON.stringify(r.data));
+  r=await tool(bw,'shares_create',{env:boEnv,recipientEmail:KIM,scope:{kind:'nodes',nodes:[`sh.${s.id}.campaign`]}});
+  assert.ok(r.isError&&/share_linked/.test(r.content[0].text),JSON.stringify(r));
+  assert.equal((await v1(bw,'GET','/envs/default-workspace/shares')).status,404,"Bo's key cannot list the owner's shares");
+  r=await v1(bw,'GET','/shares/incoming');assert.deepEqual(r.data.shares.find(x=>x.id===s.id)?.envs,[boEnv]);
+  assert.equal((await v1(br,'POST',`/shares/${s.id}/requests`,{toEmail:KIM})).status,403,'a read-only key cannot ask');
+  r=await tool(bw,'shares_requests_create',{share:s.id,toEmail:KIM,permission:'comment',note:'Kim helps with the launch'});
+  assert.ok(!r.isError,JSON.stringify(r));const rid=r.structuredContent.request.id;
+  // The owner approves by key, at view.
+  r=await tool(rw,'shares_requests_list',{});assert.ok(r.structuredContent.requests.some(x=>x.id===rid));
+  assert.ok((await tool(ro,'shares_requests_decide',{request:rid,approve:true})).isError,'a read-only key cannot approve');
+  r=await tool(rw,'shares_requests_decide',{request:rid,approve:true,permission:'view'});
+  assert.ok(!r.isError,JSON.stringify(r));const k=r.structuredContent.share;
+  assert.deepEqual([k.recipientEmail,k.permission,k.via,k.actor],[KIM,'view',rid,'Laptop agent']);
+  assert.ok((await kim('GET','/api/shares/incoming')).data.shares.some(x=>x.id===k.id),'Kim has it');
+  // Revoke both by key: Bo's linked copies go.
+  assert.equal((await v1(rw,'DELETE',`/shares/${k.id}`)).status,200);
+  r=await tool(rw,'shares_revoke',{share:s.id});assert.ok(!r.isError&&r.structuredContent.revoked,JSON.stringify(r));
+  assert.ok(!JSON.stringify((await bo('GET','/api/workspace?env='+boEnv)).data.data).includes(`sh.${s.id}.`),"nothing of the share is left in Bo's environment");
+  assert.equal((await mine()).length,before);
+});
+
 // Cards #61 and #63 on the real server: members as assignees, stale copies, and conflicts both ways.
 test('shared cards: members can be assigned, stale copies never overwrite, and the loser of a conflict is told',async()=>{
   const {fieldBase}=await import('../public/sync-core.js');

@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (47)
+## Operations (56)
 
 ### Environments
 
@@ -122,6 +122,23 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `search` | `search` | `GET /api/v1/envs/{env}/search` | read | Search an environment |
 
+### Sharing
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `shares.list` | `shares_list` | `GET /api/v1/envs/{env}/shares` | read | List shares of an environment |
+| `shares.preview` | `shares_preview` | `POST /api/v1/envs/{env}/shares/preview` | read | Preview what a share would show |
+| `shares.create` | `shares_create` | `POST /api/v1/envs/{env}/shares` | write | Share part of an environment with someone |
+| `shares.update` | `shares_update` | `PATCH /api/v1/shares/{share}` | write | Change a share's permission |
+| `shares.revoke` | `shares_revoke` | `DELETE /api/v1/shares/{share}` | write | Revoke a share |
+| `shares.incoming` | `shares_incoming` | `GET /api/v1/shares/incoming` | read | List shares with you |
+| `shares.requests.list` | `shares_requests_list` | `GET /api/v1/share-requests` | read | List re-share requests |
+| `shares.requests.create` | `shares_requests_create` | `POST /api/v1/shares/{share}/requests` | write | Ask the owner to share it on |
+| `shares.requests.decide` | `shares_requests_decide` | `POST /api/v1/share-requests/{request}` | write | Approve or deny a re-share request |
+| `proposals.list` | `proposals_list` | `GET /api/v1/envs/{env}/proposals` | read | List share additions |
+| `proposals.approve` | `proposals_approve` | `POST /api/v1/envs/{env}/proposals/{proposal}/approve` | write | Approve a share addition |
+| `proposals.deny` | `proposals_deny` | `POST /api/v1/envs/{env}/proposals/{proposal}/deny` | write | Deny a share addition |
+
 ### 3D office
 
 | Operation | MCP tool | REST | Scope | What it does |
@@ -130,14 +147,6 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | `office.agents.list` | `office_agents_list` | `GET /api/v1/office/agents` | read | List your reported agents |
 | `office.actions.wait` | `office_actions_wait` | `GET /api/v1/office/actions` | write | Wait for answers to your agents' prompts |
 | `office.actions.result` | `office_actions_result` | `POST /api/v1/office/actions/{id}` | write | Say how an answer went |
-
-### Sharing
-
-| Operation | MCP tool | REST | Scope | What it does |
-| --- | --- | --- | --- | --- |
-| `proposals.list` | `proposals_list` | `GET /api/v1/envs/{env}/proposals` | read | List share additions |
-| `proposals.approve` | `proposals_approve` | `POST /api/v1/envs/{env}/proposals/{proposal}/approve` | write | Approve a share addition |
-| `proposals.deny` | `proposals_deny` | `POST /api/v1/envs/{env}/proposals/{proposal}/deny` | write | Deny a share addition |
 
 ## Examples
 
@@ -613,6 +622,115 @@ flow search --input '{"env":"default-workspace","q":"sign-up"}'
 
 curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
   -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Shares of the default workspace
+
+MCP: call `shares_list` with `{"env":"default-workspace"}`
+
+```sh
+flow shares list --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Project Lantern by name
+
+MCP: call `shares_preview` with `{"env":"default-workspace","scope":{"kind":"project","project":"Lantern"}}`
+
+```sh
+flow shares preview --input '{"env":"default-workspace","scope":{"kind":"project","project":"Lantern"}}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares/preview" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":{"kind":"project","project":"Lantern"}}'
+```
+
+### Preview first: project Lantern with edit access
+
+MCP: call `shares_create` with `{"env":"default-workspace","recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}`
+
+```sh
+flow shares create --input '{"env":"default-workspace","recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}'
+```
+
+### Down to view
+
+MCP: call `shares_update` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","permission":"view"}`
+
+```sh
+flow shares update --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","permission":"view"}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"permission":"view"}'
+```
+
+### Revoke
+
+MCP: call `shares_revoke` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11"}`
+
+```sh
+flow shares revoke --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11"}'
+
+curl -sS -X DELETE "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Shared with you
+
+MCP: call `shares_incoming` with `{}`
+
+```sh
+flow shares incoming
+
+curl -sS -X GET "$FLOW_URL/api/v1/shares/incoming" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Waiting for you
+
+MCP: call `shares_requests_list` with `{}`
+
+```sh
+flow shares requests list
+
+curl -sS -X GET "$FLOW_URL/api/v1/share-requests" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Ask to share with Kim
+
+MCP: call `shares_requests_create` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}`
+
+```sh
+flow shares requests create --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11/requests" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}'
+```
+
+### Approve at view
+
+MCP: call `shares_requests_decide` with `{"request":"0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77","approve":true,"permission":"view"}`
+
+```sh
+flow shares requests decide --input '{"request":"0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77","approve":true,"permission":"view"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/share-requests/0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"approve":true,"permission":"view"}'
 ```
 
 ### One agent waiting on a prompt
