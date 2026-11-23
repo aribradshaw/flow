@@ -330,7 +330,8 @@ void main(){
   float fres=pow(1.0-clamp(dot(n,v),0.0,1.0),3.0),lit=clamp(dot(n,uSunDir),0.0,1.0);
   vec3 col=mix(uDeep,uShallow,clamp(0.45+(vP.y-uSea)*0.9,0.0,1.0))*(0.7+0.5*lit);
   col=mix(col,uSkyCol,fres*0.5);
-  col+=uSunCol*pow(max(dot(reflect(-uSunDir,n),v),0.0),70.0)*0.8;
+  vec2 gq=vP.xz-vec2(0.0,uT*uSpeed);
+  col+=uSunCol*pow(max(dot(reflect(-uSunDir,n),v),0.0),46.0)*(0.5+1.7*step(0.66,noise(gq*1.9+uT*0.6)));
   vec2 p=vP.xz,q=p-vec2(0.0,uT*uSpeed);
   float nz=noise(q*0.32)*0.6+noise(q*1.05+uT*0.25)*0.4;
   // foam along the hull, a V from the bow, and the wash astern
@@ -360,7 +361,7 @@ void main(){vec3 d=normalize(vDir);float h=max(d.y,0.0);
   #include <colorspace_fragment>
 }`;
 function seaGeometry(){
-  const n=110,a=170,b=1130,pos=[],idx=[],f=u=>u*a+u*u*u*b;
+  const n=84,a=190,b=1110,pos=[],idx=[],f=u=>u*a+u*u*u*b;
   for(let j=0;j<=n;j++)for(let i=0;i<=n;i++)pos.push(f(i/n*2-1),0,f(j/n*2-1));
   for(let j=0;j<n;j++)for(let i=0;i<n;i++){const p=j*(n+1)+i;idx.push(p,p+n+1,p+1,p+1,p+n+1,p+n+2)}
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);return g;
@@ -372,7 +373,8 @@ export function createYachtWorld({scene,deck}){
   const col=s=>new THREE.Color(s),own=[],keep=o=>{own.push(o);return o};
   const horizon=col(SKY.horizon);
   scene.background=horizon;scene.fog=new THREE.Fog(SKY.horizon,150,1150);
-  const hemi=keep(new THREE.HemisphereLight('#eaf6ff','#8fb0b8',2.0)),sun=keep(new THREE.DirectionalLight('#fff4de',1.9));
+  // a warm sun against cool shade: with no shadows drawn, that contrast is what gives the house its shape
+  const hemi=keep(new THREE.HemisphereLight('#e4f1ff','#7b9fb4',1.65)),sun=keep(new THREE.DirectionalLight('#fff0d2',2.45));
   sun.position.copy(SUN_DIR).multiplyScalar(60);scene.add(hemi,sun);
   const tU={value:0};
   const sea=keep(new THREE.Mesh(seaGeometry(),new THREE.ShaderMaterial({vertexShader:WATER_VERT,fragmentShader:WATER_FRAG,uniforms:{uT:tU,uSpeed:{value:3.2},uAmp:{value:0.55},uSea:{value:YACHT.SEA},
