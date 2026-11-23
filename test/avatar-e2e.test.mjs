@@ -13,6 +13,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {defaultAvatar,lookFromSpec,validateAvatar} from '../public/avatar-spec.js';
+import {renderAvatarPortrait} from '../public/avatar.js';
 
 const ROOT=fileURLToPath(new URL('..',import.meta.url));
 const freePort=()=>new Promise((ok,no)=>{const s=createNetServer().once('error',no);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>ok(p))})});
@@ -157,4 +158,21 @@ test('one avatar in every office: your own, and an environment shared with you',
     assert.equal((await owner('GET','/api/me/avatar')).data.avatar.top.style,'blazer');
     assert.equal((await owner('GET','/api/me/avatar')).data.avatar.future?.sparkle,true,'the office save kept the unknown field');
   }finally{a.close();b.close();seen.close()}
+});
+
+test('"Use my avatar instead of my photo": the portrait replaces the photo exactly where the photo shows',async()=>{
+  // The owner links their own card, so it shows their OneProfileID photo to whoever sees the card.
+  assert.equal((await owner('POST','/api/opid/link',{env:ENV,nodeId:'me',link:true})).status,200);
+  assert.equal((await owner('PUT','/api/me/avatar',{usePortrait:false})).status,200);
+  let photos=(await owner('GET','/api/opid/photos?env='+ENV)).data;
+  assert.match(photos.me,/^data:image\/png;base64,/,'the photo while the choice is off');
+  const me=(await owner('PUT','/api/me/avatar',{usePortrait:true})).data;
+  photos=(await owner('GET','/api/opid/photos?env='+ENV)).data;
+  assert.equal(photos.me,renderAvatarPortrait(me.avatar),'the portrait, at once (no stale photo cache)');
+  const svg=decodeURIComponent(photos.me.slice(photos.me.indexOf(',')+1));
+  assert.ok(svg.startsWith('<svg')&&!/<script|on\w+=/i.test(svg));
+  // Kim cannot see the owner's environment, so she gets neither.
+  assert.deepEqual((await kim('GET','/api/opid/photos?env='+ENV)).data,{});
+  assert.equal((await owner('PUT','/api/me/avatar',{usePortrait:false})).status,200);
+  assert.match((await owner('GET','/api/opid/photos?env='+ENV)).data.me,/^data:image\/png;base64,/,'off again: the photo');
 });

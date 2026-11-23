@@ -105,7 +105,7 @@ export function initTooltips(){
 // account.js reports the session user through setSessionUser(); app.js gives the workspace through
 // setPeopleSource(). A data: URL session photo is decoded once into an object URL (sessionPhoto()),
 // so every avatar, the header one included, points at the same small URL instead of repeating it.
-let me=null,meUrl='',peopleSrc=()=>[],peopleCache=null;
+let me=null,meUrl='',portraitUrl='',peopleSrc=()=>[],peopleCache=null;
 function photoUrl(u){
   const m=/^data:(image\/[a-z0-9.+-]+)(;base64)?,(.*)$/is.exec(u);if(!m)return u;
   try{const bin=m[2]?atob(m[3]):decodeURIComponent(m[3]),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return URL.createObjectURL(new Blob([b],{type:m[1]}))}catch{return u}
@@ -114,8 +114,18 @@ export const setSessionUser=u=>{
   const image=typeof u?.image==='string'?u.image.trim():'';
   if(meUrl.startsWith('blob:')&&image!==me?.raw)URL.revokeObjectURL(meUrl);
   if(image!==me?.raw)meUrl=image?photoUrl(image):'';
-  me=u?{id:typeof u.id==='string'?u.id:'',email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:meUrl,raw:image}:null;
+  me=u?{id:typeof u.id==='string'?u.id:'',email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:portraitUrl||meUrl,raw:image}:null;
 };
+// "Use my avatar instead of my photo" (Settings › Account, docs/concepts/13-avatars.md): svg is the avatar's
+// portrait (avatar.js), or '' to show the photo again. It becomes the session photo everywhere above, as one
+// small object URL. -> true when it changed.
+export function setSessionPortrait(svg){
+  const next=svg?URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'})):'';
+  if(!svg&&!portraitUrl)return false;
+  if(portraitUrl)URL.revokeObjectURL(portraitUrl);
+  portraitUrl=next;if(me)me.image=portraitUrl||meUrl;
+  return true;
+}
 // OneProfileID links (docs/concepts/10-opid-photos.md): a person links a card to their own account
 // (node.opidUser; viewers who are not the workspace owner see only node.opidLinked for others' links).
 // opidLink(n): 'me' when the card is linked to the signed-in account, 'other' for anyone else, '' when not linked.
@@ -178,8 +188,9 @@ document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains
 // re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
 // Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-// The session photo's and linked cards' object URLs (blob:) are the only non-http(s), non-data URLs allowed.
-export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl)||memberUrls.has(u))?u.trim():'';
+// The session photo's, the session portrait's and linked cards' object URLs (blob:) are the only non-http(s),
+// non-data URLs allowed.
+export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl)||(!!portraitUrl&&u===portraitUrl)||memberUrls.has(u))?u.trim():'';
 const av=(a,cls)=>{const img=safeImg(a.img);return `<span class="bub ${cls}${img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${img?photoImg(img):''}</span>`};
 const swatch=it=>it.avatar?av(it.avatar,'pk-av')
   :it.icon?`<span class="pk-ic">${icon(it.icon,13)}</span>`

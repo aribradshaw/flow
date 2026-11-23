@@ -34,6 +34,7 @@ const {inviteStore,validEmail,SCHEMA:INVITE_SCHEMA}=await import('./lib/invites.
 const limitsMod=await import('./lib/limits.mjs');
 const {userStore,accessRequestStore,SCHEMA:USER_SCHEMA,REQUEST_SCHEMA}=await import('./lib/users.mjs');
 const {avatarStore,SCHEMA:AVATAR_SCHEMA}=await import('./lib/avatars.mjs');
+const {renderAvatarPortrait}=await import('./public/avatar.js');
 const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
@@ -845,11 +846,15 @@ async function currentPeople(envId){
 }
 async function lookupPhotos(req,targets){
   const byEnv=new Map();for(const t of targets)(byEnv.get(t.env)||byEnv.set(t.env,new Set()).get(t.env)).add(t.opidUser);
-  const members=new Map();
-  for(const [env,ids] of byEnv){const now=await currentPeople(env);members.set(env,new Set((await opidMembers.list(env,[...ids])).filter(m=>now.has(m.email)).map(m=>m.opidUser)))}
+  const members=new Map(),emailOf=new Map();
+  for(const [env,ids] of byEnv){const now=await currentPeople(env),list=(await opidMembers.list(env,[...ids])).filter(m=>now.has(m.email));for(const m of list)emailOf.set(m.opidUser,m.email);members.set(env,new Set(list.map(m=>m.opidUser)))}
   const ok=opidPhotos.eligibleTargets(targets,members);if(!ok.length)return {};
-  const images=await auth.memberImages(req,ok.map(t=>t.opidUser)),out={};
-  for(const t of ok)if(images[t.opidUser])out[t.nodeId]=images[t.opidUser];
+  // People who chose to show their avatar instead of their photo (docs/concepts/13-avatars.md): its portrait, in
+  // exactly the places their photo would show.
+  const chosen=await avatars.many([...new Set(ok.map(t=>emailOf.get(t.opidUser)).filter(Boolean))]).catch(()=>new Map());
+  const portrait=t=>{const v=chosen.get(String(emailOf.get(t.opidUser)||'').toLowerCase());return v?.usePortrait?renderAvatarPortrait(v.avatar):''};
+  const want=ok.filter(t=>!portrait(t)),images=want.length?await auth.memberImages(req,want.map(t=>t.opidUser)):{},out={};
+  for(const t of ok){const p=portrait(t)||images[t.opidUser];if(p)out[t.nodeId]=p}
   return out;
 }
 const findNode=(d,id)=>(d?.charts||[]).flatMap(c=>c.nodes||[]).find(n=>n.id===id);
@@ -1506,6 +1511,8 @@ async function officeApi(req,res){
   }
   if(what==='events'){
     if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    // Your name tag shows your avatar's portrait instead of your photo when you chose that (docs/concepts/13-avatars.md).
+    if(!keyed){const v=await avatars.get(user.email).catch(()=>null);if(v?.usePortrait)user={...user,image:renderAvatarPortrait(v.avatar)}}
     try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
     return true;
   }

@@ -913,7 +913,10 @@ function setLook(key,look){
 async function saveAvatar(key,look){
   const me=(path,init)=>fetch('/api/me/avatar',{cache:'no-store',...init}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.error||'Your look could not be saved'),{code:d.code,status:r.status});return d});
   const base=look?(await me()).avatar:null;
-  return me('',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatar:look?specFromLook(look,{seed:key,base}):null})});
+  const d=await me('',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatar:look?specFromLook(look,{seed:key,base}):null})});
+  // Settings and the photo plumbing (account.js) follow: with "Use my avatar" on, the new portrait shows at once.
+  dispatchEvent(new CustomEvent('flow:avatar',{detail:d}));
+  return d;
 }
 // The look editor (office-look-editor.js): a dialog over the office, so walking pauses like under any overlay.
 async function openLook(){

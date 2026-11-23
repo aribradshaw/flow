@@ -109,7 +109,7 @@ test('the portrait: the same SVG for the same spec, sized on request, safe as an
   assert.ok(svg.includes('#3f6fd1') && svg.includes('#c8553d'), 'drawn in the spec colours');
   assert.match(renderAvatarPortrait(a, {as: 'svg', size: 32}), /^<svg width="32" height="32" /);
   const url = renderAvatarPortrait(a);
-  assert.ok(url.startsWith('data:image/svg+xml;charset=utf-8,'));
+  assert.ok(url.startsWith('data:image/svg+xml,'));
   assert.equal(decodeURIComponent(url.slice(url.indexOf(',') + 1)), svg);
   // Every option draws.
   for (const [path, ids] of Object.entries(AVATAR_OPTIONS)) for (const id of ids) {

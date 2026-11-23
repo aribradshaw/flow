@@ -18,7 +18,7 @@
 // with); renderAvatar3D uses the builder registered for the THREE it is given.
 import {lookFromSpec, readAvatar, avatarHash} from './avatar-spec.js';
 
-export const PORTRAIT_VERSION = 1;
+export const PORTRAIT_VERSION = 2;
 
 // ---------- 3D ----------
 const builders = new Map();
@@ -174,7 +174,7 @@ function cheeks(L, skin) {
 }
 function beard(L, hc) {
   switch (L.beard) {
-    case 'stubble': return path(P`M${CX - 22},54 Q${CX - 18},${CY + RY + 1} ${CX},${CY + RY + 0.5} Q${CX + 18},${CY + RY + 1} ${CX + 22},54 Q${CX + 15},65 ${CX},65 Q${CX - 15},65 ${CX - 22},54 Z`, hc, {opacity: 0.3});
+    case 'stubble': return path(P`M${CX - 22},54 Q${CX - 18},${CY + RY + 1} ${CX},${CY + RY + 0.5} Q${CX + 18},${CY + RY + 1} ${CX + 22},54 Q${CX + 15},65 ${CX},65 Q${CX - 15},65 ${CX - 22},54 Z`, shade(L.skin, 0.55), {opacity: 0.35});
     case 'mustache': return path(P`M${CX - 7},${MY - 2} Q${CX},${MY - 6.5} ${CX + 7},${MY - 2} Q${CX + 4},${MY - 0.6} ${CX},${MY - 2.4} Q${CX - 4},${MY - 0.6} ${CX - 7},${MY - 2} Z`, hc);
     case 'goatee': return path(P`M${CX - 6.5},${MY - 2} Q${CX},${MY - 6} ${CX + 6.5},${MY - 2} Q${CX + 4},${MY - 0.8} ${CX},${MY - 2.4} Q${CX - 4},${MY - 0.8} ${CX - 6.5},${MY - 2} Z`, hc)
       + path(P`M${CX - 5},${MY + 3.5} Q${CX},${MY + 13} ${CX + 5},${MY + 3.5} Q${CX},${MY + 5.5} ${CX - 5},${MY + 3.5} Z`, hc);
@@ -257,6 +257,6 @@ export function renderAvatarPortrait(spec, {size = 0, as = 'url', seed = ''} = {
     if (cache.size > 300) cache.delete(cache.keys().next().value);
   } else { cache.delete(key); cache.set(key, svg); }
   const out = size > 0 ? svg.replace('<svg ', `<svg width="${Math.round(size)}" height="${Math.round(size)}" `) : svg;
-  return as === 'svg' ? out : 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(out);
+  return as === 'svg' ? out : 'data:image/svg+xml,' + encodeURIComponent(out);
 }
 export const portraitCacheSize = () => cache.size;

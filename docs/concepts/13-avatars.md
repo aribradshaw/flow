@@ -6,6 +6,14 @@ Your avatar is the character you build in the [3D office](#3d-office): one per a
 - **Until you make one,** you get a default avatar picked for you. It stays the same every visit and in every office, because it comes from a stable, opaque seed for your account (the same one the office uses for your member key), never from your email or name.
 - **Who sees it.** People who share an office with you see your avatar there, as before. Nobody else can change it.
 
+## Use my avatar instead of my photo
+
+In **Settings › Account › Avatar**, turn on **Use my avatar instead of my photo** to show your avatar's portrait (a head-and-shoulders picture of it) wherever Flow would show your account photo: your name tag in the 3D office, assignee dots on DevOps cards, AgentFlow's human agents, people in chat card previews, person cards linked to your account, and the account menu. It is off by default, so nothing changes until you choose it.
+
+- **Who sees it.** Only the people who could see your photo there today: the portrait takes the photo's place in the same lookups, with the same access checks. Turning it off brings your photo back everywhere.
+- **The 3D office** always draws your avatar as your character, whichever you choose here.
+- **Chat conversations** with OneProfileID contacts keep showing their OneProfileID photos: Flow cannot tell which Flow account a chat contact is.
+
 ## The avatar spec (version 1)
 
 ```json

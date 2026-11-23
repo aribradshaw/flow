@@ -12,7 +12,8 @@
 
 import {store,change} from './store.js';
 import {STATUS_DEFAULTS,WORKFLOW_PRESETS,cleanWorkflow} from './workflow.js';
-import {esc,hint,setSessionUser,sessionPhoto} from './ui.js';
+import {esc,hint,setSessionUser,sessionPhoto,setSessionPortrait} from './ui.js';
+import {renderAvatarPortrait} from './avatar.js';
 import {icon} from './icons.js';
 import {popIn,popOut} from './motion.js';
 import {logoMark} from './logo-mark.js';
@@ -72,7 +73,7 @@ export const sessionUser=()=>session.user||null;
 export const signInMode=()=>session.mode;
 let sessionKey='';
 function sessionChanged(){
-  const u=session.user,key=u?`${u.email}\n${u.name||''}\n${u.image||''}`:'';if(key===sessionKey)return;
+  const u=session.user,key=u?`${u.email}\n${u.name||''}\n${u.image||''}\n${portraitStamp}`:'';if(key===sessionKey)return;
   sessionKey=key;setSessionUser(u);window.dispatchEvent(new Event('flow:session'));
 }
 const opid=()=>session.mode==='opid';
@@ -85,7 +86,8 @@ function initials(u){
 function avatar(u,size){
   const st=`width:${size}px;height:${size}px;font-size:${Math.round(size*.4)}px`;
   // sessionPhoto() is the URL every person avatar uses for this photo (one cached copy, see ui.js).
-  if(u?.image)return `<span class="acct-av" style="${st}"><img src="${esc(u===user()&&sessionPhoto()||u.image)}" alt="" referrerpolicy="no-referrer"></span>`;
+  const src=u&&u===user()?sessionPhoto()||u.image:u?.image;
+  if(src)return `<span class="acct-av" style="${st}"><img src="${esc(src)}" alt="" referrerpolicy="no-referrer"></span>`;
   if(!u)return `<span class="acct-av anon" style="${st}"><svg width="${Math.round(size*.6)}" height="${Math.round(size*.6)}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8.5" r="4.5"/><path d="M3.5 21a8.5 8.5 0 0 1 17 0z"/></svg></span>`;
   return `<span class="acct-av" style="${st}">${esc(initials(u))}</span>`;
 }
@@ -102,6 +104,42 @@ function refreshPhotos(){
   }
   const remove=dlg?.querySelector('[data-photo-remove]');if(remove)remove.hidden=!user()?.image;
 }
+// The account's avatar (docs/concepts/13-avatars.md): GET /api/me/avatar once signed in, again when the window
+// regains focus, and after the office's look editor saves (the 'flow:avatar' event). With "Use my avatar
+// instead of my photo" on, its portrait is the session photo everywhere (ui.js setSessionPortrait).
+let avatarState=null,portraitStamp='',avatarLoading=null;
+function applyAvatar(next){
+  if(!next||typeof next!=='object'||!next.avatar)return;
+  avatarState=next;
+  const stamp=next.usePortrait?JSON.stringify(next.avatar):'';if(stamp===portraitStamp)return;
+  portraitStamp=stamp;setSessionPortrait(stamp?renderAvatarPortrait(next.avatar,{as:'svg'}):'');
+  refreshPhotos();
+  const box=dlg?.querySelector('[data-avatar]');if(box)box.outerHTML=avatarSection();
+}
+function loadAvatar(){
+  if(!ready||!user()||avatarLoading)return avatarLoading;
+  avatarLoading=nativeFetch('/api/me/avatar',{credentials:'same-origin',cache:'no-store'}).then(r=>r.ok?r.json():null).then(applyAvatar).catch(()=>{}).finally(()=>{avatarLoading=null});
+  return avatarLoading;
+}
+addEventListener('flow:avatar',e=>applyAvatar(e.detail));
+function avatarSection(){
+  const a=avatarState,on=!!a?.usePortrait;
+  return `<div data-avatar>${sec('Avatar',{tip:'The character you build in the 3D office. One per account: every office you are in shows it.'})}
+    <div class="acct-avatar">${a?`<span class="acct-av acct-av-portrait" style="width:44px;height:44px"><img src="${esc(renderAvatarPortrait(a.avatar))}" alt="Your avatar"></span>`:''}
+    <label class="acct-check"><input type="checkbox" data-avatar-use${on?' checked':''}${a?'':' disabled'}> Use my avatar instead of my photo</label></div>
+    <p class="acct-muted">${a?.custom?'':'You have not made one yet, so this is the one picked for you. '}Make it yours in the 3D office: press <kbd>L</kbd> there. With this on, it shows where your photo does (name tags, card assignees, AgentFlow and the account menu), for the people who can see your photo today.</p>
+    <p data-avatar-status role="status" aria-live="polite"></p></div>`;
+}
+async function setUsePortrait(panel,on){
+  const status=panel.querySelector('[data-avatar-status]'),box=panel.querySelector('[data-avatar-use]');
+  if(box)box.disabled=true;if(status)status.textContent='Saving…';
+  try{
+    const r=await fetch('/api/me/avatar',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({usePortrait:on})});
+    const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Could not save that.');
+    applyAvatar(d);
+    const s=dlg?.querySelector('[data-avatar-status]');if(s)s.textContent=on?'Your avatar shows instead of your photo.':'Your photo shows again.';
+  }catch(e){if(status)status.textContent=e.message||'Could not save that.';if(box){box.checked=!on;box.disabled=false}}
+}
 let refreshingSession=false,photoSaving=false,photoGeneration=0;
 async function refreshSession(){
   if(!ready||!opid()||refreshingSession||photoSaving||document.hidden)return;
@@ -113,6 +151,7 @@ async function refreshSession(){
   }catch{}finally{refreshingSession=false;}
 }
 addEventListener('focus',refreshSession);
+addEventListener('focus',()=>{if(!document.hidden)loadAvatar()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshSession()});
 
 // ---- menu ----
@@ -224,6 +263,7 @@ function accountPane(){
   const u=user();
   return `<div class="acct-card">${avatar(u,44)}<div class="acct-id"><strong>${esc(u?.name||'')}</strong><span>${esc(u?.email||'')}</span></div></div>
     ${opid()?`<div class="acct-photo-actions"><button type="button" class="txt" data-photo-change>Change photo</button><input type="file" accept="image/png,image/jpeg,image/webp" data-photo-file hidden><button type="button" class="txt" data-photo-remove${u?.image?'':' hidden'}>Remove photo</button></div><p class="acct-muted">Your photo is shared across OneProfileID, your personal page and connected apps.</p><p data-photo-status role="status" aria-live="polite"></p>`:''}
+    ${u?avatarSection():''}
     <p class="acct-muted">${opid()?'Your name, password and two-factor sign-in are managed by your OneProfileID account.':'Running in local mode on this computer. Sign-in with OneProfileID turns on once the server is configured for it.'}</p>
     ${opid()?'<opid-badge mode="light" kind="backed"></opid-badge>':''}
     <div data-invites></div>`;
@@ -433,6 +473,7 @@ function openSettings(tab=getPref('settingsTab')||'account'){
   });
   d.addEventListener('change',ev=>{
     if(ev.target.matches?.('[data-photo-file]')&&ev.target.files?.[0])savePhoto(d.querySelector('[role=tabpanel]'),ev.target.files[0]);
+    if(ev.target.matches?.('[data-avatar-use]'))setUsePortrait(d.querySelector('[role=tabpanel]'),ev.target.checked);
     if(ev.target.matches?.('[data-workflow-preset]')){
       const preset=WORKFLOW_PRESETS[ev.target.value];if(!preset)return;
       const form=ev.target.closest('form');
@@ -743,7 +784,7 @@ window.fetch=async(...args)=>{
     const r=await nativeFetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
     if(r.ok)session=await r.json();
   }catch{}
-  ready=true;sessionChanged();refreshButton();markKnown();
+  ready=true;sessionChanged();refreshButton();markKnown();loadAvatar();
   if(opid()){loadOpidUi();if(!user())showSignIn();else try{sessionStorage.removeItem('flow.ssoRetry')}catch{}}
   // Signed in already when an invite link opens: the app itself.
   if(user()&&location.pathname==='/join')history.replaceState(null,'','/');
