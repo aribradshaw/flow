@@ -35,6 +35,14 @@ test('the main board has its own slot in the ring, facing the middle, clear of e
       const door=toWorld(room,0,ROOM_D/2+DOOR_W);
       assert.ok(Math.hypot(door.x-w.x,door.z-w.z)>w.width/2+3,`n=${n}: no door opens onto the main wall`);
     }
+    // a door to another office halfway to the next room (office-portals.js) has a path past the wall's end
+    if(n){
+      const a=Math.atan2(w.z,w.x),step=Math.PI*2/(n+1);
+      for(const s of [-1,1]){
+        const gap={x:Math.cos(a+s*step/2)*world.radius,z:Math.sin(a+s*step/2)*world.radius},p=local({...w},gap);
+        assert.ok(Math.abs(p.x)-w.width/2>=1.1+1.7,`n=${n}: a door beside the main wall has room`);
+      }
+    }
   }
 });
 

@@ -101,7 +101,7 @@ function drawFar({ctx,W,H,view}){
   });
 }
 function drawNear(board){
-  const {ctx,W,H,view}=board,u=view.main?1.3:1.1;
+  const {ctx,W,H,view}=board,u=view.main?Math.max(1,Math.min(1.3,W/1080)):1.1;
   const pad=10*u,gap=6*u,laneTop=36*u,headH=27*u,tileH=47*u,moreH=21*u;
   // The main board's title is centred: it reads as the room's headline, and clears corner UI on screen.
   if(view.main)paintText(ctx,view.title,W/2,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.5,'center');

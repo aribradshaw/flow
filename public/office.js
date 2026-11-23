@@ -364,7 +364,9 @@ function initScene(){
 }
 function toggleOverview(){
   if(!S.rig)return;
-  S.root.querySelector('[data-of="overview"]').setAttribute('aria-pressed',String(S.rig.toggleOverview()));
+  const on=S.rig.toggleOverview();
+  S.root.querySelector('[data-of="overview"]').setAttribute('aria-pressed',String(on));
+  S.root.classList.toggle('of-overview',on);
 }
 function recenterCamera(){
   if(S.rig?.overview)toggleOverview();

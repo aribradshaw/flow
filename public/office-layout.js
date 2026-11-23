@@ -30,11 +30,12 @@ export function classicLayout(keys,{commonR=10}={}){
   const at=i=>{const a=-Math.PI/2+i*step,x=Math.cos(a)*R,z=Math.sin(a)*R;return {x,z,facing:Math.atan2(-x,-z)}};
   const rooms=[];
   for(let i=0,k=0;i<slots;i++)if(i!==mainSlot)rooms.push({key:keys[k++],...at(i)});
-  // The feature wall stands in its slot a little behind the rooms' fronts, as wide as the gap to its
-  // neighbours allows with a 1.2 m path on each side.
+  // The feature wall stands in its slot a little behind the rooms' fronts. Either side of it, halfway to
+  // the next room, is where a door to another office can stand (office-portals.js): the wall ends a door's
+  // half width and a 1.8 m path short of that.
   const slot=at(mainSlot),depth=R-1.5;
-  const chord=slots>1?2*depth*Math.sin(step/2):40;
-  const wallW=clamp(chord-ROOM_W-2.4,8,15.5);
+  const half=slots>1?R*Math.sin(step/2):20;
+  const wallW=clamp(2*(half-1.1-1.8),8,15.5);
   const mainWall={...slot,...toWorld(slot,0,R-depth),width:wallW,depth:MAIN_WALL_T,height:MAIN_WALL_H};
   const mainBoard={width:Math.min(14,wallW-1.4),height:3.9,y:2.5};
   function mount(room,lx,lz,size){
