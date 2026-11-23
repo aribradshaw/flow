@@ -53,9 +53,12 @@ export function cleanDevops(d,db={}){
   const projects=new Set((db.projects||[]).map(p=>p.id)),items=new Set((db.timeline||[]).map(i=>i.id)),labelIds=new Set(labels.map(l=>l.id));
   const seen=new Set(),numbers=new Set(),now=new Date().toISOString();
   const raw=(Array.isArray(d.cards)?d.cards:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&!seen.has(c.id)&&seen.add(c.id));
-  let next=Math.max(1,Number.isInteger(d.nextNumber)?d.nextNumber:1,...raw.map(c=>Number.isInteger(c.number)?c.number+1:1));
+  // Cards of a combined environment (combined-core.js, ids cx.*) keep that environment's numbers: they may
+  // repeat the home's and never move its next number.
+  const cx=c=>c.id.startsWith('cx.'),own=raw.filter(c=>!cx(c));
+  let next=Math.max(1,Number.isInteger(d.nextNumber)?d.nextNumber:1,...own.map(c=>Number.isInteger(c.number)?c.number+1:1));
   const cards=raw.map(c=>{
-    let number=Number.isInteger(c.number)&&c.number>0&&!numbers.has(c.number)?c.number:next++;numbers.add(number);
+    let number=cx(c)?(Number.isInteger(c.number)&&c.number>0?c.number:0):Number.isInteger(c.number)&&c.number>0&&!numbers.has(c.number)?c.number:next++;if(!cx(c))numbers.add(number);
     const iso=v=>typeof v==='string'&&!Number.isNaN(Date.parse(v))?v:now;
     return {id:c.id,number,title:c.title.slice(0,200),description:str(c.description,8000),column:COLUMNS.some(([k])=>k===c.column)?c.column:MERGED[c.column]||NEW_COLUMN,
       project:projects.has(c.project)?c.project:'',labels:Array.isArray(c.labels)?[...new Set(c.labels)].filter(l=>labelIds.has(l)):[],
@@ -69,7 +72,7 @@ export function cleanDevops(d,db={}){
       inbox:typeof c.inbox?.at==='string'?{at:c.inbox.at}:undefined,
       snoozedUntil:snoozeIso(c.snoozedUntil)||undefined};
   });
-  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
+  return {columns,cards,nextNumber:Math.max(next,...cards.filter(c=>!cx(c)).map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
 }
 
 // Snooze: a card snoozed until a time stays off the board (unless its column shows snoozed cards) until then.

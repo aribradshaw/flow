@@ -36,6 +36,8 @@ const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
+// Combined view (docs/combined.md): other environments of the same user shown in the open one's board and timeline.
+const combined=await import('./public/combined-core.js');
 // OneProfileID photos on person cards a person linked to their account (docs/concepts/10-opid-photos.md).
 const opidPhotos=await import('./lib/opid-photos.mjs');
 const {validOpidUser,normalize:normalizeDb}=await import('./lib/cleaners.mjs');
@@ -271,6 +273,8 @@ const seenBy=(envId,user)=>{if(opidId(user))opidMembers.record(envId,user).catch
 const isLinked=id=>typeof id==='string'&&id.startsWith('sh.');
 function stripLinked(d){
   if(!d||typeof d!=='object')return d;
+  // Combined records (cx.*) and references to them never belong to the workspace that showed them.
+  if(combined.hasCombined(d))d=combined.stripCombined(d);
   const out={...d,charts:(d.charts||[]).map(c=>({...c,nodes:(c.nodes||[]).filter(n=>!isLinked(n.id)),edges:(c.edges||[]).filter(e=>!isLinked(e.id))}))};
   delete out.shares;delete out.shareMembers;
   if(Array.isArray(d.projects))out.projects=d.projects.filter(x=>!isLinked(x?.id));
@@ -406,6 +410,57 @@ async function recordOwnerChanges(envId,user,before,after,base){
   }
   await shares.record(entries.map(({clash,...e})=>e));
 }
+// ---- combined view (docs/combined.md) ----
+// The other environments a request asks to combine (?combine=a,b) that this user owns: [{envId, w}].
+async function combinable(homeEnv,user,list){
+  if(!user||user.token)return [];
+  const out=[];
+  for(const id of combined.cleanCombine(list,homeEnv)){
+    const w=await workspaces.get(id).catch(()=>null);
+    if(w?.data&&!w.archivedAt&&sameEmail(w.owner,user.email))out.push({envId:id,w});
+  }
+  return out;
+}
+// The home workspace as served (v: withShares' result) with the combined environments' records in it.
+// shared gets each one's revision (and its shares' signature), so a client polling with ?since hears of
+// their changes too.
+async function withCombined(homeEnv,user,v,list){
+  if(!v?.data)return v;
+  const envList=await combinable(homeEnv,user,list);if(!envList.length)return v;
+  const projections=[],sig=[];
+  for(const {envId,w} of envList){
+    try{
+      const s=await withShares(envId,user,w.data);
+      projections.push(combined.projectEnv(normalizeDb(structuredClone(s.data)),{env:envId,name:w.name||s.data.environment?.name||'Workspace',rev:w.rev}));
+      sig.push(`cx:${envId}:${w.rev}${s.shared?':'+s.shared:''}`);
+    }catch(e){console.error('combined projection failed',e?.message)}
+  }
+  return {...v,data:combined.applyCombined(v.data,projections),shared:[v.shared,...sig].filter(Boolean).join(',')};
+}
+// A home save that changed combined records: each edit goes to the record's own environment (only the
+// fields shared records allow, only those this user changed: base is the browser's sharedEdits), through the same path as a save there,
+// so edits to shares placed in that environment go on to their owner. Never creates or deletes anything.
+async function applyCombinedSave(homeEnv,user,data,base){
+  for(const {envId} of await combinable(homeEnv,user,combined.combinedEnvs(data))){
+    for(let attempt=0;attempt<3;attempt++){
+      const w=await workspaces.get(envId);if(!w?.data||w.archivedAt)break;
+      const served=normalizeDb(structuredClone((await withShares(envId,user,w.data)).data));
+      const out=combined.combinedEdits(served,data,base,envId);if(!out.edits.length)break;
+      // The same last guard as for shares (bulkWrite): one save changing many records is an old copy, not edits.
+      if(bulkWrite(out.edits.map(e=>({kind:e.kind,recordId:e.id,field:e.field})))){console.error('combined write-back refused: too many records in one save',JSON.stringify({env:envId,records:new Set(out.edits.map(e=>e.kind+'|'+e.id)).size}));break}
+      const next=normalizeDb(out.data),stored=stripLinked(next),before=stripLinked(served);
+      let ok=true;
+      if(JSON.stringify(stored)!==JSON.stringify(before)){
+        const put=await workspaces.put(envId,{baseRev:w.rev,data:keepCounters(w.data,{...stored,environment:{...(stored.environment||{}),id:envId,ownerEmail:w.owner}}),by:user.email,owner:w.owner,visibility:w.visibility,name:w.name,source:{via:'save'},opidUser:opidId(user)});
+        if(put.conflict)continue;
+        ok=!put.refused;
+        if(ok)await recordOwnerChanges(envId,user,before,stored,out.base).catch(e=>console.error('share history failed',e?.message));
+      }
+      if(ok)await applyRecipientSave(envId,user,next,out.base).catch(e=>console.error('share write-back failed',e?.message));
+      break;
+    }
+  }
+}
 // A new, empty workspace (one blank chart) for an environment.
 const emptyWorkspace=(id,name,owner)=>({active:'chart-'+id,charts:[{id:'chart-'+id,name:'Untitled chart',nodes:[],edges:[]}],projects:[],timeline:[],environment:{id,name,ownerEmail:owner,visibility:'private',members:[]}});
 async function createEnvironment(user,name){
@@ -447,7 +502,8 @@ async function workspace(req,res){
   if(req.method==='GET'){
     if(local){
       const r=await relay(req);
-      if(r&&r.status===200&&r.data?.env&&r.data.data){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:r.data.data,by:'relay',owner:user.email,mirror:true}).catch(()=>{})}
+      // The mirror is this environment's own data: never the records of environments combined with it.
+      if(r&&r.status===200&&r.data?.env&&r.data.data){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:combined.stripCombined(r.data.data),by:'relay',owner:user.email,mirror:true}).catch(()=>{})}
       if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return true}
       const w=await workspaces.get(u.searchParams.get('env')||DEFAULT_ENV.id);
       json(res,200,{env:w?.envId||u.searchParams.get('env')||DEFAULT_ENV.id,rev:0,data:w?.data||null,offline:true});return true;
@@ -465,7 +521,9 @@ async function workspace(req,res){
     if(!canRead(e,user)&&!(e.unregistered&&!w)){json(res,404,{error:'Not found'});return true}
     const since=parseInt(u.searchParams.get('since')),mine=sameEmail(ownerOf(w,envId),user.email);
     // Linked copies are added for the environment's owner only; anyone else gets the stored data as is.
-    const v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
+    let v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
+    // Other environments of this user combined into this one's board and timeline (?combine=a,b).
+    if(mine&&u.searchParams.get('combine'))v=await withCombined(envId,user,v,u.searchParams.get('combine'));
     // Only the owner sees whose account a card is linked to; other readers see their own link only.
     if(!mine&&v.data)opidPhotos.maskOpidLinks(v.data,opidId(user));
     if(mine&&w)seenBy(envId,user);
@@ -480,7 +538,7 @@ async function workspace(req,res){
         if(local){
           const r=await relay(req,raw);
           // Keep this computer's copy current too: it is the offline fallback.
-          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email,source:{via:'relay'},mirror:true})}}catch{}}
+          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,combined.stripCombined(b.data)).data,by:'relay',owner:user.email,source:{via:'relay'},mirror:true})}}catch{}}
           if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return}
           json(res,503,{error:'Offline: the server could not be reached',offline:true});return;
         }
@@ -507,7 +565,7 @@ async function workspace(req,res){
         const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source,opidUser:opidId(user)});
         if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code,limit:true});return}
-        if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
+        if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withCombined(envId,user,await withShares(envId,user,out.current.data),u.searchParams.get('combine')||'')).data:null});return}
         envs.claim(data,{email:owner});
         // What the browser's copy held before each change (sync-core fieldBase): tells the owner's edits from
         // a merge that kept a value they never saw (conflict notices).
@@ -518,7 +576,10 @@ async function workspace(req,res){
         // copy can be out of date (an old tab, a browser that could not store its latest copy), and a tab
         // running older code sends no sharedEdits, so its copy changes nothing on the owner's side.
         if(!user.token)await applyRecipientSave(envId,user,body.data,fieldMap(body.sharedEdits)||{}).catch(e=>console.error('share write-back failed',e?.message));
-        const v=user.token?{shared:''}:await withShares(envId,user,data);
+        // Edits this user made to combined records go to their own environments (never stored here:
+        // stripLinked above), from sharedEdits only, like shared records.
+        if(!user.token)await applyCombinedSave(envId,user,body.data,fieldMap(body.sharedEdits)||{}).catch(e=>console.error('combined write-back failed',e?.message));
+        const v=user.token?{shared:''}:await withCombined(envId,user,await withShares(envId,user,data),u.searchParams.get('combine')||'');
         // Cards removed other than by Delete: the browser says where to restore them (DevOps › Recently deleted).
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
         // OneProfileID links this save tried to add for someone else were refused: the browser reads the workspace back.

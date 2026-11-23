@@ -184,11 +184,19 @@ export function localTarget(db,envId,ref){
   const has=id=>ref.kind==='card'?(db?.devops?.cards||[]).some(c=>c.id===id):[...nodesOf(db).values()].some(n=>n.id===id&&!n.linked?.stub);
   if(ref.env===envId&&has(ref.id))return ref.id;
   for(const s of db?.shares||[])if(s?.ownerEnv===ref.env&&has(`sh.${s.id}.${ref.id}`))return `sh.${s.id}.${ref.id}`;
+  // An environment combined with this one (combined-core.js): its record, or a share placed there.
+  for(const m of db?.combined||[]){
+    if(m?.env===ref.env&&has(`cx.${m.env}.${ref.id}`))return `cx.${m.env}.${ref.id}`;
+    for(const s of m?.shares||[])if(s?.ownerEnv===ref.env&&has(`cx.${m.env}.sh.${s.id}.${ref.id}`))return `cx.${m.env}.sh.${s.id}.${ref.id}`;
+  }
   return null;
 }
 // The link for a record the browser shows: a linked copy points at the owner's record, so everyone
 // it reaches resolves it with their own access.
 export function refFor(db,envId,kind,id){
+  // A combined environment's record points at that environment (or, for a share placed there, its owner's).
+  const cx=/^cx\.([A-Za-z0-9-]{1,64})\.(.+)$/.exec(String(id||''));
+  if(cx){const meta=(db?.combined||[]).find(x=>x?.env===cx[1]);return refFor(meta?{shares:meta.shares}:{},cx[1],kind,cx[2])}
   const m=/^sh\.([A-Za-z0-9_-]+)\.(.+)$/.exec(String(id||''));
   if(m){const s=(db?.shares||[]).find(x=>x.id===m[1]);const r={env:s?.ownerEnv||'',kind,id:m[2]};return validRef(r)?r:null}
   const r={env:envId||'',kind,id};return validRef(r)?r:null;

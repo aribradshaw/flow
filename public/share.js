@@ -17,32 +17,52 @@ import {store} from './store.js';
 import {esc,hint} from './ui.js';
 import {icon} from './icons.js';
 import {detailModal} from './modal.js';
+import {parseForeign} from './combined-core.js';
+import {envBadge} from './combined.js';
 
 const RANK={view:0,comment:1,edit:2};
 export const PERMS=[['view','Can view'],['comment','Can comment'],['edit','Can edit']];
+// Records of another environment shown combined with this one (combined-core.js, ids cx.<env>.<id>) are
+// linked too: foreign:true, env and envName say where they live. A shared record placed in that environment
+// keeps its share's permission (innerShare: its share id there).
+const SH=/^sh\.([A-Za-z0-9_-]+)\.(.+)$/;
+function foreignLink(x,f){
+  const meta=(store.db.combined||[]).find(m=>m.env===f.env)||{},inner=SH.exec(f.id),sm=inner&&(meta.shares||[]).find(s=>s.id===inner[1]);
+  return {shareId:inner?`cx.${f.env}.sh.${inner[1]}`:`cx.${f.env}`,id:f.id,foreign:true,env:f.env,envName:meta.name||'another environment',innerShare:inner?inner[1]:'',
+    permission:inner?(sm?.permission||'view'):'edit',ownerEmail:inner?(sm?.ownerEmail||''):'',ownerEnvName:meta.name||'',stub:false,readOnly:false};
+}
 export function linkOf(x){
-  const m=/^sh\.([A-Za-z0-9_-]+)\.(.+)$/.exec(String(x?.id||''));if(!m)return null;
+  const f=parseForeign(x?.id);if(f)return foreignLink(x,f);
+  const m=SH.exec(String(x?.id||''));if(!m)return null;
   const meta=(store.db.shares||[]).find(s=>s.id===m[1])||{},l=x.linked||{};
   return {shareId:m[1],id:m[2],permission:l.permission||meta.permission||'view',ownerEmail:meta.ownerEmail||'',ownerEnvName:meta.ownerEnvName||'',stub:!!l.stub,readOnly:!!(l.readOnly||l.stub)};
 }
 export const canEdit=x=>{const l=linkOf(x);return !l||(!l.readOnly&&RANK[l.permission]>=2)};
-export const canComment=x=>{const l=linkOf(x);return !!l&&!l.readOnly&&RANK[l.permission]>=1};
+export const canComment=x=>{const l=linkOf(x);return !!l&&!l.foreign&&!l.readOnly&&RANK[l.permission]>=1};
 export const locked=x=>!canEdit(x);
 const PERM_WORDS={view:'view only',comment:'can comment',edit:'can edit'};
 // Timeline items and DevOps cards: who shared it and what this user may do with it.
-export const linkedTip=l=>l.stub?sharedTip(l):`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. ${l.permission==='edit'?'Fields the owner allows are editable; the rest are locked.':l.permission==='comment'?'You can comment; its fields are locked.':'Its fields are locked.'}`;
-export const lockedMsg=x=>{const l=linkOf(x);return !l?'':l.stub?'Co-owner cards are read-only.':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. Ask the owner for edit access.`};
+const foreignTip=l=>`From ${l.envName}, shown combined with this environment. ${l.innerShare?`Shared with you there${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. `:''}Edits go back to ${l.envName}; open it to delete, add or re-file.`;
+export const linkedTip=l=>l.foreign?foreignTip(l):l.stub?sharedTip(l):`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. ${l.permission==='edit'?'Fields the owner allows are editable; the rest are locked.':l.permission==='comment'?'You can comment; its fields are locked.':'Its fields are locked.'}`;
+export const lockedMsg=x=>{const l=linkOf(x);return !l?'':l.foreign&&!l.innerShare?`This is in ${l.envName}. Open it there to change that.`:l.stub?'Co-owner cards are read-only.':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERM_WORDS[l.permission]||l.permission}. Ask the owner for edit access.`};
 // The link badge of the chart's linked boxes, for timeline items and DevOps cards. inline: in a row.
+// Where a record that is not this environment's own belongs, for a refusal (delete, duplicate, re-file).
+export const ownerMsg=(x,what='It')=>{const l=linkOf(x);return l?.foreign?`${what} is in ${l.envName}. Open ${l.envName} to delete, add or re-file it.`:`${what} belongs to its owner. Remove the share in Settings › Sharing.`};
 export function sharedBadge(x,{inline=false,tip=true}={}){
   const l=linkOf(x);if(!l)return '';
+  if(l.foreign)return envBadge(x,{inline,tip:tip?linkedTip(l):'',shared:!!l.innerShare});
   const label=l.stub?'Co-owner stub, read-only':`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`;
   return `<span class="sh-badge${inline?' in':''}${l.stub?' stub':''}" role="img" aria-label="${esc(label)}"${tip?` data-tip="${esc(linkedTip(l))}"`:''}>${icon(l.stub?'ban':'link',inline?9:11)}</span>`;
 }
-export const sharedChip=x=>{const l=linkOf(x);return l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(linkedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''};
+export const sharedChip=x=>{const l=linkOf(x);return l?.foreign?envBadge(x,{tip:linkedTip(l),shared:!!l.innerShare}):l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(linkedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''};
 export const sharedNote=x=>{const l=linkOf(x);return l?`<p class="sh-note">${esc(linkedTip(l))}</p>`:''};
 // Two records from the same place: both one's own, or both from the same share.
 export const sameSource=(x,y)=>(linkOf(x)?.shareId||'')===(linkOf(y)?.shareId||'');
-export const shareOf=x=>{const l=linkOf(x);return l&&(store.db.shares||[]).find(s=>s.id===l.shareId)||null};
+export const shareOf=x=>{const l=linkOf(x);if(!l)return null;
+  if(l.foreign){const meta=(store.db.combined||[]).find(m=>m.env===l.env)||{};
+    // A share placed in that environment, or that environment's own card: the recipients it is shared with.
+    return l.innerShare?(meta.shares||[]).find(s=>s.id===l.innerShare)||null:{members:(meta.shareMembers||[]).filter(m=>m.cards?.includes(x.id))}}
+  return (store.db.shares||[]).find(s=>s.id===l.shareId)||null};
 // Members of the share a linked record came from: [{id ('@email' or a linked person card), name, image?, owner}].
 export const members=x=>shareOf(x)?.members||[];
 export const sharedTip=l=>l.stub?`Co-owner of a card shared with you${l.ownerEmail?' by '+l.ownerEmail:''}. Name only; read-only.`:`Shared with you${l.ownerEmail?' by '+l.ownerEmail:''} · ${PERMS.find(p=>p[0]===l.permission)?.[1].toLowerCase()||l.permission}. Your layout is your own.`;
@@ -70,7 +90,7 @@ export const api={
 // ---- History + comments of a linked record (inspector) ----
 const when=t=>{try{return new Date(t).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}catch{return t}};
 export function historyHtml(x,kind){
-  const l=linkOf(x);if(!l||l.stub)return '';
+  const l=linkOf(x);if(!l||l.stub||l.foreign)return '';
   return `<label>Shared${l.ownerEmail?` by ${esc(l.ownerEmail)}`:''}</label>
     ${canComment(x)?`<div class="sh-cmt"><textarea data-sh-comment rows="2" maxlength="4000" placeholder="Comment for ${esc(l.ownerEmail||'the owner')}"></textarea><button type="button" class="txt" data-i="shComment" data-kind="${kind}">Comment</button></div>`:''}
     <ul class="sh-hist" data-sh-hist="${esc(x.id)}" data-kind="${kind}"><li class="acct-muted">Loading history…</li></ul>`;

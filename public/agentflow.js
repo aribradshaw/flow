@@ -725,9 +725,11 @@ function toolsHtml(a){
   return `<div class="af-ph af-ph-tools"><label for="af-new-tools">${icon('wrench',12)}Tools</label>${hint(they?'What they may use':'What it may use','Tools')}</div>
     <div class="af-chips">${a.tools.map((v,i)=>chipHtml('tools','tool',v,i)).join('')}${newChip('tools','tool',a.tools.length?'Add…':'Add tool, then Enter')}</div>`;
 }
-const projectItems=()=>db().projects.map(p=>({value:p.id,label:p.name,color:p.color}));
-const cardItems=()=>db().devops.cards.map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
-const itemItems=()=>[...db().timeline].sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
+// AgentFlow is this environment's own: records of a combined environment (ids cx.*, combined-core.js) are not offered.
+const own=x=>!x.id.startsWith('cx.');
+const projectItems=()=>db().projects.filter(own).map(p=>({value:p.id,label:p.name,color:p.color}));
+const cardItems=()=>db().devops.cards.filter(own).map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
+const itemItems=()=>db().timeline.filter(own).sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
 const PICKERS={'af-projects':['projects',projectItems,'Projects'],'af-cards':['cards',cardItems,'Cards'],'af-items':['items',itemItems,'Timeline items']};
 const linkCount=x=>x.projects.length+x.cards.length+x.items.length;
 function linksHtml(x){

@@ -315,6 +315,14 @@ With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets
 - **Polling.** The conversation list refreshes every 15 seconds while it shows, an open conversation every 5 seconds, and the unread badge every minute, only while the Flow tab is visible.
 - **Privacy.** Flow sends OneProfileID only your own OneProfileID session from this browser, so messages always go out as you. The chat routes take no user, email or account id, and the only other person they ever name is a friend's handle. Messages are not stored in Flow.
 
+## Combined view
+
+The DevOps board and the Timeline can show several of your environments at once. Open the account menu (top right): each of your other environments has a box beside its name. Tick it to show that environment's cards, timeline items and projects in the one you have open. Clicking the name still switches to it. The menu and the toolbars then say **Combined: N environments**, and a legend under the toolbar names each environment; its × stops showing it. Your choice is kept with your preferences, on every device you sign in on.
+
+The environment you have open stays the home: new cards, items and projects go there, and the mind map and AgentFlow show it alone. Each card and item from another environment carries a small badge with that environment's name, and keeps its own number (so two cards can both be #1). Shares placed in a combined environment come along too, with their own permissions: a view-only share stays read-only.
+
+Edits to a card or item from another environment go back to that environment, never into the one you have open: title, description, column (moves on the board), points, due date, labels, assignees, checklist, links and snooze for cards; title, kind, status, priority, dates, owner, link, notes and target release for timeline items; name and colour for projects. Deleting it, adding to it, giving it another project or timeline item, or delegating it to an AgentFlow agent is done in its own environment. The combined environments are read again whenever any of them changes, at the same 20-second interval and on returning to the tab as the rest of the workspace. Details: `docs/combined.md`.
+
 ## 3D office
 
 The 3D office is a small virtual office for one environment, where you can see your team and the coding agents they have running right now. Open it from the AgentFlow toolbar with **3D** (between **Workflow** and **+**). It fills the window; **Esc** or the close button takes you back to AgentFlow.

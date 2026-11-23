@@ -10,7 +10,9 @@ import {store,change,checkpoint,commit,save,step} from './store.js';
 import {agentsForCard,delegate} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList,isSnoozed,nextWake,snoozePresets,wakeText} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
-import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {linkOf,canEdit,locked,lockedMsg,ownerMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {isForeign,envOf} from './combined-core.js';
+import {combinedLegend,combinedMeta,envName} from './combined.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
 // board, its filters and the card panel (in the shared #inspector), and handles drag and gates.
@@ -36,20 +38,28 @@ const db=()=>store.db,dv=()=>store.db.devops,card=id=>dv().cards.find(c=>c.id===
 const project=id=>db().projects.find(p=>p.id===id),label=id=>dv().labels.find(l=>l.id===id);
 const colName=id=>dv().columns.find(c=>c.id===id)?.name||id;
 const touch=c=>c.updated=new Date().toISOString();
-// Assignees are the org chart's person cards, across every chart.
-function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n of c.nodes)if(types.includes(n.type)&&!m.has(n.id))m.set(n.id,n);return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))}
+// Assignees are the org chart's person cards, across every chart, and the person cards of environments
+// combined with this one (combined.js: they come with the server's db.combined, never as mind map cards).
+const combinedPeople=()=>combinedMeta().flatMap(m=>m.people||[]);
+function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n of c.nodes)if(types.includes(n.type)&&!m.has(n.id))m.set(n.id,n);
+  if(types.includes('person'))for(const n of combinedPeople())if(!m.has(n.id))m.set(n.id,n);
+  return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))}
 const people=()=>nodesOf(['person']);
 // Members of shares (docs/sharing.md) are assigned as '@<email>': on a linked card, the share's members;
 // on one's own shared card, the recipients it is shared with (db.shareMembers, from the server).
-const memberList=()=>{const m=new Map();for(const x of [...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
-const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
+const memberList=()=>{const m=new Map();for(const x of [...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
+const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
 // Who can be assigned to a card. A linked card: the person cards of its share and the share's members,
 // never anyone else of the owner's. One's own card: one's person cards, plus recipients it is shared with.
 function peopleFor(c){
   if(!c)return [...people(),...memberList().values()];
   if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>({...m,type:'person'}))];
-  return [...people(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id)).map(m=>({...m,type:'person'}))];
+  return [...people().filter(p=>!isForeign(p.id)),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id)).map(m=>({...m,type:'person'}))];
 }
+// Another environment's records never go on this environment's own cards (and the reverse): a card's
+// project, timeline item, labels and people come from where the card lives.
+const sameEnv=(x,c)=>envOf(x)===envOf(c);
+const fromEnv=x=>envOf(x)?` · ${envName(envOf(x))||'another environment'}`:'';
 const today=()=>{const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`};
 const fmt=s=>`${MONTHS[+s.slice(5,7)-1]} ${+s.slice(8)}${s.slice(0,4)!==today().slice(0,4)?`, ${s.slice(0,4)}`:''}`;
 const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
@@ -258,10 +268,10 @@ function sanitize(){
 }
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
-const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
-const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
+const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:isForeign(p.id)?envName(envOf(p)):p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
+const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,...(!c&&isForeign(p.id)?{sub:envName(envOf(p))}:{}),avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
 // A linked card takes its owner's labels (the ones of its share); they are read-only everywhere.
-const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||!linkOf(c)||sameSource(l,c))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
+const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||(isForeign(l.id)||isForeign(c.id)?sameSource(l,c):!linkOf(c)||sameSource(l,c)))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name+(c?'':fromEnv(l)),group:name,pill:{bg,fg}}}));
 const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
 function openFilter(b){
   const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
@@ -283,7 +293,7 @@ function toolbar(cards){
     <span class="dv-count">${n} card${n===1?'':'s'}</span>${boardSnoozeToggle(zz)}
     ${active?`<button type="button" class="txt" data-dv="clear">Clear</button>`:''}<span class="sp"></span>
     ${ib('undo','Recently deleted · restore a card',{attrs:'data-dv="deleted"'})}
-    ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>`;
+    ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>${combinedLegend()}`;
 }
 // Agents a card is delegated to, built once per board render (cardAgents).
 let cardAgents=new Map();
@@ -374,9 +384,10 @@ function action(name,b){
 }
 // A new card inherits the active filters so it stays visible.
 function addCard(column){
-  const proj=ui.projects.find(p=>p!=='none')||(ui.entity&&entityProjects(db(),ui.entity)[0]?.id)||'';
+  // New cards go to this environment: filters on another (combined) environment's records are not inherited.
+  const proj=ui.projects.find(p=>p!=='none'&&!isForeign(p))||(ui.entity&&entityProjects(db(),ui.entity).find(p=>!isForeign(p.id))?.id)||'';
   ui.q='';keepUi();
-  change(()=>{const c=newCard(dv(),{column,project:proj,labels:[...ui.labels],assignees:ui.assignees.map(node=>({node,role:'requester'}))});selected=c.id;
+  change(()=>{const c=newCard(dv(),{column,project:proj,labels:ui.labels.filter(l=>!isForeign(l)),assignees:ui.assignees.filter(n=>!isForeign(n)).map(node=>({node,role:'requester'}))});selected=c.id;
     if(ui.agents.length&&delegate(db().agentflow,c.id,ui.agents)){ui.agents=[];keepUi()}});
   const t=$('#dc-title');t?.focus();t?.select();
 }
@@ -385,7 +396,7 @@ function rename(colId){
   if(v&&v!==colName(colId))change(()=>{dv().columns.find(c=>c.id===colId).name=v.slice(0,80);dv().namesCustomized=true});
 }
 function remove(id){
-  if(linkOf(card(id))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
+  if(linkOf(card(id))){toast(ownerMsg(card(id),'This card'),true);return}
   change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null},{deletedCards:[id]});
 }
 
@@ -417,7 +428,7 @@ function cardMenu(e,id){
   const pc=capList(ppl,p=>devs.has(p.id),MENU_CAP);
   const allowed=new Set(labelItems(c).map(x=>x.value)),lc=capList(dv().labels.filter(x=>allowed.has(x.id)),x=>c.labels.includes(x.id),MENU_CAP);
   const pri=priorityLabels(dv().labels).filter(x=>allowed.has(x.id)),prc=capList(db().projects,p=>p.id===c.project,MENU_CAP);
-  const on=A?.agents.length?new Set(agentsForCard(A,id).map(a=>a.id)):null;
+  const on=A?.agents.length&&!isForeign(id)?new Set(agentsForCard(A,id).map(a=>a.id)):null;
   const ac=on&&capList([...A.agents].sort((a,b)=>a.name.localeCompare(b.name)),a=>on.has(a.id),MENU_CAP);
   const more=label=>['-',{label,run:()=>select(id)}];
   openMenu(e,[
@@ -513,7 +524,10 @@ export function focus({person,entity,agent,cardId}={}){
 // stays empty on this tab. #devops/card/<number> deep-links to it; Back closes it.
 let modal=null,modalFor=null,pushed=false,labelForm=false;
 const cardEl=id=>document.querySelector(`#devopsView [data-card="${CSS.escape(id)}"]`);
-const cardHash=c=>`#devops/card/${c.number}`;
+// A combined environment's card: #devops/card/<env>/<number> (its numbers may repeat this environment's).
+const cardHash=c=>`#devops/card/${envOf(c)?envOf(c)+'/':''}${c.number}`;
+const HASH=/^#devops\/card\/(?:([A-Za-z0-9-]{1,64})\/)?(\d+)$/;
+const byHash=h=>{const m=HASH.exec(h);return m?dv().cards.find(x=>x.number===+m[2]&&envOf(x)===(m[1]||'')):null};
 export function renderInspector(pane){
   panel(pane,false);
   const c=card(selected);
@@ -544,7 +558,7 @@ export function renderInspector(pane){
 }
 // Hash changes (Back/Forward, a pasted link): open or close the card it names.
 export function syncHash(){
-  const m=/^#devops\/card\/(\d+)$/.exec(location.hash),c=m&&dv().cards.find(x=>x.number===+m[1]);
+  const c=byHash(location.hash);
   if(c&&selected!==c.id){pushed=false;focus({cardId:c.id});rerender()}
   else if(!c&&selected){pushed=false;selected=null;rerender()}
 }
@@ -568,8 +582,8 @@ const clash=(c,f)=>clashHtml(c,f,{show:showField(f)});
 function cardDetailHtml(c){
   // A linked card (docs/sharing.md): view and comment lock every field; edit unlocks the ones its owner allows.
   const l=linkOf(c),ed=canEdit(c),ro=ed?'':' disabled',mine=l?' disabled':'';
-  const ppl=peopleFor(c),items=[...db().timeline].filter(i=>!l||sameSource(i,c)).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
-  const projectOpts=db().projects.map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
+  const ppl=peopleFor(c),items=[...db().timeline].filter(i=>sameEnv(i,c)&&(!l||sameSource(i,c))).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
+  const projectOpts=db().projects.filter(p=>sameEnv(p,c)).map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
   const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
   return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span>${isSnoozed(c)?`<span class="cd-snz" data-tip="${esc(snoozeTip(c))}">${icon('clock',12)}Snoozed until ${esc(wakeText(c.snoozedUntil))}</span>`:''}<span class="sp"></span>
     ${c.column==='uat'&&ed?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
@@ -607,13 +621,15 @@ function cardDetailHtml(c){
 // AgentFlow agents working this card (the link is stored on the agent, agentflow-core.js).
 const agentItems=()=>[...(db().agentflow?.agents||[])].sort((a,b)=>a.name.localeCompare(b.name)).map(a=>{const [bg,fg]=memberColor(a.id);return {value:a.id,label:a.name,sub:a.title,avatar:{text:initials(a.name),bg,fg}}});
 function agentRow(c){
-  if(!db().agentflow?.agents.length)return '';
+  // AgentFlow agents are this environment's: a combined environment's card is delegated there.
+  if(!db().agentflow?.agents.length||isForeign(c.id))return '';
   const on=agentsForCard(db().agentflow,c.id),names=on.map(a=>a.name).join(', ');
   return prop('Delegated to',named(`Delegated to: ${names||'None'}`,pickerButton('dc-agents',names||'None',agentItems(),on.map(a=>a.id),{cls:'mini wide',count:false}))+hint('AgentFlow agents working this card. It joins their work queue.','Delegated to'),{ic:'bot'})
     +(on.length?`<div class="dc-agchips">${on.map(a=>`<button type="button" class="dc-agchip" id="dc-ag-${esc(a.id)}" data-dc-agent="${esc(a.id)}" data-tip="${esc(a.title?`Open in AgentFlow\n${a.title}`:'Open in AgentFlow')}" aria-label="Open ${esc(a.name)} in AgentFlow${a.title?`, ${esc(a.title)}`:''}">${icon('bot',12)}<span>${esc(a.name)}</span></button>`).join('')}</div>`:'');
 }
 // Delegate a card to exactly these agents (ids). One undo step; nothing changes when an agent's queue is full.
 function setAgents(c,ids){
+  if(isForeign(c.id)){toast(ownerMsg(c,'This card'),true);return}
   // Check room before recording an undo step: delegate() changes nothing when an agent is full.
   const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,ids);
   if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}

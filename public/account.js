@@ -21,6 +21,7 @@ import {SCOPES,SHORTCUTS,keysFor,showCombo,comboOf,rebind,resetShortcut,resetAll
 import {getPref,setPref,onPrefs} from './prefs.js';
 import {currentEnv,listEnvironments,switchEnvironment,createEnvironment,renameEnvironment,archiveEnvironment,refresh} from './sync.js';
 import {sharingPane,openShareDialog,api as shareApi} from './share.js';
+import {combinedIds,setCombined,pruneCombined} from './combined.js';
 import {renderApiKeysTab} from './apikeys.js';
 import {ask} from './modal.js';
 
@@ -36,6 +37,8 @@ const I={
   fingerprint:'<path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .13-5.35 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/>',
   reset:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   chevron:'<path d="m9 6 6 6-6 6"/>',
+  box:'<rect x="4" y="4" width="16" height="16" rx="3"/>',
+  boxOn:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-6"/>',
 };
 const svg=(n,s=16)=>`<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`;
 
@@ -117,16 +120,28 @@ function envRow(){
   const pub=e.visibility==='public';
   return `<div class="acct-env" role="presentation"><span class="acct-env-k">Environment</span>
     <span class="acct-env-n">${esc(e.name)}</span>
-    <span class="acct-vis ${pub?'pub':''}">${svg(pub?'globe':'lock',11)}${pub?'Public':'Private'}</span></div>
+    <span class="acct-vis ${pub?'pub':''}">${svg(pub?'globe':'lock',11)}${pub?'Public':'Private'}</span>${cxCount()}</div>
     <div class="acct-envs" data-envs></div>`;
 }
-// The user's other environments, to switch to from the menu (filled in once the list arrives).
+// Combined view (combined.js): how many environments the board and timeline show together.
+const cxCount=()=>{const n=combinedIds().length;return `<span class="acct-cx-n" data-cx-count${n?'':' hidden'}>Combined: ${n+1} environments</span>`};
+// The user's other environments, to switch to from the menu (filled in once the list arrives). The box
+// beside each one shows its cards and items combined with this environment's (combined.js) instead.
 async function fillMenuEnvs(){
   const box=menu?.querySelector('[data-envs]');if(!box)return;
   const list=await listEnvironments(),cur=currentEnv();if(!menu)return;
-  const others=list.filter(x=>x.id!==cur);
-  box.innerHTML=others.slice(0,6).map(x=>`<button type="button" role="menuitem" class="acct-item sub" data-acct="env" data-id="${esc(x.id)}">${svg('swap',14)}<span>${esc(x.name)}</span></button>`).join('')
+  pruneCombined(list);
+  const on=new Set(combinedIds()),others=list.filter(x=>x.id!==cur).filter((x,i)=>i<6||on.has(x.id));
+  box.innerHTML=others.map(x=>`<div class="acct-envrow"><button type="button" role="menuitem" class="acct-item sub" data-acct="env" data-id="${esc(x.id)}" data-tip="Open ${esc(x.name)}">${svg('swap',14)}<span>${esc(x.name)}</span></button>${cxToggle(x,on.has(x.id))}</div>`).join('')
     +`<button type="button" role="menuitem" class="acct-item sub" data-acct="env-new">${svg('plus',14)}<span>New environment</span></button>`;
+}
+const cxToggle=(x,on)=>`<button type="button" role="menuitemcheckbox" class="acct-cx${on?' on':''}" aria-checked="${on}" data-cx-env="${esc(x.id)}" aria-label="${esc(`Show ${x.name} combined with this environment`)}" data-tip="${on?'Shown combined here\nClick to stop':'Show its DevOps cards and timeline\nhere, combined with this environment'}">${svg(on?'boxOn':'box',15)}</button>`;
+function toggleCx(b){
+  const on=b.getAttribute('aria-checked')!=='true',name=b.previousElementSibling?.textContent||'';
+  setCombined(b.dataset.cxEnv,on);
+  b.outerHTML=cxToggle({id:b.dataset.cxEnv,name},on);
+  menu?.querySelector(`[data-cx-env="${CSS.escape(b.dataset.cxEnv)}"]`)?.focus();
+  const n=combinedIds().length,c=menu?.querySelector('[data-cx-count]');if(c){c.hidden=!n;c.textContent=`Combined: ${n+1} environments`}
 }
 function openMenu(){
   closeMenu();
@@ -143,7 +158,7 @@ function openMenu(){
     ${opid()?'<div class="acct-foot"><opid-badge mode="light" kind="backed"></opid-badge></div>':''}`;
   document.body.append(menu);
   placeMenu();refreshButton();popIn(menu);fillMenuEnvs();fullWidthBadge(menu.querySelector('.acct-foot opid-badge'));
-  menu.querySelector('[role=menuitem]')?.focus();
+  menu.querySelector('[role=menuitem],[role=menuitemcheckbox]')?.focus();
 }
 function placeMenu(){
   const b=document.getElementById('acctBtn');if(!menu||!b)return;
@@ -160,6 +175,7 @@ function closeMenu(refocus=false){
 document.addEventListener('click',e=>{
   const t=e.target instanceof Element?e.target:null;if(!t)return;
   if(t.closest('#acctBtn')){menu?closeMenu():openMenu();return}
+  const cx=t.closest('.acct-menu [data-cx-env]');if(cx){toggleCx(cx);return}
   const item=t.closest('.acct-menu [data-acct]');
   if(item){const a=item.dataset.acct;closeMenu();if(a==='settings')openSettings();else if(a==='devlog')openSettings('devlog');else if(a==='logout')signOut();else if(a==='switch')switchAccount();
     else if(a==='env')openEnv(item.dataset.id);else if(a==='env-new')openSettings('environment').then?.(()=>document.querySelector('#envNew')?.focus());return}
@@ -167,7 +183,7 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(!menu)return;
-  const items=[...menu.querySelectorAll('[role=menuitem]')],i=items.indexOf(document.activeElement);
+  const items=[...menu.querySelectorAll('[role=menuitem],[role=menuitemcheckbox]')],i=items.indexOf(document.activeElement);
   if(e.key==='Escape'){e.preventDefault();closeMenu(true)}
   else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=items.length;items[(i+(e.key==='ArrowDown'?1:n-1))%n]?.focus()}
   else if(e.key==='Home'||e.key==='End'){e.preventDefault();items[e.key==='Home'?0:items.length-1]?.focus()}

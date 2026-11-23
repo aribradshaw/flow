@@ -34,7 +34,7 @@ async function browser({stored,sync,server}){
     let s=readFileSync(new URL('store.js',pub),'utf8').replace("import {uid,clone} from './ui.js';","const uid=()=>crypto.randomUUID(),clone=x=>structuredClone(x);");
     for(const f of ['devops-core.js','demo-seed.js','workflow.js','agentflow-core.js','sync-core.js'])s=s.replace(`from './${f}'`,`from ${JSON.stringify(new URL(f,pub).href)}`);
     writeFileSync(join(dir,'store.mjs'),s);
-    writeFileSync(join(dir,'sync.mjs'),readFileSync(new URL('sync.js',pub),'utf8').replace("from './sync-core.js'",`from ${JSON.stringify(new URL('sync-core.js',pub).href)}`).replace("from './store.js'","from './store.mjs'"));
+    writeFileSync(join(dir,'sync.mjs'),readFileSync(new URL('sync.js',pub),'utf8').replace("from './sync-core.js'",`from ${JSON.stringify(new URL('sync-core.js',pub).href)}`).replace("from './combined-core.js'",`from ${JSON.stringify(new URL('combined-core.js',pub).href)}`).replace("from './prefs.js'",`from ${JSON.stringify(new URL('prefs.js',pub).href)}`).replace("from './store.js'","from './store.mjs'"));
     const store=await import(pathToFileURL(join(dir,'store.mjs')).href),sync=await import(pathToFileURL(join(dir,'sync.mjs')).href);
     const realInterval=globalThis.setInterval;globalThis.setInterval=()=>0;
     try{sync.startSync()}finally{globalThis.setInterval=realInterval}

@@ -85,7 +85,9 @@ export function clashes(base,local,remote){
 }
 // Linked copies of shared records (ids sh.<share>.<id>): the shared fields as a copy holds them,
 // {kind:{id:{field:value}}} (deep copies, so later in-place edits of the copy do not change them).
-const isLinked=id=>typeof id==='string'&&id.startsWith('sh.');
+// Records of environments combined with this one (cx.*, combined-core.js) are linked the same way: only
+// the edits this user makes to them are sent back to their own environments.
+const isLinked=id=>typeof id==='string'&&(id.startsWith('sh.')||id.startsWith('cx.'));
 export function linkedFields(d){
   const out={},R=recordsOf(d);
   for(const kind of Object.keys(SHARED_FIELDS))for(const x of R[kind])if(isLinked(x?.id)){

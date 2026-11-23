@@ -153,6 +153,12 @@ button.sc-k:hover{border-color:var(--line2);background:#fff}
 .acct-item.sub{height:28px;padding-left:22px;font-size:12px;color:var(--muted)}
 .acct-item.sub:hover,.acct-item.sub:focus-visible{color:var(--ink)}
 .acct-item.sub span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.acct-envrow{display:flex;align-items:center;gap:2px}
+.acct-envrow .acct-item{flex:1;min-width:0}
+.acct-cx{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--faint)}
+.acct-cx:hover,.acct-cx:focus-visible{background:var(--hover);color:var(--ink)}
+.acct-cx.on{color:var(--flygon-dark)}
+.acct-cx-n{grid-column:1/-1;color:var(--flygon-dark);font-size:11px;font-weight:600}
 /* the one section header of Settings: title, optional hint, optional action on the right */
 .acct-sec{display:flex;align-items:center;gap:5px;min-height:26px;margin:14px 0 6px}
 .acct-panel>.acct-sec:first-child,.ak>.acct-sec:first-child{margin-top:0}

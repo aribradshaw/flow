@@ -5,7 +5,9 @@ import {cardsForItem,isOpen,readyToClose} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
 import {panel} from './motion.js';
-import {linkOf,canEdit,locked,lockedMsg,linkedTip,sharedBadge,sharedChip,sharedNote,sameSource,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {linkOf,canEdit,locked,lockedMsg,ownerMsg,linkedTip,sharedBadge,sharedChip,sharedNote,sameSource,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {isForeign} from './combined-core.js';
+import {combinedLegend,envName} from './combined.js';
 
 // Timeline items: {id,title,kind,status,priority,release,start,end?,projects[],owner,link,notes}; dates are YYYY-MM-DD.
 // start may be '' (unscheduled backlog): those items only appear on the Board and List.
@@ -159,10 +161,10 @@ function toolbar(){
     ${ib('check',ui.hideDone?'Show done & cancelled':'Hide done & cancelled',{cls:ui.hideDone?'on':'',attrs:'data-tl="hideDone"'})}
     ${ui.view==='gantt'?ib('branch',ui.showCards?'Hide DevOps cards':'Show DevOps cards\nCards with a due date and a project',{cls:ui.showCards?'on':'',attrs:'data-tl="showCards"'}):''}
     ${ib('tag','Projects',{cls:selected==='projects'?'on':'',attrs:'data-tl="projects"'})}
-    ${ib('plus',ui.view==='board'?'Add feature':'Add item',{key:keyLabel('timeline.add'),cls:'primary',attrs:'data-tl="add"'})}</div>`;
+    ${ib('plus',ui.view==='board'?'Add feature':'Add item',{key:keyLabel('timeline.add'),cls:'primary',attrs:'data-tl="add"'})}</div>${combinedLegend()}`;
 }
 // Project filter items: each project (with the chart card it sits under) plus Untagged.
-const projectItems=()=>[...projectOrder(db().projects).map(p=>({value:p.id,label:p.name,color:p.color,sub:cardName(p.entity)})),{value:'none',label:'Untagged',color:'#c4cbc8'}];
+const projectItems=()=>[...projectOrder(db().projects).map(p=>({value:p.id,label:p.name,color:p.color,sub:isForeign(p.id)?envName(p.id.split('.')[1]):cardName(p.entity)})),{value:'none',label:'Untagged',color:'#c4cbc8'}];
 export function action(name,b){
   ({
     add:()=>add(),
@@ -362,16 +364,17 @@ export function add(over={}){
   let it;
   change(()=>{
     it={id:uid(),title:`New ${KINDS[kind].label.split(' ')[0].toLowerCase()}`,kind,status:over.status||'planned',priority:'',release:'',start,end:KINDS[kind].range&&start?n2d(d2n(start)+13):'',
-      projects:over.projects||ui.projects.filter(p=>p!=='none').slice(0,1),owner:'',link:'',notes:''};
+      projects:over.projects||ui.projects.filter(p=>p!=='none'&&!isForeign(p)).slice(0,1),owner:'',link:'',notes:''};
     db().timeline.push(it);selected=it.id;
   });
   const t=$('#ti-title');t?.focus();t?.select();
 }
-const refuse=i=>{toast(linkOf(i)?.permission==='edit'?'Shared items belong to their owner. Remove the share in Settings › Sharing.':lockedMsg(i),true)};
+const refuse=i=>{toast(linkOf(i)?.foreign||linkOf(i)?.permission==='edit'?ownerMsg(i,'This item'):lockedMsg(i),true)};
 function remove(id){if(linkOf(item(id))){refuse(item(id));return}change(()=>{db().timeline=db().timeline.filter(i=>i.id!==id);for(const i of db().timeline)if(i.release===id)i.release='';for(const c of db().devops.cards)if(c.item===id)c.item='';selected=null})}
 function duplicate(id){const i=item(id);if(linkOf(i)){refuse(i);return}if(i)change(()=>{const c={...clone(i),id:uid(),title:i.title+' (copy)'};db().timeline.push(c);selected=c.id})}
+// This environment's own project of that name (never a combined environment's), or a new one.
 export function projectByName(name){
-  const found=db().projects.find(p=>p.name.toLowerCase()===name.toLowerCase());if(found)return found;
+  const found=db().projects.find(p=>!isForeign(p.id)&&p.name.toLowerCase()===name.toLowerCase());if(found)return found;
   const p={id:uid(),name:name.slice(0,80),color:PALETTE[db().projects.length%PALETTE.length],entity:''};db().projects.push(p);return p;
 }
 function addTag(input){
@@ -412,7 +415,7 @@ function itemHtml(i){
   // allows. Its projects are the owner's.
   const l=linkOf(i),ed=canEdit(i),ro=ed?'':' disabled';
   const k=KINDS[i.kind],people=chartNames(['person']);
-  const sugg=[...db().projects.filter(p=>!i.projects.includes(p.id)).map(p=>p.name),...chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase()))];
+  const sugg=[...db().projects.filter(p=>!isForeign(p.id)&&!i.projects.includes(p.id)).map(p=>p.name),...chartNames(['entity','area']).filter(n=>!db().projects.some(p=>p.name.toLowerCase()===n.toLowerCase()))];
   const link=/^https?:\/\//i.test(i.link)?`<a class="ib" href="${esc(i.link)}" target="_blank" rel="noopener" data-tip="Open link" aria-label="Open link">${icon('external')}</a>`:'';
   // Releases sharing a project come first in the target-release picker.
   const releases=db().timeline.filter(r=>r.kind==='release'&&r.id!==i.id&&sameSource(r,i)).sort((a,b)=>(b.projects.some(p=>i.projects.includes(p))-a.projects.some(p=>i.projects.includes(p)))||(a.start||'9999').localeCompare(b.start||'9999'));
@@ -459,7 +462,7 @@ export function inspectorClick(e){
   if(b.dataset.i==='shComment'&&i){postComment(modal.body,i).catch(err=>toast(err.message,true));return}
   if(i&&locked(i)&&(b.dataset.tset||b.dataset.untag||b.dataset.ti==='complete')){toast(lockedMsg(i),true);return}
   if(i&&linkOf(i)&&b.dataset.untag)return;
-  if(b.dataset.pdel&&linkOf(project(b.dataset.pdel))){toast('Shared projects belong to their owner.',true);return}
+  if(b.dataset.pdel&&linkOf(project(b.dataset.pdel))){toast(linkOf(project(b.dataset.pdel)).foreign?ownerMsg(project(b.dataset.pdel),'This project'):'Shared projects belong to their owner.',true);return}
   if(b.dataset.tset&&i){
     const [f,v]=b.dataset.tset.split(':');
     change(()=>{i[f]=f==='priority'&&i.priority===v?'':v;if(f==='kind'&&KINDS[v].range&&dated(i)&&!isRange(i))i.end=n2d(d2n(i.start)+13);if(f==='kind'&&v==='release')i.release=''});return;

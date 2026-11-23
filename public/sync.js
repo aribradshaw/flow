@@ -1,5 +1,8 @@
 import {store,adoptRemote} from './store.js';
 import {merge3,same,size,isSeed,fieldBase,clashes,withHeld,linkedFields,noteEdits,settleEdits} from './sync-core.js';
+import {cleanCombine} from './combined-core.js';
+import {getPref} from './prefs.js';
+// A relative import added here also needs its .replace(...) in test/sync-stale-copy.test.mjs.
 
 // Server sync: the server's copy of the environment is the source of truth; browser storage is the
 // offline cache. On load the browser asks the server for its workspace:
@@ -65,8 +68,12 @@ export function startSync(){
 }
 function schedule(ms){clearTimeout(timer);timer=setTimeout(push,ms)}
 
+// Other environments shown combined with this one (combined.js; docs/combined.md): the server adds their
+// cards, items and projects to what it serves (ids cx.<env>.<id>) and sends edits to them back to them.
+const combine=env=>cleanCombine(getPref('combinedEnvs'),env||st.env||'').join(',');
 async function get(env,since){
   const q=new URLSearchParams();if(env)q.set('env',env);if(since){q.set('since',since);if(st.shared)q.set('shared',st.shared)}
+  const cx=env?combine(env):'';if(cx)q.set('combine',cx);
   const r=await fetch('/api/workspace'+(q.size?'?'+q:''),{cache:'no-store'});
   return {status:r.status,data:await r.json().catch(()=>({}))};
 }
@@ -127,7 +134,8 @@ async function push(){
       const base=st.base?withHeld(fieldBase(st.base,sent),st.held):null;
       status('saving','Saving to the server…');
       let r;
-      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,intent:st.intent||{deleted:[],undo:false},sharedEdits:sentEdits,...(base?{fieldBase:base}:{}),...(allowShrink?{allowShrink:true}:{})})});}
+      const cx=combine(st.env);
+      try{r=await fetch(`/api/workspace?env=${encodeURIComponent(st.env)}${cx?'&combine='+encodeURIComponent(cx):''}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseRev:st.rev,data:sent,intent:st.intent||{deleted:[],undo:false},sharedEdits:sentEdits,...(base?{fieldBase:base}:{}),...(allowShrink?{allowShrink:true}:{})})});}
       catch{r=null}
       const d=r?await r.json().catch(()=>({})):{};
       if(r?.status===200){if(d.via)via=d.via;allowShrink=false;backoff=0;st.rev=d.rev;st.base=sent;st.held=null;st.edits=settleEdits(st.edits,sentEdits,sent,store.db);st.dirty=edits!==e0;if(!st.dirty)st.intent=null;

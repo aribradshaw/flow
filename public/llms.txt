@@ -17,6 +17,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [AgentFlow](/docs/index.html#agentflow): AgentFlow is an org chart for agentic work.
 - [OneProfileID photos](/docs/index.html#oneprofileid-photos): When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card.
 - [Chat](/docs/index.html#chat): With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards.
+- [Combined view](/docs/index.html#combined-view): The DevOps board and the Timeline can show several of your environments at once.
 - [3D office](/docs/index.html#3d-office): The 3D office is a small virtual office for one environment, where you can see your team and the coding agents they have running right now.
 
 ## API: Environments
