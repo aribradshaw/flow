@@ -957,7 +957,10 @@ async function resolveCards(req,user,refs){
   }
   return out;
 }
-const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards,officeDirect:sendOfficeDirect});
+// An office Direct recipient's OneProfileID account ID: the one stored at their sign-in (lib/users.mjs),
+// else their live session's. Server-side only; lib/chat.mjs matches it to a friend handle.
+const officeOpidId=async u=>{const stored=(await users.get(String(u?.email||'').toLowerCase()).catch(()=>null))?.opidId;return validOpidUser(stored)?stored:opidId(u)||''};
+const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards,officeDirect:sendOfficeDirect,opidIdFor:officeOpidId});
 
 // ---------- environments: a user's own workspaces (list, create, rename, archive) ----------
 //   GET /api/environments            -> [{id, name, visibility, rev, updatedAt}] the user owns

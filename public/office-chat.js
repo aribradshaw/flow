@@ -40,6 +40,9 @@ export function chatPrefix(value,selected='nearby'){
 }
 
 const privateChannel=id=>id==='direct'||id==='agent';
+// Direct messages are saved in Flow chat (and OneProfileID) only between OneProfileID friends.
+export const DIRECT_HINT='Saved in Flow chat for OneProfileID friends. Others get an office DM: not saved.';
+export const directHint=saved=>saved===false?'Not OPID friends: messages here aren’t saved.':saved===true?'Saved in Flow chat and OneProfileID.':DIRECT_HINT;
 const norm=value=>value.trim().toLowerCase();
 const agentId=a=>JSON.stringify([a.source,a.id]);
 
@@ -99,11 +102,13 @@ export function attachOfficeChat({form,env,me,api,show,toast,canSend,targets,sen
   const input=form.querySelector('input'),submit=form.querySelector('[type=submit]');
   form.insertAdjacentHTML('afterbegin','<button type="button" class="of-channel" aria-haspopup="true" aria-expanded="false"></button><div class="of-channel-menu" aria-label="Chat channels and recipients" hidden></div>');
   form.insertAdjacentHTML('beforebegin','<div class="of-chat-reply" role="status" hidden></div>');
-  form.insertAdjacentHTML('afterend','<small class="of-chat-privacy" hidden>Flow chat saves messages to verified friends. Office DM: not saved.</small>');
+  form.insertAdjacentHTML('afterend',`<small class="of-chat-privacy" hidden>${DIRECT_HINT}</small>`);
   const chip=form.querySelector('.of-channel'),menu=form.querySelector('.of-channel-menu');
   const notice=form.previousElementSibling,privacy=form.nextElementSibling;
   const draft=()=>chatDraft(input.value,selected,targets());
-  const hintFor=c=>c.id==='direct'?'Flow chat stores friends’ messages when available. Office DM: not saved.':c.placeholder||`Message ${c.label}`;
+  // What the last Direct send to each person said: saved in Flow chat, or not (not OneProfileID friends).
+  const directSaved=new Map();
+  const hintFor=(c,target)=>c.id==='direct'?directHint(target&&directSaved.get(target.id)):c.placeholder||`Message ${c.label}`;
   let selected={channel:'nearby'},sending=false,showChannels=false,noticeTimer;
   const post=({channel,from,text,bubbleOn})=>{
     if(active!==instance||!channels.has(channel)||typeof text!=='string'||!text.trim())return;
@@ -139,11 +144,12 @@ export function attachOfficeChat({form,env,me,api,show,toast,canSend,targets,sen
     const label=d.both?`Office + Agent`:c.label;
     const destination=d.target?` → ${d.target.name}`:'';
     chip.append(label+destination);
-    chip.title=[label+destination,hintFor(c)].join(' · ');
+    chip.title=[label+destination,hintFor(c,d.target)].join(' · ');
     chip.style.setProperty('--of-chat-color',c.color);
     input.placeholder=d.target||!privateChannel(c.id)?c.placeholder||`Message ${c.label}`:'Choose a recipient';
-    input.title=hintFor(c);
+    input.title=hintFor(c,d.target);
     privacy.hidden=c.id!=='direct';
+    if(!privacy.hidden)privacy.textContent=hintFor(c,d.target);
     submit.disabled=sending||!d.text.trim()||!!d.choices||(privateChannel(d.channel)&&!d.target);
     paintMenu(d);
   }
@@ -202,6 +208,7 @@ export function attachOfficeChat({form,env,me,api,show,toast,canSend,targets,sen
     try{
       const result=c.send?await c.send(body,{env,me:me(),post}):await sendOfficeChat(d,api,sendDirect);
       if(active!==instance)return;
+      if(d.channel==='direct'&&typeof result?.saved==='boolean')directSaved.set(d.target.id,result.saved);
       if(input.value===raw){input.value='';selected={channel:'nearby'}}
       if(result?.warning)toast?.(result.warning,true);
     }catch(error){if(active===instance)toast?.(error.message,true)}

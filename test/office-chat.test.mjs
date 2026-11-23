@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
-import {chatDraft,chatTargets,officeChat,sendOfficeChat} from '../public/office-chat.js';
+import {chatDraft,chatTargets,officeChat,sendOfficeChat,directHint,DIRECT_HINT} from '../public/office-chat.js';
 import {officeHub,officeState} from '../lib/office.mjs';
 
 const people=[{key:'self',name:'Me'},{key:'p1',name:'Sam'},{key:'p2',name:'Sam Lee'}];
@@ -130,4 +130,11 @@ test('Agent chat uses owner-only steer, respects can, and only shows a content-f
     assert.deepEqual(peer.events.filter(e=>e.type==='chatHint').at(-1).data,{key:a.key,channel:'agent'});
   }
   assert.deepEqual(markers,[['here','message',a.key,'agent']]);
+});
+
+test('Direct hint: saved for OneProfileID friends, a plain warning when the last send was not saved',()=>{
+  assert.equal(directHint(undefined),DIRECT_HINT);
+  assert.match(DIRECT_HINT,/OneProfileID friends/);
+  assert.equal(directHint(false),'Not OPID friends: messages here aren’t saved.');
+  assert.match(directHint(true),/Saved in Flow chat/);
 });

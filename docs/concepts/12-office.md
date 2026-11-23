@@ -39,7 +39,7 @@ Use the chip beside the chat box to choose a channel. **Esc** resets it to Nearb
 |---|---|---|
 | **Nearby** (white) | Plain text | People within 6 metres of your avatar get the bubble and log entry. The server checks distance when you send. |
 | **Office** (blue) | `/o message` | Everyone in this office gets the bubble and log entry. Flow saves the latest 50 Office messages. |
-| **Direct** (purple) | `@Person message` | You and the selected person get the message, and the recipient gets a **Reply** button. When OneProfileID supplies a verified handle and allows you to message that friend, it is saved in [Flow chat](11-chat.md). Otherwise it is relayed within this office as **Office DM: not saved**. Others may see an ellipsis over you. |
+| **Direct** (purple) | `@Person message` | You and the selected person get the message, and the recipient gets a **Reply** button. When you and that person are OneProfileID friends, it goes through OneProfileID chat and is saved in [Flow chat](11-chat.md) and OneProfileID. Otherwise it is relayed within this office as **Office DM: not saved**, and the hint under the box says **Not OPID friends: messages here aren't saved**. Others may see an ellipsis over you. |
 | **Agent** (orange) | `@Agent message` | Your selected agent receives it through its reporter. You see the text and replies appear in the agent's transcript as usual. Other people see only that you're talking to an agent. |
 | **Office + Agent** | `/o @Agent message` | Two sends: a public Office message and a message to your selected agent. |
 
