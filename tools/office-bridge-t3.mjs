@@ -1,6 +1,6 @@
 import {execFile, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {existsSync, readFileSync} from 'node:fs';
+import {existsSync, readFileSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {basename, delimiter, dirname, join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -107,6 +107,46 @@ function pendingFor(row, item) {
   };
 }
 
+function readPending(db) {
+  const waiting = new Map();
+  for (const row of optional(db, `SELECT thread_id, kind, runtime_request_id FROM ${requests}
+    WHERE resolved_at IS NULL AND status NOT IN ('resolved','cancelled','expired') ORDER BY created_at, runtime_request_id`)) {
+    if (typeof row.runtime_request_id !== 'string' || !row.runtime_request_id || waiting.has(row.thread_id)) continue;
+    const prompts = optional(db, `SELECT payload_json FROM ${items}
+      WHERE thread_id=? AND type IN ('approval_request','user_input_request') ORDER BY ordinal DESC`, row.thread_id);
+    const prompt = prompts.map(row => parseJson(row.payload_json)).find(p => p.requestId === row.runtime_request_id);
+    waiting.set(row.thread_id, pendingFor(row, prompt));
+  }
+  return waiting;
+}
+
+export function createT3PromptDetector(DatabaseSync, path) {
+  let db, identity, version, signature;
+  function close() { db?.close(); db = undefined; version = undefined; }
+  function check() {
+    try {
+      const stat = statSync(path);
+      const key = stat.dev + ':' + stat.ino;
+      if (!db || key !== identity) {
+        close();
+        db = open(DatabaseSync, path);
+        db.exec('PRAGMA busy_timeout=50');
+        identity = key;
+      }
+      const nextVersion = db.prepare('PRAGMA data_version').get().data_version;
+      if (nextVersion === version) return false;
+      const next = JSON.stringify([...readPending(db)].sort());
+      const changed = signature !== next && (signature !== undefined || next !== '[]');
+      [version, signature] = [nextVersion, next];
+      return changed;
+    } catch {
+      close();
+      return false;
+    }
+  }
+  return {check, close};
+}
+
 export function readT3(DatabaseSync, path) {
   const agents = new Map();
   const nativeIds = new Set();
@@ -121,13 +161,7 @@ export function readT3(DatabaseSync, path) {
     for (const row of db.prepare(`SELECT * FROM ${runs} WHERE status IN ('running','queued','starting') ORDER BY ordinal`).all()) {
       if (row.status !== 'queued' || !parseJson(row.payload_json).queueHeld) live.set(row.thread_id, row);
     }
-    const waiting = new Map();
-    for (const row of optional(db, `SELECT * FROM ${requests} WHERE resolved_at IS NULL
-      AND status NOT IN ('resolved','cancelled','expired') ORDER BY created_at, runtime_request_id`)) {
-      if (typeof row.runtime_request_id === 'string' && row.runtime_request_id && !waiting.has(row.thread_id)) {
-        waiting.set(row.thread_id, row);
-      }
-    }
+    const waiting = readPending(db);
 
     for (const thread of db.prepare(`SELECT * FROM ${threads} WHERE deleted_at IS NULL`).all()) {
       const id = thread.thread_id;
@@ -138,14 +172,7 @@ export function readT3(DatabaseSync, path) {
       const state = parseJson(thread.payload_json);
       const selection = parseJson(run?.payload_json).modelSelection ?? state.modelSelection;
       const provider = run?.provider || state.providerInstanceId;
-      let pending = null;
-      if (request) {
-        // Match the exact request rather than inferring it from the last turn item.
-        const prompts = optional(db, `SELECT payload_json FROM ${items}
-          WHERE thread_id=? AND type IN ('approval_request','user_input_request') ORDER BY ordinal DESC`, id);
-        const prompt = prompts.map(row => parseJson(row.payload_json)).find(p => p.requestId === request.runtime_request_id);
-        pending = pendingFor(request, prompt);
-      }
+      const pending = request ?? null;
       const latest = run && optional(db, `SELECT type, payload_json FROM ${items}
         WHERE thread_id=? AND run_id=? AND type NOT IN ('checkpoint','user_message')
         ORDER BY ordinal DESC LIMIT 1`, id, run.run_id)[0];
@@ -205,44 +232,58 @@ function readRequest(DatabaseSync, path, id) {
   }
 }
 
-function dispatch(url, command, stillPending, signal) {
+function openSocket(url, signal) {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
     const ws = new WebSocket(url, {headers: {origin: 'http://' + url.host}});
-    let opened = false;
-    let settled = false;
-    const onAbort = () => finish(false, signal.reason);
-    const timer = setTimeout(() => finish(false, new Error('T3 did not answer in time.')), 20000);
-    function finish(result, error) {
-      if (settled) return;
-      settled = true;
+    const onOpen = () => finish(ws);
+    const onClose = () => finish(null);
+    const onAbort = () => finish(null, signal.reason);
+    function finish(socket, error) {
+      ws.removeEventListener('open', onOpen);
+      ws.removeEventListener('close', onClose);
+      signal.removeEventListener('abort', onAbort);
+      if (!socket) ws.close();
+      if (error) reject(error);
+      else resolve(socket);
+    }
+    ws.addEventListener('open', onOpen, {once: true});
+    ws.addEventListener('close', onClose, {once: true});
+    signal.addEventListener('abort', onAbort, {once: true});
+  });
+}
+
+function sendCommand(ws, id, command, stillValid, signal) {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    if (!stillValid()) throw new Error('This request is no longer current in T3.');
+    if (ws.readyState !== WebSocket.OPEN) throw new Error('T3 closed the connection.');
+    const onAbort = () => finish(signal.reason, true);
+    const onClose = () => finish(new Error('T3 closed the connection before confirming the response.'));
+    const timer = setTimeout(() => finish(new Error('T3 did not answer in time.'), true), 20000);
+    function finish(error, close = false) {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
-      ws.close();
+      ws.removeEventListener('close', onClose);
+      ws.removeEventListener('message', onMessage);
+      if (close) ws.close();
       if (error) reject(error);
-      else resolve(result);
+      else resolve();
     }
-    signal.addEventListener('abort', onAbort, {once: true});
-    ws.addEventListener('open', () => {
-      opened = true;
-      try {
-        if (!stillPending()) throw new Error('This request is no longer current in T3.');
-        ws.send(JSON.stringify({_tag: 'Request', id: '1', tag: 'orchestration.dispatchCommand', payload: command, headers: []}));
-      } catch (err) {
-        finish(false, err);
-      }
-    }, {once: true});
-    ws.addEventListener('close', () => {
-      // Retry the handshake only if the socket never opened, so a command is dispatched at most once.
-      finish(false, opened ? new Error('T3 closed the connection before confirming the response.') : null);
-    }, {once: true});
-    ws.addEventListener('message', event => {
+    function onMessage(event) {
       const data = parseJson(event.data);
       const messages = Array.isArray(data) ? data : [data];
-      const reply = messages.find(message => message?._tag === 'Exit' && message.requestId === '1');
-      if (!reply) return;
-      finish(true, reply.exit?._tag === 'Success' ? null : new Error('T3 rejected the command.'));
-    });
+      const reply = messages.find(message => message?._tag === 'Exit' && message.requestId === id);
+      if (reply) finish(reply.exit?._tag === 'Success' ? null : new Error('T3 rejected the command.'));
+    }
+    signal.addEventListener('abort', onAbort, {once: true});
+    ws.addEventListener('close', onClose, {once: true});
+    ws.addEventListener('message', onMessage);
+    try {
+      ws.send(JSON.stringify({_tag: 'Request', id, tag: 'orchestration.dispatchCommand', payload: command, headers: []}));
+    } catch (error) {
+      finish(error, true);
+    }
   });
 }
 
@@ -257,15 +298,7 @@ function t3Env(path) {
   return env;
 }
 
-// One orchestration command on the local T3 server, the way the T3 app sends it: a short-lived token from
-// `t3 auth session issue`, a WebSocket ticket, then orchestration.dispatchCommand. stillValid() is checked
-// right before it is sent.
-export async function dispatchT3(path, command, stillValid, signal) {
-  const userdata = dirname(path);
-  const runtime = parseJson(readFileSync(join(userdata, 'server-runtime.json'), 'utf8'));
-  if (!Number.isInteger(runtime.port) || runtime.port < 1 || runtime.port > 65535) {
-    throw new Error('T3 runtime port is unavailable.');
-  }
+async function issueBearer(path, signal) {
   const args = ['auth', 'session', 'issue', '--scope', 'orchestration:read',
     '--scope', 'orchestration:operate', '--ttl', '2m', '--label', 'flow-office-bridge', '--token-only'];
   const options = {timeout: 15000, maxBuffer: 32768, windowsHide: true, signal, env: t3Env(path)};
@@ -275,34 +308,102 @@ export async function dispatchT3(path, command, stillValid, signal) {
     : exec('t3', args, options));
   const token = stdout.trim().split(/\r?\n/).at(-1);
   if (!token) throw new Error('T3 did not issue a bearer token.');
-  const host = '127.0.0.1:' + runtime.port;
+  return token;
+}
 
+function runtimePort(path) {
+  const runtime = parseJson(readFileSync(join(dirname(path), 'server-runtime.json'), 'utf8'));
+  if (!Number.isInteger(runtime.port) || runtime.port < 1 || runtime.port > 65535) {
+    throw new Error('T3 runtime port is unavailable.');
+  }
+  return runtime.port;
+}
+
+async function dial(port, token, signal) {
+  const host = '127.0.0.1:' + port;
   for (const protocol of ['2', '']) {
     const response = await fetch('http://' + host + '/api/auth/websocket-ticket/rpc', {
       method: 'POST', headers: {authorization: 'Bearer ' + token}, redirect: 'error',
       signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
     });
-    if (!response.ok) throw new Error('T3 refused to issue a WebSocket ticket.');
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw Object.assign(new Error('T3 refused to issue a WebSocket ticket.'), {status: response.status});
+    }
     const {ticket} = await response.json();
     if (typeof ticket !== 'string' || !ticket) throw new Error('T3 returned an invalid WebSocket ticket.');
     const url = new URL('ws://' + host + '/ws');
     url.searchParams.set('wsTicket', ticket);
     if (protocol) url.searchParams.set('orchestrationProtocol', protocol);
-    if (await dispatch(url, command, stillValid, signal)) return;
+    const socket = await openSocket(url, AbortSignal.any([signal, AbortSignal.timeout(10000)]));
+    if (socket) return socket;
   }
   throw new Error('T3 refused the WebSocket connection.');
 }
 
-export function respondT3(path, {agentId, requestId, decision}, stillPending, signal) {
-  return dispatchT3(path, {
+export function createT3Session(path, signal, {now = () => Date.now(), issue = issueBearer, connect = dial,
+  portOf = runtimePort} = {}) {
+  let token, socket, port, opening, sequence = 0, renewAt = 0;
+  function closeSocket() { socket?.close(); socket = undefined; }
+  signal.addEventListener('abort', closeSocket, {once: true});
+
+  async function getSocket() {
+    signal.throwIfAborted();
+    const currentPort = portOf(path);
+    if (currentPort === port && socket?.readyState === WebSocket.OPEN && now() < renewAt) return socket;
+    if (opening) return opening;
+
+    opening = (async () => {
+      closeSocket();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (currentPort !== port || !token || now() >= renewAt) {
+          const start = now();
+          token = await issue(path, signal);
+          renewAt = start + 110000;
+          port = currentPort;
+        }
+        try {
+          const connected = await connect(port, token, signal);
+          if (signal.aborted) connected.close();
+          signal.throwIfAborted();
+          return socket = connected;
+        } catch (error) {
+          if (error.status !== 401 || attempt) throw error;
+          token = undefined;
+        }
+      }
+    })();
+    try { return await opening; }
+    finally { opening = undefined; }
+  }
+
+  return {
+    async warm() { await getSocket(); },
+    async dispatch(command, stillValid, actionSignal = signal) {
+      const ws = await getSocket();
+      // Once sent, the outcome may be ambiguous after a disconnect. Reconnect for the next command.
+      await sendCommand(ws, String(++sequence), command, stillValid, actionSignal);
+    },
+  };
+}
+
+export async function dispatchT3(path, command, stillValid, signal) {
+  const controller = new AbortController();
+  const session = createT3Session(path, AbortSignal.any([signal, controller.signal]));
+  try { await session.dispatch(command, stillValid); }
+  finally { controller.abort(); }
+}
+
+export function respondT3(path, {agentId, requestId, decision}, stillPending, signal, dispatch = dispatchT3) {
+  return dispatch(path, {
     type: 'runtime-request.respond', commandId: randomUUID(), threadId: agentId, requestId,
     decision: decision === 'allow' ? 'accept' : 'decline',
   }, stillPending, signal);
 }
 
 // Stop: interrupt the thread's running turn (run.interrupt, as T3's own stop button and t3_thread_interrupt do).
-export function stopT3(path, {agentId, runId}, stillRunning, signal) {
-  return dispatchT3(path, {type: 'run.interrupt', commandId: randomUUID(), threadId: agentId, runId,
+export function stopT3(path, {agentId, runId}, stillRunning, signal, dispatch = dispatchT3) {
+  return dispatch(path, {type: 'run.interrupt', commandId: randomUUID(), threadId: agentId, runId,
     reason: 'Stopped from the Flow office'}, stillRunning, signal);
 }
 
@@ -383,7 +484,8 @@ export function createT3Responder(DatabaseSync, path, send = respondT3, {message
     try {
       if (!stillPending()) return failure('This approval is no longer pending or must be answered locally.');
       await send(path, action, stillPending, signal);
-      for (let i = 0; i < 20; i++) {
+      const deadline = Date.now() + 5000;
+      do {
         const row = readRequest(DatabaseSync, path, action.requestId);
         if (!row || row.thread_id !== action.agentId) return failure('T3 no longer has this request.');
         if (row.status === 'resolved') {
@@ -392,8 +494,8 @@ export function createT3Responder(DatabaseSync, path, send = respondT3, {message
           return {ok: true, message: action.decision === 'allow' ? 'Approved in T3 Code.' : 'Denied in T3 Code.'};
         }
         if (terminal.has(row.status)) return failure('T3 closed this request before confirming the decision.');
-        await delay(250, undefined, {signal});
-      }
+        await delay(25, undefined, {signal});
+      } while (Date.now() < deadline);
       return failure('T3 did not confirm the decision. Check the request in T3 Code.');
     } catch {
       // CLI errors can include local paths or authentication output.

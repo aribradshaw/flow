@@ -8,9 +8,9 @@ import {DatabaseSync} from 'node:sqlite';
 import {test} from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {promisify} from 'node:util';
-import {makePayload, normalizeRemote, runBridge, createRepoResolver, agentflowOf} from '../tools/office-bridge.mjs';
+import {createReportWake, makePayload, normalizeRemote, runBridge, createRepoResolver, agentflowOf} from '../tools/office-bridge.mjs';
 import {createClaudeScanner} from '../tools/office-bridge-claude.mjs';
-import {createT3Responder, readT3} from '../tools/office-bridge-t3.mjs';
+import {createT3PromptDetector, createT3Responder, createT3Session, readT3} from '../tools/office-bridge-t3.mjs';
 
 const exec = promisify(execFile);
 const source = 'bridge:fixture';
@@ -100,6 +100,92 @@ test('reads T3 worktrees, models, activity, lineage and exact pending requests f
   assert.equal(parent.children.length, 2);
   assert.deepEqual(parent.children[0], {id: 'child', title: 'Review tests', vendor: 'gemini', model: 'Gemini-3-pro', status: 'running'});
   assert.deepEqual(parent.children[1], {id: 'inline', title: 'Research', vendor: 'claude', model: 'Opus 5.5', status: 'running'});
+});
+
+test('prompt detector ignores unrelated commits and sees a new or edited prompt', t => {
+  const {path, settle} = fixture(t);
+  const writer = new DatabaseSync(path);
+  writer.exec('PRAGMA journal_mode=WAL');
+  const detector = createT3PromptDetector(DatabaseSync, path);
+  t.after(() => { detector.close(); writer.close(); });
+  assert.equal(detector.check(), true);
+  assert.equal(detector.check(), false);
+  writer.exec(`UPDATE ${prefix}threads SET title='Other title' WHERE thread_id='main'`);
+  assert.equal(detector.check(), false);
+  writer.prepare(`UPDATE ${prefix}turn_items SET payload_json=? WHERE ordinal=3`)
+    .run(JSON.stringify({requestId: 'r-1', prompt: 'Run true?'}));
+  assert.equal(detector.check(), true);
+  settle('r-1', 'resolved', 'accept');
+  assert.equal(detector.check(), true);
+  assert.equal(detector.check(), false);
+});
+
+test('prompt notifications wake the report early and coalesce within the debounce', async () => {
+  const report = createReportWake();
+  const signal = AbortSignal.timeout(1000);
+  const start = performance.now();
+  const waiting = report.wait(3000, signal);
+  report.notify();
+  await delay(20);
+  report.notify();
+  await waiting;
+  assert.ok(performance.now() - start >= 90);
+  assert.equal(signal.aborted, false);
+  const controller = new AbortController();
+  const idle = report.wait(3000, controller.signal);
+  const early = await Promise.race([idle.then(() => true), delay(150, false)]);
+  controller.abort();
+  await idle;
+  assert.equal(early, false);
+});
+
+test('T3 session reuses the bearer and socket, reconnects and renews the token', async () => {
+  class Socket extends EventTarget {
+    readyState = WebSocket.OPEN;
+    ids = [];
+    send(frame) {
+      const {id} = JSON.parse(frame);
+      this.ids.push(id);
+      this.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({_tag: 'Exit', requestId: id, exit: {_tag: 'Success'}}),
+      }));
+    }
+    close() {
+      this.readyState = WebSocket.CLOSED;
+      this.dispatchEvent(new Event('close'));
+    }
+  }
+  const sockets = [];
+  const tokens = [];
+  const controller = new AbortController();
+  let time = 0, issued = 0;
+  const session = createT3Session('fixture', controller.signal, {
+    now: () => time, portOf: () => 1234,
+    issue: async () => 'token-' + ++issued,
+    connect: async (_port, token) => {
+      tokens.push(token);
+      const socket = new Socket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  try {
+    await session.warm();
+    await session.dispatch({}, () => true);
+    await session.dispatch({}, () => true);
+    await assert.rejects(session.dispatch({}, () => false), /no longer current/);
+    assert.deepEqual(sockets[0].ids, ['1', '2']);
+    assert.equal(issued, 1);
+    sockets[0].close();
+    await session.dispatch({}, () => true);
+    assert.deepEqual(tokens, ['token-1', 'token-1']);
+    time = 110000;
+    await session.warm();
+    assert.deepEqual(tokens, ['token-1', 'token-1', 'token-2']);
+  } finally {
+    controller.abort();
+  }
+  assert.equal(sockets.at(-1).readyState, WebSocket.CLOSED);
 });
 
 test('payload limits keep waiting agents, bound body size, and resolve safe Git remotes', async t => {

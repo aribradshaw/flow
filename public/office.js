@@ -803,7 +803,7 @@ function refreshPanel(){
         <p class="of-note">Its details are private: it works in a repo outside the projects you can see here.</p></div>`;
       else{
         let prompt='';
-        if(a.pending){
+        if(a.pending&&!(ans?.requestId===a.pending.requestId&&ans.result?.ok)){
           const can=a.mine&&a.pending.can?.length;
           prompt=`<div class="of-prompt"><div class="of-pk">${a.pending.kind==='question'?'Question':'Permission prompt'}</div><pre>${esc(a.pending.summary||'')}</pre>
             ${can&&(ans?.requestId!==a.pending.requestId||ans.state==='failed')?`<div class="of-btns">${a.pending.can.includes('allow')?`<button type="button" class="txt primary" data-of="allow">${icon('check',13)}Allow</button>`:''}${a.pending.can.includes('deny')?`<button type="button" class="txt" data-of="deny">${icon('ban',13)}Deny</button>`:''}</div>`:''}
@@ -822,7 +822,7 @@ function refreshPanel(){
   for(const b of S.panel.querySelectorAll('[data-seat-agent]'))b.addEventListener('click',()=>showAgent(b.dataset.seatMember,b.dataset.seatAgent));
 }
 // ---------- Allow / Deny: one state flow ----------
-// Click: "Approved" or "Denied" at once, and the mascot nods (and works) or shakes. The reporter's result
+// Click: "Allowing…" or "Denying…" at once, and the mascot nods (and works) or shakes. The reporter's result
 // either fails ("…isn't waiting any more", shown in red, the work stops) or goes through; an approved one
 // shows "Running…" once its next report has it running with nothing pending, then clears. Nothing back
 // in 20 s: "Still waiting on <host>…".
@@ -838,16 +838,18 @@ function decide(decision){
 function answerSent(a){const cur=S.answers.get(a.agentId);S.answers.set(a.agentId,{...cur,...a,state:cur?.state==='failed'?'sent':cur?.state||'sent',at:cur?.at||Date.now()});refreshPanel()}
 function answerResult(a){
   const cur=S.answers.get(a.agentId)||{},ok=!!a.result?.ok,next={...cur,...a,state:ok?'done':'failed'};
-  if(cur.state==='running')next.state='running';
+  if(cur.requestId&&cur.requestId!==a.requestId)return;
+  if(cur.state==='running'&&ok)next.state='running';
   S.answers.set(a.agentId,next);
   if(!ok||a.decision==='deny')S.reactions?.settle(reactKey(a.agentId));
+  if(ok&&a.decision==='allow')answersSeen(S.live.get(S.meKey)||[]);
   if(ok&&a.decision==='deny')setTimeout(()=>{if(S?.answers.get(a.agentId)===next){S.answers.delete(a.agentId);refreshPanel()}},ANSWER_DONE_MS);
   refreshPanel();
 }
 // My agents' next report: an approved one running again with nothing pending is "Running…", then done.
 function answersSeen(agents){
   for(const [id,ans] of S.answers){
-    if(ans.decision!=='allow'||ans.state==='failed'||ans.state==='running'||ans.state==='gone')continue;
+    if(ans.decision!=='allow'||ans.state!=='done')continue;
     const a=agents.find(x=>x.id===id);
     if(!a){S.reactions?.settle(reactKey(id));continue}
     if(a.pending&&a.pending.requestId===ans.requestId)continue; // still on that prompt
@@ -863,7 +865,7 @@ function answerHtml(ans,a){
   const word=ans.decision==='allow'?'Approved':'Denied',slow=ans.state==='sent'&&Date.now()-(ans.at||Date.now())>ANSWER_SLOW;
   if(ans.state==='failed')return `<p class="of-res bad" role="status">${esc(ans.result?.message||'That did not go through')}</p>`;
   if(ans.state==='running')return `<p class="of-res ok" role="status">${icon('check',12)} Approved · Running…</p>`;
-  if(slow)return `<p class="of-res" role="status">${word}. Still waiting on ${esc(ans.host||a.hostLabel||a.host||'its machine')}…</p>`;
+  if(ans.state==='sent')return `<p class="of-res" role="status">${ans.decision==='allow'?'Allowing':'Denying'}…${slow?` Still waiting on ${esc(ans.host||a.hostLabel||a.host||'its machine')}…`:''}</p>`;
   return `<p class="of-res ${ans.decision==='allow'?'ok':''}" role="status">${icon(ans.decision==='allow'?'check':'ban',12)} ${word}${ans.state==='done'&&ans.result?.message?` · ${esc(ans.result.message)}`:''}</p>`;
 }
 

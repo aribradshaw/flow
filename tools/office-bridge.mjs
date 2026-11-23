@@ -4,7 +4,7 @@ import {basename, join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs, promisify} from 'node:util';
 import {createClaudeScanner} from './office-bridge-claude.mjs';
-import {createT3Responder, defaultT3Db, loadSqlite, readT3, short} from './office-bridge-t3.mjs';
+import {createT3PromptDetector, createT3Responder, createT3Session, defaultT3Db, loadSqlite, readT3, respondT3, short, stopT3} from './office-bridge-t3.mjs';
 import {transcriptText} from '../lib/office-mask.mjs';
 
 const exec = promisify(execFile);
@@ -182,8 +182,36 @@ function requestFlow(cfg, signal) {
   };
 }
 
+export function createReportWake() {
+  let pending = false;
+  let wake;
+  return {
+    notify() { pending = true; wake?.(); },
+    async wait(ms, signal) {
+      if (!pending && ms > 0 && !signal.aborted) {
+        await new Promise(resolve => {
+          const timer = setTimeout(done, ms);
+          function done() {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', done);
+            wake = undefined;
+            resolve();
+          }
+          wake = done;
+          signal.addEventListener('abort', done, {once: true});
+        });
+      }
+      if (pending) {
+        try { await delay(100, undefined, {signal}); }
+        catch (error) { if (!signal.aborted) throw error; }
+        pending = false;
+      }
+    },
+  };
+}
+
 export async function runBridge({cfg, source, scan, respond, signal, interval = 3000, once = false, dryRun = false,
-  print = console.log, log = console.error, sleep = delay}) {
+  print = console.log, log = console.error, sleep = delay, reportWake}) {
   const request = requestFlow(cfg, signal);
   const jobs = new Map();
   let respondQueue = Promise.resolve();
@@ -205,9 +233,13 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
           try { result = await respond({...action, kind}, signal); }
           catch { result = {ok: false, message: 'Could not reach the local agent.'}; }
         }
-        job.result = result;
         // Messages and stops are logged with the agent and the outcome, never the message's text.
         log('office bridge: ' + (kind === 'answer' ? '' : `${kind} for ${short(action.agentId, 120)}: ${result.ok ? 'ok' : 'failed'}: `) + result.message);
+        job.result = result;
+        if (!once) {
+          job.next = Infinity;  // The retry loop starts only if this POST fails.
+          void ack(job);
+        }
       });
     }
   }
@@ -217,13 +249,14 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
     return Math.max(min, Math.min(error.retryAfter ?? 0, 300_000), backoff[Math.min(failures, backoff.length - 1)]);
   }
 
-  async function ack(job) {
+  async function ack(job, result = job.result) {
     try {
-      await request('POST', '/actions/' + encodeURIComponent(job.action.id), job.result);
+      await request('POST', '/actions/' + encodeURIComponent(job.action.id), result);
       job.ackedAt = Date.now();
       if (job.failures) log('office bridge: action acknowledgement recovered');
     } catch (error) {
-      if (signal.aborted || once) throw error;
+      if (once) throw error;
+      if (signal.aborted) return;
       if (!job.failures) log('office bridge: could not acknowledge an action' + (error.status ? ' (HTTP ' + error.status + ')' : ''));
       if (error.status === 404) job.ackedAt = Date.now();
       else job.next = Date.now() + retryMs(error, job.failures++);
@@ -270,14 +303,15 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
         state = reason;
         wait = retryMs(error, failures++);
       }
-      if (wait) await sleep(wait, undefined, {signal}).catch(error => { if (!signal.aborted) throw error; });
+      if (label === 'report' && reportWake && !failures) await reportWake.wait(wait, signal);
+      else if (wait) await sleep(wait, undefined, {signal}).catch(error => { if (!signal.aborted) throw error; });
     }
   }
 
   if (dryRun) return loop('scan', report, interval);
   const query = new URLSearchParams({source, wait: '25'});
   const reports = loop('report', report, interval);
-  const poll = loop('action poll', async () => enqueue(await request('GET', '/actions?' + query)), 500);
+  const poll = loop('action poll', async () => enqueue(await request('GET', '/actions?' + query)), 25);
   const acknowledgements = loop('action acknowledgement', async () => {
     const now = Date.now();
     for (const [id, job] of jobs) {
@@ -330,11 +364,25 @@ export async function officeBridge(cfg, argv) {
   const stop = () => controller.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+  const session = createT3Session(path, controller.signal);
+  const dispatch = (_path, command, valid, signal) => session.dispatch(command, valid, signal);
+  const reportWake = createReportWake();
+  let detector, promptTimer, warmTimer;
+  if (!values.once && !values['dry-run']) {
+    detector = createT3PromptDetector(DatabaseSync, path);
+    detector.check();
+    promptTimer = setInterval(() => { if (detector.check()) reportWake.notify(); }, 200);
+    const warm = () => session.warm().catch(() => {});
+    warm();
+    warmTimer = setInterval(warm, 5000);
+  }
   let t3Unavailable = false;
   try {
     await runBridge({
-      cfg, source, interval, once: values.once, dryRun: values['dry-run'], signal: controller.signal,
-      respond: createT3Responder(DatabaseSync, path),
+      cfg, source, interval, once: values.once, dryRun: values['dry-run'], signal: controller.signal, reportWake,
+      respond: createT3Responder(DatabaseSync, path, (...args) => respondT3(...args, dispatch), {
+        stop: (...args) => stopT3(...args, dispatch),
+      }),
       scan: async () => {
         const now = Date.now();
         let data;
@@ -351,6 +399,10 @@ export async function officeBridge(cfg, argv) {
       },
     });
   } finally {
+    controller.abort();
+    clearInterval(promptTimer);
+    clearInterval(warmTimer);
+    detector?.close();
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }
