@@ -240,7 +240,9 @@ function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
   const empty=!sources.length;
   S.root.querySelector('.of-connect-callout').hidden=!empty;
-  S.root.querySelector('.of-connect-link').hidden=empty;
+  const link=S.root.querySelector('.of-connect-link');link.hidden=empty;
+  // Connected already: the header button is for adding another machine, so say so.
+  if(!empty){const n=sources.length;link.textContent=`✓ ${n} machine${n===1?'':'s'} connected · Add another`;link.title=sources.map(x=>x.source||x.name||'').filter(Boolean).join(', ')}
 }
 function connectAgents(opener){
   const office=S;
