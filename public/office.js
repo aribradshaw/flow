@@ -10,6 +10,7 @@ import {esc,uid} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
 import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
+import {classicLayout,toWorld,ROOM_W,ROOM_D,WALL_T,WALL_H,BACK_WALL_H,DOOR_W} from './office-layout.js';
 import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
@@ -25,7 +26,7 @@ import {notifyOn,toggleNotify} from './office-alerts.js';
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
 const EMOTES=[['wave','👋','Wave'],['thumbs','👍','Thumbs up'],['clap','👏','Clap'],['heart','❤️','Heart']];
-const SAY_RADIUS=14,SEND_MS=100,ROOM_W=12,ROOM_D=9;
+const SAY_RADIUS=14,SEND_MS=100;
 let S=null; // the open office
 
 // ---------- opening and closing ----------
@@ -285,7 +286,7 @@ function initScene(){
   Object.assign(M,{
     box:new THREE.BoxGeometry(1,1,1),ico:new THREE.IcosahedronGeometry(1,0),ico1:new THREE.IcosahedronGeometry(1,1),oct:new THREE.OctahedronGeometry(1,0),
     cyl:new THREE.CylinderGeometry(1,1,1,7),cone:new THREE.ConeGeometry(1,1,6),torus:new THREE.TorusGeometry(0.62,0.12,5,14),disc:new THREE.CircleGeometry(1,16),
-    wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
+    wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:mat('#3d4c56'),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
   });
   S.world=new THREE.Group();scene.add(S.world);
   Object.assign(S,{renderer,scene,camera,ground,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
@@ -299,7 +300,7 @@ function initScene(){
   // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN});
   const openCard=id=>openOverlay('card',id);
-  S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
+  S.boards=createOfficeBoards({env:S.env,envName:S.opts.offices.find(o=>o.id===S.env)?.name,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
       return kind==='agent'&&entry.cls?.includes('agent')?agentOf(member,id)?.seat?.card:null;
@@ -325,42 +326,70 @@ function toggleControls(){
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
 function clear(group){group.removeFromParent();group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
-function label(obj,html,{y=1.6,cls='',near=0,show=null}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show};S.labelList.push(l);return l}
+// top: the label hangs below its point (a plate on a wall) instead of standing on it.
+function label(obj,html,{y=1.6,cls='',near=0,show=null,top=false}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show,top};S.labelList.push(l);return l}
 
 // ---------- rooms ----------
-function layout(n){
-  const R=Math.max(17,(S.commonR||10)+ROOM_D/2+5,n*(ROOM_W+3)/(2*Math.PI)+6),out=[];
-  for(let i=0;i<n;i++){const a=-Math.PI/2+i/n*Math.PI*2,c=new THREE.Vector3(Math.cos(a)*R,0,Math.sin(a)*R),facing=Math.atan2(-c.x,-c.z);out.push({c,facing})}
-  return out;
-}
+// The world (office-layout.js) places the rooms and the main board's feature wall. A room has low walls so
+// you can see in, a tall back wall its whiteboard hangs on, and a door with its name plate beside it.
 function buildRooms(){
   const previous=S.rooms;
   S.rooms=new Map();
   for(const r of previous.values())clear(r.group);
-  S.walls=[];S.overviewRadius=12;
+  if(S.mainWall){clear(S.mainWall);S.mainWall=null}
+  S.walls=[];
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
-  layout(list.length).forEach(({c,facing},i)=>{
-    const m=list[i],[bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
+  const byKey=new Map(list.map(m=>[m.key,m]));
+  S.worldLayout=classicLayout(list.map(m=>m.key),{commonR:S.commonR||10});
+  S.overviewRadius=Math.max(12,S.worldLayout.radius+8);
+  const boxAt=(frame,x,z,w,d,h)=>{const p=toWorld(frame,x,z);S.walls.push(officeBox(p.x,p.z,frame.facing,w,d,h))};
+  for(const slot of S.worldLayout.rooms){
+    const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,0,slot.z),facing=slot.facing;
+    const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
     const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
-    const cos=Math.cos(facing),sin=Math.sin(facing);
-    S.overviewRadius=Math.max(S.overviewRadius,Math.hypot(c.x,c.z)+8);
-    const wall=(x,z,w,d)=>{
-      g.add(part(M.box,M.wall,[x,0.55,z],[w,1.1,d]));
-      S.walls.push(officeBox(c.x+x*cos+z*sin,c.z-x*sin+z*cos,facing,w,d,1.1));
-    };
-    wall(0,-ROOM_D/2,ROOM_W,0.2);wall(-ROOM_W/2,0,0.2,ROOM_D);wall(ROOM_W/2,0,0.2,ROOM_D);
-    const side=(ROOM_W-3)/2;wall(-(3/2+side/2),ROOM_D/2,side,0.2);wall(3/2+side/2,ROOM_D/2,side,0.2);
-    const stripe=part(M.box,mat(fg),[0,1.12,-ROOM_D/2],[ROOM_W,0.06,0.24]);stripe.userData.own=true;g.add(stripe);
+    const wall=(x,z,w,d,h=WALL_H)=>{g.add(part(M.box,M.wall,[x,h/2,z],[w,h,d]));boxAt(slot,x,z,w,d,h)};
+    wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
+    const side=(ROOM_W-DOOR_W)/2;wall(-(DOOR_W/2+side/2),ROOM_D/2,side,WALL_T);wall(DOOR_W/2+side/2,ROOM_D/2,side,WALL_T);
+    const accent=mat(fg);accent.userData.own=true;
+    const stripe=part(M.box,accent,[0,BACK_WALL_H+0.03,-ROOM_D/2],[ROOM_W,0.06,WALL_T+0.04]);stripe.userData.own=true;g.add(stripe);
+    // Door posts in the member's colour mark the way in.
+    for(const x of [-DOOR_W/2,DOOR_W/2]){const post=part(M.box,accent,[x,0.75,ROOM_D/2],[0.16,1.5,0.26]);post.userData.own=true;g.add(post);boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
     S.world.add(g);
-    const sign=new THREE.Object3D();sign.position.set(3.4,0,ROOM_D/2);g.add(sign);
-    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:1.45,cls:'room'});
+    // The name plate hangs on the front wall beside the door: below the top of the wall on screen, so it
+    // never covers the room's board, which is higher and further back. It also says who is away and
+    // whether agents are running, so nothing floats inside the room.
+    const sign=new THREE.Object3D();sign.position.set(DOOR_W/2+side/2,0,ROOM_D/2+WALL_T/2+0.02);g.add(sign);
+    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,tag});roomLook(m.key);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,tag,note:previous.get(m.key)?.note||''});roomLook(m.key);
     buildDesks(m.key,false);
-  });
+  }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
+  buildMainWall();
   updateColliders();
-  S.boards?.rebuild(S.rooms,{commonRadius:S.commonR||10,boardAnchor:key=>S.worldLayout?.boardAnchor?.(key)});
+  const anchors=S.worldLayout.boardAnchors();
+  S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
+  // E at a board opens the first card in the lane in front of you.
+  S.interact?.unregisterWhere(id=>id.startsWith('board:'));
+  for(const a of [...anchors.rooms,{key:null,...anchors.main}]){
+    const key=a.key,spot={x:a.x+a.nx*1.8,y:0,z:a.z+a.nz*1.8},tile=()=>S.boards?.tileNear(key,S.pos);
+    S.interact?.register({id:'board:'+(key??'main'),position:()=>spot,radius:a.width/2+0.6,height:a.y-a.height/2-0.2,
+      enabled:()=>!!tile(),label:()=>{const t=tile();return t?`Open #${t.number} ${t.title.length>28?t.title.slice(0,27)+'…':t.title}`:''},
+      onInteract:()=>{const t=tile();if(t)S.boards.pick({near:true,tile:t})}});
+  }
+}
+// The main board's feature wall: a freestanding wall on a plinth, with a planter at each end.
+function buildMainWall(){
+  const w=S.worldLayout.mainWall,g=new THREE.Group();g.position.set(w.x,0,w.z);g.rotation.y=w.facing;S.mainWall=g;
+  g.add(part(M.box,M.wall,[0,w.height/2,0],[w.width,w.height,w.depth]));
+  g.add(part(M.box,M.plinth,[0,0.09,0],[w.width+0.3,0.18,w.depth+0.3]));
+  g.add(part(M.box,M.trim,[0,w.height+0.04,0],[w.width+0.1,0.08,w.depth+0.1]));
+  S.walls.push(officeBox(w.x,w.z,w.facing,w.width+0.3,w.depth+0.3,w.height));
+  for(const x of [-w.width/2-0.75,w.width/2+0.75]){
+    g.add(part(M.cyl,M.pot,[x,0.3,0.4],[0.4,0.6,0.4]),part(M.cone,M.leaf,[x,1.15,0.4],[0.62,1.25,0.62]),part(M.cone,M.leaf,[x,1.75,0.4],[0.45,0.95,0.45]));
+    const p=toWorld(w,x,0.4);S.walls.push(officeBox(p.x,p.z,w.facing,0.85,0.85,0.6));
+  }
+  S.world.add(g);
 }
 // A room is lit while its member has the office open; otherwise dimmed, with when they were last here.
 const ago=iso=>{const t=Date.parse(iso);if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} d ago`};
@@ -368,7 +397,8 @@ function roomLook(key){
   const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||r.member.me;
   r.floorMat.color.set(r.bg);if(!on)r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);
   r.tag.el.classList.toggle('off',!on);
-  const seen=ago(r.member.lastSeen);r.tag.el.querySelector('small').textContent=on?'':` · offline${seen?` · last seen ${seen}`:''}`;
+  const seen=ago(r.member.lastSeen),parts=[on?'':`offline${seen?` · last seen ${seen}`:''}`,r.note].filter(Boolean);
+  r.tag.el.querySelector('small').textContent=parts.length?' · '+parts.join(' · '):'';
 }
 function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
@@ -378,18 +408,18 @@ function updateColliders(){
 function buildDesks(key,refresh=true){
   const room=S.rooms.get(key);if(!room)return;
   if(!room.desks){
-    const g=new THREE.Group(),empty=new THREE.Object3D();empty.position.set(0,0,-1);g.add(empty);
+    const g=new THREE.Group();
     room.desks=g;S.world.add(g);
-    g.userData={entries:new Map(),lounge:S.activity?.lounge(g)||[],empty:label(empty,'<span class="of-empty"></span>',{y:0.4,cls:'muted',near:22})};
+    g.userData={entries:new Map(),lounge:S.activity?.lounge(g)||[]};
   }
-  const g=room.desks,{entries,empty}=g.userData;g.position.copy(room.center);g.rotation.y=room.facing;
+  const g=room.desks,{entries}=g.userData;g.position.copy(room.center);g.rotation.y=room.facing;
   room.boxes=[];
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
   for(const b of g.userData.lounge)room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
   // Sessions seated at an AgentFlow agent's desk sit in the common area instead (buildSeats).
   const all=S.live.get(key)||[],agents=all.filter(a=>!isSeated(a,S.afPlaced)),away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
-  empty.el.firstElementChild.textContent=away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'No agents running';
-  empty.el.firstElementChild.hidden=!!agents.length;
+  room.note=agents.length?`${agents.length} ${agents.length===1?'agent':'agents'}`:away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'no agents running';
+  roomLook(key);
   const visible=new Set();
   agents.slice(0,16).forEach((a,i)=>{
     const col=i%cols,row=Math.floor(i/cols),x=(col-(cols-1)/2)*sx,z=-ROOM_D/2+1.4+row*2.1,id=deskKey(key,a);
@@ -522,7 +552,7 @@ function upsertPerson(p,self=false){
     obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
     if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
     const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|blob:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
-    const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
+    const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
     a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
@@ -832,6 +862,6 @@ function placeLabels(){
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}
-    l.el.style.transform=`translate(${((p.x+1)/2*w).toFixed(1)}px,${((1-p.y)/2*h).toFixed(1)}px) translate(-50%,-100%)`;
+    l.el.style.transform=`translate(${((p.x+1)/2*w).toFixed(1)}px,${((1-p.y)/2*h).toFixed(1)}px) translate(-50%,${l.top?'0':'-100%'})`;
   }
 }
