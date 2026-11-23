@@ -266,7 +266,8 @@ export function createVoice(o){
     const {w,d}=a,H=2.3,T=0.1,door=2.4;
     const wall=(x,z,ww,dd)=>{
       if(a.glass){g.add(part(box,glass,[x,H/2,z],[ww,H,dd]));g.add(part(box,frameMat,[x,H,z],[ww,0.06,dd+0.02]))}
-      const p=toWorld(a,x,z);V.walls.push(officeBox(p.x,p.z,a.facing,ww,dd,H));
+      // cam 0: the glass stops people, never the camera (office-world-core.js wallsFrom).
+      const p=toWorld(a,x,z);V.walls.push(Object.assign(officeBox(p.x,p.z,a.facing,ww,dd,H),a.glass?{cam:0}:{}));
     };
     if(a.glass){
       g.add(part(box,floorMat,[0,0.025,0],[w,0.05,d]));
@@ -392,10 +393,15 @@ export function createVoice(o){
     const a=V.anchors[0],m=o.me();if(!a||!o.walkTo)return;
     const {commonR=10}=(()=>{try{return o.layout()}catch{return {}}})(),ring=commonR+2;
     const door=toWorld(a,0,a.d/2+1.6),inside=toWorld(a,0,a.d/2-1.6),ang=Math.atan2(door.z,door.x),r=Math.hypot(m.x,m.z);
-    const route=[];
-    if(r>ring){const k=ring/r;route.push({x:m.x*k,z:m.z*k})}
-    if(Math.hypot(door.x,door.z)>ring)route.push({x:Math.cos(ang)*ring,z:Math.sin(ang)*ring});
-    route.push(door,inside);
+    let route=[];
+    // A world with corridors says where the walk bends (office-layout.js route()).
+    const planned=(()=>{try{return o.layout().world?.route?.({x:m.x,z:m.z},door)}catch{return null}})();
+    if(planned?.length)route=[...planned,inside];
+    else{
+      if(r>ring){const k=ring/r;route.push({x:m.x*k,z:m.z*k})}
+      if(Math.hypot(door.x,door.z)>ring)route.push({x:Math.cos(ang)*ring,z:Math.sin(ang)*ring});
+      route.push(door,inside);
+    }
     V.route=route;V.routeAt=0;o.walkTo(route[0].x,route[0].z);paint();
   }
   function followRoute(m){

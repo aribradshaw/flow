@@ -41,18 +41,28 @@ test('worlds: ids are checked, and the office stays the default',()=>{
   assert.equal(buildWorld('yacht',3).id,'yacht');assert.equal(buildWorld('whatever',3).id,'classic');
 });
 
-test('classic: the office as office-layout.js lays it out, on one flat floor with nothing added',()=>{
+test('classic: the floor plan office-layout.js lays out, on one flat floor inside its outer walls',()=>{
   for(const keys of [[],['a'],['a','b','c'],Array.from({length:12},(_,i)=>'k'+i)]){
     const w=classicWorld(keys),l=classicLayout(keys);
     assert.deepEqual(w.rooms.map(({y,...r})=>r),l.rooms);assert.ok(w.rooms.every(r=>r.y===0));
     assert.deepEqual(w.mainWall,l.mainWall);assert.deepEqual(w.boardAnchors(),l.boardAnchors());assert.equal(w.radius,l.radius);
-    assert.deepEqual(w.walls,[]);assert.equal(w.terrain,undefined,'the flat office needs no terrain');assert.equal(w.doors,undefined);
+    assert.equal(w.terrain,undefined,'the flat office needs no terrain');
+    // Its walls are the plan's, as boxes office-controls.js reads, each with how high it stops the camera.
+    assert.equal(w.walls.length,l.walls.length);
+    w.walls.forEach((b,i)=>{const p=l.walls[i];assert.ok(near(b.x,p.x)&&near(b.z,p.z)&&near(b.halfX,p.w/2)&&near(b.halfZ,p.d/2)&&near(b.height,p.h));assert.equal(b.cam,p.cam);assert.equal(b.kind,p.kind)});
+    assert.equal(typeof w.doors,'function');assert.equal(typeof w.places,'function');assert.equal(typeof w.plan,'function');
   }
-  assert.deepEqual(classicWorld(['a'],{commonR:22}).rooms[0].z,classicLayout(['a'],{commonR:22}).rooms[0].z);
   assert.equal(classicWorld(3).rooms.length,3,'a count works too');
-  const w=classicWorld(4);
-  assert.equal(w.ground(3,-40),0);assert.equal(w.ground(500,0),null);assert.equal(w.sea,-Infinity);
+  const w=classicWorld(4),b=w.bounds;
+  assert.equal(w.ground(0,0),0);assert.equal(w.ground(b.minX+0.5,b.minZ+0.5),0);assert.equal(w.ground(b.maxX+1,0),null);assert.equal(w.ground(0,b.minZ-1),null);assert.equal(w.ground(500,0),null);assert.equal(w.sea,-Infinity);
   assert.equal(w.ground(w.spawn.x,w.spawn.z),0);assert.deepEqual(w.respawn({x:900,z:900}),w.spawn);
+  // The scenery is rebuilt only when its signature changes: the same members and org give the same one.
+  const org=[{id:'a',name:'A'},{id:'b',name:'B',reportsTo:'a'}];
+  assert.equal(classicWorld(4,{org}).sig,classicWorld(4,{org}).sig);assert.notEqual(classicWorld(4,{org}).sig,w.sig);assert.notEqual(classicWorld(7).sig,w.sig);
+  // A walker cannot leave the floor, and the camera's walls leave out glass and the outer walls.
+  const out=w.step({x:0,z:0},{x:0,z:b.minZ-30});assert.ok(out.z>b.minZ-0.5&&w.ground(out.x,out.z)===0);
+  const side=w.step({x:0,z:0},{x:b.maxX+30,z:0});assert.ok(side.x<b.maxX&&w.ground(side.x,side.z)===0);
+  const cam=wallsFrom(w.walls,0);assert.ok(cam.length&&cam.every(c=>c.height>0.12));assert.ok(cam.length<w.walls.length);
 });
 
 test('yacht: a room for every member, on deck, apart from each other; the owner has the bridge',()=>{

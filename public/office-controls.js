@@ -86,6 +86,11 @@ export function createOfficeCamera(camera) {
       return overview;
     },
     setAuto(value) { auto = value; },
+    // A world's own default view, set when you arrive in it.
+    frame({pitch: p, zoom: z} = {}) {
+      if (Number.isFinite(p)) wantedPitch = clampPitch(p);
+      if (Number.isFinite(z)) zoom = clamp(z, 2.9, 22);
+    },
     update(dt, position, heading, vx, vz, walls, radius, {held = false, align = true} = {}) {
       idle = held ? 0 : idle + dt;
       if (!overview && auto && align && idle > 1.25 && Math.hypot(vx, vz) > 0.4) {

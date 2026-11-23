@@ -1,8 +1,8 @@
 // Doors between offices (docs/concepts/12-office.md). The server lists, per viewer, the other offices
 // sharing connects them to and that they can enter (snapshot.portals: [{env, label, sub, own}]): the offices of
 // environments shared with them ("<owner>'s office"), their own shared environments' offices, and, while
-// visiting, their own office. Each is a glowing door on the ring of rooms, in a gap between two rooms, facing
-// the middle. Walk through it or click it to go to that office. Pure geometry here; office.js draws the labels.
+// visiting, their own office. Each is a glowing door where the world puts it (the classic office: reception,
+// office-layout.js doors()); doorSpots() is the fallback, a ring of rooms with a door in each gap, facing the middle. Walk through it or click it to go to that office. Pure geometry here; office.js draws the labels.
 //
 //   doorSpots(portals, {rooms, ringRadius})   -> [{portal, x, z, facing}]   where each door stands
 //   buildDoors(THREE, spots, {box, mat})      -> {group, spots:[{portal, anchor, hit, x, z}]}

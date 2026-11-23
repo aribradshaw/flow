@@ -391,7 +391,8 @@ function updateRooms(members,agentflow){
   S.members=members;S.snapAgentflow=agentflow;
   S.root.querySelector('[data-of-replay]').disabled=!S.world||!members.some(m=>m.key===S.meKey);
   if(!S.world)return;
-  if(afChanged)buildAgentflow();
+  // A world that places the org itself (pods) places it again when the rooms change.
+  if(afChanged||(changed&&S.place.org))buildAgentflow();
   if(changed)buildRooms();
   else for(const m of members){const room=S.rooms.get(m.key);if(room){room.member=m;roomLook(m.key)}}
   S.chief?.update();
@@ -494,7 +495,7 @@ function initScene(){
     navWorld,person:key=>S.people.get(key),isQuiet:key=>presenceStatus.isQuiet(key),
     inMeeting:key=>{const p=S?.people.get(key)?.obj.position;return !!p&&!!S.voice?.inMeeting?.(p.x,p.z)},
     room:roomSpots,boardSpot:key=>(key==null?S.devops?.spot():S.boards?.spot(key))||null,
-    entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,player:()=>S.pos,
+    entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,lounge:()=>S.worldLayout?.lounge||null,player:()=>S.pos,
     label,unlabel:l=>{l.el.remove();S.labelList=S.labelList.filter(x=>x!==l)},
     // A figure that outlived its desk or its place in the org (walking out): nothing to click or press E on.
     retire:obj=>{const u=obj.userData;S.clickables=S.clickables.filter(c=>c!==obj);if(u?.kind==='agent')S.interact?.unregister(`agent:${u.member}:${u.id}`);else if(u?.kind==='af')S.interact?.unregister('af:'+u.id)}});
@@ -594,13 +595,14 @@ function usePlace(id){
   const pick=S.root.querySelector('.of-world');pick.value=id;pick.hidden=!(mine()&&S.opts.setWorld);
   S.root.querySelector('.of-motion-row').hidden=S.place.sea===-Infinity;
   if(!S.placed)return;
-  buildRooms();arrive();S.boards?.invalidate();sendPresence(true);
+  buildAgentflow();buildRooms();arrive();S.boards?.invalidate();sendPresence(true);
 }
-// Stand at my room's door (or where this world lets people in).
+// Stand at my room's door, or where this world lets people in (the classic office: reception).
 function arrive(){
-  const r=S.rooms.get(S.meKey),at=S.place.spawn,heading=r?r.facing:at.heading;
+  const r=S.worldLayout?.arriveAtSpawn?null:S.rooms.get(S.meKey),at=S.place.spawn,heading=r?r.facing:at.heading;
   if(r)S.pos.copy(r.door);else S.pos.set(at.x,at.y,at.z);
   S.floor=S.pos.y;S.target=S.follow=null;S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading);
+  if(S.worldLayout?.view)S.rig?.frame(S.worldLayout.view);
 }
 // Walls as the camera needs them: measured up from the deck I stand on.
 function cameraWalls(){
@@ -612,6 +614,7 @@ function cameraWalls(){
 // ---------- rooms ----------
 // The world (office-layout.js) places the rooms and the main board's feature wall. A room has low walls so
 // you can see in, a tall back wall its whiteboard hangs on, and a door with its name plate beside it.
+const memberOrder=()=>[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
 function buildRooms(){
   if(S.signs)clear(S.signs);
   const previous=S.rooms;
@@ -620,14 +623,15 @@ function buildRooms(){
   if(S.mainWall){clear(S.mainWall);S.mainWall=null}
   S.walls=[];
   S.interact?.unregister('mirror');
-  const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
+  const list=memberOrder();
   const byKey=new Map(list.map(m=>[m.key,m]));
-  S.worldLayout=S.place.layout(list.map(m=>m.key),{commonR:S.commonR||10});
+  S.worldLayout=S.place.layout(list.map(m=>m.key),{commonR:S.commonR||10,org:S.afList||[]});
+  const roomWalls=S.worldLayout.roomWalls;
   S.overviewRadius=Math.max(12,S.worldLayout.radius+8);
   // Boxes are solid from their top down, so one on a raised deck is that much taller.
   const boxAt=(frame,x,z,w,d,h)=>{const p=toWorld(frame,x,z);S.walls.push(officeBox(p.x,p.z,frame.facing,w,d,h+(frame.y||0)))};
   S.signs=new THREE.Group();S.world.add(S.signs);
-  for(const n of S.place.signs){const o=new THREE.Object3D();o.position.set(n.x,n.y,n.z);S.signs.add(o);label(o,`<span class="of-sign">${esc(n.text)}</span>`,{y:0,cls:'sign',near:26})}
+  for(const n of S.place.signs){const o=new THREE.Object3D();o.position.set(n.x,n.y,n.z);S.signs.add(o);label(o,`<span class="of-sign">${esc(n.text)}</span>`,{y:0,cls:'sign',near:n.near||26})}
   for(const slot of S.worldLayout.rooms){
     const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,slot.y||0,slot.z),facing=slot.facing;
     const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
@@ -635,10 +639,15 @@ function buildRooms(){
     // One material per room so a theme can recolour these walls without painting every room.
     const wallMat=M.wall.clone();let wallOwned=false;
     const wall=(x,z,w,d,h=WALL_H)=>{const mesh=part(M.box,wallMat,[x,h/2,z],[w,h,d]);mesh.userData.wall=true;if(!wallOwned){mesh.userData.own=true;wallOwned=true}g.add(mesh);boxAt(slot,x,z,w,d,h)};
-    wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
+    // The back wall. Where the world's own wall is behind the room (roomWalls.back false), a lining on it in
+    // the room's colours, with a material of its own so the world can fade it with that wall.
+    let backMat=null;
+    if(roomWalls?.back===false){backMat=wallMat.clone();const lining=part(M.box,backMat,[0,BACK_WALL_H/2,-ROOM_D/2+0.05],[ROOM_W-WALL_T,BACK_WALL_H,0.1]);lining.userData.wall=true;lining.userData.own=true;g.add(lining)}
+    else wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);
+    wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
     const side=(ROOM_W-DOOR_W)/2;wall(-(DOOR_W/2+side/2),ROOM_D/2,side,WALL_T);wall(DOOR_W/2+side/2,ROOM_D/2,side,WALL_T);
     const accent=mat(fg);accent.userData.own=true;
-    const stripe=part(M.box,accent,[0,BACK_WALL_H+0.03,-ROOM_D/2],[ROOM_W,0.06,WALL_T+0.04]);stripe.userData.own=true;g.add(stripe);
+    if(!backMat){const stripe=part(M.box,accent,[0,BACK_WALL_H+0.03,-ROOM_D/2],[ROOM_W,0.06,WALL_T+0.04]);stripe.userData.own=true;g.add(stripe)}
     // Door posts in the member's colour mark the way in.
     for(const x of [-DOOR_W/2,DOOR_W/2]){const post=part(M.box,accent,[x,0.75,ROOM_D/2],[0.16,1.5,0.26]);post.userData.own=true;g.add(post);boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
     S.world.add(g);
@@ -658,7 +667,7 @@ function buildRooms(){
       const at=toWorld(slot,mx,mz);
       S.interact?.register({id:'mirror',position:()=>({x:at.x,y:0,z:at.z}),radius:2.1,height:2.15,priority:2,label:'Edit your look',onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
     }
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,backMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
@@ -667,9 +676,9 @@ function buildRooms(){
   buildDoors();
   S.presence?.syncDoors();
   S.voice?.layout();S.walls.push(...(S.voice?.walls||[])); // the meeting room's glass stops people and the camera
-  // NPCs that are new to the office walk in from the edge of the common area, on the main wall's side (or
-  // where the world lets people in).
-  {const w=S.place.id==='classic'&&S.worldLayout.mainWall,d=w&&Math.hypot(w.x,w.z),r=(S.commonR||10)+1.5;S.npcEntrance=d?{x:w.x/d*r,z:w.z/d*r}:S.place.spawn?{x:S.place.spawn.x,z:S.place.spawn.z}:null}
+  // NPCs that are new to the office walk in where the world lets people in.
+  S.npcEntrance=S.worldLayout.entrance||(S.place.spawn?{x:S.place.spawn.x,z:S.place.spawn.z}:null);
+  S.place.adoptRooms?.(S.rooms);
   updateColliders();
   S.decor?.mount();
   const anchors=S.worldLayout.boardAnchors();
@@ -715,6 +724,7 @@ function roomLook(key){
   const theme=S.decor?.themeOf(key);
   r.floorMat.color.set(theme?.floor||r.bg);r.wallMat?.color.set(theme?.wall||'#f9fbfa');
   if(!on){r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);r.wallMat?.color.lerp(new THREE.Color('#d5d9d7'),.45)}
+  if(r.backMat&&r.wallMat)r.backMat.color.copy(r.wallMat.color);
   r.tag.el.classList.toggle('off',!on);
   const seen=ago(r.member.lastSeen);r.seen=seen;
   if(S.presence)S.presence.paintRoom(r,on);
@@ -832,18 +842,20 @@ function buildAgentflow(){
   S.boards?.invalidate();
   if(S.afGroup){clear(S.afGroup);S.org?.dispose();S.org=null}
   const g=new THREE.Group();S.afGroup=g;S.world.add(g);
-  const list=afAgents().slice(0,200),{pos,radius}=orgLayout(list);
+  const list=afAgents().slice(0,200),lay=S.place.org?.(list,memberOrder().map(m=>m.key))||orgLayout(list),{pos,radius}=lay;S.afList=list;
   // Seats: which agents have a place here decides which sessions leave their owners' rooms; an AI agent with
   // nobody at its desk is dimmed.
   const was=[...S.afPlaced||[]].join('\n');S.afPlaced=new Set(list.filter(a=>pos.has(a.id)).map(a=>a.id));S.afPos=pos;
   if(S.rooms.size&&[...S.afPlaced].join('\n')!==was){for(const k of S.rooms.keys())buildDesks(k,false);updateColliders()}
   const seats=seatsByAgent(S.live,S.afPlaced);S.seatSig=seatSig(seats);
-  if(S.commonR!==radius){S.commonR=radius;S.place.common(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
+  // The floor is laid out again when the org needs another shape of it (a world with pods: lay.sig).
+  const sig=lay.sig??radius;
+  if(S.orgSig!==sig){S.orgSig=sig;S.commonR=radius;S.place.common(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
   const items=[],people=[];
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
     if(a.kind==='human'){if(a.member&&(a.member===S.meKey||S.people.has(a.member)))continue;people.push({a,p,offline:!!a.member,dim})}
-    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,dim:dim||kind==='agent'&&!seats.has(a.id),still:dim})}
+    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||kind==='agent'&&!seats.has(a.id),still:dim})}
   }
   // Robots that just left the org are still drawn while they walk out (office-npc.js).
   const robots=items.filter(it=>it.kind==='agent');
@@ -867,7 +879,7 @@ function buildAgentflow(){
       const left=a.member&&S.leftAt?.get(a.member),from=left&&Date.now()-left.at<20000?left:null;if(from)S.leftAt.delete(a.member);
       return {id:a.id,obj:S.afPeople[i],x:p.x,z:p.z,member:a.member||'',still:dim,from};
     });
-    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
+    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,yaw:it.yaw,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
   }
   buildSeats(seats);
   S.chief?.update();
@@ -1086,10 +1098,10 @@ function pick(e){
 function buildDoors(){
   if(!S?.world)return;if(S.doorGroup)clear(S.doorGroup);
   const rooms=[...S.rooms.values()],ring=rooms.length?Math.hypot(rooms[0].center.x,rooms[0].center.z):(S.commonR||10)+7;
-  // The main board's wall holds a slot in the ring too: doors go in the gaps either side of it. So does the meeting room (office-voice.js).
+  // A world without places of its own for doors: they go in the gaps of the ring of rooms, the main board's wall and the meeting room.
   const wall=S.worldLayout?.mainWall,meet=S.worldLayout?.meetingAnchors?.()||[];
   const taken=[...rooms,...(wall?[{center:{x:wall.x,z:wall.z}}]:[]),...meet.map(a=>({center:{x:a.x,z:a.z}}))];
-  // A world may have its own places for doors (the yacht: the swim platform); the office puts them in the ring's gaps.
+  // A world has its own places for doors (the office: reception; the yacht: the swim platform).
   const spots=S.worldLayout?.doors?.(S.portalList)||doorSpots(S.portalList,{rooms:taken,ringRadius:ring});
   const d=buildDoors3d(spots);S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
   d.spots.forEach((sp,i)=>{sp.anchor.parent.position.y=spots[i].y||0});
@@ -1402,6 +1414,8 @@ function frame(dt,t,delta){
     S.camera.position.x+=S.place.center.x*S.ov;S.camera.position.y+=S.floor*(1-S.ov);S.camera.position.z+=S.place.center.z*S.ov;
   }
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
+  // A world that fades the wall the camera is behind hides the room boards on it too.
+  if(S.place.veilRev!==undefined&&S.place.veilRev!==S.veilRev){S.veilRev=S.place.veilRev;S.boards?.veil(S.place.veiled)}
   S.devops?.frame(dt,!paused);
   if(!replay)S.boards?.frame(S.labelList);
   S.meters?.frame();

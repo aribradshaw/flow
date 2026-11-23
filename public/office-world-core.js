@@ -55,17 +55,25 @@ export function stepIn(world,from,to,walls=world.walls,r=BODY){
 // Walls as the camera sees them from a floor height: a box only matters for what stands above that floor.
 export function wallsFrom(walls,floor){
   const out=[];
-  for(const b of walls){const h=b.height-floor;if(h>0.12)out.push({x:b.x,z:b.z,c:b.c,s:b.s,halfX:b.halfX,halfZ:b.halfZ,height:h})}
+  for(const b of walls){const h=(b.cam??b.height)-floor;if(h>0.12)out.push({x:b.x,z:b.z,c:b.c,s:b.s,halfX:b.halfX,halfZ:b.halfZ,height:h})}
   return out;
 }
 const nearest=(points,p)=>points.reduce((best,q)=>Math.hypot(q.x-p.x,q.z-p.z)<Math.hypot(best.x-p.x,best.z-p.z)?q:best);
 
-// ---------- classic: office-layout.js, on one flat floor ----------
+// ---------- classic: office-layout.js's floor plan, on one flat floor ----------
 const keysOf=n=>Array.isArray(n)?n:Array.from({length:Math.max(0,n|0)},(_,i)=>'m'+i);
+// opts.org: the AgentFlow agents, for the pods in the open-plan core.
 export function classicWorld(members,opts={}){
-  const layout=classicLayout(keysOf(members),opts),spawn={x:0,y:0,z:6,heading:Math.PI};
-  return {...layout,id:'classic',rooms:layout.rooms.map(r=>({...r,y:0})),walls:[],signs:[],sea:-Infinity,center:{x:0,z:0},spawn,
-    ground:(x,z)=>Math.hypot(x,z)<=110?0:null,open:()=>false,respawn:()=>({...spawn})};
+  const layout=classicLayout(keysOf(members),opts),b=layout.bounds,spawn=layout.spawn;
+  // cam: how high a box stops the camera (glass and the fading outer walls: not at all).
+  const walls=layout.walls.map(w=>Object.assign(wallBox(w.x,w.z,w.yaw,w.w,w.d,w.h,0,w.kind),{cam:w.cam}));
+  const inside=(x,z)=>x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ;
+  const world={...layout,id:'classic',rooms:layout.rooms.map(r=>({...r,y:0})),walls,plain:layout.walls,sea:-Infinity,
+    // What the scenery is built from: when this is the same, nothing moved.
+    sig:JSON.stringify([layout.halfWidth,layout.coreDepth,layout.rooms.map(r=>[r.x,r.z]),layout.bays.map(x=>x.type),layout.pods.map(p=>[p.id,p.name,p.x,p.z,p.w,p.d,p.tables.map(t=>t.seats)])]),
+    ground:(x,z)=>Number.isFinite(x)&&Number.isFinite(z)&&inside(x,z)?0:null,open:()=>false,respawn:()=>({...spawn})};
+  world.step=(from,to,all=walls)=>stepIn(world,from,to,all);
+  return world;
 }
 
 // ---------- yacht ----------

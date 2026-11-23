@@ -2,7 +2,7 @@
 // it, whom to call, and how loud and from which side a nearby voice sounds. Tested by node.
 //
 //   meetingAnchors({world, rooms, commonR, roomW, roomD})  -> [{id, name, x, y, z, facing, w, d, glass}]
-//       The world's own (world.meetingAnchors(): the classic office's glass room in its slot of the ring;
+//       The world's own (world.meetingAnchors(): the classic office's glass room beside reception;
 //       glass:false when the world draws the room itself). A world without them has no meeting room (proximity
 //       voice still works there). With no world at all: one glass room in the widest gap of the ring of rooms.
 //   insideAnchor(anchor, x, z, margin)    in that room's floor (a margin > 0 grows it, < 0 shrinks it)

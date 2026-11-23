@@ -21,7 +21,7 @@
 //   office: {THREE, layer (a group in the world's frame, for figures that outlived their desk), world (the
 //     group every room is in), navWorld() -> {boxes, bounds?, ground?}, person(memberKey) -> {obj}|undefined,
 //     isQuiet(memberKey), room(memberKey) -> {door, lounge}|undefined, boardSpot(memberKey|null) -> {x, z, yaw}|null,
-//     entrance() -> {x, z}, commonRadius(), player() -> {x, z}, label(obj, html, opts) -> l, unlabel(l),
+//     entrance() -> {x, z}, commonRadius(), lounge() -> [{x, z, fx, fz}]|null (where idle ones stand about), player() -> {x, z}, label(obj, html, opts) -> l, unlabel(l),
 //     inMeeting(memberKey) -> true while they are in the meeting room (a follower waits at its desk),
 //     retire(obj): a figure now only walking out (no clicks, no E)}
 import {buildNav,navBounds,follow,separation,sidestep} from './office-nav.js';
@@ -128,8 +128,8 @@ export function createNpcs(office){
     const seen=new Set();
     for(const r of robots){
       const key='af:'+r.id;seen.add(key);let n=npcs.get(key);
-      if(!n){const entering=settled();n=make(key,'robot',{home:{x:r.x,z:r.z,yaw:0},entering,door:entering?office.entrance():null})}
-      else retarget(n,r.x,r.z);
+      if(!n){const entering=settled();n=make(key,'robot',{home:{x:r.x,z:r.z,yaw:r.yaw||0},entering,door:entering?office.entrance():null})}
+      else{retarget(n,r.x,r.z);n.home.yaw=r.yaw||0}
       if(n.anchor!==r.anchor){n.bubble=null;n.emote=null;n.emoteState=''} // the old anchor took its labels along
       n.anchor=r.anchor;n.status=r.busy?'running':'idle';n.still=!!r.still;n.wander=true;n.area='common';n.boardKey=null;n.removed=false;n.ghost=false;n.input.gone=false;
     }
@@ -220,7 +220,9 @@ export function createNpcs(office){
       case 'lounge':{
         const r=n.area.startsWith('room:')?office.room(n.member):null,a=s*Math.PI*2;
         if(r){n.gx=r.lounge.x+Math.sin(a)*0.65;n.gz=r.lounge.z+Math.cos(a)*0.65;n.faceX=r.lounge.x;n.faceZ=r.lounge.z;return true}
-        // The common area's edge, where its rug ends.
+        // The world's lounge (a coffee bar to stand at), or the common area's edge, where its rug ends.
+        const spots=office.lounge?.();
+        if(spots?.length){const q=spots[Math.min(spots.length-1,Math.floor(s*spots.length))],j=unit(n.key+'lounge')*Math.PI*2;n.gx=q.x+Math.sin(j)*0.22;n.gz=q.z+Math.cos(j)*0.22;n.faceX=q.fx;n.faceZ=q.fz;return true}
         const rad=Math.max(4,office.commonRadius()-1.2);n.gx=Math.cos(a)*rad;n.gz=Math.sin(a)*rad;n.faceX=0;n.faceZ=0;return true;
       }
       case 'wander':{const a=s*Math.PI*2,d=1.4+s*1.8;n.gx=n.home.x+Math.sin(a)*d;n.gz=n.home.z+Math.cos(a)*d;return true}

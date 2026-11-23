@@ -152,14 +152,15 @@ function drawNear(board){
 export function createOfficeBoards({env,world,camera,position,agents,openCard,seatCard}){
   let dirty=true,wake=null,carrying=new Map(),visibleNumbers=new Set();
   const boards=new Map(),badges=new Map();
-  let showing=true;
+  let showing=true,veiled=new Set();
+  const show=()=>{for(const [key,b] of boards)b.anchor.visible=showing&&!veiled.has(key)};
   const unsubscribe=subscribeWorkspace(()=>{dirty=true});
   // anchors: {rooms:[{key, member, ...mount}]}, from the world's boardAnchors().
   function rebuild(anchors){
     for(const board of boards.values())disposeBoard(board);
     boards.clear();
     for(const a of anchors.rooms||[])boards.set(a.key,makeBoard(world,a,{key:a.key,member:a.member}));
-    for(const b of boards.values())b.anchor.visible=showing;
+    show();
     dirty=true;
   }
   function refresh(){
@@ -244,7 +245,9 @@ export function createOfficeBoards({env,world,camera,position,agents,openCard,se
     world.worldToLocal(p);const yaw=Math.atan2(f.x,f.z);
     return {x:p.x+Math.sin(yaw)*1.6,z:p.z+Math.cos(yaw)*1.6,yaw};
   }
-  return {hit,pick,rebuild,frame,tileNear,spot,invalidate(){dirty=true},setVisible(value){showing=value;for(const b of boards.values())b.anchor.visible=value},
+  return {hit,pick,rebuild,frame,tileNear,spot,invalidate(){dirty=true},setVisible(value){showing=value;show()},
+    // Boards (by member key) the camera is behind: a world that fades their wall hides them with it.
+    veil(keys){veiled=new Set(keys||[]);show()},
     dispose(){unsubscribe();for(const b of boards.values())disposeBoard(b);boards.clear();for(const b of badges.values())b.remove()}};
 }
 
