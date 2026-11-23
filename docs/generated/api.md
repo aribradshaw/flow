@@ -1137,7 +1137,7 @@ List DevOps cards
 
 `GET /api/v1/envs/{env}/cards` · scope `read` · MCP tool `cards_list`
 
-Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name), agent (AgentFlow agent: cards delegated to it), q ("#12" or title text), hideDone, snoozed (true: only cards snoozed now; false: only awake ones; left out: both). notProject, notLabel, notAssignee, notAgent and notEntity leave out cards that match. Include and exclude combine.
+Board cards in board order. Filters: column, project (id, name or "none"), label (id or name), assignee (person id or name, or "none" for unassigned), agent (AgentFlow agent: cards delegated to it), q ("#12" or title text), hideDone, snoozed (true: only cards snoozed now; false: only awake ones; left out: both). notProject, notLabel, notAssignee, notAgent and notEntity leave out cards that match. Include and exclude combine.
 
 **Input**
 
@@ -1147,11 +1147,11 @@ Board cards in board order. Filters: column, project (id, name or "none"), label
 | `column` | string |  | Board column: requests (Requests / Sprinted), doing (Doing), blocked (Blocked), uat (UAT), done (Done), must (Backlog: Must Have), nice (Backlog: Nice to Have). One of `requests`, `doing`, `blocked`, `uat`, `done`, `must`, `nice`. |
 | `project` | string |  | Project id or name, or "none". |
 | `label` | string |  | Label id or name. |
-| `assignee` | string |  | Person node id or name, or a share member (@email or email). |
+| `assignee` | string |  | Person node id or name, or a share member (@email or email), or "none" for unassigned. |
 | `agent` | string |  | AgentFlow agent id or name: cards delegated to it. |
 | `notProject` | string |  | Project id or name, or "none": leave these cards out. |
 | `notLabel` | string |  | Label id or name: leave cards with this label out. |
-| `notAssignee` | string |  | Person node id or name, or a share member (@email or email): leave their cards out. |
+| `notAssignee` | string |  | Person node id or name, or a share member (@email or email), or "none": leave unassigned cards out. |
 | `notAgent` | string |  | AgentFlow agent id or name: leave out cards delegated to it. |
 | `notEntity` | string |  | Entity or area id or name: leave out cards in the projects under it. |
 | `q` | string |  |  |

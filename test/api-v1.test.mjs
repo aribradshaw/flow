@@ -321,11 +321,15 @@ test('cards: create, get, update, list, and move through the board gates',async(
   assert.deepEqual(r.body.items.map(x=>x.number),[2]);
   r=await op('cards.list',{env:ENV,project:'none'});
   assert.deepEqual(r.body.items.map(x=>x.number),[2]);
+  r=await op('cards.list',{env:ENV,assignee:'none'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[2]);
   r=await op('cards.list',{env:ENV,label:'Frontend'});
   assert.deepEqual(r.body.items.map(x=>x.number),[1]);
   // Exclude is the opposite of include, and the two combine.
   r=await op('cards.list',{env:ENV,notAssignee:'cleo'});
   assert.deepEqual(r.body.items.map(x=>x.number),[2]);
+  r=await op('cards.list',{env:ENV,notAssignee:'none'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[1]);
   r=await op('cards.list',{env:ENV,project:'Lantern',notAssignee:'Bo Marsh'});
   assert.deepEqual(r.body.items.map(x=>x.number),[]);
   r=await op('cards.list',{env:ENV,notProject:'none'});

@@ -146,10 +146,10 @@ export const isOpen=c=>c.column!=='done';
 
 // f includes and excludes. Include is "any of these"; exclude is "none of these"; they combine.
 // projects / notProjects: ids or "none". entity / entities and notEntity / notEntities: chart cards.
-// assignee / assignees and notAssignee / notAssignees: person ids. agents / notAgent / notAgents:
-// AgentFlow ids (a card delegated to any excluded agent is left out). label / labels and notLabel / notLabels.
-// snoozed: true keeps only cards snoozed now, false only awake ones; left out, both.
-// q matches "#12"/"12" or the title.
+// assignee / assignees and notAssignee / notAssignees: person ids or "none" (no assignees).
+// agents / notAgent / notAgents: AgentFlow ids (a card delegated to any excluded agent is left out).
+// label / labels and notLabel / notLabels. snoozed: true keeps only cards snoozed now, false only
+// awake ones; left out, both. q matches "#12"/"12" or the title.
 export function filterCards(db,f={}){
   const q=(f.q||'').trim().toLowerCase(),num=/^#?\d+$/.test(q)?Number(q.replace('#','')):null;
   const ids=(one,many)=>[...(one?[one]:[]),...(Array.isArray(many)?many:[])];
@@ -161,14 +161,15 @@ export function filterCards(db,f={}){
   const notDelegated=blocked.length?agentCards(blocked):null;
   const notProjects=ids(f.notProject,f.notProjects),notPeople=ids(f.notAssignee,f.notAssignees),notLabels=ids(f.notLabel,f.notLabels);
   const onProject=(c,p)=>p==='none'?!c.project:c.project===p;
+  const onAssignee=(c,p)=>p==='none'?!c.assignees.length:c.assignees.some(a=>a.node===p);
   return db.devops.cards.filter(c=>(!f.hideDone||isOpen(c))
     &&(!f.projects?.length||f.projects.some(p=>onProject(c,p)))
     &&(!notProjects.length||!notProjects.some(p=>onProject(c,p)))
     &&(!ent||ent.has(c.project))
     &&(!notEnt||!notEnt.has(c.project))
-    &&(!f.assignee||c.assignees.some(a=>a.node===f.assignee))
-    &&(!f.assignees?.length||c.assignees.some(a=>f.assignees.includes(a.node)))
-    &&(!notPeople.length||!c.assignees.some(a=>notPeople.includes(a.node)))
+    &&(!f.assignee||onAssignee(c,f.assignee))
+    &&(!f.assignees?.length||f.assignees.some(p=>onAssignee(c,p)))
+    &&(!notPeople.length||!notPeople.some(p=>onAssignee(c,p)))
     &&(!delegated||delegated.has(c.id))
     &&(!notDelegated||!notDelegated.has(c.id))
     &&(!f.label||c.labels.includes(f.label))

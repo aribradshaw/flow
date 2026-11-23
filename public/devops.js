@@ -317,7 +317,7 @@ function sanitize(){
   const known=id=>!!nodeById(id),agent=id=>!!db().agentflow?.agents.some(a=>a.id===id);
   ui.projects=ui.projects.filter(p=>p==='none'||project(p));ui.notProjects=ui.notProjects.filter(p=>p==='none'||project(p));
   ui.entities=ui.entities.filter(known);ui.notEntities=ui.notEntities.filter(known);
-  ui.assignees=ui.assignees.filter(known);ui.notAssignees=ui.notAssignees.filter(known);
+  ui.assignees=ui.assignees.filter(id=>id==='none'||known(id));ui.notAssignees=ui.notAssignees.filter(id=>id==='none'||known(id));
   ui.labels=ui.labels.filter(label);ui.notLabels=ui.notLabels.filter(label);
   ui.agents=ui.agents.filter(agent);ui.notAgents=ui.notAgents.filter(agent);
 }
@@ -325,11 +325,13 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 // Picker items shared by the filters and the card panel.
 const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:isForeign(p.id)?envName(envOf(p)):p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
 const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,...(!c&&isForeign(p.id)?{sub:envName(envOf(p))}:{}),avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
+// Filter picker only: people plus Unassigned (cards with nobody), matching Projects → No project.
+const assigneeFilterItems=()=>[...personItems(),{value:'none',label:'Unassigned',color:'#c4cbc8'}];
 // A linked card takes its owner's labels (the ones of its share); they are read-only everywhere.
 const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||(isForeign(l.id)||isForeign(c.id)?sameSource(l,c):!linkOf(c)||sameSource(l,c)))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name+(c?'':fromEnv(l)),group:name,pill:{bg,fg}}}));
 const entityItems=()=>nodesOf(['entity','area']).filter(e=>ui.entities.includes(e.id)||ui.notEntities.includes(e.id)||entityProjects(db(),e.id).length).map(e=>({value:e.id,label:e.name,...(isForeign(e.id)?{sub:envName(envOf(e))}:{})}));
 // [include key, exclude key, items, menu name]. A value is include, exclude, or off.
-const FILTER_PICKERS={'dv-projects':['projects','notProjects',projectItems,'Projects'],'dv-entities':['entities','notEntities',entityItems,'Entities'],'dv-assignees':['assignees','notAssignees',personItems,'Assignees'],'dv-agents':['agents','notAgents',()=>agentItems(),'Agents'],'dv-labels':['labels','notLabels',labelItems,'Labels']};
+const FILTER_PICKERS={'dv-projects':['projects','notProjects',projectItems,'Projects'],'dv-entities':['entities','notEntities',entityItems,'Entities'],'dv-assignees':['assignees','notAssignees',assigneeFilterItems,'Assignees'],'dv-agents':['agents','notAgents',()=>agentItems(),'Agents'],'dv-labels':['labels','notLabels',labelItems,'Labels']};
 function openFilter(b){
   const [inc,exc,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!inc)return;
   openPicker(b,{items:items(),selected:ui[inc],excluded:ui[exc],cycle:true,label,placeholder:`Search ${label.toLowerCase()}`,onChange(v,x){ui[inc]=v;ui[exc]=x||[];keepUi();render()}});
@@ -342,7 +344,7 @@ function toolbar(cards){
   return `<div class="tl-bar dv-bar">
     ${filterBtn('dv-projects','Projects',projectItems,'Filter by project. Click a choice again to exclude it.')}
     ${filterBtn('dv-entities','Entities',entityItems,'Filter by entity: cards in the projects under it. Click a choice again to exclude it.')}
-    ${filterBtn('dv-assignees','Assignees',personItems,'Filter by assignee. Click a choice again to exclude it.')}
+    ${filterBtn('dv-assignees','Assignees',assigneeFilterItems,'Filter by assignee or Unassigned. Click a choice again to exclude it.')}
     ${db().agentflow?.agents.length?filterBtn('dv-agents','Agents',()=>agentItems(),'Filter by AgentFlow agent: cards delegated to it. Click a choice again to exclude it.'):''}
     ${filterBtn('dv-labels','Labels',labelItems,'Filter by label. Click a choice again to exclude it.')}
     <input id="dv-q" type="search" placeholder="Search # or title" value="${esc(ui.q)}" aria-label="Search cards by number or title">
