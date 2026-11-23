@@ -32,6 +32,7 @@ import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
 import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
 import {createVoice} from './office-voice.js';
+import {createDecor} from './office-decor.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -53,6 +54,7 @@ export function openOffice(opts){
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <button type="button" class="txt" data-of-replay disabled>Replay</button>
+      <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
       <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
@@ -84,7 +86,8 @@ export function openOffice(opts){
         <dt>Meters</dt><dd>Walk up to a room or office meter and press E</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
-        <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd></dl>
+        <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd>
+        <dt>Decorate</dt><dd>Inside your room: place props, R to rotate, Delete to remove, Esc to leave</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
@@ -122,6 +125,7 @@ export function closeOffice(){
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.voice?.dispose(); // every call ends; the mic and a shared screen are released
+  s.decor?.dispose();
   s.meters?.dispose();s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
@@ -235,6 +239,7 @@ function connect(){
   on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
   on('meters',d=>{S.sparks=d.sparks||{};S.meters?.invalidate()});
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
+  on('decor',row=>{if(S.world)S.decor?.remote(row)});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
   on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
   on('result',a=>{
@@ -372,7 +377,9 @@ function updateRooms(members,agentflow){
 function snapshot(d){
   const previous=S.live;
   if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
-  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.sparks=d.sparks||{};S.portalList=d.portals||[];
+  S.meKey=d.me.key;S.me=d.me;
+  S.decor?.load(d.decor);
+  S.live=new Map(Object.entries(d.live||{}));S.sparks=d.sparks||{};S.portalList=d.portals||[];
   S.serverWorld=d.env?.world;if(S.world)usePlace(wantedWorld());
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();S.meters?.invalidate();
@@ -497,7 +504,14 @@ function initScene(){
     }});
   S.cardDrag=createOfficeCardDrag({root:S.root,env:S.env,local:()=>S.env===S.opts.current,hitAt,targetAt:cardTargetAt,openCard});
   S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:e=>S.replay?.active?null:S.cardDrag.grab(e),
-    hover:e=>{if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
+    hover:e=>{S.decor?.hover(e);if(S.decor?.editing()){cv.style.cursor='crosshair';return}if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
+  S.decor=createDecor({
+    root:()=>S.root,me:()=>S.meKey,pos:()=>S.pos,rooms:()=>S.rooms,liveCount:key=>(S.live.get(key)||[]).length,
+    anchor(key){const layout=S.worldLayout,list=layout?.decorAnchors?.()||[];return list.find(a=>a.key===key)||layout?.decorAnchor?.(key)||null},
+    api:(path,body)=>api(path,body),toast:(m,bad)=>S?.opts.toast?.(m,bad),camera:()=>S.camera,canvas:()=>S.renderer?.domElement,
+    refresh:()=>updateColliders(),repaint:key=>roomLook(key),
+  });
+  if(navigator.webdriver&&globalThis.__flowOffice)Object.assign(globalThis.__flowOffice,{project:(x,z)=>S.decor.project(x,z),decor:()=>S.decor.debug()});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);const delta=S.clock.getDelta();frame(Math.min(.05,delta),S.clock.elapsedTime,delta)};loop();
 }
 function toggleOverview(){
@@ -573,7 +587,9 @@ function buildRooms(){
     const m=byKey.get(slot.key),c=new THREE.Vector3(slot.x,slot.y||0,slot.z),facing=slot.facing;
     const [bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
     const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
-    const wall=(x,z,w,d,h=WALL_H)=>{g.add(part(M.box,M.wall,[x,h/2,z],[w,h,d]));boxAt(slot,x,z,w,d,h)};
+    // One material per room so a theme can recolour these walls without painting every room.
+    const wallMat=M.wall.clone();let wallOwned=false;
+    const wall=(x,z,w,d,h=WALL_H)=>{const mesh=part(M.box,wallMat,[x,h/2,z],[w,h,d]);mesh.userData.wall=true;if(!wallOwned){mesh.userData.own=true;wallOwned=true}g.add(mesh);boxAt(slot,x,z,w,d,h)};
     wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
     const side=(ROOM_W-DOOR_W)/2;wall(-(DOOR_W/2+side/2),ROOM_D/2,side,WALL_T);wall(DOOR_W/2+side/2,ROOM_D/2,side,WALL_T);
     const accent=mat(fg);accent.userData.own=true;
@@ -588,7 +604,7 @@ function buildRooms(){
     const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     const entrance=new THREE.Vector3(0,0,ROOM_D/2).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
@@ -601,6 +617,7 @@ function buildRooms(){
   // where the world lets people in).
   {const w=S.place.id==='classic'&&S.worldLayout.mainWall,d=w&&Math.hypot(w.x,w.z),r=(S.commonR||10)+1.5;S.npcEntrance=d?{x:w.x/d*r,z:w.z/d*r}:S.place.spawn?{x:S.place.spawn.x,z:S.place.spawn.z}:null}
   updateColliders();
+  S.decor?.mount();
   const anchors=S.worldLayout.boardAnchors();
   S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
   // E at a board opens the first card in the lane in front of you.
@@ -636,7 +653,9 @@ function buildMainWall(){
 const ago=iso=>{const t=Date.parse(iso);if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} d ago`};
 function roomLook(key){
   const r=S.rooms.get(key);if(!r)return;const on=S.people.has(key)||(!S.replay?.active&&r.member.me);
-  r.floorMat.color.set(r.bg);if(!on)r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);
+  const theme=S.decor?.themeOf(key);
+  r.floorMat.color.set(theme?.floor||r.bg);r.wallMat?.color.set(theme?.wall||'#f9fbfa');
+  if(!on){r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);r.wallMat?.color.lerp(new THREE.Color('#d5d9d7'),.45)}
   r.tag.el.classList.toggle('off',!on);
   const seen=ago(r.member.lastSeen);r.seen=seen;
   if(S.presence)S.presence.paintRoom(r,on);
@@ -648,6 +667,7 @@ function roomLook(key){
 function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
 function updateColliders(){
+  S.decor?.stamp();
   S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes),...(S.presence?.doorBoxes()||[])];
   S.npc?.invalidate(); // NPCs re-plan their walks around what is there now
 }
@@ -926,6 +946,7 @@ function cardTargetAt(e){
   return null;
 }
 function pick(e){
+  if(S.decor?.pointer(e))return;
   const hit=hitAt(e);closeMenu();if(!hit)return;
   if(S.replay?.active){if(hit.point)S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
   if(S.voice?.pick(S.ray))return;
@@ -993,7 +1014,7 @@ function onClick(e){
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
-    allow:()=>decide('allow'),deny:()=>decide('deny'),
+    allow:()=>decide('allow'),deny:()=>decide('deny'),decorate:()=>S.decor?.toggle(),
     afInfo(){closeMenu();showAf(b.dataset.id)},
     agentDetails:()=>openAgentPanelOverlay('agent',b.dataset.id),
     agentQueue:()=>openAgentPanelOverlay('queue',b.dataset.id),
@@ -1103,6 +1124,7 @@ function onKey(e){
   if(overlayOpen()){e.stopPropagation();return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
+    if(S.decor?.escape())return;
     if(S.interact?.closeOpen())return;
     if(S.voice?.escape())return;
     if(S.pointer?.cancelGrab())return;
@@ -1114,6 +1136,7 @@ function onKey(e){
     closeOffice();return;
   }
   if(isTyping(e.target))return;
+  if(S.decor?.key(e)){e.stopPropagation();return}
   if(S.pointer?.grabbing){e.stopPropagation();return}
   e.stopPropagation(); // the app underneath does not see office shortcuts
   if(e.ctrlKey||e.metaKey||e.altKey)return;
@@ -1236,6 +1259,7 @@ function frame(dt,t,delta){
   // (office-activity.js): after the above, so they have the last word.
   S.npc?.tick(animation.dt,animation.t);
   S.activity?.tick(animation.dt,animation.t);
+  S.decor?.frame();
   if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,animation.t)}
   if(!paused){
     // The camera works as if my deck were the ground, then rides up to it; the overview frames the whole world.

@@ -1441,7 +1441,7 @@ officeHistory.start();
 // Voice and screen sharing (lib/office-rtc.mjs): WebRTC signalling over the office stream, and ICE servers (TURN from env vars).
 const officeRtcMod=await import('./lib/office-rtc.mjs');
 const officeRtc=officeRtcMod.officeRtc({hub:officeHub}),officeIce=officeRtcMod.iceConfig();
-// /api/office/{env}/events (SSE), history, presence, status, knock, admit, enter, say, emote, answer and steer (an answer, a message or a stop: lib/office.mjs), rtc (GET: ICE servers;
+// /api/office/{env}/events (SSE), history, presence, status, knock, admit, enter, say, emote, decorate, answer and steer (an answer, a message or a stop: lib/office.mjs), rtc (GET: ICE servers;
 // POST: voice signalling, lib/office-rtc.mjs; never logged), and /api/office/alerts (SSE, per person):
 // the app's page only, signed in (local mode too).
 async function officeApi(req,res){
@@ -1455,7 +1455,7 @@ async function officeApi(req,res){
     catch(e){console.error('office alerts failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open office alerts'});else res.end()}
     return true;
   }
-  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status|history|rtc|knock|admit|enter)$/.exec(u.pathname);
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status|history|rtc|knock|admit|enter|decorate)$/.exec(u.pathname);
   if(!m){json(res,404,{error:'Not found'});return true}
   // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
   const keyed=m[2]==='events'&&!!req.headers.authorization;
@@ -1494,7 +1494,7 @@ async function officeApi(req,res){
   if(req.method!=='POST'){res.writeHead(405,{Allow:what==='rtc'?'GET, POST':'POST'});res.end();return true}
   readJson(req,res,async b=>{
     try{
-      const out=await (what==='rtc'?officeRtc.signal(envId,user,b):what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):what==='knock'?officeHub.knock(envId,user,b||{}):what==='admit'?officeHub.admit(envId,user,b||{}):what==='enter'?officeHub.enter(envId,user,b||{}):officeHub.answer(envId,user,b));
+      const out=await (what==='rtc'?officeRtc.signal(envId,user,b):what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):what==='knock'?officeHub.knock(envId,user,b||{}):what==='admit'?officeHub.admit(envId,user,b||{}):what==='enter'?officeHub.enter(envId,user,b||{}):what==='decorate'?officeHub.decorate(envId,user,b||{}):officeHub.answer(envId,user,b));
       json(res,200,out);
     }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
   });
