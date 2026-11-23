@@ -66,3 +66,9 @@
 .of-mh{padding:4px 8px 6px;font-size:11px;font-weight:700;color:var(--muted)}
 .of-menu button{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 8px;border:0;border-radius:5px;background:transparent;text-align:left}
 .of-menu button:hover,.of-menu button:focus-visible{background:var(--hover)}
+.of-controls{position:absolute;top:56px;right:12px;width:min(310px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;box-sizing:border-box;padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.14);z-index:5;font-size:12px}
+.of-controls dl{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;margin:12px 0}
+.of-controls dt{font-weight:600}
+.of-controls dd{margin:0;color:var(--muted)}
+.of-controls label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.of-top [aria-pressed=true],.of-top [aria-expanded=true]{color:var(--accent);background:var(--accent-2)}

@@ -8,6 +8,7 @@ import * as THREE from './vendor/three/three.module.min.js';
 import {icon} from './icons.js';
 import {esc} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
+import {bindOfficePointer,createOfficeCamera,officeBox} from './office-controls.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97757'},codex:{name:'Codex',color:'#2b2f33'},gemini:{name:'Gemini',color:'#4c7cf0'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -25,8 +26,10 @@ export function openOffice(opts){
       <span class="of-title">${icon('cube3d',16)}<b>3D office</b></span>
       ${opts.offices.length>1?`<select class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
-      <span class="of-keys">WASD or arrows · click to walk · 1–4 emotes · Esc closes</span>
+      <span class="of-keys">WASD · middle/right drag · scroll to zoom</span>
       <button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
+      <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
+      <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
       <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
     <div class="of-stage"><div class="of-labels" aria-hidden="true"></div></div>
     <div class="of-dock">
@@ -34,13 +37,25 @@ export function openOffice(opts){
       <form class="of-say"><input class="of-input" maxlength="280" placeholder="Say something… (Enter)" aria-label="Chat message" autocomplete="off"><button type="submit" class="ib" aria-label="Send" data-tip="Send">${icon('send')}</button></form>
       <div class="of-emotes" role="group" aria-label="Emotes">${EMOTES.map(([k,e,l],i)=>`<button type="button" data-emote="${k}" aria-label="${l} (${i+1})" data-tip="${l} · ${i+1}">${e}</button>`).join('')}</div>
     </div>
+    <aside class="of-controls" aria-label="Office controls" hidden>
+      <b>Office controls</b>
+      <dl><dt>Walk</dt><dd>WASD, arrows, or click/tap a destination</dd>
+        <dt>Orbit</dt><dd>Middle/right drag, Alt+drag, Q / E, or one-finger drag</dd>
+        <dt>Zoom</dt><dd>Scroll, + / − buttons, or pinch</dd>
+        <dt>Pan</dt><dd>Two-finger drag</dd>
+        <dt>Recenter</dt><dd>Middle-click or F</dd>
+        <dt>Overview</dt><dd>O or the overview button</dd>
+        <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd></dl>
+      <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
+    </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
   root.tabIndex=-1;document.body.append(root);
   S={opts,root,lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
-    keys:new Set(),people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
-    me:null,meKey:'',pos:new THREE.Vector3(0,0,6),heading:0,az:0,target:null,follow:null,zoom:1.2,sentAt:0,moving:false,lastSent:'',chat:[],opener:document.activeElement};
+    keys:new Set(),walls:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
+    me:null,meKey:'',pos:new THREE.Vector3(0,0,6),heading:0,target:null,follow:null,sentAt:0,moving:false,lastSent:'',chat:[],opener:document.activeElement};
   try{initScene()}catch(e){S.stage.innerHTML='<p class="of-fail">This browser could not start 3D graphics, so the office cannot open here.</p>';status('3D is not available')}
   root.addEventListener('click',onClick);
+  root.querySelector('.of-auto-camera').addEventListener('change',e=>S.rig?.setAuto(e.target.checked));
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
@@ -81,7 +96,7 @@ function snapshot(d){
   S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
   buildRooms();buildAgentflow();
-  if(!S.placed){S.placed=true;const r=S.rooms.get(S.meKey);if(r){S.pos.copy(r.door);S.heading=r.facing}S.az=Math.atan2(S.pos.x,S.pos.z)}
+  if(!S.placed){S.placed=true;const r=S.rooms.get(S.meKey);if(r){S.pos.copy(r.door);S.heading=r.facing}S.rig?.reset(S.pos,S.heading)}
   upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x:S.pos.x,z:S.pos.z,heading:S.heading,moving:false},true);
   for(const p of d.people)if(p.key!==S.meKey)upsertPerson(p);
   S.lines.innerHTML='';S.chat=[];for(const l of d.chat||[])addLine(l,{quiet:true});
@@ -101,7 +116,7 @@ function initScene(){
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
   S.stage.prepend(renderer.domElement);renderer.domElement.className='of-canvas';
   const scene=new THREE.Scene();scene.background=new THREE.Color('#eef2ef');scene.fog=new THREE.Fog('#eef2ef',45,110);
-  const camera=new THREE.PerspectiveCamera(45,1,0.1,200);
+  const camera=new THREE.PerspectiveCamera(45,1,0.08,1400);
   scene.add(new THREE.HemisphereLight('#ffffff','#b9c4bf',2.2));
   const sun=new THREE.DirectionalLight('#ffffff',1.6);sun.position.set(12,30,18);scene.add(sun);
   const ground=new THREE.Mesh(new THREE.CircleGeometry(120,48),mat('#dfe6e2'));ground.rotation.x=-Math.PI/2;ground.name='ground';scene.add(ground);
@@ -115,14 +130,21 @@ function initScene(){
   Object.assign(S,{renderer,scene,camera,ground,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
   const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
-  const cv=renderer.domElement;let down=null;
-  cv.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,t:performance.now()}});
-  cv.addEventListener('pointerup',e=>{if(down&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<8)pick(e);down=null});
-  cv.addEventListener('wheel',e=>{e.preventDefault();zoomBy(Math.exp(e.deltaY*.0012))},{passive:false});
-  cv.addEventListener('pointermove',e=>{const hit=hitAt(e);cv.style.cursor=hit?.kind?'pointer':'default'});
+  const cv=renderer.domElement;
+  S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.heading);
+  S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:()=>S.rig.recenter(S.heading),
+    hover:e=>{cv.style.cursor=hitAt(e)?.kind?'pointer':'default'}});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);frame(Math.min(.05,S.clock.getDelta()),S.clock.elapsedTime)};loop();
 }
-const zoomBy=f=>{S.zoom=Math.max(.45,Math.min(2.6,S.zoom*f))};
+function toggleOverview(){
+  if(!S.rig)return;
+  S.root.querySelector('[data-of="overview"]').setAttribute('aria-pressed',String(S.rig.toggleOverview()));
+}
+function toggleControls(){
+  const el=S.root.querySelector('.of-controls');
+  el.hidden=!el.hidden;
+  S.root.querySelector('[data-of="controls"]').setAttribute('aria-expanded',String(!el.hidden));
+}
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
 function clear(group){S.world.remove(group);group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
@@ -136,11 +158,17 @@ function layout(n){
 }
 function buildRooms(){
   for(const r of S.rooms.values())clear(r.group);S.rooms.clear();
+  S.walls=[];S.overviewRadius=12;
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
   layout(list.length).forEach(({c,facing},i)=>{
     const m=list[i],[bg,fg]=memberColor(m.key),g=new THREE.Group();g.position.copy(c);g.rotation.y=facing;
     const floor=part(M.box,mat(bg),[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
-    const wall=(x,z,w,d)=>g.add(part(M.box,M.wall,[x,0.55,z],[w,1.1,d]));
+    const cos=Math.cos(facing),sin=Math.sin(facing);
+    S.overviewRadius=Math.max(S.overviewRadius,Math.hypot(c.x,c.z)+8);
+    const wall=(x,z,w,d)=>{
+      g.add(part(M.box,M.wall,[x,0.55,z],[w,1.1,d]));
+      S.walls.push(officeBox(c.x+x*cos+z*sin,c.z-x*sin+z*cos,facing,w,d,1.1));
+    };
     wall(0,-ROOM_D/2,ROOM_W,0.2);wall(-ROOM_W/2,0,0.2,ROOM_D);wall(ROOM_W/2,0,0.2,ROOM_D);
     const side=(ROOM_W-3)/2;wall(-(3/2+side/2),ROOM_D/2,side,0.2);wall(3/2+side/2,ROOM_D/2,side,0.2);
     const stripe=part(M.box,mat(fg),[0,1.12,-ROOM_D/2],[ROOM_W,0.06,0.24]);stripe.userData.own=true;g.add(stripe);
@@ -305,7 +333,7 @@ function onClick(e){
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
-  ({close:closeOffice,zoomIn:()=>zoomBy(1/1.2),zoomOut:()=>zoomBy(1.2),closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
+  ({close:closeOffice,zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
@@ -360,27 +388,34 @@ function decide(decision){
 const MOVE={w:[0,-1],arrowup:[0,-1],s:[0,1],arrowdown:[0,1],a:[-1,0],arrowleft:[-1,0],d:[1,0],arrowright:[1,0]};
 function onKey(e){
   if(!S)return;
-  const typing=e.target.closest?.('input,textarea,select');
-  e.stopPropagation(); // the app underneath does not see keys while the office is open
-  if(typing){if(e.key==='Escape'){e.preventDefault();e.target.blur()}return}
+  const typing=e.target.closest?.('input,textarea,select,[contenteditable]:not([contenteditable=false])');
   if(e.key==='Escape'){e.preventDefault();if(closeMenu())return;if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}closeOffice();return}
+  if(typing)return;
+  e.stopPropagation(); // the app underneath does not see office shortcuts
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   const k=e.key.toLowerCase();
+  if(['q','e','f','o','?'].includes(k)&&!e.target.closest?.('[role=menu]')){
+    e.preventDefault();
+    if(e.repeat)return;
+    if(k==='q'||k==='e')S.rig?.rotate((k==='q'?1:-1)*Math.PI/6);
+    if(k==='f')S.rig?.recenter(S.heading);
+    if(k==='o')toggleOverview();
+    if(k==='?')toggleControls();
+    return;
+  }
   if(MOVE[k]&&!e.target.closest?.('[role=menu]')){e.preventDefault();S.keys.add(k);S.target=null;S.follow=null;return}
   if(MOVE[k]&&e.target.closest?.('[role=menu]')&&(k==='arrowup'||k==='arrowdown')){e.preventDefault();const bs=[...S.menu.querySelectorAll('button')],i=bs.indexOf(document.activeElement);bs[(i+(k==='arrowup'?-1:1)+bs.length)%bs.length]?.focus();return}
   if(/^[1-4]$/.test(e.key)){e.preventDefault();emote(EMOTES[+e.key-1][0]);return}
   if(e.key==='Enter'&&e.target===document.body||e.key==='t'){e.preventDefault();S.root.querySelector('.of-input').focus()}
 }
-function onKeyUp(e){if(!S)return;S.keys.delete(e.key.toLowerCase());e.stopPropagation()}
+function onKeyUp(e){S?.keys.delete(e.key.toLowerCase())}
 function clearKeys(){S?.keys.clear()}
 
 // ---------- each frame ----------
 const v3=new THREE.Vector3();
 function frame(dt,t){
   // Me: keys, then a click target, then following someone.
-  // The camera sits outside me, looking towards the middle of the office; keys move relative to it.
-  if(Math.hypot(S.pos.x,S.pos.z)>3)S.az=turn(S.az,Math.atan2(S.pos.x,S.pos.z),dt*0.16);
-  const fx=-Math.sin(S.az),fz=-Math.cos(S.az);
+  const fx=-Math.sin(S.rig.yaw),fz=-Math.cos(S.rig.yaw);
   let dx=0,dz=0;for(const k of S.keys){const [r,f]=MOVE[k];dx+=r*-fz+-f*fx;dz+=r*fx+-f*fz}
   if(!dx&&!dz&&S.follow){const f=S.people.get(S.follow);if(f){v3.copy(f.obj.position).sub(S.pos);const d=v3.length();if(d>1.8){dx=v3.x/d;dz=v3.z/d}}}
   if(!dx&&!dz&&S.target){v3.copy(S.target).sub(S.pos);const d=v3.length();if(d<0.15)S.target=null;else{dx=v3.x/d;dz=v3.z/d}}
@@ -401,9 +436,11 @@ function frame(dt,t){
     else if(u.status==='waiting'){c.position.y=Math.abs(Math.sin(t*3.2+c.id))*0.38;for(const m of u.mats||[])m.emissiveIntensity=0.25+Math.abs(Math.sin(t*3.2))*0.35}
     for(const k of u.kids||[]){const o=k.userData.orbit;o.a+=dt*(u.status==='idle'?0.3:1.6);k.position.set(c.position.x+Math.cos(o.a)*o.r,o.y+Math.sin(t*5+o.a)*0.06,c.position.z+Math.sin(o.a)*o.r);k.rotation.y=-o.a}
   }
-  // Camera: behind and above me, eased.
-  const cam=S.camera,goal=v3.set(S.pos.x-fx*13*S.zoom,14*S.zoom,S.pos.z-fz*13*S.zoom);cam.position.lerp(goal,Math.min(1,dt*5));cam.lookAt(S.pos.x+fx*2,0.6,S.pos.z+fz*2);
-  S.renderer.render(S.scene,cam);
+  const speed=len?SPEED/len:0;
+  S.rig.update(dt,S.pos,S.heading,dx*speed,dz*speed,S.walls,S.overviewRadius,
+    {held:S.pointer.orbiting,align:!S.keys.size||S.keys.has('w')||S.keys.has('arrowup')});
+  S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
+  S.renderer.render(S.scene,S.camera);
   placeLabels();
 }
 const turn=(a,b,dt)=>{let d=((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;return a+d*Math.min(1,dt*10)};
