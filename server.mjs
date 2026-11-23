@@ -4,6 +4,7 @@ import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync,copyFileSync,
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {resolve,extname,sep,join} from 'node:path';
+import {readRaw} from './lib/body.mjs';
 const root=fileURLToPath(new URL('./public/',import.meta.url));
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.json':'application/json','.txt':'text/plain','.md':'text/markdown'};
 // Storage: BACKUP_DIR, SAVES_DIR and INBOX_DIR (e.g. a Railway volume at /data/backups, /data/saves,
@@ -18,9 +19,10 @@ const KEEP_LOCAL=200;
 const validDb=d=>Array.isArray(d?.charts)&&d.charts.length&&d.charts.some(c=>c.id===d.active)&&d.charts.every(c=>typeof c.name==='string'&&Array.isArray(c.nodes)&&Array.isArray(c.edges));
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(body))};
 function readBody(req,res,done){
-  let body='',bytes=0;
-  req.on('data',chunk=>{bytes+=chunk.length;if(bytes>5000000){res.writeHead(413);res.end();req.destroy();return;}body+=chunk;});
-  req.on('end',()=>{if(!res.writableEnded)done(body)});
+  readRaw(req,5000000).then(r=>{
+    if(r.tooLarge){if(!res.destroyed&&!res.headersSent){res.writeHead(413);res.end()}return}
+    if(!r.aborted&&!res.writableEnded)done(r.text);
+  });
 }
 // Sign-in (OneProfileID when OPID_* is set, otherwise local single-user mode) and environments.
 // Imported after .env is loaded so OPID_* values there are seen.
@@ -1706,7 +1708,7 @@ function resolveStatic(url){
   return file;
 }
 let draining=false;
-const server=http.createServer(async(req,res)=>{
+async function handleRequest(req,res){
   res.once('finish',()=>{if(draining)setImmediate(()=>server.closeIdleConnections())});
   if(req.url.split('?')[0]==='/health'&&(req.method==='GET'||req.method==='HEAD')){
     res.writeHead(draining?503:200,{'Cache-Control':'no-store'});res.end();return;
@@ -1741,7 +1743,10 @@ const server=http.createServer(async(req,res)=>{
   let file;try{file=resolveStatic(decodeURIComponent(req.url?.split('?')[0]||'/'))}catch{file=null}
   if(!file||(req.method!=='GET'&&req.method!=='HEAD')){res.writeHead(404);res.end('Not found');return;}
   try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control',file.startsWith(vendorRoot)?'public, max-age=86400':'no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}
-});
+}
+// One request that throws (a client gone mid-read, say) answers 500 and is logged: it never stops the server.
+const server=http.createServer((req,res)=>{handleRequest(req,res).catch(e=>{console.error('request failed:',req.method,req.url?.split('?')[0],e?.message||e);
+  if(!res.headersSent&&!res.destroyed){res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:'Something went wrong'}))}else res.destroy()})});
 // Local single-user mode only ever listens on loopback; a public deploy must run with OneProfileID.
 // With OPID_* set it listens on HOST (default 0.0.0.0) at PORT, as hosts like Railway expect.
 const LOOPBACK=['127.0.0.1','localhost','::1'];
