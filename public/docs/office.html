@@ -42,7 +42,10 @@
             &quot;description&quot;: &quot;running (working), waiting (on its person: a permission prompt or a question) or idle.&quot;
           },
           &quot;activity&quot;: {
-            &quot;description&quot;: &quot;What it is doing right now, e.g. \&quot;Running tests\&quot;.&quot;
+            &quot;description&quot;: &quot;What it is doing right now, e.g. \&quot;Running tests\&quot; or \&quot;Edit lib/auth.mjs\&quot;.&quot;
+          },
+          &quot;activityKind&quot;: {
+            &quot;description&quot;: &quot;What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as \&quot;Running tests\&quot;); an idle agent is always idle. Shown for private agents too.&quot;
           },
           &quot;host&quot;: {
             &quot;description&quot;: &quot;The machine, e.g. \&quot;laptop\&quot;.&quot;
@@ -71,6 +74,9 @@
                 &quot;model&quot;: {},
                 &quot;status&quot;: {
                   &quot;description&quot;: &quot;running (working), waiting (on its person: a permission prompt or a question) or idle.&quot;
+                },
+                &quot;activityKind&quot;: {
+                  &quot;description&quot;: &quot;As for the agent; inferred from the title when missing.&quot;
                 }
               }
             }
@@ -195,7 +201,7 @@
 }</code></pre></details><h4>Example: One agent waiting on a prompt</h4><pre><code>curl -sS -X PUT &quot;$FLOW_URL/api/v1/office/agents&quot; \
   -H &quot;Authorization: Bearer $FLOW_API_KEY&quot; \
   -H &#39;Content-Type: application/json&#39; \
-  -d &#39;{&quot;source&quot;:&quot;bridge:laptop&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;,&quot;agents&quot;:[{&quot;id&quot;:&quot;laptop:t3:thread-abc&quot;,&quot;title&quot;:&quot;Fix login bug&quot;,&quot;vendor&quot;:&quot;claude&quot;,&quot;model&quot;:&quot;Opus 5.5&quot;,&quot;status&quot;:&quot;waiting&quot;,&quot;activity&quot;:&quot;Waiting for approval&quot;,&quot;host&quot;:&quot;laptop&quot;,&quot;hostLabel&quot;:&quot;laptop · T3&quot;,&quot;repo&quot;:{&quot;name&quot;:&quot;flow&quot;,&quot;remote&quot;:&quot;https://github.com/acme/flow.git&quot;},&quot;children&quot;:[],&quot;pending&quot;:{&quot;requestId&quot;:&quot;req-1&quot;,&quot;kind&quot;:&quot;approval&quot;,&quot;summary&quot;:&quot;Run: npm test&quot;,&quot;can&quot;:[&quot;allow&quot;,&quot;deny&quot;]},&quot;agentflow&quot;:{&quot;agent&quot;:&quot;Builder&quot;,&quot;card&quot;:12},&quot;transcript&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;text&quot;:&quot;Fix the login redirect loop.&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;},{&quot;role&quot;:&quot;assistant&quot;,&quot;text&quot;:&quot;The callback keeps ?next=/login. Running the tests next.&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;},{&quot;role&quot;:&quot;tool&quot;,&quot;text&quot;:&quot;Run: npm test&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;}]}]}&#39;</code></pre><pre class="out"><code>{
+  -d &#39;{&quot;source&quot;:&quot;bridge:laptop&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;,&quot;agents&quot;:[{&quot;id&quot;:&quot;laptop:t3:thread-abc&quot;,&quot;title&quot;:&quot;Fix login bug&quot;,&quot;vendor&quot;:&quot;claude&quot;,&quot;model&quot;:&quot;Opus 5.5&quot;,&quot;status&quot;:&quot;waiting&quot;,&quot;activity&quot;:&quot;Waiting for approval&quot;,&quot;activityKind&quot;:&quot;test&quot;,&quot;host&quot;:&quot;laptop&quot;,&quot;hostLabel&quot;:&quot;laptop · T3&quot;,&quot;repo&quot;:{&quot;name&quot;:&quot;flow&quot;,&quot;remote&quot;:&quot;https://github.com/acme/flow.git&quot;},&quot;children&quot;:[],&quot;pending&quot;:{&quot;requestId&quot;:&quot;req-1&quot;,&quot;kind&quot;:&quot;approval&quot;,&quot;summary&quot;:&quot;Run: npm test&quot;,&quot;can&quot;:[&quot;allow&quot;,&quot;deny&quot;]},&quot;agentflow&quot;:{&quot;agent&quot;:&quot;Builder&quot;,&quot;card&quot;:12},&quot;transcript&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;text&quot;:&quot;Fix the login redirect loop.&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;},{&quot;role&quot;:&quot;assistant&quot;,&quot;text&quot;:&quot;The callback keeps ?next=/login. Running the tests next.&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;},{&quot;role&quot;:&quot;tool&quot;,&quot;text&quot;:&quot;Run: npm test&quot;,&quot;at&quot;:&quot;2026-10-29T17:00:00.000Z&quot;}]}]}&#39;</code></pre><pre class="out"><code>{
   &quot;actions&quot;: [],
   &quot;accepted&quot;: 1
 }</code></pre></section>
@@ -206,7 +212,7 @@
   &quot;properties&quot;: {},
   &quot;required&quot;: [],
   &quot;additionalProperties&quot;: false
-}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>agents</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agents[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable and unique within the source, e.g. &quot;laptop:t3:thread-abc&quot;.</td></tr><tr><td><code>agents[].title</code></td><td>string</td><td></td><td>What it is working on (up to 200 characters).</td></tr><tr><td><code>agents[].vendor</code></td><td>string</td><td></td><td>Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one).</td></tr><tr><td><code>agents[].model</code></td><td>string</td><td></td><td>Display name, e.g. &quot;Opus 5.5&quot;.</td></tr><tr><td><code>agents[].status</code></td><td>string</td><td></td><td>running (working), waiting (on its person: a permission prompt or a question) or idle.</td></tr><tr><td><code>agents[].activity</code></td><td>string</td><td></td><td>What it is doing right now, e.g. &quot;Running tests&quot;.</td></tr><tr><td><code>agents[].host</code></td><td>string</td><td></td><td>The machine, e.g. &quot;laptop&quot;.</td></tr><tr><td><code>agents[].hostLabel</code></td><td>string</td><td></td><td>How to show where it runs, e.g. &quot;laptop · T3&quot;.</td></tr><tr><td><code>agents[].repo</code></td><td>object | null</td><td></td><td>The repository it works in: matched against projects&#39; repos to decide who may see the details.</td></tr><tr><td><code>agents[].children</code></td><td>object[]</td><td></td><td>Its subagents (up to 20 kept).</td></tr><tr><td><code>agents[].pending</code></td><td>object | null</td><td></td><td>What it waits on (only kept while status is waiting).</td></tr><tr><td><code>agents[].agentflow</code></td><td>object | null</td><td></td><td>The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent&#39;s desk in the office&#39;s common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: &quot;[Flow] &lt;Agent&gt;: #&lt;n&gt; …&quot; (the agent runner&#39;s threads), or &quot;#&lt;n&gt;&quot; for a card delegated to exactly one agent.</td></tr><tr><td><code>agents[].transcript</code></td><td>object[]</td><td></td><td>The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again.</td></tr><tr><td><code>sources</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].source</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].agents</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
+}</code></pre></details><h4>Output</h4><table class="fields"><thead><tr><th>Field</th><th>Type</th><th></th><th>Description</th></tr></thead><tbody><tr><td><code>agents</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>agents[].id</code></td><td>string</td><td><span class="req">required</span></td><td>Stable and unique within the source, e.g. &quot;laptop:t3:thread-abc&quot;.</td></tr><tr><td><code>agents[].title</code></td><td>string</td><td></td><td>What it is working on (up to 200 characters).</td></tr><tr><td><code>agents[].vendor</code></td><td>string</td><td></td><td>Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one).</td></tr><tr><td><code>agents[].model</code></td><td>string</td><td></td><td>Display name, e.g. &quot;Opus 5.5&quot;.</td></tr><tr><td><code>agents[].status</code></td><td>string</td><td></td><td>running (working), waiting (on its person: a permission prompt or a question) or idle.</td></tr><tr><td><code>agents[].activity</code></td><td>string</td><td></td><td>What it is doing right now, e.g. &quot;Running tests&quot; or &quot;Edit lib/auth.mjs&quot;.</td></tr><tr><td><code>agents[].activityKind</code></td><td>string</td><td></td><td>What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as &quot;Running tests&quot;); an idle agent is always idle. Shown for private agents too. One of <code>edit</code>, <code>read</code>, <code>search</code>, <code>run</code>, <code>test</code>, <code>think</code>, <code>web</code>, <code>idle</code>.</td></tr><tr><td><code>agents[].host</code></td><td>string</td><td></td><td>The machine, e.g. &quot;laptop&quot;.</td></tr><tr><td><code>agents[].hostLabel</code></td><td>string</td><td></td><td>How to show where it runs, e.g. &quot;laptop · T3&quot;.</td></tr><tr><td><code>agents[].repo</code></td><td>object | null</td><td></td><td>The repository it works in: matched against projects&#39; repos to decide who may see the details.</td></tr><tr><td><code>agents[].children</code></td><td>object[]</td><td></td><td>Its subagents (up to 20 kept).</td></tr><tr><td><code>agents[].pending</code></td><td>object | null</td><td></td><td>What it waits on (only kept while status is waiting).</td></tr><tr><td><code>agents[].agentflow</code></td><td>object | null</td><td></td><td>The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent&#39;s desk in the office&#39;s common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: &quot;[Flow] &lt;Agent&gt;: #&lt;n&gt; …&quot; (the agent runner&#39;s threads), or &quot;#&lt;n&gt;&quot; for a card delegated to exactly one agent.</td></tr><tr><td><code>agents[].transcript</code></td><td>object[]</td><td></td><td>The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again.</td></tr><tr><td><code>sources</code></td><td>object[]</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].source</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].at</code></td><td>string</td><td><span class="req">required</span></td><td></td></tr><tr><td><code>sources[].agents</code></td><td>integer</td><td><span class="req">required</span></td><td></td></tr></tbody></table><details><summary>JSON Schema</summary><pre><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;properties&quot;: {
     &quot;agents&quot;: {
@@ -239,7 +245,21 @@
           },
           &quot;activity&quot;: {
             &quot;type&quot;: &quot;string&quot;,
-            &quot;description&quot;: &quot;What it is doing right now, e.g. \&quot;Running tests\&quot;.&quot;
+            &quot;description&quot;: &quot;What it is doing right now, e.g. \&quot;Running tests\&quot; or \&quot;Edit lib/auth.mjs\&quot;.&quot;
+          },
+          &quot;activityKind&quot;: {
+            &quot;type&quot;: &quot;string&quot;,
+            &quot;enum&quot;: [
+              &quot;edit&quot;,
+              &quot;read&quot;,
+              &quot;search&quot;,
+              &quot;run&quot;,
+              &quot;test&quot;,
+              &quot;think&quot;,
+              &quot;web&quot;,
+              &quot;idle&quot;
+            ],
+            &quot;description&quot;: &quot;What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as \&quot;Running tests\&quot;); an idle agent is always idle. Shown for private agents too.&quot;
           },
           &quot;host&quot;: {
             &quot;type&quot;: &quot;string&quot;,
@@ -287,6 +307,20 @@
                 &quot;status&quot;: {
                   &quot;type&quot;: &quot;string&quot;,
                   &quot;description&quot;: &quot;running (working), waiting (on its person: a permission prompt or a question) or idle.&quot;
+                },
+                &quot;activityKind&quot;: {
+                  &quot;type&quot;: &quot;string&quot;,
+                  &quot;enum&quot;: [
+                    &quot;edit&quot;,
+                    &quot;read&quot;,
+                    &quot;search&quot;,
+                    &quot;run&quot;,
+                    &quot;test&quot;,
+                    &quot;think&quot;,
+                    &quot;web&quot;,
+                    &quot;idle&quot;
+                  ],
+                  &quot;description&quot;: &quot;As for the agent; inferred from the title when missing.&quot;
                 }
               }
             }
@@ -399,6 +433,7 @@
       &quot;model&quot;: &quot;Opus 5.5&quot;,
       &quot;status&quot;: &quot;waiting&quot;,
       &quot;activity&quot;: &quot;Waiting for approval&quot;,
+      &quot;activityKind&quot;: &quot;test&quot;,
       &quot;host&quot;: &quot;laptop&quot;,
       &quot;hostLabel&quot;: &quot;laptop · T3&quot;,
       &quot;repo&quot;: {

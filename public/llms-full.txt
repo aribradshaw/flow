@@ -5028,7 +5028,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
 ```
 
 ```json
@@ -5058,7 +5058,8 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok or other (other: picked from the model when it names one). |
 | `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
 | `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
-| `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests". |
+| `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests" or "Edit lib/auth.mjs". |
+| `agents[].activityKind` | string |  | What kind of work it is doing, for its animation in the office: edit (changing files), read, search, run (shell commands), test, think, web or idle. Optional: when missing or unknown, Flow infers it from activity (a tool name such as Edit, Read, Grep, Bash or WebFetch, or words such as "Running tests"); an idle agent is always idle. Shown for private agents too. One of `edit`, `read`, `search`, `run`, `test`, `think`, `web`, `idle`. |
 | `agents[].host` | string |  | The machine, e.g. "laptop". |
 | `agents[].hostLabel` | string |  | How to show where it runs, e.g. "laptop · T3". |
 | `agents[].repo` | object | null |  | The repository it works in: matched against projects' repos to decide who may see the details. |
@@ -5088,6 +5089,7 @@ curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
       "model": "Opus 5.5",
       "status": "waiting",
       "activity": "Waiting for approval",
+      "activityKind": "test",
       "host": "laptop",
       "hostLabel": "laptop · T3",
       "repo": {

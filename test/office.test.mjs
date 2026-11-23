@@ -3,7 +3,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {normalizeRepo,repoMatches,cleanReport,officeState,viewAgent,officeHub,MAX_AGENTS,MAX_CHILDREN} from '../lib/office.mjs';
+import {normalizeRepo,repoMatches,cleanReport,officeState,viewAgent,officeHub,inferKind,ACTIVITY_KINDS,MAX_AGENTS,MAX_CHILDREN} from '../lib/office.mjs';
 
 test('repo names, owner/name and git remotes normalise to the same thing',()=>{
   for(const s of ['flow','Flow','flow.git'])assert.deepEqual(normalizeRepo(s),{full:'',name:'flow'},s);
@@ -43,6 +43,32 @@ test('reports are validated and capped: unknown values fall back, strings are cu
   assert.equal(viewAgent(cleanReport({source:'s',agents:[{id:'x',repo:{remote:'git@github.com:acme/flow.git'}}]}).agents[0],{owner:true}).repo.slug,'acme/flow');
 });
 
+test('activityKind: a valid reported kind is kept, anything else is inferred from activity; idle is idle',()=>{
+  assert.deepEqual(ACTIVITY_KINDS,['edit','read','search','run','test','think','web','idle']);
+  const cases={
+    'Edit lib/office.mjs':'edit','MultiEdit':'edit','Write docs/a.md':'edit','apply_patch':'edit','Fixing the login bug':'edit',
+    'Read README.md':'read','Reading the docs':'read','Explore':'read',
+    'Grep "officeHub"':'search','Glob **/*.mjs':'search','Searching for callers':'search',
+    'Bash: git status':'run','Bash(ls -la)':'run','$ make build':'run','Running npm install':'run',
+    'Bash: npm test':'test','npm test':'test','Running tests':'test','shell: cargo test --all':'test','node --test test/office.test.mjs':'test',
+    'WebFetch https://example.com':'web','WebSearch three.js instancing':'web','Browsing the docs site':'web',
+    'Thinking':'think','Planning the change':'think','':'think','Waiting for approval':'think'};
+  for(const [text,kind] of Object.entries(cases))assert.equal(inferKind(text),kind,JSON.stringify(text));
+  assert.equal(inferKind('Edit a.mjs','idle'),'idle');
+  const r=cleanReport({source:'s',agents:[
+    {id:'a',status:'running',activity:'Bash: npm test'},
+    {id:'b',status:'running',activity:'Bash: npm test',activityKind:'WEB'},
+    {id:'c',status:'running',activity:'Read x',activityKind:'dance'},
+    {id:'d',status:'idle',activity:'Edit x',activityKind:'edit'},
+    {id:'e',status:'waiting',activityKind:'search',children:[{id:'k1',title:'Explore the repo',status:'running'},{id:'k2',status:'running',activityKind:'test'},{id:'k3',status:'idle',activityKind:'test'},{id:'k4',status:'running',activity:'WebFetch x',title:'Helper'}]},
+    {id:'f',status:'running',activity:5,activityKind:7}]});
+  assert.deepEqual(r.agents.map(a=>a.activityKind),['test','web','read','idle','search','think']);
+  assert.deepEqual(r.agents[4].children.map(c=>c.activityKind),['read','test','idle','web']);
+  // Every view carries it: the owner's, a project viewer's and the private one.
+  const a=r.agents[4];
+  for(const v of [viewAgent(a,{owner:true}),viewAgent(a,{full:true}),viewAgent(a,{})]){assert.equal(v.activityKind,'search');assert.equal(v.children[0].activityKind,'read')}
+});
+
 const AGENT={id:'host:t3:1',title:'Fix the login bug',vendor:'claude',model:'Opus 5.5',status:'waiting',activity:'Waiting for approval',host:'laptop',hostLabel:'laptop · T3',
   repo:{name:'flow',remote:'https://github.com/acme/flow.git'},children:[{id:'c1',title:'Explore',vendor:'claude',status:'running'}],
   pending:{requestId:'req-1',kind:'approval',summary:'Run: rm -rf build',can:['allow','deny']}};
@@ -56,8 +82,8 @@ test('redaction: the owner sees all and may answer; a project viewer sees detail
   assert.equal(shared.title,'Fix the login bug');assert.equal(shared.repo.slug,'acme/flow');assert.equal(shared.id,'opaque');
   assert.deepEqual(shared.pending.can,[]);assert.equal(shared.pending.requestId,undefined);assert.equal(shared.source,undefined);
   const priv=viewAgent(a,{key:()=>'opaque'});
-  assert.deepEqual(Object.keys(priv).sort(),['children','id','private','status','vendor']);
-  assert.deepEqual(priv,{id:'opaque',vendor:'claude',status:'waiting',private:true,children:[{vendor:'claude',status:'running'}]});
+  assert.deepEqual(Object.keys(priv).sort(),['activityKind','children','id','private','status','vendor']);
+  assert.deepEqual(priv,{id:'opaque',vendor:'claude',status:'waiting',activityKind:'think',private:true,children:[{vendor:'claude',status:'running',activityKind:'read'}]});
   const text=JSON.stringify(priv);
   for(const secret of ['Fix the login','Opus','Waiting for approval','flow','laptop','rm -rf','req-1','host:t3'])assert.ok(!text.includes(secret),secret);
 });
@@ -173,7 +199,7 @@ test('the SSE hub: a snapshot redacted per viewer, presence, chat, emotes, live 
     // A new report pushes fresh views, re-redacted for each viewer.
     st.report(users.ann.email,{source:'bridge:laptop',agents:[{...AGENT,activity:'Running tests',status:'running',pending:null}]});
     assert.equal((await bo.next('agents')).agents[0].activity,'Running tests');
-    assert.deepEqual((await cy.next('agents')).agents,[{id:sc.live[annKey][0].id,vendor:'claude',status:'running',private:true,children:[{vendor:'claude',status:'running'}]}],'same opaque id as before');
+    assert.deepEqual((await cy.next('agents')).agents,[{id:sc.live[annKey][0].id,vendor:'claude',status:'running',activityKind:'test',private:true,children:[{vendor:'claude',status:'running',activityKind:'read'}]}],'same opaque id as before');
     // Answers: only the owner, and only the owner hears it was queued and how it went.
     st.report(users.ann.email,{source:'bridge:laptop',agents:[AGENT]});await ann.next('agents');
     assert.throws(()=>hub.answer('env1',users.bo,{source:'bridge:laptop',agentId:AGENT.id,requestId:'req-1',decision:'allow'}),{status:404},'Bo has no such agent of his own');
