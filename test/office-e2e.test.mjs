@@ -42,6 +42,10 @@ test('local mode: the office opens for the local user with their reported agents
   let r=await api('PUT','/api/v1/office/agents',{source:'bridge:test',at:new Date().toISOString(),agents:[{id:'t3:1',title:'Fix login',vendor:'claude',model:'Opus 5.5',status:'waiting',activity:'Waiting',
     host:'box',hostLabel:'box · T3',repo:{name:'flow'},children:[{id:'c',title:'Explore',vendor:'claude',status:'running'}],pending:{requestId:'req-1',kind:'approval',summary:'Run: npm test',can:['allow','deny']}}]});
   assert.equal(r.status,200);assert.deepEqual(r.data.actions,[]);
+  // Odd rows never fail a report: a null remote, a null repo, numbers for strings, junk rows.
+  r=await api('PUT','/api/v1/office/agents',{source:'odd',agents:[{id:'a',repo:{name:'flow',remote:null}},{id:'b',repo:null},{id:7,title:5,children:null,pending:'x'},null,'junk',{title:'no id'}]});
+  assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.accepted,3);
+  await api('PUT','/api/v1/office/agents',{source:'odd',agents:[]});
   const s=sse('/api/office/default-workspace/events');await s.ready;
   const snap=await s.next('snapshot');
   assert.equal(snap.members.length,1);assert.ok(snap.members[0].me);

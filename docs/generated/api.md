@@ -3363,18 +3363,7 @@ A reporter on your machine (flow office bridge, or any integration) sends every 
 | --- | --- | --- | --- |
 | `source` | string | yes | The reporter, e.g. "bridge:laptop". Each source replaces only its own agents. |
 | `at` | string |  | When the reporter read its agents (ISO time). |
-| `agents` | object[] | yes |  |
-| `agents[].id` | string | yes | Stable and unique within the source, e.g. "laptop:t3:thread-abc". |
-| `agents[].title` | string |  | What it is working on (up to 200 characters). |
-| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini or other. |
-| `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
-| `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
-| `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests". |
-| `agents[].host` | string |  | The machine, e.g. "laptop". |
-| `agents[].hostLabel` | string |  | How to show where it runs, e.g. "laptop · T3". |
-| `agents[].repo` | object | null |  | The repository it works in: matched against projects' repos to decide who may see the details. |
-| `agents[].children` | object[] |  | Its subagents (up to 20 kept). |
-| `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
+| `agents` | any[] | yes |  |
 
 **Output**
 
