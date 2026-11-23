@@ -9,6 +9,7 @@
 //     whole input; <command> --help lists its flags.
 //   flow refresh                                refetch the OpenAPI document (cached for an hour)
 //   flow mcp                                    a local stdio MCP server that proxies to the REST API
+//   flow office bridge                          report local coding agents to Flow
 //   flow inbox|workspace …                     tools/inbox.mjs, tools/env.mjs
 // Config: $XDG_CONFIG_HOME/flygon-flow/config.json (default ~/.config), written 0600; FLOW_URL,
 // FLOW_API_KEY and FLOW_ENV override it. The key is never printed.
@@ -172,9 +173,14 @@ async function main(argv){
     fail('Usage: flow env use <id> | flow env');
   }
   if(cmd==='mcp')return mcp();
+  if(cmd==='office'&&rest[0]==='bridge'){
+    const {officeBridge}=await import('./office-bridge.mjs');
+    try{return await officeBridge(config(),rest.slice(1))}
+    catch(e){fail('office bridge: '+e.message)}
+  }
   const cfg=config();
   if(cmd==='refresh'){const ops=operationsFrom(await spec(cfg,{refresh:true}));console.log(`${ops.length} commands from ${cfg.url}`);return}
-  const usage=`Usage: flow <command> …\n  flow login --url <server> --key <key>   flow env use <id>   flow refresh   flow mcp\n  flow inbox …   flow workspace …`;
+  const usage=`Usage: flow <command> …\n  flow login --url <server> --key <key>   flow env use <id>   flow refresh   flow mcp\n  flow inbox …   flow workspace …   flow office bridge`;
   if(!cmd||cmd==='help'||cmd==='--help'||cmd==='-h'){
     console.log(usage);
     if(cfg.url)try{console.log('\n'+groupHelp(operationsFrom(await spec(cfg))))}catch(e){console.log(`\n(${e.message})`)}
