@@ -12,6 +12,7 @@ import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,cr
 import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
 import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
+import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
 import {openBridgeDialog} from './office-connect.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
@@ -21,7 +22,7 @@ import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
 const EMOTES=[['wave','👋','Wave'],['thumbs','👍','Thumbs up'],['clap','👏','Clap'],['heart','❤️','Heart']];
-const SAY_RADIUS=14,SEND_MS=75,ROOM_W=12,ROOM_D=9;
+const SAY_RADIUS=14,SEND_MS=100,ROOM_W=12,ROOM_D=9;
 let S=null; // the open office
 
 // ---------- opening and closing ----------
@@ -70,7 +71,7 @@ export function openOffice(opts){
   root.tabIndex=-1;document.body.append(root);
   S={opts,root,lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
-    me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],opener:document.activeElement};
+    me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
@@ -104,59 +105,96 @@ function focusPending(){
   const f=afAgents().find(a=>a.id===id||String(a.name||'').toLowerCase()===id.toLowerCase());
   if(f){S.focused=true;showAf(f.id)}
 }
-const status=t=>{const el=S?.root.querySelector('.of-status');if(el)el.textContent=t};
+const status=t=>{const el=S?.root.querySelector('.of-status');if(el&&el.textContent!==t)el.textContent=t};
 
 // ---------- the network ----------
 const api=(path,body)=>fetch(`/api/office/${encodeURIComponent(S.env)}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
   .then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(d.error||'Something went wrong'),{code:d.code,status:r.status});return d});
-// EventSource retries by itself after a dropped connection, but not after an error answer (a deploy
-// restarting the server): then we open a new one, backing off up to 10 s. "Reconnecting…" shows only
-// after 4 s without the stream; a stream that has said nothing for 40 s (heartbeats come every 15 s) is replaced.
+// Replace failed or stalled streams ourselves, including HTTP errors that stop native retries.
+function disconnect(restart=false){
+  S.es?.close();S.es=null;clearTimeout(S.retry);
+  S.retry=setTimeout(connect,S.stream.disconnected({restart}));
+  watch();
+}
 function connect(){
-  S.es?.close();clearTimeout(S.retry);
-  const es=new EventSource(`/api/office/${encodeURIComponent(S.env)}/events`);S.es=es;S.heard=Date.now();
-  const on=(type,f)=>es.addEventListener(type,e=>{if(S?.es!==es)return;S.heard=Date.now();try{f(JSON.parse(e.data))}catch(err){console.error('office',type,err)}});
-  on('snapshot',d=>{S.tries=0;S.down=0;updateSources(d.yourSources||[]);snapshot(d)});
+  const cursor=S.stream.cursor,query=cursor?'?lastEventId='+encodeURIComponent(cursor):'';
+  const es=new EventSource(`/api/office/${encodeURIComponent(S.env)}/events${query}`);S.es=es;S.heard=Date.now();
+  const on=(type,f)=>es.addEventListener(type,e=>{
+    if(S?.es!==es)return;
+    S.heard=Date.now();
+    try{f(JSON.parse(e.data));S.stream.received(e.lastEventId)}catch(err){console.error('office',type,err)}
+  });
+  on('snapshot',d=>{snapshot(d);S.stream.connected();watch()});
+  on('restart',()=>disconnect(true));
   on('yourSources',updateSources);
   on('hb',()=>{});
-  on('join',p=>{if(!S.world)return;upsertPerson(p);presenceChanged(p.key)});on('move',p=>{if(S.world)upsertPerson(p)});
-  on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
+  on('join',p=>{if(!S.world)return;const joined=!S.people.has(p.key);upsertPerson(p);if(joined)presenceChanged(p.key)});
+  on('move',p=>{if(S.world)upsertPerson(p)});
+  on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('agents',({member,agents})=>{S.live.set(member,agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending()});
-  on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildAgentflow();buildRooms()}refreshPanel()});
+  on('members',({members,agentflow})=>{updateRooms(members,agentflow);refreshPanel()});
   on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
   on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
-  es.onerror=()=>{
-    if(S?.es!==es)return;S.down||=Date.now();
-    if(es.readyState===EventSource.CLOSED){const wait=Math.min(10000,800*2**(S.tries||0));S.tries=(S.tries||0)+1;S.retry=setTimeout(()=>{if(S?.es===es)connect()},wait)}
-  };
+  es.onerror=()=>{if(S?.es===es)disconnect()};
 }
 function watch(){
   if(!S)return;
-  if(Date.now()-S.heard>40000&&S.es?.readyState===EventSource.OPEN){S.down||=Date.now();connect()}
-  const down=S.down?Date.now()-S.down:0;
-  if(down>60000)status('Cannot reach the office. Still trying…');else if(down>4000)status('Reconnecting…');
-  else if(!S.down&&S.me)status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'} · ${S.people.size} here`);
+  const now=Date.now();
+  if(S.es&&now-S.heard>40000){disconnect();return}
+  if(!S.stream.stale){
+    let changed=false;
+    for(const [key,until] of S.absent)if(now>=until){S.absent.delete(key);removePerson(key);roomLook(key);changed=true}
+    if(changed)buildAgentflow();
+  }
+  const phase=S.stream.phase;
+  const el=S.root.querySelector('.of-status');
+  el.classList.toggle('stale',S.stream.stale&&!!S.me);
+  if(phase==='unreachable')status('Cannot reach the office. Still trying…');
+  else if(phase==='reconnecting')status('Reconnecting…');
+  else if(!S.stream.stale&&S.me)status(`Live · ${S.members.length} ${S.members.length===1?'room':'rooms'} · ${S.people.size} here`);
+}
+function updateRooms(members,agentflow){
+  const roomShape=rows=>rows.map(({key,name,owner,me})=>[key,name,owner,me]);
+  const changed=!S.placed||JSON.stringify(roomShape(S.members))!==JSON.stringify(roomShape(members));
+  const afChanged=!S.placed||JSON.stringify(S.snapAgentflow)!==JSON.stringify(agentflow);
+  S.members=members;S.snapAgentflow=agentflow;
+  if(!S.world)return;
+  if(afChanged)buildAgentflow();
+  if(changed)buildRooms();
+  else for(const m of members){const room=S.rooms.get(m.key);if(room){room.member=m;roomLook(m.key)}}
 }
 function snapshot(d){
-  S.meKey=d.me.key;S.me=d.me;S.members=d.members;S.snapAgentflow=d.agentflow;S.live=new Map(Object.entries(d.live||{}));
-  S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
+  const previous=S.live;
+  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));
+  updateSources(d.yourSources||[]);
+  updateRooms(d.members,d.agentflow);
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
-  watch();
-  if(!S.world){focusPending();return}
-  buildAgentflow();buildRooms();
-  if(!S.placed){
-    S.placed=true;const r=S.rooms.get(S.meKey),heading=r?.facing??0;
-    if(r)S.pos.copy(r.door);
-    S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading);
+  for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
+  if(S.world){
+    const changed=officeDiff([...previous],[...S.live],([key])=>key);
+    for(const [key] of changed.upsert)buildDesks(key);
+    for(const key of changed.remove)buildDesks(key);
+    if(changed.upsert.length||changed.remove.length)seatsChanged();
+    if(!S.placed){
+      S.placed=true;const r=S.rooms.get(S.meKey),heading=r?.facing??0;
+      if(r)S.pos.copy(r.door);
+      S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading);
+    }
+    const {x,y,z,heading}=S.controller.state;
+    if(!S.people.has(S.meKey))upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x,y,z,heading,moving:false},true);
+    const diff=officeDiff([...S.people.values()].filter(p=>!p.self),d.people.filter(p=>p.key!==S.meKey),p=>p.key,()=>false);
+    let joined=false;
+    for(const p of diff.upsert){joined||=!S.people.has(p.key);upsertPerson(p)}
+    for(const key of diff.remove){
+      // The new process starts with empty positions. Give peers time to send their poses.
+      if(d.resumedHere) {S.absent.delete(key);removePerson(key);roomLook(key);joined=true}
+      else if(!S.absent.has(key))S.absent.set(key,Date.now()+10000);
+    }
+    if(joined)presenceChanged();
   }
-  const {x,y,z,heading}=S.controller.state;
-  upsertPerson({key:S.meKey,name:S.opts.me?.name||d.me.name,image:S.opts.me?.image||'',x,y,z,heading,moving:false},true);
-  for(const p of d.people)if(p.key!==S.meKey)upsertPerson(p);
-  S.lines.innerHTML='';S.chat=[];for(const l of d.chat||[])addLine(l,{quiet:true});
-  watch();sendPresence(true);presenceChanged();
-  focusPending();
+  sendPresence(true);refreshPanel();focusPending();
 }
 function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
@@ -183,13 +221,13 @@ function connectAgents(opener){
 }
 function sendPresence(force){
   const t=performance.now();
-  if(!force&&t-S.sentAt<SEND_MS)return;
+  if(!force&&(S.stream.stale||t-S.sentAt<SEND_MS))return;
   const {x,y,z,heading,speed,grounded,sprinting}=S.controller.state;
   const rounded=n=>Math.round(n*100)/100;
   const pose={x:rounded(x),y:rounded(y),z:rounded(z),heading:rounded(heading),moving:speed>0.05,jump:!grounded,sprint:sprinting};
   const sig=JSON.stringify(pose);
   if(!force&&sig===S.lastSent)return;
-  S.sentAt=t;S.lastSent=sig;api('presence',pose).catch(()=>{});
+  const office=S;S.sentAt=t;S.lastSent=sig;api('presence',pose).catch(()=>{if(S===office&&S.lastSent===sig)S.lastSent=''})
 }
 
 // ---------- the scene ----------
@@ -245,7 +283,7 @@ function toggleControls(){
 }
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
-function clear(group){S.world.remove(group);group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
+function clear(group){group.removeFromParent();group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
 function label(obj,html,{y=1.6,cls='',near=0,show=null}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show};S.labelList.push(l);return l}
 
 // ---------- rooms ----------
@@ -255,7 +293,9 @@ function layout(n){
   return out;
 }
 function buildRooms(){
-  for(const r of S.rooms.values()){clear(r.group);if(r.desks)clear(r.desks)}S.rooms.clear();
+  const previous=S.rooms;
+  S.rooms=new Map();
+  for(const r of previous.values())clear(r.group);
   S.walls=[];S.overviewRadius=12;
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
   layout(list.length).forEach(({c,facing},i)=>{
@@ -274,9 +314,10 @@ function buildRooms(){
     const sign=new THREE.Object3D();sign.position.set(3.4,0,ROOM_D/2);g.add(sign);
     const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:1.45,cls:'room'});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:null,boxes:[],floorMat,bg,tag});roomLook(m.key);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,desks:previous.get(m.key)?.desks,boxes:[],floorMat,bg,tag});roomLook(m.key);
     buildDesks(m.key,false);
   });
+  for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
   updateColliders();
   S.boards?.rebuild(S.rooms,{commonRadius:S.commonR||10,boardAnchor:key=>S.worldLayout?.boardAnchor?.(key)});
 }
@@ -295,24 +336,34 @@ function updateColliders(){
 }
 function buildDesks(key,refresh=true){
   const room=S.rooms.get(key);if(!room)return;
-  if(room.desks){clear(room.desks)}
-  const g=new THREE.Group();g.position.copy(room.center);g.rotation.y=room.facing;room.desks=g;S.world.add(g);
+  if(!room.desks){
+    const g=new THREE.Group(),empty=new THREE.Object3D();empty.position.set(0,0,-1);g.add(empty);
+    room.desks=g;S.world.add(g);
+    g.userData={entries:new Map(),lounge:S.activity?.lounge(g)||[],empty:label(empty,'<span class="of-empty"></span>',{y:0.4,cls:'muted',near:22})};
+  }
+  const g=room.desks,{entries,empty}=g.userData;g.position.copy(room.center);g.rotation.y=room.facing;
   room.boxes=[];
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
-  for(const b of S.activity?.lounge(g)||[])room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
+  for(const b of g.userData.lounge)room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h));
   // Sessions seated at an AgentFlow agent's desk sit in the common area instead (buildSeats).
   const all=S.live.get(key)||[],agents=all.filter(a=>!isSeated(a,S.afPlaced)),away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
-  if(!agents.length){const o=new THREE.Object3D();o.position.set(0,0,-1);g.add(o);label(o,`<span class="of-empty">${away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'No agents running'}</span>`,{y:0.4,cls:'muted',near:22})}
+  empty.el.firstElementChild.textContent=away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'No agents running';
+  empty.el.firstElementChild.hidden=!!agents.length;
+  const visible=new Set();
   agents.slice(0,16).forEach((a,i)=>{
-    const col=i%cols,row=Math.floor(i/cols),x=(col-(cols-1)/2)*sx,z=-ROOM_D/2+1.4+row*2.1;
+    const col=i%cols,row=Math.floor(i/cols),x=(col-(cols-1)/2)*sx,z=-ROOM_D/2+1.4+row*2.1,id=deskKey(key,a);
+    visible.add(id);
     room.boxes.push(officeBox(room.center.x+x*cos+z*sin,room.center.z-x*sin+z*cos,room.facing,1.7,0.8,0.76));
-    makeDesk(g,a,key,x,z,a.private?'Private project':seatTag(a,'',a.title||VENDOR[a.vendor]?.name||'Agent'),{phase:(i*1.7+key.length)%6.28});
+    entries.set(id,makeDesk(g,a,key,x,z,a.private?'Private project':seatTag(a,'',a.title||VENDOR[a.vendor]?.name||'Agent'),{phase:(i*1.7+key.length)%6.28},entries.get(id)));
   });
+  for(const [id,d] of entries)if(!visible.has(id)){clear(d);entries.delete(id)}
   if(refresh)updateColliders();
 }
 // One live session at a desk (in its owner's room, or beside an AgentFlow agent): the desk and its screen,
 // the mascot with its subagents, and its clickable name tag.
-function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}={}){
+const deskKey=(key,a)=>JSON.stringify([key,a.source,a.id]);
+function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}={},existing){
+  if(existing){updateDesk(existing,a,key,x,z,name,tagY,lounge);return existing}
   const d=new THREE.Group();d.position.set(x,0,z);d.scale.setScalar(scale);parent.add(d);
   d.add(part(M.box,M.desk,[0,0.72,0],[1.7,0.08,0.8]),part(M.box,M.desk,[0,0.36,-0.25],[1.5,0.7,0.12]));
   const scr=new THREE.MeshLambertMaterial({color:'#3b4542',emissive:'#000000',flatShading:true});
@@ -323,12 +374,34 @@ function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}=
   mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase};
   mascot.add(shadow(0.45));
   mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
-  S.activity?.attach(mascot,a,{member:key,desk:d,root:parent,lounge});
-  const at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
-  label(mascot,`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`,{y:tagY,cls:'agent click',near:16});
-  if(a.status==='waiting')label(mascot,`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`,{y:tagY+0.5,cls:'bang click'});
-  scr.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
+  d.userData.mascot=mascot;
+  updateDesk(d,a,key,x,z,name,tagY,lounge);
   return d;
+}
+function updateDesk(d,a,key,x,z,name,tagY,lounge){
+  d.position.set(x,0,z);
+  const mascot=d.userData.mascot,u=mascot.userData;
+  const look=mascotKind(a.vendor,a.model);
+  if(u.mascot.kind!==look){
+    u.mascot.group.removeFromParent();
+    u.mascot=createMascot(look,{color:VENDOR_COLOR[a.vendor],scale:.52});
+    u.mascot.group.position.y=.62;mascot.add(u.mascot.group);
+  }
+  u.status=a.status;u.children=(a.children||[]).length;
+  u.screen.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
+  S.activity?.attach(mascot,a,{member:key,desk:d,root:d.parent,lounge});
+  const at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
+  const tag=`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`;
+  if(!u.tag)u.tag=label(mascot,tag,{y:tagY,cls:'agent click',near:16});
+  else if(u.tagHTML!==tag)u.tag.el.innerHTML=tag;
+  u.tagHTML=tag;u.tag.y=tagY;
+  const bang=a.status==='waiting'?`<button type="button" class="of-bang" ${at} aria-label="Waiting: ${esc(name)}">!</button>`:'';
+  if(bang){
+    if(!u.bang)u.bang=label(mascot,bang,{y:tagY+.5,cls:'bang click'});
+    else if(u.bangHTML!==bang)u.bang.el.innerHTML=bang;
+    u.bang.y=tagY+.5;
+  }else if(u.bang){u.bang.el.remove();S.labelList=S.labelList.filter(l=>l!==u.bang);u.bang=null}
+  u.bangHTML=bang;
 }
 // ---------- AgentFlow agents in the common area ----------
 // Laid out like the org chart. AI agents are robots, teams round tables, automations little machines (all
@@ -373,16 +446,20 @@ function buildAgentflow(){
 // that agent, seen from any side, with the agent's name and the card on its tag; up to three per agent.
 const seatSig=seats=>[...seats].map(([id,l])=>id+':'+l.length).sort().join();
 function buildSeats(seats=seatsByAgent(S.live,S.afPlaced)){
-  // Detached anchors tell the activity module (office-activity.js) their actors are gone.
-  if(S.seatGroup){clear(S.seatGroup);S.seatGroup.clear()}const g=new THREE.Group();S.seatGroup=g;S.world.add(g);
+  if(!S.seatGroup){S.seatGroup=new THREE.Group();S.world.add(S.seatGroup)}
+  const g=S.seatGroup,entries=S.seatEntries??=new Map(),visible=new Set();
   for(const [id,sitting] of seats){
     const p=S.afPos?.get(id),a=afOf(id);if(!p||!a)continue;
     sitting.slice(0,3).forEach(({member,agent},i,list)=>{
       // Its own anchor, turned so the mascot sits between the agent and its desk: the activity's frame (office-activity.js).
-      const at=new THREE.Group();at.position.set(p.x+1.12,0,p.z+(i-(list.length-1)/2)*0.85);at.rotation.y=-Math.PI/2;g.add(at);
-      makeDesk(at,agent,member,0,0,seatTag(agent,a.name),{tagY:list.length>1&&i%2?1.15:1.6,phase:i*1.7,scale:0.5,lounge:false});
+      const key=deskKey(member,agent);visible.add(key);
+      let at=entries.get(key);
+      if(!at){at=new THREE.Group();at.rotation.y=-Math.PI/2;g.add(at);entries.set(key,at)}
+      at.position.set(p.x+1.12,0,p.z+(i-(Math.min(list.length,3)-1)/2)*0.85);
+      makeDesk(at,agent,member,0,0,seatTag(agent,a.name),{tagY:list.length>1&&i%2?1.15:1.6,phase:i*1.7,scale:0.5,lounge:false},at.children[0]);
     });
   }
+  for(const [key,at] of entries)if(!visible.has(key)){clear(at);entries.delete(key)}
 }
 // A session report changed: re-seat, and redraw the org only when who is busy changed (that dims or lights robots).
 function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(seats)!==S.seatSig)buildAgentflow();else buildSeats(seats)}
@@ -391,7 +468,7 @@ function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(s
 // A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
 function makeAvatar(key){return makeHuman(lookFor(key),{shadow:false})}
 function upsertPerson(p,self=false){
-  if(!S)return;let a=S.people.get(p.key);
+  if(!S)return;S.absent.delete(p.key);let a=S.people.get(p.key);
   if(!a){
     const obj=new THREE.Group(),pose=new THREE.Group(),figure=makeAvatar(p.key),shade=shadow(0.45);
     figure.position.y=-0.88;pose.add(figure);pose.position.y=0.88;obj.add(pose,shade);
@@ -416,8 +493,13 @@ const nameOf=key=>S.people.get(key)?.name||S.members.find(m=>m.key===key)?.name|
 
 // ---------- chat and emotes ----------
 function addLine(l,{quiet=false}={}){
-  const el=document.createElement('div');el.className='of-line'+(l.key===S.meKey?' mine':'');el.innerHTML=`<b>${esc(l.name)}</b> ${esc(l.text)}`;
-  S.lines.append(el);while(S.lines.children.length>50)S.lines.firstChild.remove();S.lines.scrollTop=S.lines.scrollHeight;
+  if(S.chat.some(line=>line.id===l.id))return;
+  S.chat=mergeOfficeChat(S.chat,[l]);
+  if(!S.chat.some(line=>line.id===l.id))return;
+  const el=document.createElement('div');el.dataset.id=l.id;el.className='of-line'+(l.key===S.meKey?' mine':'');el.innerHTML=`<b>${esc(l.name)}</b> ${esc(l.text)}`;
+  const next=S.chat[S.chat.findIndex(line=>line.id===l.id)+1];
+  S.lines.insertBefore(el,[...S.lines.children].find(child=>child.dataset.id===next?.id)||null);
+  if(S.lines.children.length>50)S.lines.firstChild.remove();S.lines.scrollTop=S.lines.scrollHeight;
   if(quiet)return;
   const p=S.people.get(l.key);if(!p)return;
   if(p.obj.position.distanceTo(S.pos)>SAY_RADIUS&&l.key!==S.meKey)return; // too far away to hear: the log only

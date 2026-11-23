@@ -6,6 +6,7 @@
 .of-env{font-weight:600;color:var(--muted)}
 .of-switch{height:28px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;padding:0 6px;font-weight:600}
 .of-status{font-size:12px;color:var(--muted)}
+.of-status.stale{opacity:.72}
 .of-keys{font-size:11px;color:var(--faint);margin-right:6px}
 @media (max-width:760px){.of-keys{display:none}}
 .of-stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none}

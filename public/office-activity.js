@@ -135,13 +135,15 @@ export function createActivity(office){
   // lounge: false keeps an idle one at its desk (a session seated at an AgentFlow agent's desk, office-seats.js).
   // -> 'waiting' when it just started waiting (or waits on a new prompt), else ''. Pings for the owner.
   function attach(mascot,a,{member,desk,root,lounge=true}){
-    const key=member+'\n'+a.id,prev=actors.get(key);
+    const key=JSON.stringify([member,a.source,a.id]),prev=actors.get(key);
     root.updateWorldMatrix(true,true);
-    const home=desk.localToWorld(mascot.position.clone()),facing=new THREE.Euler().setFromQuaternion(root.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y;
+    const home=desk.localToWorld(new V(0,0,0.85)),facing=new THREE.Euler().setFromQuaternion(root.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y;
     const u=prev||{key,member,pos:home.clone(),yaw:facing+Math.PI,seed:hash(key),phase:'desk',until:0,hopAt:0};
-    // A new mascot each rebuild: props start over on it; place and pose carry on.
-    for(const m of u.own||[])m.dispose?.();
-    Object.assign(u,{mascot,desk,root,home,facing,lounge,props:{},own:[],kind:kindOf(a),status:a.status,mine:!!a.mine});
+    if(u.mascot!==mascot){
+      for(const m of u.own||[])m.dispose?.();
+      Object.assign(u,{mascot,props:{},own:[]});
+    }
+    Object.assign(u,{desk,root,home,facing,lounge,kind:kindOf(a),status:a.status,mine:!!a.mine});
     const req=a.pending?.requestId||'',started=!!prev&&a.status==='waiting'&&(prev.lastStatus!=='waiting'||(req&&req!==prev.lastReq));
     u.lastStatus=a.status;u.lastReq=req;actors.set(key,u);
     if(started){u.hopAt=performance.now();if(u.mine)ping()}
@@ -190,7 +192,7 @@ export function createActivity(office){
   function tick(dt,t){
     const now=t;
     for(const [key,u] of actors){
-      if(!u.root.parent){for(const m of u.own)m.dispose?.();actors.delete(key);continue} // its room was rebuilt without it
+      if(!u.desk.parent||!u.root.parent){for(const m of u.own)m.dispose?.();actors.delete(key);continue} // its room was rebuilt without it
       const goal=goalOf(u,now),dist=Math.hypot(goal.x-u.pos.x,goal.z-u.pos.z),atHome=u.pos.distanceTo(u.home)<0.06;
       let y=0,tilt=0,walking=false;
       if(dist>0.06){
