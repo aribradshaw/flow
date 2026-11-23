@@ -1,11 +1,11 @@
 /* Your T3 threads in the 3D office (public/office-threads.js): the sidebar in the top right and the thread chat
    that slides down from the top. Styled after T3's own sidebar and thread view. */
 .of{--of-th-w:292px}
-.of-th{position:absolute;top:52px;right:10px;width:min(var(--of-th-w),calc(100% - 20px));max-height:calc(100% - 128px);display:flex;flex-direction:column;
+.of-th{position:absolute;top:52px;left:10px;width:min(var(--of-th-w),calc(100% - 20px));max-height:max(220px,calc(100% - 360px));display:flex;flex-direction:column;
   background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 24px rgba(16,24,22,.14);z-index:6;overflow:hidden;font-size:12.5px;
   animation:of-th-in .18s ease-out}
 .of-th[hidden]{display:none}
-@keyframes of-th-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+@keyframes of-th-in{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
 .of-th-head{display:flex;align-items:center;gap:6px;padding:8px 8px 4px 12px}
 .of-th-head b{font-size:13px}
 .of-th-search{display:flex;align-items:center;gap:6px;margin:2px 10px 6px;padding:0 8px;height:28px;border-radius:8px;background:var(--bg);color:var(--muted)}
@@ -49,7 +49,7 @@
 .of-th-dot{position:absolute;top:1px;right:0;min-width:14px;height:14px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:#2563eb;color:#fff;font:700 9.5px/14px inherit;text-align:center}
 .of-th-dot.wait{background:#c2410c}
 /* The agent panel and the controls step aside for the sidebar. */
-.of.of-th-open .of-panel,.of.of-th-open .of-controls{right:calc(20px + var(--of-th-w))}
+/* The sidebar is on the left; the right-hand panels stay where they are. */
 /* A thread's name tag in the office, lit while its row is hovered. */
 .of-label.of-hl{z-index:3}
 .of-label.of-hl .of-tag{background:#2563eb;color:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.35),0 4px 14px rgba(37,99,235,.45);transform:scale(1.12)}
@@ -58,7 +58,7 @@
 .of-ts{position:absolute;top:44px;left:50%;width:min(780px,calc(100% - 24px));height:min(64vh,620px);display:flex;flex-direction:column;
   background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;box-shadow:0 14px 40px rgba(16,24,22,.22);z-index:7;
   transform:translate(-50%,-105%);transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s;opacity:0;pointer-events:none;font-size:13px}
-.of.of-th-open .of-ts{left:calc((100% - var(--of-th-w) - 20px)/2);width:min(780px,calc(100% - var(--of-th-w) - 44px))}
+.of.of-th-open .of-ts{left:calc(var(--of-th-w) + 20px + (100% - var(--of-th-w) - 20px)/2);width:min(780px,calc(100% - var(--of-th-w) - 44px))}
 .of-ts.open{transform:translate(-50%,0);opacity:1;pointer-events:auto}
 .of-ts-head{display:flex;align-items:center;gap:8px;padding:10px 12px 8px 16px;border-bottom:1px solid var(--line)}
 .of-ts-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
