@@ -161,7 +161,7 @@ test('the reporter contract accepts optional usage and does not require the brid
   assert.equal(typeof usage.properties.costUsd.description,'string');
   const report=getOperation('office.agents.report');
   assert.ok(report.input.properties.agents.items.properties.usage);
-  assert.match(report.description,/office bridge does not send it yet/);
+  assert.match(report.description,/office bridge sends measured usage/);
   assert.equal(report.examples[0].input.agents[0].usage,undefined);
 });
 

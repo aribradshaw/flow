@@ -3,6 +3,8 @@ import {homedir, hostname} from 'node:os';
 import {basename, join, resolve} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs, promisify} from 'node:util';
+import {createCodexScanner} from './office-bridge-codex.mjs';
+import {createT3Usage, sumUsage} from './office-bridge-usage.mjs';
 import {createClaudeScanner} from './office-bridge-claude.mjs';
 import {createT3PromptDetector, createT3Responder, createT3Session, defaultT3Db, loadSqlite, readT3, respondT3, short, stopT3} from './office-bridge-t3.mjs';
 import {transcriptText} from '../lib/office-mask.mjs';
@@ -90,7 +92,7 @@ function describe(agent) {
   };
 }
 
-export async function makePayload({source, host, now, t3, claude, resolveRepo}) {
+export async function makePayload({source, host, now, t3, claude, codex = [], resolveRepo}) {
   const childrenByParent = new Map();
   const top = [];
   for (const agent of t3.values()) {
@@ -105,7 +107,7 @@ export async function makePayload({source, host, now, t3, claude, resolveRepo}) 
       top.push(agent);
     }
   }
-  top.push(...claude.filter(agent => validId(agent.id) && !t3.has(agent.id)));
+  top.push(...[...claude, ...codex].filter(agent => validId(agent.id) && !t3.has(agent.id)));
   top.sort((a, b) => Number(Boolean(b.pending)) - Number(Boolean(a.pending)));
   const agents = [];
   const selected = top.slice(0, 200);
@@ -130,8 +132,11 @@ export async function makePayload({source, host, now, t3, claude, resolveRepo}) 
       // The transcript tail, masked and cut here before it leaves the machine (Flow masks it again).
       const transcript = (Array.isArray(agent.transcript) ? agent.transcript : []).slice(-12)
         .map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
+      const usage = sumUsage([agent.usage, ...[...(childrenByParent.get(agent.id) ?? [])].slice(0, 20)
+        .filter(child => agent.cwd && child.cwd === agent.cwd).map(child => child.usage)]);
+      const reporter = isT3 ? 'T3' : agent.provider === 'codex' ? 'Codex CLI' : 'Claude Code';
       return {
-        ...describe(agent), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + (isT3 ? ' · T3' : ' · Claude Code'), 120),
+        ...describe(agent), ...(usage ? {usage} : {}), ...(agentflow ? {agentflow} : {}), activity: short(agent.activity), host, hostLabel: short(host + ' · ' + reporter, 120),
         repo: await resolveRepo(agent.cwd), children: [...children.values()].slice(0, 20), pending, can,
         ...(transcript.length ? {transcript} : {}),
       };
@@ -328,7 +333,7 @@ export async function runBridge({cfg, source, scan, respond, signal, interval = 
 }
 
 const help = `Usage: flow office bridge [options]
-Report local T3 Code and Claude Code agents to Flow's 3D office.
+Report local T3 Code, Claude Code and Codex CLI agents to Flow's 3D office.
 Uses the server URL and write-scope API key from flow login or FLOW_URL and FLOW_API_KEY.
 
   --once          Print one snapshot and send it, then exit
@@ -359,6 +364,8 @@ export async function officeBridge(cfg, argv) {
   const DatabaseSync = await loadSqlite();
   const path = resolve(values['t3-db'] ?? defaultT3Db());
   const scanClaude = createClaudeScanner(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'));
+  const scanCodex = createCodexScanner(process.env.CODEX_HOME || join(homedir(), '.codex'), DatabaseSync);
+  const readUsage = createT3Usage();
   const resolveRepo = createRepoResolver();
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -387,7 +394,7 @@ export async function officeBridge(cfg, argv) {
         const now = Date.now();
         let data;
         try {
-          data = readT3(DatabaseSync, path);
+          data = readT3(DatabaseSync, path, readUsage, now);
           if (t3Unavailable) console.error('office bridge: T3 state recovered');
           t3Unavailable = false;
         } catch {
@@ -395,7 +402,8 @@ export async function officeBridge(cfg, argv) {
           t3Unavailable = true;
           data = {agents: new Map(), nativeIds: new Set()};
         }
-        return makePayload({source, host, now, t3: data.agents, claude: scanClaude(data.nativeIds, now), resolveRepo});
+        return makePayload({source, host, now, t3: data.agents, claude: scanClaude(data.nativeIds, now),
+          codex: scanCodex(data.nativeIds, now), resolveRepo});
       },
     });
   } finally {

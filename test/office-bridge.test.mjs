@@ -20,7 +20,7 @@ const key = 'flow_test_fixture';
 const prefix = 'orchestration_v2_projection_';
 
 function scratch(t) {
-  const root = join(homedir(), 'scratch');
+  const root = join(homedir(), 'scratch', 'flow-usage');
   mkdirSync(root, {recursive: true});
   const dir = mkdtempSync(join(root, 'flow-office-bridge-'));
   t.after(() => rmSync(dir, {recursive: true, force: true}));

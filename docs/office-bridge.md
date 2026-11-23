@@ -1,6 +1,6 @@
 # Connect local coding agents to Flow’s 3D office
 
-Run the bridge on each computer where you use T3 Code or Claude Code. It reports your local agents to the office under the account that owns the Flow API key. The bridge reports about every three seconds. If a computer stops reporting, its agents disappear after 90 seconds.
+Run the bridge on each computer where you use T3 Code, Claude Code, or Codex CLI. It reports your local agents to the office under the account that owns the Flow API key. The bridge reports about every three seconds. If a computer stops reporting, its agents disappear after 90 seconds.
 
 Flow only shows other members an agent’s details when its repository matches a project they can access. Set the project’s `repos` field to the repository’s origin URL or slug. Otherwise the agent appears as **Private project** with its status. Reports to Flow include the host name, thread titles, recent activity, and prompt summaries. Preview a snapshot before connecting if those fields may contain sensitive information. The bridge resolves Git remotes locally and strips URL credentials, query strings, and fragments.
 
@@ -58,6 +58,16 @@ Each agent also carries the last 12 lines of its conversation: your messages, th
 From your own T3 agent's panel in the office you can also send it a message (it runs as your next turn, after the current one when it is busy; the bridge passes the text to `t3 thread send` on standard input) and stop its running turn (T3's interrupt, only for the turn that was running). The bridge checks the thread is still running on this computer first, and logs each one with the agent and how it went, never the message text. Threads delegated by another T3 thread, and Claude Code sessions, cannot be steered from Flow.
 
 The reporting user can answer supported T3 approvals in Flow. Open T3 Code or Claude Code to answer T3 questions, Claude Code prompts, and T3 requests that lack a reviewable approval summary. A delegated T3 thread with a pending prompt appears separately so Flow can show its prompt.
+
+## What the usage meters count
+
+The bridge reads usage locally and sends per-agent totals for the current calendar day in the computer’s timezone. The meters reflect agents in the report at that moment.
+
+- **T3 Code** uses completed provider-turn totals from its state database, dated by the turn’s start. A live turn contributes after T3 records its complete usage. Measured delegated threads shown as children contribute to the parent when both use the same checkout.
+- **Claude Code** uses timestamped message usage in the session transcript, counting each message once even when its usage is repeated across several blocks. Input, output, cache writes and cache reads all count toward tokens.
+- **Codex CLI** reads changes in cumulative token counts from recent session logs in the `sessions` directory under `~/.codex` or `CODEX_HOME`. The session index also finds recently resumed sessions. T3-managed CLI sessions are accounted for through T3.
+
+The bridge remembers transcript byte offsets and completed T3 turn positions between reports. Cost uses standard API token rates and is an **API-equivalent list price estimate**. A subscription may include the usage. Claude cache writes use their recorded duration when available. Otherwise the estimate uses short cache write rates. Agents with unpriced models contribute tokens only.
 
 ## Run at sign-in
 

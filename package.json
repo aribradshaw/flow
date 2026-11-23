@@ -39,6 +39,8 @@
     "tools/office-bridge.mjs",
     "tools/office-bridge-t3.mjs",
     "tools/office-bridge-claude.mjs",
+    "tools/office-bridge-codex.mjs",
+    "tools/office-bridge-usage.mjs",
     "tools/inbox.mjs",
     "tools/env.mjs",
     "lib/api-spec.mjs",

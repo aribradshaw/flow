@@ -6,6 +6,8 @@ import {basename, delimiter, dirname, join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {promisify} from 'node:util';
 
+import {localDay} from './office-bridge-usage.mjs';
+
 const exec = promisify(execFile);
 const terminal = new Set(['resolved', 'cancelled', 'expired']);
 const approvals = new Set(['command', 'file_change', 'approval', 'tool_approval']);
@@ -147,7 +149,7 @@ export function createT3PromptDetector(DatabaseSync, path) {
   return {check, close};
 }
 
-export function readT3(DatabaseSync, path) {
+export function readT3(DatabaseSync, path, readUsage, now = Date.now()) {
   const agents = new Map();
   const nativeIds = new Set();
   if (!existsSync(path)) return {agents, nativeIds};
@@ -155,6 +157,9 @@ export function readT3(DatabaseSync, path) {
   const db = open(DatabaseSync, path);
   try {
     db.exec('BEGIN');
+    const day = readUsage && localDay(now);
+    const file = readUsage && statSync(path);
+    const identity = file && `${path}:${file.dev}:${file.ino}`;
     const projects = new Map(optional(db, 'SELECT * FROM projection_projects')
       .map(row => [row.project_id, row.workspace_root]));
     const live = new Map();
@@ -190,7 +195,7 @@ export function readT3(DatabaseSync, path) {
         parent: state.lineage?.parentThreadId, children,
         status: pending ? 'waiting' : 'running',
         activity: pending ? (pending.kind === 'question' ? 'Asked a question' : 'Waiting for approval') : activity(latest),
-        transcript: transcriptOf(db, id),
+        transcript: transcriptOf(db, id), usage: readUsage?.(db, identity, id, day),
       });
     }
 

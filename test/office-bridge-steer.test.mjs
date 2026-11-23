@@ -12,7 +12,7 @@ import {readT3} from '../tools/office-bridge-t3.mjs';
 
 const prefix = 'orchestration_v2_projection_';
 function scratch(t) {
-  const root = join(homedir(), 'scratch');
+  const root = join(homedir(), 'scratch', 'flow-usage');
   mkdirSync(root, {recursive: true});
   const dir = mkdtempSync(join(root, 'flow-office-steer-'));
   t.after(() => rmSync(dir, {recursive: true, force: true}));

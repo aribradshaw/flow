@@ -2,6 +2,8 @@ import {closeSync, openSync, readFileSync, readSync, readdirSync, statSync} from
 import {join} from 'node:path';
 import {parseJson, short} from './office-bridge-t3.mjs';
 
+import {createTranscriptUsage, localDay} from './office-bridge-usage.mjs';
+
 const windowMs = 5 * 60_000;
 const readLimit = 512 * 1024;
 
@@ -113,7 +115,9 @@ function sessionStates(root) {
 
 export function createClaudeScanner(root) {
   let cache = new Map();
+  const usageReader = createTranscriptUsage('claude');
   return (exclude, now) => {
+    const day = localDay(now);
     const states = sessionStates(root);
     const nextCache = new Map();
     const sessions = new Map();
@@ -144,12 +148,14 @@ export function createClaudeScanner(root) {
             summary: short(tool.input?.command) || (Array.isArray(tool.input?.questions)
               ? short(tool.input.questions.map(q => short(q?.question)).join(' ')) : '') || 'Review the prompt in Claude Code',
           } : null;
+          let usage;
+          try { usage = usageReader.read(path, day).usage; } catch { /* usage is optional */ }
           sessions.set(id, {
             id: 'claude:' + id, provider: 'claudeAgent', mtimeMs,
             title: data.title || 'Claude Code session', model: data.model, cwd: data.cwd || state?.cwd,
             status: waiting ? 'waiting' : 'running', pending,
             activity: waiting ? 'Waiting for input' : short(data.lastTool?.name) || 'Working in Claude Code',
-            transcript: data.transcript,
+            transcript: data.transcript, usage,
           });
         } catch {
           // A session can disappear or be rewritten as it is being scanned.
