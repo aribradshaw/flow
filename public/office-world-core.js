@@ -2,7 +2,7 @@
 // import it for tests; public/office-world.js and office-world-yacht.js draw what this file lays out.
 //
 // A world lays out the same things whatever it looks like (the shape office-layout.js gives the classic
-// office): rooms [{key, x, y, z, facing}], the main board's wall, boardAnchors(), and a radius. A world
+// office): rooms [{key, x, y, z, facing}], the main board's wall, boardAnchors(), meterAnchors(), and a radius. A world
 // with decks adds: ground(x, z) (the floor's height at a point, null where there is none), walls (the
 // boxes that stop people and the camera), spawn, respawn(pos), signs and doors(portals).
 //
@@ -10,7 +10,7 @@
 // stacked. So a box is solid from its top down, a wall between two heights stops walkers on both of
 // them, and office-controls.js needs only ground() to walk the decks and the stairs between them.
 import {officeBox} from './office-controls.js';
-import {classicLayout,toWorld,ROOM_W,ROOM_D,WALL_T,BACK_WALL_H,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
+import {classicLayout,toWorld,roomMeterMount,officeMeterMount,ROOM_W,ROOM_D,WALL_T,BACK_WALL_H,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
 export {ROOM_W,ROOM_D};
 
 export const WORLDS=[{id:'classic',name:'Office'},{id:'yacht',name:'Yacht'}];
@@ -187,8 +187,10 @@ export function yachtWorld(members,{commonR=10}={}){
   const OFF=0.07,wallW=Math.min(15.5,(HB-3.6)*2-5.2);
   const mainWall={x:0,y:MAIN,z:zL0+0.5,facing:0,width:wallW,depth:MAIN_WALL_T,height:MAIN_WALL_H};
   const mount=(frame,lx,lz,size)=>{const p=toWorld(frame,lx,lz);return {x:p.x,y:frame.y+size.y,z:p.z,nx:Math.sin(frame.facing),nz:Math.cos(frame.facing),width:size.width,height:size.height}};
+  const boardWidth=Math.min(14,wallW-1.4);
   const boardAnchors=()=>({rooms:rooms.map(r=>({key:r.key,...mount(r,0,-roomD/2+WALL_T/2+OFF,ROOM_BOARD)})),
-    main:mount(mainWall,0,MAIN_WALL_T/2+OFF,{width:Math.min(14,wallW-1.4),height:3.9,y:2.5})});
+    main:mount(mainWall,0,MAIN_WALL_T/2+OFF,{width:boardWidth,height:3.9,y:2.5})});
+  const meterAnchors=()=>({rooms:rooms.map(r=>({key:r.key,...roomMeterMount(r)})),main:officeMeterMount(mainWall,boardWidth)});
   // Doors to other offices: along the transom on the swim platform (you arrive by tender), then the lounge's sides.
   function doors(portals){
     const list=(Array.isArray(portals)?portals:[]).filter(p=>p&&typeof p.env==='string'&&p.env).slice(0,12),out=[];
@@ -202,7 +204,7 @@ export function yachtWorld(members,{commonR=10}={}){
   const mid=(zBow+zSw)/2;
   const spots=[{x:0,y:SWIM,z:zL1+3.6,heading:Math.PI},{x:0,y:MAIN,z:pz+2.2,heading:Math.PI},{x:0,y:UPPER,z:zL0-3.5,heading:0},
     {x:0,y:UPPER,z:zS1+1.5,heading:Math.PI},{x:0,y:SUN,z:zS1-sunRamp-1.5,heading:Math.PI},{x:0,y:FORE,z:pad.z-4.6,heading:Math.PI}];
-  const world={id:'yacht',rooms,spare,walls,mainWall,boardAnchors,doors,sea:SEA,center:{x:0,z:mid},radius:(zSw-zBow)/2+6,
+  const world={id:'yacht',rooms,spare,walls,mainWall,boardAnchors,meterAnchors,doors,sea:SEA,center:{x:0,z:mid},radius:(zSw-zBow)/2+6,
     bounds:{minX:-HB,maxX:HB,minZ:zBow,maxZ:zSw},spawn:spots[1],lounge:{x:px-2.2,y:PIT,z:pz-2.2},
     signs:[{x:0,y:UPPER+4.7,z:zB1-roomD,text:'Bridge'},{x:0,y:SUN+2.9,z:zS0+3,text:'Sundeck bar'},{x:0,y:FORE+4,z:pad.z,text:'Helipad'},
       {x:0,y:SWIM+2.4,z:zL1+0.3,text:'Beach club'}],

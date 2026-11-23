@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {classicLayout,toWorld,ROOM_W,ROOM_D,DOOR_W,BACK_WALL_H,MAIN_WALL_H,MEETING_W,MEETING_D} from '../public/office-layout.js';
 import {doorSpots} from '../public/office-portals.js';
+import {meterAnchors} from '../public/office-meters-core.js';
 
 const local=(frame,p)=>{const dx=p.x-frame.x,dz=p.z-frame.z,c=Math.cos(frame.facing),s=Math.sin(frame.facing);return {x:dx*c-dz*s,z:dx*s+dz*c}};
 const keys=n=>Array.from({length:n},(_,i)=>'m'+i);
@@ -44,6 +45,27 @@ test('the main board has its own slot in the ring, facing the middle, clear of e
         assert.ok(Math.abs(p.x)-w.width/2>=1.1+1.7,`n=${n}: a door beside the main wall has room`);
       }
     }
+  }
+});
+
+test('room meters sit inside the front wall, opposite the name sign, clear of the door',()=>{
+  const fb=meterAnchors({roomD:ROOM_D});
+  for(const n of [1,3,8]){
+    const world=classicLayout(keys(n)),{rooms,main}=world.meterAnchors();
+    assert.deepEqual(rooms.map(r=>r.key),keys(n));
+    for(const a of rooms){
+      const room=world.rooms.find(r=>r.key===a.key),p=local(room,a);
+      const nrm=local(room,{x:room.x+a.nx,z:room.z+a.nz});
+      assert.ok(Math.abs(p.x-fb.room.x)<1e-9&&Math.abs(p.z-fb.room.z)<1e-9,'the same local spot as the fallback');
+      assert.ok(Math.abs(Math.atan2(nrm.x,nrm.z)-fb.room.ry)<1e-9,'the same turn as the fallback, into the room and toward the door');
+      assert.ok(p.x<0&&p.z<ROOM_D/2-0.1,'inside the front wall, off the name sign');
+      const extra=fb.room.ry-Math.PI,edge=p.x+a.width/2*Math.abs(Math.cos(extra));
+      assert.ok(edge<-DOOR_W/2,'clear of the door');
+    }
+    const wall=world.mainWall,q=local(wall,main);
+    assert.ok(Math.abs(main.nx-Math.sin(wall.facing))<1e-9&&Math.abs(main.nz-Math.cos(wall.facing))<1e-9,'faces with the main board');
+    assert.ok(Math.abs(q.x)+main.width/2<=wall.width/2+1e-6,'stays on the feature wall, out of the portal gaps');
+    assert.ok(q.z>wall.depth/2,'on the common-area side of the wall');
   }
 });
 

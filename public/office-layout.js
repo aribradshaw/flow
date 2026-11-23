@@ -13,6 +13,9 @@
 // is {x, y, z (the board's centre in world space), nx, nz (the unit normal it faces: into its room, or the
 // common area), width, height (the most its wall takes)}. A mount sits just off its wall's face, so a board
 // on it is flush and never stands in the walk path. Rooms are keyed by member key, in the order given.
+// meterAnchors() is the same shape: a small screen inside each room's door wall (opposite the name sign,
+// clear of the door) and one on the common-area face of the main board's wall. nx, nz is the way the
+// screen faces. The room screen's turn matches meterAnchors() in office-meters-core.js.
 // TODO(yacht world): yachtWorld() must answer boardAnchors() too: each cabin's inboard bulkhead for its
 // room board, and the lounge's forward bulkhead (or the bridge's back wall) for the main board.
 // TODO(yacht world): meetingAnchors() too (a lounge or the bridge, glass:false where the deck has its own walls);
@@ -21,6 +24,10 @@ export const ROOM_W=12,ROOM_D=9,WALL_T=0.2,WALL_H=1.1,BACK_WALL_H=3.9,DOOR_W=3;
 export const MAIN_WALL_H=5.2,MAIN_WALL_T=0.4;
 export const ROOM_BOARD={width:9.2,height:2.6,y:2.42};
 export const MEETING_W=9,MEETING_D=7;
+// Same local pose as the fallback in office-meters-core.js: inside the front wall, at −x (the name
+// sign is at +x), yawed so a +z-facing plane looks into the room and toward the door.
+const ROOM_METER={width:1.62,height:0.9,y:2.15,x:-2.5,yaw:Math.PI-0.42};
+const OFFICE_METER={width:1.98,height:1.1,y:2.08};
 const OFF=0.07; // a board's face this far off its wall: the frame's depth
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 
@@ -58,5 +65,26 @@ export function classicLayout(keys,{commonR=10}={}){
       rooms:rooms.map(r=>({key:r.key,...mount(r,0,-ROOM_D/2+WALL_T/2+OFF,ROOM_BOARD)})),
       main:mount(mainWall,0,MAIN_WALL_T/2+OFF,mainBoard),
     }),
+    meterAnchors:()=>({
+      rooms:rooms.map(r=>({key:r.key,...roomMeterMount(r)})),
+      main:officeMeterMount(mainWall,mainBoard.width),
+    }),
   };
+}
+
+// A room meter's mount. Local +z is out the door, so the screen sits just inside that wall.
+// Its normal is the fallback yaw, added to the room's facing: into the room and toward the door.
+export function roomMeterMount(room){
+  const lz=ROOM_D/2-0.55,ry=(room.facing||0)+ROOM_METER.yaw,p=toWorld(room,ROOM_METER.x,lz);
+  return {x:p.x,y:(room.y||0)+ROOM_METER.y,z:p.z,nx:Math.sin(ry),nz:Math.cos(ry),width:ROOM_METER.width,height:ROOM_METER.height};
+}
+// The office meter, on the common-area face of the main wall, as far toward +x as the wall allows
+// so it stays off the portal gaps beside the wall. It faces the same way as the main board.
+export function officeMeterMount(mainWall,boardWidth){
+  const w=OFFICE_METER.width,half=mainWall.width/2;
+  const want=(boardWidth||Math.min(14,mainWall.width-1.4))/2+0.25+w/2;
+  const lx=Math.min(want,half-w/2-0.08);
+  const p=toWorld(mainWall,lx,MAIN_WALL_T/2+OFF+0.04);
+  const facing=mainWall.facing||0;
+  return {x:p.x,y:(mainWall.y||0)+OFFICE_METER.y,z:p.z,nx:Math.sin(facing),nz:Math.cos(facing),width:w,height:OFFICE_METER.height};
 }

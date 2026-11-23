@@ -249,6 +249,23 @@ test('yacht: boards hang inside each room and on the lounge wall; doors stand on
   assert.equal(doors[0].y,YACHT.SWIM);assert.equal(doors[11].y,YACHT.MAIN);
 });
 
+test('yacht: meters sit inside each door wall and beside the lounge board',()=>{
+  const w=yachtWorld(['o','a','b']),a=w.meterAnchors();
+  assert.deepEqual(a.rooms.map(r=>r.key),['o','a','b']);
+  for(const [i,m] of a.rooms.entries()){
+    const r=w.rooms[i],c=Math.cos(r.facing),s=Math.sin(r.facing);
+    const dx=m.x-r.x,dz=m.z-r.z,lx=dx*c-dz*s,lz=dx*s+dz*c;
+    const nlx=m.nx*c-m.nz*s,nlz=m.nx*s+m.nz*c;
+    assert.ok(lx<-1.5&&lz<ROOM_D/2-0.1&&lz>ROOM_D/2-1.2,'inside the front wall, clear of the door, off the name sign');
+    assert.ok(nlz<0&&nlx>0,'faces into the room and toward the door');
+    assert.ok(near(m.y,r.y+2.15),'at eye height on that deck');
+    assert.equal(w.ground(m.x,m.z),r.y,'on the cabin deck, not over the side');
+  }
+  assert.equal(a.main.nz,1);assert.ok(a.main.z>w.mainWall.z,'on the lounge side of the forward wall');
+  assert.equal(w.ground(a.main.x,a.main.z),YACHT.MAIN);
+  assert.ok(Math.abs(a.main.x)+a.main.width/2<=w.mainWall.width/2+1e-6,'clear of the side stairs');
+});
+
 test('the world is kept with the environment\'s AgentFlow data: yacht is stored, the default and junk are not',()=>{
   assert.deepEqual(cleanAgentflow({agents:[],office:{world:'yacht'}}).office,{world:'yacht'});
   for(const o of [undefined,null,{},{world:'classic'},{world:'moon'},{world:['yacht']},'yacht'])assert.equal('office' in cleanAgentflow({agents:[],office:o}),false,JSON.stringify(o));

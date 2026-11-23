@@ -3,7 +3,7 @@
 //
 //   layout(keys, {commonR})          lay out for these members (the owner first) and rebuild the scenery. Answers
 //                                    the plan, in the shape of office-layout.js: rooms [{key, x, y, z, facing}],
-//                                    mainWall, boardAnchors(), radius, and doors(portals) when the world places them
+//                                    mainWall, boardAnchors(), meterAnchors(), radius, and doors(portals) when the world places them
 //   walls    [box]                   what else stops people and the camera (officeBox: height is the top)
 //   terrain  {ground, floor, limit}  for office-controls.js to walk decks and stairs; null on one flat floor
 //   ground(x, z)                     floor height there, or null where there is no floor (water)

@@ -18,6 +18,7 @@ import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
 import {createInteractions} from './office-interact.js';
 import {createReactions} from './office-reactions.js';
+import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
@@ -80,6 +81,7 @@ export function openOffice(opts){
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
+        <dt>Meters</dt><dd>Walk up to a room or office meter and press E</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
         <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd></dl>
@@ -120,7 +122,7 @@ export function closeOffice(){
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.voice?.dispose(); // every call ends; the mic and a shared screen are released
-  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
+  s.meters?.dispose();s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
@@ -230,7 +232,8 @@ function connect(){
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
   on('rtc',d=>S.voice?.event(d)); // voice signalling (office-voice.js, lib/office-rtc.mjs)
-  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
+  on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
+  on('meters',d=>{S.sparks=d.sparks||{};S.meters?.invalidate()});
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
   on('action',a=>{if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
@@ -369,10 +372,10 @@ function updateRooms(members,agentflow){
 function snapshot(d){
   const previous=S.live;
   if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
-  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.portalList=d.portals||[];
+  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.sparks=d.sparks||{};S.portalList=d.portals||[];
   S.serverWorld=d.env?.world;if(S.world)usePlace(wantedWorld());
   updateSources(d.yourSources||[]);
-  updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();
+  updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();S.meters?.invalidate();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
@@ -474,6 +477,9 @@ function initScene(){
   S.reactions=createReactions(THREE);
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
     toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
+  S.meters=createOfficeMeters({world:S.world,root:S.root,env:()=>S.env,position:()=>office.pos,members:()=>S.members,live:()=>S.live,sparks:()=>S.sparks||{},meKey:()=>S.meKey,
+    label:(obj,html,opts)=>label(obj,html,opts),unlabel:hint=>{if(!hint)return;hint.el.remove();S.labelList=S.labelList.filter(l=>l!==hint)},
+    anchor:key=>meterMount(key),interact:()=>S.interact});
   // Voice (office-voice.js): the meeting room's call, proximity voice and screen sharing.
   S.voice=createVoice({scene,world:S.world,stage:S.stage,root:S.root,interact:S.interact,label,clear,env:()=>office.env,me:()=>office.pos,
     facing:()=>office.rig?office.rig.yaw+Math.PI:office.controller.state.heading,people:()=>office.people,meKey:()=>office.meKey,nameOf,
@@ -605,6 +611,13 @@ function buildRooms(){
       enabled:()=>!!tile(),label:()=>{const t=tile();return t?`Open #${t.number} ${t.title.length>28?t.title.slice(0,27)+'…':t.title}`:''},
       onInteract:()=>{const t=tile();if(t)S.boards.pick({near:true,tile:t})}});
   }
+  S.meters?.rebuild(S.rooms,{commonRadius:S.commonR||10,roomD:ROOM_D});
+}
+// key null is the office meter. A world's meterAnchors() wins; the meter module has a local fallback.
+function meterMount(key){
+  const all=S?.worldLayout?.meterAnchors?.();if(!all)return null;
+  if(key==null||key==='office')return all.main||all.office||null;
+  return all.rooms?.find(r=>r.key===key)||all[key]||null;
 }
 // The main board's feature wall: a freestanding wall on a plinth, with a planter at each end.
 function buildMainWall(){
@@ -866,13 +879,15 @@ function showEmote(key,k){
 function hitAt(e){
   if(!S.camera)return null;const r=S.renderer.domElement.getBoundingClientRect();
   S.ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),S.camera);
-  const board=S.replay?.active?null:S.boards?.hit(S.ray);
+  const board=S.replay?.active?null:S.boards?.hit(S.ray),meter=S.replay?.active?null:S.meters?.hit(S.ray);
   for(const h of S.ray.intersectObjects(S.clickables,true)){
-    if(board&&board.distance<h.distance)break;
+    if((board&&board.distance<h.distance)||(meter&&meter.distance<h.distance))break;
     if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
     let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
   const g=S.ray.intersectObjects(S.place.floors)[0];
-  return board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point}:g?{kind:'',point:g.point}:null;
+  let out=board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point,distance:board.distance}:g?{kind:'',point:g.point,distance:g.distance}:null;
+  if(meter&&(out?.distance==null||meter.distance<out.distance))out={kind:'meter',meter,point:meter.point,distance:meter.distance};
+  return out;
 }
 function cardTargetAt(e){
   const bounds=S.stage.getBoundingClientRect();
@@ -914,6 +929,7 @@ function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
   if(S.replay?.active){if(hit.point)S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
   if(S.voice?.pick(S.ray))return;
+  if(hit.kind==='meter'){if(S.meters?.pick(hit.meter))return;S.follow=null;S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
   if(S.boards?.pick(hit.board))return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
@@ -973,7 +989,7 @@ function onClick(e){
   const dr=e.target.closest('.of-labels [data-door]');if(dr){goDoor(S.doorSpots?.find(x=>x.portal.env===dr.dataset.door)?.portal);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
-  ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
+  ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},closeMeter:()=>S.meters?.close(),
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
@@ -1092,6 +1108,7 @@ function onKey(e){
     if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
     if(S.presence?.closeOverlays())return;
+    if(S.meters?.isOpen()&&S.meters.close())return;
     if(S.replay?.active){S.replay.finish();return}
     if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
     closeOffice();return;
@@ -1229,6 +1246,7 @@ function frame(dt,t,delta){
   }
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
   if(!replay)S.boards?.frame(S.labelList);
+  S.meters?.frame();
   S.renderer.render(S.scene,S.camera);
   if(!replay)S.interact?.update();
   S.voice?.frame(dt);
