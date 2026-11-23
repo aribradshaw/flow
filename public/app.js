@@ -213,7 +213,8 @@ new ResizeObserver(()=>{if(isOpen('agentflow'))af.resized()}).observe($('#agentf
 
 // Back / Forward: a split hash restores that split; a deep link (#devops/card/4) into a shown pane
 // focuses it; any other single-tab hash leaves the split.
-window.addEventListener('popstate',()=>{
+window.addEventListener('popstate',e=>{
+  if(af.officeHistory(e.state))return;
   const h=parseHash(location.hash);
   if(h.tabs){if(h.tabs.join()!==split.tabs?.join())setLayout(h.tabs,h.tabs.includes(tab)?tab:h.tabs.find(t=>!split.tabs?.includes(t))||h.tabs[0])}
   else if(split.tabs&&location.hash.includes('/')&&split.tabs.includes(h.tab))focusPane(split.tabs.indexOf(h.tab));
@@ -650,7 +651,6 @@ const pane=$('#inspector');
 pane.addEventListener('submit',e=>e.preventDefault());
 pane.addEventListener('click',e=>{
   if(tab==='timeline')return tl.inspectorClick(e);
-  if(tab==='devops')return dv.inspectorClick(e);
   if(tab==='agentflow')return af.inspectorClick(e);
   const b=e.target.closest('button');if(!b)return;
   const n=node(selected),ed=edge(selected);
@@ -666,7 +666,6 @@ pane.addEventListener('click',e=>{
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
   if(tab==='timeline')return tl.inspectorInput(e);
-  if(tab==='devops')return dv.inspectorInput(e);
   if(tab==='agentflow')return af.inspectorInput(e);
   const form=$('#edit'),n=node(selected),ed=edge(selected);
   if(!form||e.target.type==='file'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
@@ -681,8 +680,8 @@ pane.addEventListener('input',e=>{
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
-pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='devops')dv.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
+pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------
 // Every key comes from the shortcut registry (shortcuts.js), so rebinding in Settings applies here.
@@ -719,12 +718,12 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
-  renderInspector();photosMaybe();chatRendered();
+  renderInspector();dv.renderHostedCards();photosMaybe();chatRendered();
   // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
   const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}
   firstRun({store,replaceDb,envId:currentEnv(),signedIn:!!sessionUser()});
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
-  if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
+  if(isSplit()&&!af.officeOpen()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
 // The owner approved or denied additions this user made inside a share: say so once (share.js).
 store.onChange=()=>{render();const m=decisionNotice();if(m)toast(m,m.includes('denied'))};
@@ -749,7 +748,7 @@ window.addEventListener('flow:session',()=>render());
 tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
 dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
 // AgentFlow agents and workflows link to cards and timeline items.
-af.mount({rerender:render,toast,openProjects:()=>toTimeline(tl.focusProjects),openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
+af.mount({rerender:render,toast,officeOverlays:{card:dv.openCardModal},openProjects:()=>toTimeline(tl.focusProjects),openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
 // Extension point: add palette tools without changing the canvas engine.
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.
@@ -805,14 +804,19 @@ window.addEventListener('flow:session',()=>openPending());
 // session is known (signed in, where sign-in is required) and the workspace has synced.
 let officeLinking=false;
 async function openOfficeLink(){
-  if(officeLinking||!parseHash(location.hash).office)return;officeLinking=true;
+  if(officeLinking||af.officeOpen()||!parseHash(location.hash).office)return;officeLinking=true;
   try{
     await sessionKnown;
     if(signInMode()==='opid'&&!sessionUser())return;
     await synced();
     const h=parseHash(location.hash);if(!h.office)return;
     if(!isOpen('agentflow'))setTab('agentflow');
-    await af.openOfficeLink({focus:h.agent||''});
+    const cardId=h.cardNumber==null?undefined:dv.officeCardId(h.cardNumber);
+    if(h.cardNumber!=null){
+      history.replaceState(null,'','#office');
+      if(!cardId)toast('This card is unavailable.',true);
+    }
+    await af.openOfficeLink({focus:h.agent||'',cardId});
   }finally{officeLinking=false}
 }
 window.addEventListener('flow:session',()=>openOfficeLink());

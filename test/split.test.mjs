@@ -13,6 +13,7 @@ test('parseHash reads split hashes and keeps every older hash working', ()=>{
   assert.deepEqual(parseHash('#nope'),{tab:'chart',tabs:null});
   // '#office' opens AgentFlow and its 3D office; '#office/<id>' focuses an agent there.
   assert.deepEqual(parseHash('#office'),{tab:'agentflow',tabs:null,office:true});
+  assert.deepEqual(parseHash('#office/card/12'),{tab:'agentflow',tabs:null,office:true,cardNumber:12});
   assert.deepEqual(parseHash('#office/'),{tab:'agentflow',tabs:null,office:true});
   assert.deepEqual(parseHash('#office/homebox%3At3%3Aabc'),{tab:'agentflow',tabs:null,office:true,agent:'homebox:t3:abc'});
   assert.deepEqual(parseHash('#office/laptop:claude:1'),{tab:'agentflow',tabs:null,office:true,agent:'laptop:claude:1'});

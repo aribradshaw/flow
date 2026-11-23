@@ -51,7 +51,7 @@ export function openMenu(at,items,{label='Menu',align='',onClose=null}={}){
   }else if(at?.type){x=at.clientX;y=at.clientY}else{x=at.x;y=at.y}
   at?.preventDefault?.();
   const el=document.createElement('div');el.className='cm';el.innerHTML=panelHtml(items,label);
-  (document.querySelector('dialog[open]')||document.body).append(el);
+  (at.closest?.('dialog[open]')||document.body).append(el);
   if(align==='end'&&at instanceof Element)x=at.getBoundingClientRect().right-el.offsetWidth;
   place(el,x,y);popIn(el);
   const m={el,items,back,sub:null,active:-1,onClose};

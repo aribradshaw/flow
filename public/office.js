@@ -6,7 +6,7 @@
 // arrives here is already what this person may see. Loaded on demand from the AgentFlow toolbar.
 import * as THREE from './vendor/three/three.module.min.js';
 import {icon} from './icons.js';
-import {esc} from './ui.js';
+import {esc,uid} from './ui.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
 import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
@@ -73,7 +73,7 @@ export function openOffice(opts){
     </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
   root.tabIndex=-1;document.body.append(root);
-  S={opts,root,lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
+  S={opts,root,overlays:[],overlaySession:uid(),lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
@@ -87,6 +87,7 @@ export function openOffice(opts){
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
   connect();S.watch=setInterval(watch,1000);
   root.focus({preventScroll:true});
+  if(opts.cardId)openOverlay('card',opts.cardId);
 }
 export const officeOpen=()=>!!S;
 export function closeOffice(){
@@ -95,8 +96,40 @@ export function closeOffice(){
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
+  for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
+}
+// Each overlay owns a same-URL history entry, so Back returns to the office or its parent overlay.
+export function officeHistory(state){
+  if(!S)return false;
+  const top=S.overlays.at(-1),key=state?.officeOverlay;
+  if(!top)return key?.startsWith(S.overlaySession+'/')||false;
+  if(key!==top.key){
+    const keep=S.overlays.findIndex(entry=>entry.key===key)+1;
+    for(const entry of S.overlays.splice(keep).reverse())entry.modal.close();
+  }
+  return true;
+}
+function openOverlay(kind,id){
+  const office=S,open=office?.opts.overlays?.[kind];if(!open)return;
+  const at=office.overlays.findIndex(entry=>entry.kind===kind&&entry.id===id);
+  if(at>=0){
+    const distance=office.overlays.length-1-at;
+    if(distance)history.go(-distance);
+    return;
+  }
+  clearKeys();office.pointer?.cancelOrbit();
+  const key=office.overlaySession+'/'+uid(),from=document.activeElement;
+  const modal=open(id,{host:office.root,from,onClose(){
+    if(S!==office)return;
+    const i=office.overlays.findIndex(entry=>entry.key===key);
+    if(history.state?.officeOverlay===key)history.back();
+    else if(i>=0)office.overlays.splice(i,1);
+  }});
+  if(!modal)return;
+  office.overlays.push({kind,id,key,modal});
+  history.pushState({...history.state,officeOverlay:key},'');
 }
 function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env,focus:''};S.switching=true;closeOffice();openOffice(opts)}
 // opts.focus (#office/<id>): show that agent's panel as soon as it is in the office (live agents can
@@ -217,6 +250,7 @@ function connectAgents(opener){
   }});
   office.bridge=bridge;
   clearKeys();
+  bridge.dialog.addEventListener('keydown',e=>e.stopPropagation());
   office.root.append(bridge.dialog);bridge.dialog.showModal();
   bridge.dialog.addEventListener('close',()=>{
     if(S!==office||office.bridge!==bridge)return;
@@ -264,7 +298,7 @@ function initScene(){
   const office=S;
   // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN});
-  const openCard=id=>{if(store.db.devops.cards.some(c=>c.id===id)){closeOffice();office.opts.openCard?.(id)}};
+  const openCard=id=>openOverlay('card',id);
   S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
@@ -668,7 +702,7 @@ function decide(decision){
 const isTyping=el=>el?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable=false])');
 function onKey(e){
   if(!S)return;
-  if(S.bridge?.dialog.open){e.stopPropagation();return}
+  if(overlayOpen()||e.target.closest?.('dialog[open]'))return
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.interact?.closeOpen())return;
@@ -707,6 +741,7 @@ function onKey(e){
 function onKeyUp(e){
   if(S?.input.keyUp(e.code)&&!isTyping(e.target))e.stopPropagation();
 }
+const overlayOpen=()=>S.bridge?.dialog.open||S.overlays.length||S.root.querySelector('dialog[open]');
 function clearKeys(){S?.input.clear();S?.controller.clearJump();S?.pointer?.cancelGrab()}
 
 // Buffer roughly one presence interval and interpolate the three coordinates together.
@@ -728,10 +763,11 @@ function remoteMotion(p, now){
 
 function frame(dt,t){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
-  const editing=S.bridge?.dialog.open||S.pointer.grabbing||isTyping(document.activeElement);
+  const paused=overlayOpen();
+  const editing=paused||S.pointer.grabbing||isTyping(document.activeElement);
   const pads=editing?[]:navigator.getGamepads?.()||[];
   const gamepad=Array.prototype.find.call(pads,pad=>pad?.connected&&pad.mapping==='standard');
-  const input=S.input.sample(gamepad,controller.jump);S.interact?.gamepad(gamepad);
+  const input=S.input.sample(gamepad,controller.jump);if(!paused)S.interact?.gamepad(gamepad);
   const {right,forward,orbitX,orbitY}=input,steering=!!(right||forward);
   if(orbitX||orbitY)S.rig.rotate(-orbitX*2.6*dt,orbitY*1.9*dt);
 
@@ -740,7 +776,7 @@ function frame(dt,t){
   if(steering){S.follow=null;S.target=null}
   else{
     const target=S.people.get(S.follow)?.obj.position||S.target;
-    if(target){
+    if(target&&!paused){
       const dx=target.x-state.x,dz=target.z-state.z,d=Math.hypot(dx,dz),stop=S.follow?1.8:0.18;
       if(d>stop){
         const throttle=Math.min(1,Math.sqrt(2*24*(d-stop))/(input.sprint?RUN_SPEED:WALK_SPEED));
@@ -781,7 +817,7 @@ function frame(dt,t){
   pulseMascots(t);
   // What each agent acts out and where it walks (office-activity.js): after the above, so it has the last word.
   S.activity?.tick(dt,t);
-  S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
+  if(!paused)S.rig.update(dt,S.pos,player.heading,player.vx,player.vz,S.walls,S.overviewRadius,
     {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
   S.boards?.frame(S.labelList);

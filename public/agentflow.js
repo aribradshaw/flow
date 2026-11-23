@@ -44,9 +44,9 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');return `<span class="pill" style="background:${bg};color:${fg}">${esc(names[s]||s)}</span>`};
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
-let openProjects;
+let openProjects,officeOverlays,officeModule;
 export function mount(opts){
-  openProjects=opts.openProjects;
+  openProjects=opts.openProjects;officeOverlays=opts.officeOverlays;
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
@@ -550,10 +550,12 @@ function action(name,b){
 // The 3D office (office.js, loaded on first use with Three.js): this environment's, or the office of an
 // environment whose share is placed here. link: {focus} when it opens from the #office hash (app.js):
 // focus is the agent to show, and closing it takes the address back to #agentflow.
-export const openOfficeLink=({focus=''}={})=>openOffice({focus,link:true});
+export const openOfficeLink=({focus='',cardId}={})=>openOffice({focus,cardId,link:true});
+export const officeHistory=state=>officeModule?.officeHistory(state);
+export const officeOpen=()=>officeModule?.officeOpen();
 async function openOffice(link={}){
   if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
-  let m;try{m=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
+  let m;try{m=officeModule=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
   const env=currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
   const offices=[{id:env,name:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
   // The office you last picked opens; otherwise this environment's own office, unless it has no AgentFlow
@@ -561,8 +563,8 @@ async function openOffice(link={}){
   const KEY='flygon-flow-office:'+env;let pick='';try{pick=localStorage.getItem(KEY)||''}catch{}
   const first=offices.some(o=>o.id===pick)?pick:af().agents.length?env:offices[1]?.id||env;
   const u=sessionUser();
-  m.openOffice({env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
-    openProjects,openCard,
+  m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
+    openProjects,overlays:officeOverlays,cardId:link.cardId,
     focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()},
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }

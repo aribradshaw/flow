@@ -10,7 +10,10 @@ const isTab=t=>TABS.includes(t);
 // (a live agent's id, or an AgentFlow agent's id or name).
 export function parseHash(hash=''){
   const o=/^#?office(?:\/([^|]*))?$/.exec(String(hash));
-  if(o){let agent='';try{agent=decodeURIComponent(o[1]||'').trim().slice(0,200)}catch{}return {tab:'agentflow',tabs:null,office:true,...agent?{agent}:{}}}
+  if(o){
+    const card=/^card\/(\d+)$/.exec(o[1]||'');
+    if(card)return {tab:'agentflow',tabs:null,office:true,cardNumber:Number(card[1])};
+    let agent='';try{agent=decodeURIComponent(o[1]||'').trim().slice(0,200)}catch{}return {tab:'agentflow',tabs:null,office:true,...agent?{agent}:{}}}
   const parts=String(hash).replace(/^#/,'').split('|'),head=p=>p.split('/')[0];
   if(parts.length===2){const [a,b]=parts.map(head);if(isTab(a)&&isTab(b)&&a!==b)return {tab:a,tabs:[a,b]}}
   const t=head(parts[0]);return {tab:isTab(t)?t:'chart',tabs:null};

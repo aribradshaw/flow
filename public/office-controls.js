@@ -206,7 +206,11 @@ export function bindOfficePointer(canvas, rig, {pick, hover, recenter, grab}) {
     const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1;
     rig.zoomBy(Math.exp(e.deltaY * units * 0.0012));
   }, {passive:false});
-  return {cancelGrab,get grabbing(){return !!held},get orbiting() { return [...pointers.values()].some(p => p.orbit); }};
+  const cancelOrbit=()=>{
+    for(const id of [...pointers.keys()])if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);
+    pointers.clear();
+  };
+  return {cancelGrab,cancelOrbit,get grabbing(){return !!held},get orbiting() { return [...pointers.values()].some(p => p.orbit); }};
 }
 
 export const WALK_SPEED = 5.2;

@@ -201,14 +201,14 @@ export function openPicker(trigger,o){
   const key=trigger.dataset.picker;
   if(picker?.key===key){closePicker();return}
   closePicker();
-  const multi=o.multi!==false,sel=new Set(o.selected||[]),id='pk-'+uid().slice(0,8),anchor=()=>document.querySelector(`[data-picker="${CSS.escape(key)}"]`);
+  const multi=o.multi!==false,sel=new Set(o.selected||[]),id='pk-'+uid().slice(0,8),host=trigger.closest('dialog[open]')||document.body,anchor=()=>host.querySelector(`[data-picker="${CSS.escape(key)}"]`);
   const el=document.createElement('div');el.className='picker';
   const search=o.search!==false;
   el.innerHTML=`<input class="pk-q" type="search" placeholder="${esc(o.placeholder||'Search')}" aria-label="Filter options" aria-controls="${id}" autocomplete="off" role="combobox" aria-expanded="true">
     <div class="pk-list" role="listbox" id="${id}" aria-multiselectable="${multi}" aria-label="${esc(o.label||'Options')}" tabindex="${search?-1:0}"></div>
     ${multi?`<div class="pk-foot"><button type="button" class="txt" data-pk="all">Select all</button><button type="button" class="txt" data-pk="clear">Clear</button></div>`:''}`;
   // Inside a modal dialog the popover must live in it (the top layer covers everything else).
-  (trigger.closest('dialog[open]')||document.body).append(el);
+  host.append(el);
   const list=el.querySelector('.pk-list'),input=el.querySelector('.pk-q');if(!search)input.hidden=true;
   const focusEl=search?input:list;let typed='',typedAt=0;
   let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value))),q='';

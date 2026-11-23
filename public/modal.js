@@ -29,10 +29,10 @@ function grow(d,from,dir){
 }
 const fadeBackdrop=(d,dir)=>{try{return d.animate([{opacity:0},{opacity:1}],{duration:dir>0?240:160,pseudoElement:'::backdrop',direction:dir>0?'normal':'reverse',fill:'both'})}catch{return null}};
 
-export function detailModal({cls='',label='Details',from=null,onClose,events={}}={}){
+export function detailModal({cls='',label='Details',from=null,host=document.body,onClose,events={}}={}){
   const d=document.createElement('dialog');d.className='modal '+cls;d.setAttribute('aria-label',label);d.setAttribute('aria-modal','true');
   d.innerHTML='<div class="modal-body"></div>';
-  document.body.append(d);
+  host.append(d);
   for(const [type,fn] of Object.entries(events))d.addEventListener(type,fn);
   d.addEventListener('submit',e=>e.preventDefault());
   // Keys inside stay inside (the app's shortcuts must not act behind the modal).
@@ -60,6 +60,15 @@ export function detailModal({cls='',label='Details',from=null,onClose,events={}}
     get closing(){return !!closing}};
   m.open();
   return m;
+}
+
+// Keep a focused field and its caret when a detail body is refreshed.
+export function paintDetail(m,html,first){
+  const a=document.activeElement,keep=m.body.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
+  m.body.innerHTML=html;
+  const f=keep&&m.body.querySelector('#'+CSS.escape(keep.id));
+  if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
+  else if(!m.el.contains(document.activeElement)||document.activeElement===m.el)m.body.querySelector(first)?.focus({preventScroll:true});
 }
 
 // A small confirm on top of everything (gates). Enter confirms, Esc cancels.
