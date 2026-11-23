@@ -7,7 +7,7 @@ import {openMenu} from './menu.js';
 import {getPref,setPref} from './prefs.js';
 import {detailModal,paintDetail,detailFieldId,ask,askTime} from './modal.js';
 import {store,change,checkpoint,commit,save,step} from './store.js';
-import {agentsForCard,delegate} from './agentflow-core.js';
+import {agentsForCard,delegate,shownMember,memberAliasIds} from './agentflow-core.js';
 import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList,isSnoozed,nextWake,snoozePresets,wakeText} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,ownerMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
@@ -58,14 +58,16 @@ function workspaceMembers(){
   const emails=[env?.ownerEmail,...(env?.members||[])].filter(Boolean).map(e=>e.toLowerCase());
   return [...new Set(emails)].filter(email=>!seen.has(email)).map(email=>({id:'@'+email,name:email,type:'person'}));
 }
-const memberList=()=>{const m=new Map();for(const x of [...workspaceMembers(),...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
+const memberList=()=>{const m=new Map(),own=people();for(const x of [...workspaceMembers(),...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,shownMember(x,own));return m};
 export const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
 // Who can be assigned to a card. A linked card: the person cards of its share and the share's members,
 // never anyone else of the owner's. One's own card: one's person cards, plus recipients it is shared with.
 export function peopleFor(c){
-  if(!c)return [...people(),...memberList().values()];
-  if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>({...m,type:'person'}))];
-  return [...people().filter(p=>!isForeign(p.id)),...new Map([...workspaceMembers(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id))].map(m=>[m.id,{...m,type:'person'}])).values()];
+  // The board-wide assignee filter. A member renamed to the viewer's own person card is that card:
+  // listing both would show the same name twice, and choosing one would hide the other's cards.
+  if(!c){const own=people(),members=memberList(),hidden=new Set(memberAliasIds(own.map(p=>p.id),own,[...members.keys()]));return [...own,...[...members.values()].filter(m=>!hidden.has(m.id))]}
+  if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>shownMember(m,people()))];
+  return [...people().filter(p=>!isForeign(p.id)),...new Map([...workspaceMembers(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id))].map(m=>[m.id,shownMember(m,people())])).values()];
 }
 // Another environment's records never go on this environment's own cards (and the reverse): a card's
 // project, timeline item, labels and people come from where the card lives.
@@ -77,6 +79,12 @@ const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',yea
 const day=iso=>{const d=new Date(iso);return d.toLocaleDateString([],{month:'short',day:'numeric',...(d.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})})};
 const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="background:${bg};color:${fg}"${l.name.length>12?` data-tip="${esc(l.name)}"`:''}>${esc(l.name)}</span>`};
 const bubble=(id,roles)=>{const n=nodeById(id);return n?personAvatar(n,{tip:`${n.name} · ${roles.join(', ')}`}):''};
+// Filtering by the viewer's own person card also matches the share member with that email.
+function viewFilter(){
+  const members=[...memberList().keys()],own=people();
+  const widen=ids=>[...new Set([...(ids||[]),...memberAliasIds(ids,own,members)])];
+  return {...ui,assignees:widen(ui.assignees),notAssignees:widen(ui.notAssignees)};
+}
 // Column sorts (devops-core.js SORTS): per column, kept in the user's prefs, never in the workspace.
 const sortOf=col=>sortKey(getPref('devopsSort')?.[col]);
 const sortName=k=>SORTS.find(([s])=>s===k)?.[1]||'Manual';
@@ -220,7 +228,7 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
   // its own slot is quiet), and a card moved into it goes to the end of the board order.
   if(sortOf(to)!=='manual'){
     if(from===to){
-      const vis=colCards(to,filterCards(db(),ui)).list.slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
+      const vis=colCards(to,filterCards(db(),viewFilter())).list.slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
       if((vis[i-1]?.id??null)!==(afterId??null)||(vis[i+1]?.id??null)!==(beforeId??null))toast(`${colName(to)} is sorted by ${sortName(sortOf(to)).toLowerCase()}. Switch to Manual to reorder.`);
       return false;
     }
@@ -420,7 +428,7 @@ export function render(){
   if(sortable?.active()){deferred=true;return}
   sanitize();
   const el=$('#devopsView'),old=el.querySelector('.dv-scroll'),keep=old&&[old.scrollLeft,old.scrollTop,new Map([...el.querySelectorAll('[data-dcol]')].map(c=>[c.dataset.dcol,c.querySelector('.dcol-b')?.scrollTop||0]))];
-  const cards=filterCards(db(),ui);
+  const cards=filterCards(db(),viewFilter());
   cardAgents=new Map();for(const a of db().agentflow?.agents||[])for(const id of a.cards)cardAgents.set(id,[...(cardAgents.get(id)||[]),a]);
   // Cards that stay glide to their new place; added ones fade in, removed ones fade out.
   const prompt=el.querySelector('.opid-prompt')||document.createElement('aside');
@@ -531,7 +539,7 @@ function colMenu(e,col){
     '-',
     {label:'Sort',icon:'sort',items:sortItems(col)},
     {label:'Rename column…',icon:'pencil',run:()=>rename(col)},
-    {label:'Show snoozed cards',icon:'clock',checked:showSnoozed(col),note:String(colCards(col,filterCards(db(),ui)).snoozed.length),run:()=>toggleSnoozed(col)},
+    {label:'Show snoozed cards',icon:'clock',checked:showSnoozed(col),note:String(colCards(col,filterCards(db(),viewFilter())).snoozed.length),run:()=>toggleSnoozed(col)},
     col==='done'&&{label:'Hide Done',icon:'check',checked:ui.hideDone,run:toggleDone},
   ].filter(Boolean),{label:`Column: ${name}`});
 }
@@ -584,7 +592,7 @@ export function focus({person,entity,agent,cardId}={}){
   else if(agent){ui={...FILTERS(),agents:[agent],hideDone:true};keepUi()}
   if(cardId&&card(cardId)){
     selected=cardId;reveal=true;
-    if(!filterCards(db(),ui).some(c=>c.id===cardId)){ui=FILTERS();keepUi()}
+    if(!filterCards(db(),viewFilter()).some(c=>c.id===cardId)){ui=FILTERS();keepUi()}
   }
 }
 
@@ -636,7 +644,7 @@ function modalKey(e){
   if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable)return;
   const dir=matches(e,'devops.prevCard')?-1:matches(e,'devops.nextCard')?1:0;if(!dir)return;
   const c=card(selected);if(!c)return;
-  const list=colCards(c.column,filterCards(db(),ui)).list;
+  const list=colCards(c.column,filterCards(db(),viewFilter())).list;
   const next=list[list.findIndex(x=>x.id===c.id)+dir];if(!next)return;
   e.preventDefault();selected=next.id;reveal=true;rerender();
 }

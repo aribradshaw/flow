@@ -1,5 +1,21 @@
 import {sameName} from './agentflow-core.js';
 
+// Node ids whose OneProfileID photo the workspace should load: linked person cards, and share
+// members (@email) that carry a link. The server decides which photos actually exist.
+export function linkedPhotoIds(db){
+  const ids=[];
+  const add=n=>{
+    if(!n||typeof n.id!=='string')return;
+    if(!((typeof n.opidUser==='string'&&n.opidUser)||n.opidLinked===true))return;
+    if(!ids.includes(n.id))ids.push(n.id);
+  };
+  for(const c of db?.charts||[])for(const n of c.nodes||[])if(n.type==='person')add(n);
+  for(const s of db?.shares||[])for(const m of s.members||[])add(m);
+  for(const m of db?.shareMembers||[])add(m);
+  for(const e of db?.combined||[]){for(const s of e.shares||[])for(const m of s.members||[])add(m);for(const m of e.shareMembers||[])add(m)}
+  return ids.sort();
+}
+
 const emailKey=email=>String(email||'').trim().toLowerCase();
 const matchesEmail=(node,key)=>node.linked?.opidEmail==='match'||emailKey(node.email)===key;
 

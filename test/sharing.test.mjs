@@ -344,6 +344,21 @@ describe('members (card #63): owner and recipients can be assigned to shared car
     assert.ok(!p.nodes.some(n=>parseLinkedId(n.id).id==='me'),"the owner's person card is not projected as a card");
     assert.ok(!JSON.stringify(p).includes('Cleo'));
   });
+  test('a member outside the share still carries their photo and account link',()=>{
+    const db=withMe(),s=share({kind:'person',nodeId:'bo'});
+    const me=db.charts[0].nodes.find(n=>n.id==='me');
+    me.image='data:image/png;base64,AAAA';me.opidUser='u-owner';
+    db.charts[0].nodes.push({...N('kimc','Kim Person','person',1,1),email:KIM,opidUser:'u-kim',image:'https://cdn.example.test/kim.png'});
+    const p=projectForRecipient(db,s,[],{members:[OWNER,BO,KIM],viewer:'u-owner'});
+    const ownerM=p.share.members.find(m=>m.email===OWNER),kim=p.share.members.find(m=>m.email===KIM);
+    assert.equal(ownerM.id,memberId(OWNER));assert.equal(ownerM.name,'Owner Person');
+    assert.equal(ownerM.image,me.image);assert.equal(ownerM.opidUser,'u-owner');assert.equal(ownerM.opidLinked,undefined);
+    assert.equal(kim.opidLinked,true);assert.equal(kim.opidUser,undefined);assert.equal(kim.image,'https://cdn.example.test/kim.png');
+    assert.ok(!JSON.stringify(p).includes('u-kim'),"another person's account id never crosses");
+    assert.ok(!p.nodes.some(n=>['me','kimc'].includes(parseLinkedId(n.id)?.id)),'the cards themselves stay outside the share');
+    const asBo=projectForRecipient(db,s,[],{members:[OWNER,BO,KIM],viewer:'u-bo'}).share.members.find(m=>m.email===OWNER);
+    assert.equal(asBo.opidLinked,true);assert.equal('opidUser' in asBo,false);
+  });
   test('assignee edits: in-scope people and members only; hidden people stay on the owner\'s card',()=>{
     const db=withMe(),s=share({kind:'person',nodeId:'bo'}),bo={email:BO},m={members:[OWNER,BO,KIM]};
     const r=applyRecipientEdit(db,s,{kind:'card',id:linkedId(s.id,'k-cb'),fields:{assignees:[{node:linkedId(s.id,'bo'),role:'tester'},{node:memberId(OWNER),role:'requester'},{node:memberId(KIM)}]}},bo,m);

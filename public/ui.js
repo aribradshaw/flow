@@ -163,12 +163,29 @@ export function people(){if(!peopleCache){peopleCache=peopleSrc()||[];queueMicro
 export const isMe=n=>isSessionPerson(n,people(),me);
 // A linked card shows its account's current photo first (the signed-in user's own right away), then
 // any uploaded photo. An unlinked card shows its uploaded photo, or the signed-in user's when it is theirs.
-export function personPhoto(n){
-  if(!n)return '';
+function photoOf(n){
   const link=opidLink(n);
   if(link){const p=memberPhotos.get(n.id)||(link==='me'?me?.image:'');if(p)return p}
   if(typeof n.image==='string'&&n.image)return n.image;
   return !link&&me?.image&&isMe(n)?me.image:'';
+}
+// The viewer's own person card with this email (not a shared or combined copy, and not a @email member).
+function ownCardFor(n){
+  const email=String(n.email||(typeof n.id==='string'&&n.id.startsWith('@')?n.id.slice(1):'')).trim().toLowerCase();
+  if(!email)return null;
+  for(const p of people()){
+    if(!p||p===n||p.type!=='person'||typeof p.id!=='string')continue;
+    if(p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    if(String(p.email||'').trim().toLowerCase()===email)return p;
+  }
+  return null;
+}
+// A share member (@email) shows the viewer's own person card's photo when that card has their email,
+// then the member's own uploaded photo or linked account photo.
+export function personPhoto(n){
+  if(!n)return '';
+  if(typeof n.id==='string'&&n.id.startsWith('@')){const card=ownCardFor(n);if(card){const p=photoOf(card);if(p)return p}}
+  return photoOf(n);
 }
 export const photoImg=src=>`<img class="pa-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`;
 export function personAvatar(n,{size=0,cls='',tip=''}={}){
