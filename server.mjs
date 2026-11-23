@@ -536,7 +536,9 @@ async function commitAdds(envId,user,plans){
       const next=core.applyPendingEdit(home.data,s,cur,{kind:r.kind,id:r.id,fields:r.rec},user,{members});if(next)await shares.updateProposal(next);
     }
     if(!core.proposalSize(plan))continue;
-    const now=new Date().toISOString(),ids=(map,pending)=>{for(const [lid,oid] of Object.entries(plan.map))out[lid]={id:core.linkedId(s.id,map?.[oid]||oid),pending}};
+    // A card the owner took at once has the owner's #number: the result carries it, not the recipient's local one.
+    const now=new Date().toISOString(),ids=(map,pending,db)=>{for(const [lid,oid] of Object.entries(plan.map)){const id=map?.[oid]||oid,n=db?.devops?.cards?.find(c=>c.id===id)?.number;
+      out[lid]={id:core.linkedId(s.id,id),pending,...(Number.isInteger(n)?{number:n}:{})}}};
     const join=plan.joins.length?await shares.getProposal(plan.joins[0]):null;
     if(mode==='direct'&&!(join?.status==='pending')){
       let done=false;
@@ -548,7 +550,7 @@ async function commitAdds(envId,user,plans){
         if(w.refused)break;if(w.conflict)continue;
         await shares.addProposal({id:randomUUID(),shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,proposedBy:user.email,envId,records:plan.records,status:'applied',createdAt:now,decidedAt:now,decidedBy:user.email,map});
         await shares.record(addedHistory(s,plan.records,map,user.email));
-        ids(map,false);done=true;
+        ids(map,false,db);done=true;
       }
       if(done)continue;
       // The owner's workspace could not take it (a limit, or it kept changing): it waits as a proposal instead.

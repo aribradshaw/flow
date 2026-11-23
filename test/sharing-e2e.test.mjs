@@ -643,7 +643,19 @@ test('additions: off, needs approval, allowed; app saves, the API and MCP; scope
   await owner('PATCH',`/api/shares/${s.id}`,{adds:'direct'});
   r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API direct',project:L('p-cb')});
   assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,undefined);assert.ok(r.data.card.id.startsWith(`sh.${s.id}.`));
-  assert.ok((await home()).devops.cards.some(c=>c.title==='API direct'));
+  const direct=(await home()).devops.cards.find(c=>c.title==='API direct');assert.ok(direct);
+  assert.equal(r.data.card.number,direct.number,"the result carries the owner's #number, not a provisional local one");
+  r=await v1(kw,'PATCH',`/envs/${kimEnv}/cards/${r.data.card.number}`,{description:'By number'});assert.equal(r.status,200,'and the card is found by that number');
+  // Kim's own person card cannot be assigned to a shared card: its owner would never see it (it used to be dropped on sync).
+  const kimChart=(await v1(kw,'GET',`/envs/${kimEnv}/charts`)).data.items.find(c=>!c.id.startsWith('sh.'));
+  const own=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(kimChart.id)}/nodes`,{name:'Kim Own Person',type:'person'});assert.equal(own.status,201,JSON.stringify(own.data));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API own assignee',project:L('p-cb'),assignees:[{node:own.data.node.id}]});
+  assert.equal(r.status,400,JSON.stringify(r.data));assert.equal(r.data.code,'person_not_in_share');
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='API own assignee'),'nothing is created');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API share assignee',project:L('p-cb'),assignees:[{node:L('bo')}]});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.deepEqual(r.data.card.assignees.map(a=>a.node),[L('bo')]);
+  assert.deepEqual((await home()).devops.cards.find(c=>c.title==='API share assignee').assignees.map(a=>a.node),['bo'],'and it reaches the owner');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API own card',assignees:[{node:own.data.node.id}]});assert.equal(r.status,201,'her own cards still take her own people');
   r=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(SC)}/edges`,{from:L('marsh'),to:L('labs'),type:'group'});
   assert.equal(r.status,201,JSON.stringify(r.data));assert.ok((await home()).charts[0].edges.some(e=>e.from==='marsh'&&e.to==='labs'),'an edge between shared cards');
   await owner('DELETE',`/api/shares/${s.id}`);

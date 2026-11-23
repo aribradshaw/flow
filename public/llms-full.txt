@@ -2122,7 +2122,7 @@ Create a DevOps card
 
 `POST /api/v1/envs/{env}/cards` · scope `write` · MCP tool `cards_create`
 
-Add a card (it gets the next #number). Lands in Requests / Sprinted unless `column` says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400. In a shared project, or with share, it is added to that share's owner when the share lets you add (pending: true while it waits for their approval; the owner numbers it); a share that does not is refused with 403 share_adds_off.
+Add a card (it gets the next #number). Lands in Requests / Sprinted unless `column` says otherwise. References (project, labels, assignees, item) are ids or names; unknown ones are refused with 400. In a shared project, or with share, it is added to that share's owner when the share lets you add, and number is the owner's (pending: true while it waits for their approval: number is provisional until the owner numbers it); a share that does not is refused with 403 share_adds_off. A shared card takes only the share's people (their linked person cards or share members); a person card of your own is refused with 400 person_not_in_share.
 
 **Input**
 

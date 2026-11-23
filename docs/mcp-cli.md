@@ -115,6 +115,8 @@ flow cards --help                  # the commands in a group;  flow cards move -
 flow refresh                       # refetch the API description
 ```
 
+- **Cards are deleted on the board only.** The API, CLI and MCP can restore a deleted card but
+  not delete one, so an agent cannot remove work by mistake. Move a card you no longer want to Done.
 - **Commands are generated** from the server's OpenAPI document. Operation `a.b.c` becomes
   `flow a b c`. Flags are the input fields, in kebab-case (`--due-date` for `dueDate`). Values are
   converted to the schema's type: integers, numbers, booleans (`--urgent`, `--no-urgent`,
