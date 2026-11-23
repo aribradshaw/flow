@@ -58,6 +58,13 @@ export function isQuietStatus(presence) {
   return presence === 'dnd';
 }
 
+// Inverse of the room frame office.js uses: local (x, z) becomes
+// world (c.x + x*cos + z*sin, c.z - x*sin + z*cos). facing 0 keeps local +z on world +z.
+export function roomLocal(centerX, centerZ, facing, x, z) {
+  const dx = x - centerX, dz = z - centerZ, c = Math.cos(facing), s = Math.sin(facing);
+  return {x: dx * c - dz * s, z: dx * s + dz * c};
+}
+
 // choice: the status they picked (kept in localStorage). current: what the office shows now.
 // auto: current Away was set by this rule, not picked. hidden: the tab is in the background.
 // idleMs: time since the last key, pointer or wheel. Coming back clears an automatic Away.

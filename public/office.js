@@ -103,7 +103,7 @@ export function openOffice(opts){
   root.querySelector('.of-say').addEventListener('submit',e=>{e.preventDefault();say()});
   root.querySelector('.of-switch')?.addEventListener('change',e=>{switchTo(e.target.value)});
   addEventListener('keydown',onKey,true);addEventListener('keyup',onKeyUp,true);addEventListener('blur',clearKeys);
-  S.presence=attachOfficeStatus(S,{officeBox});
+  S.presence=attachOfficeStatus(S,{officeBox,refreshColliders:updateColliders});
   S.replay=attachOfficeReplay(root,{env:S.env,scene:replayScene,live:restoreLiveScene,clear:clearReplayScene,
     names:key=>key===S.meKey?'You':S.members.find(m=>m.key===key)?.name||'Guest',
     react:e=>{if(e.type==='emote')showEmote(e.member,e.emote);else S.reactions?.react(e.member+'|'+e.agent,e.decision)}});

@@ -9,7 +9,8 @@
 // pings once they leave Do not disturb. The office calls this itself for waiting agents.
 import * as THREE from './vendor/three/three.module.min.js';
 import {initials} from './devops-core.js';
-import {cleanPresenceStatus, isQuietStatus, nextPresence, presenceMeta, PRESENCE_STATUSES} from './office-status-core.js';
+import {cleanPresenceStatus, doorPolicy, isQuietStatus, nextPresence, presenceMeta, PRESENCE_STATUSES, roomLocal} from './office-status-core.js';
+import {DOOR_W, ROOM_D, ROOM_W} from './office-layout.js';
 
 const STORE = 'flow.office.status';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -84,7 +85,7 @@ export function roomTagHtml({name, me, fg, online, seen, presence, key, extra}) 
   return `<span class="of-room"${who} data-status="${show ? esc(show.id) : 'offline'}" style="--c:${fg};--st:${color}">${mark}<b>${esc(name)}</b>${me ? ' · your room' : ''}<small>${esc(note)}</small></span>`;
 }
 
-function toast(root, text, {bad = false, html = ''} = {}) {
+function toast(root, text, {bad = false, html = '', actions = [], ms = 8000} = {}) {
   const stack = root.querySelector('.of-toasts');
   if (!stack) return null;
   const el = document.createElement('div');
@@ -93,19 +94,53 @@ function toast(root, text, {bad = false, html = ''} = {}) {
   if (html) el.innerHTML = html;
   else el.textContent = text;
   stack.append(el);
-  const timer = setTimeout(() => el.remove(), 8000);
-  el.querySelector('[data-dismiss]')?.addEventListener('click', () => { clearTimeout(timer); el.remove(); });
+  const timer = setTimeout(() => el.remove(), ms);
+  if (actions.length) {
+    const row = document.createElement('div');
+    row.className = 'of-actions';
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', () => { clearTimeout(timer); el.remove(); action.run(); });
+      row.append(button);
+    }
+    el.append(row);
+  }
   return el;
 }
 
+let audioCtx;
+function soundOn() {
+  const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AC || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return null;
+  try { audioCtx = audioCtx || new AC(); audioCtx.resume?.(); } catch { return null; }
+  return audioCtx;
+}
+function tone(freq, at, dur, gain) {
+  const ac = soundOn();
+  if (!ac) return;
+  const osc = ac.createOscillator(), amp = ac.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  amp.gain.setValueAtTime(gain, ac.currentTime + at);
+  amp.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + at + dur);
+  osc.connect(amp);
+  amp.connect(ac.destination);
+  osc.start(ac.currentTime + at);
+  osc.stop(ac.currentTime + at + dur + 0.02);
+}
+const playKnock = () => { tone(180, 0, 0.08, 0.18); tone(140, 0.14, 0.1, 0.14); };
+const playChime = () => { tone(880, 0, 0.12, 0.05); tone(1320, 0.1, 0.16, 0.035); };
+
 // One open office. office is the office.js state object; officeBox builds a collider.
-export function attachOfficeStatus(office, {officeBox} = {}) {
+export function attachOfficeStatus(office, {officeBox, refreshColliders} = {}) {
   const root = office.root;
   root.insertAdjacentHTML('beforeend', '<div class="of-toasts" aria-live="polite"></div>');
   const top = root.querySelector('.of-top');
   const hud = document.createElement('div');
   hud.className = 'of-presence';
-  hud.innerHTML = `<button type="button" class="of-presence-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Status: Available"><i></i><span>Available</span><b class="of-held" hidden></b></button>
+  hud.innerHTML = `<button type="button" class="of-presence-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Status: Available"><i></i><span>Available</span><b class="of-held" hidden></b><b class="of-knocks" hidden></b></button>
     <ul class="of-presence-menu" role="listbox" hidden>${PRESENCE_STATUSES.map(id => {
       const meta = presenceMeta(id);
       return `<li role="none"><button type="button" role="option" data-presence-status="${id}"><i style="background:${meta.color}"></i>${esc(meta.label)}</button></li>`;
@@ -116,6 +151,13 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
   const menu = hud.querySelector('.of-presence-menu');
   const note = hud.querySelector('.of-presence-text');
   const heldEl = hud.querySelector('.of-held');
+  const knockEl = hud.querySelector('.of-knocks');
+  const knockBtn = document.createElement('button');
+  knockBtn.type = 'button';
+  knockBtn.className = 'of-knock';
+  knockBtn.hidden = true;
+  knockBtn.innerHTML = 'Knock <kbd>E</kbd>';
+  root.append(knockBtn);
 
   let choice = {status: 'available', text: ''};
   let auto = false;
@@ -124,6 +166,14 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
   let textTimer = 0;
   let seeded = false;
   const seenWaiting = new Set();
+  const seenKnocks = new Set();
+  const admits = new Map();
+  let knockState = {count: 0, label: ''};
+  let knockRoom = '';
+  let doorRoot = null;
+  let hinges = [];
+  let boxSig = '';
+  let wasInside = new Set();
   const api = (path, body) => fetch(`/api/office/${encodeURIComponent(office.env)}/${path}`, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
   }).then(async r => {
@@ -150,7 +200,16 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
     for (const opt of menu.querySelectorAll('[data-presence-status]')) opt.setAttribute('aria-selected', String(opt.dataset.presenceStatus === cur.status));
     if (document.activeElement !== note) note.value = choice.text || '';
     paintHeld(listHeld(office.meKey).length);
+    paintKnockBadge();
   }
+  function paintKnockBadge(data) {
+    if (data) knockState = {count: data.count || 0, label: data.label || knockLabelOf(data.count || 0)};
+    const show = knockState.count > 0 && status.isQuiet(office.meKey);
+    knockEl.hidden = !show;
+    knockEl.textContent = knockState.count > 99 ? '99+' : String(knockState.count);
+    knockEl.title = knockState.label;
+  }
+  function knockLabelOf(n) { return `${n} ${n === 1 ? 'knock' : 'knocks'}`; }
   function paintPerson(avatar) {
     if (!avatar?.tag) return;
     const presence = byKey.get(avatar.key) || {status: 'available', text: ''};
@@ -231,6 +290,125 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
   note.addEventListener('keydown', e => e.stopPropagation());
   root.addEventListener('click', e => { if (!hud.contains(e.target)) closeMenu(); });
 
+  function worldApi() {
+    return office.worldApi || office.theme || globalThis.flowOfficeWorld || null;
+  }
+  function anchorFor(room) {
+    const given = worldApi()?.doorAnchor?.(room);
+    if (given && Number.isFinite(given.x) && Number.isFinite(given.z)) {
+      return {
+        x: given.x, z: given.z,
+        yaw: Number.isFinite(given.yaw) ? given.yaw : room.facing || 0,
+        width: Number.isFinite(given.width) && given.width > 0.4 ? given.width : DOOR_W,
+        y: Number.isFinite(given.y) ? given.y : 0,
+      };
+    }
+    const entrance = room.entrance || room.door || room.center;
+    return {x: entrance.x, z: entrance.z, yaw: room.facing || 0, width: DOOR_W, y: entrance.y || 0};
+  }
+  function policyFor(room) {
+    const key = room.member?.key;
+    if (!key || key === office.meKey) return {open: true, enter: false, knock: false, sound: false};
+    const online = !!office.people?.has(key);
+    const presence = byKey.get(key)?.status || 'available';
+    return doorPolicy({online, presence, admitted: (admits.get(key) || 0) > Date.now()});
+  }
+  function contains(room, x, z, y = 0) {
+    if (!room?.center) return false;
+    // A cabin on another deck shares no floor with you. Two metres is more than a jump.
+    if (Math.abs(y - (room.center.y || 0)) > 2) return false;
+    const l = roomLocal(room.center.x, room.center.z, room.facing || 0, x, z);
+    return Math.abs(l.x) < ROOM_W / 2 - 0.35 && Math.abs(l.z) < ROOM_D / 2 - 0.35;
+  }
+  function disposeDoors() {
+    doorRoot?.traverse(o => { if (!o.userData.own) return; o.geometry?.dispose(); o.material?.dispose(); });
+    doorRoot?.removeFromParent();
+    doorRoot = null;
+    hinges = [];
+  }
+  function syncDoors() {
+    disposeDoors();
+    if (!office.world || !office.rooms) return;
+    doorRoot = new THREE.Group();
+    office.world.add(doorRoot);
+    for (const room of office.rooms.values()) {
+      const anchor = anchorFor(room);
+      const pivot = new THREE.Group();
+      // Hinge on the local −x jamb. rotation.y > 0 swings the slab toward local −z, into the room.
+      pivot.position.set(anchor.x, anchor.y, anchor.z);
+      pivot.rotation.y = anchor.yaw;
+      const swing = new THREE.Group();
+      swing.position.x = -anchor.width / 2;
+      const slabMat = new THREE.MeshLambertMaterial({color: '#d7c4a3', flatShading: true});
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(anchor.width, 2.4, 0.08), slabMat);
+      slab.position.set(anchor.width / 2, 1.2, 0);
+      slab.userData.own = true;
+      const knobMat = new THREE.MeshLambertMaterial({color: '#8a6a3b', flatShading: true});
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.12), knobMat);
+      knob.position.set(anchor.width - 0.22, 1.05, 0.08);
+      knob.userData.own = true;
+      swing.add(slab, knob);
+      pivot.add(swing);
+      swing.rotation.y = policyFor(room).open ? Math.PI / 2 : 0;
+      doorRoot.add(pivot);
+      hinges.push({room, anchor, swing});
+    }
+    boxSig = '';
+  }
+  function doorBoxes() {
+    if (!officeBox) return [];
+    const out = [];
+    for (const door of hinges) {
+      if (policyFor(door.room).open) continue;
+      const a = door.anchor;
+      // Taller than a jump (feet reach about 1.4 above the deck). Same x, z and yaw as the
+      // closed slab. Collision boxes start at the ground, so a door on a raised deck is as
+      // tall as that deck plus the slab, the same way the room walls are.
+      out.push(officeBox(a.x, a.z, a.yaw, a.width, 0.08, 2.4 + (a.y || 0)));
+    }
+    return out;
+  }
+  function refreshBoxes() {
+    const sig = hinges.map(d => policyFor(d.room).open ? '' : d.room.member.key).join('|');
+    if (sig === boxSig) return;
+    boxSig = sig;
+    refreshColliders?.();
+  }
+  function swingDoors() {
+    for (const door of hinges) {
+      const target = policyFor(door.room).open ? Math.PI / 2 : 0;
+      door.swing.rotation.y += (target - door.swing.rotation.y) * 0.18;
+    }
+  }
+  function showPrompt(room) {
+    knockRoom = room?.member?.key || '';
+    knockBtn.hidden = !knockRoom;
+  }
+  function doKnock() {
+    if (!knockRoom) return;
+    api('knock', {room: knockRoom}).catch(e => toast(root, e.status === 429 ? 'Wait a moment before knocking again' : e.message, {bad: true}));
+  }
+  knockBtn.addEventListener('click', doKnock);
+  function showKnock(item) {
+    if (!item?.from || status.isQuiet(office.meKey)) return;
+    const id = item.from + '|' + (item.at || '');
+    if (seenKnocks.has(id)) return;
+    seenKnocks.add(id);
+    const name = item.name || 'Someone';
+    toast(root, `${name} is at the door`, {
+      ms: 20000,
+      actions: [
+        {label: 'Let in', run: () => api('admit', {from: item.from, admit: true}).catch(e => toast(root, e.message, {bad: true}))},
+        {label: 'Not now', run: () => api('admit', {from: item.from, admit: false}).catch(e => toast(root, e.message, {bad: true}))},
+      ],
+    });
+  }
+  function applyAdmissions(rows) {
+    admits.clear();
+    for (const row of rows || []) if (row?.room && row.until > Date.now()) admits.set(row.room, row.until);
+    boxSig = '';
+  }
+
   return {
     destroy() {
       clearTimeout(textTimer);
@@ -239,6 +417,8 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
       removeEventListener('wheel', onPointer, true);
       document.removeEventListener('visibilitychange', onVis);
       hud.remove();
+      knockBtn.remove();
+      disposeDoors();
       root.querySelector('.of-toasts')?.remove();
       byKey.clear();
       held.clear();
@@ -258,12 +438,38 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
         }
         syncHud();
         paintAll();
+        boxSig = '';
+      });
+      on('knock', data => {
+        playKnock();
+        showKnock(data);
+      });
+      on('knockBadge', data => paintKnockBadge(data));
+      on('knocks', data => {
+        paintKnockBadge({count: 0, label: ''});
+        for (const item of data?.items || []) showKnock(item);
+      });
+      on('knockAnswer', data => {
+        if (!data) return;
+        if (data.admit) {
+          if (data.room) admits.set(data.room, data.until || Date.now() + 120000);
+          boxSig = '';
+          toast(root, `${data.name || 'They'} let you in`);
+        } else {
+          const name = data.name || 'They';
+          toast(root, data.mode === 'dnd' ? `${name} does not want to be disturbed` : `${name} is focusing`);
+        }
+      });
+      on('entered', data => {
+        playChime();
+        toast(root, `${data?.name || 'Someone'} came in`);
       });
     },
     onSnapshot(d) {
       for (const row of d.statuses || []) {
         if (row?.key && PRESENCE_STATUSES.includes(row.status)) byKey.set(row.key, {status: row.status, text: row.text || ''});
       }
+      applyAdmissions(d.admissions);
       const saved = loadChoice();
       const serverMine = byKey.get(office.meKey);
       choice = saved || serverMine || {status: 'available', text: ''};
@@ -271,6 +477,8 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
       if (office.meKey) byKey.set(office.meKey, {status: choice.status, text: choice.text});
       syncHud();
       paintAll();
+      paintKnockBadge(d.knocks);
+      if (d.knocks?.items) for (const item of d.knocks.items) showKnock(item);
       // This browser's saved choice wins over whatever the server still has.
       if (saved) api('status', choice).catch(e => toast(root, e.message, {bad: true}));
     },
@@ -301,14 +509,43 @@ export function attachOfficeStatus(office, {officeBox} = {}) {
         if (res.held) paintHeld(res.count);
       }
     },
-    // Filled in with the doors: a themed world may answer doorAnchor(room).
-    worldApi() {
-      return office.worldApi || office.theme || globalThis.flowOfficeWorld || null;
+    // A themed world may answer doorAnchor(room) with a world {x, z, yaw, width, y}.
+    worldApi,
+    doorBoxes,
+    syncDoors,
+    beforeMove() {
+      const now = Date.now();
+      for (const [key, until] of admits) if (until <= now) admits.delete(key);
+      refreshBoxes();
+      swingDoors();
     },
-    doorBoxes() { return []; },
-    syncDoors() {},
-    beforeMove() {},
-    afterMove() {},
-    onKey() { return false; },
+    afterMove(player) {
+      if (!player || !office.rooms) return;
+      const nowIn = new Set();
+      let prompt = null;
+      let best = 2.2;
+      for (const room of office.rooms.values()) {
+        const feet = player.y || 0;
+        if (contains(room, player.x, player.z, feet)) nowIn.add(room.member.key);
+        const door = hinges.find(h => h.room === room);
+        if (!door || policyFor(room).open || contains(room, player.x, player.z, feet)) continue;
+        if (Math.abs(feet - (door.anchor.y || 0)) > 2) continue;
+        const dist = Math.hypot(player.x - door.anchor.x, player.z - door.anchor.z);
+        if (dist < best) { best = dist; prompt = room; }
+      }
+      for (const key of nowIn) if (!wasInside.has(key)) {
+        const room = office.rooms.get(key);
+        if (room && policyFor(room).enter) api('enter', {room: key}).catch(() => {});
+      }
+      wasInside = nowIn;
+      showPrompt(prompt);
+    },
+    // E knocks only while the prompt is up, so it still talks to agents everywhere else.
+    onKey(e) {
+      if (knockBtn.hidden || e.repeat || e.key?.toLowerCase() !== 'e') return false;
+      e.preventDefault();
+      doKnock();
+      return true;
+    },
   };
 }

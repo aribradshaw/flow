@@ -169,8 +169,9 @@
 .of-presence{display:flex;align-items:center;gap:4px;position:relative;min-width:0}
 .of-presence-btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid var(--line2);border-radius:999px;background:#fff;font:600 12px/1 inherit;color:var(--ink)}
 .of-presence-btn > i,.of-presence-menu i{width:8px;height:8px;border-radius:50%;flex:none;display:block}
-.of-presence-btn .of-held{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#d4534a;color:#fff;font-size:10px}
-.of-presence-btn .of-held[hidden]{display:none}
+.of-presence-btn .of-held,.of-presence-btn .of-knocks{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#d4534a;color:#fff;font-size:10px}
+.of-presence-btn .of-knocks{background:#d08900}
+.of-presence-btn .of-held[hidden],.of-presence-btn .of-knocks[hidden]{display:none}
 .of-presence-text{width:7.5rem;max-width:28vw;height:28px;border:1px solid var(--line2);border-radius:999px;padding:0 8px;font-size:12px;background:#fff;min-width:0}
 .of-presence-menu{position:absolute;top:34px;left:0;z-index:6;margin:0;padding:4px;list-style:none;min-width:190px;background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16)}
 .of-presence-menu button{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:5px;background:transparent;text-align:left;font:inherit}
@@ -182,7 +183,12 @@
 .of-room{border-color:var(--st,var(--c))}
 .of-toasts{position:absolute;right:12px;bottom:12px;z-index:6;display:flex;flex-direction:column;gap:8px;width:min(320px,calc(100% - 24px));pointer-events:none}
 .of-toast{pointer-events:auto;padding:10px 12px;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.16);font-size:13px}
+.of-toast .of-actions{display:flex;gap:6px;margin-top:8px}
+.of-toast button{border:1px solid var(--line2);border-radius:6px;background:#fff;font:600 12px inherit;padding:4px 8px;cursor:pointer}
 .of-toast.bad{color:var(--danger)}
+.of-knock{position:absolute;left:50%;bottom:78px;z-index:5;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 12px;border:0;border-radius:999px;background:#1d2725;color:#fff;font:600 13px inherit;box-shadow:0 4px 16px rgba(0,0,0,.2);cursor:pointer}
+.of-knock[hidden]{display:none}
+.of-knock kbd{display:inline-grid;place-items:center;min-width:22px;height:22px;border-radius:5px;background:#fff;color:#1d2421;font:700 12px/1 ui-monospace,Consolas,monospace}
 @media (max-width:520px){.of-presence-text{width:5.5rem}}
 /* Worlds (public/office-world.js): the picker, place names, and the sea-motion switch */
 .of-world{height:28px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;padding:0 6px;font-weight:600}
