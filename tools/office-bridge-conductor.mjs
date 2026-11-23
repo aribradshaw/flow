@@ -152,8 +152,8 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
     triedAt = now();
     const brief = await fetchBrief().catch(() => ({}));
     const message = conductorBrief(brief);
-    const made = await runT3({bin, path, project, title: CONDUCTOR_TITLE, message, signal});
     const had = state.threadId;
+    const made = await runT3({bin, path, project, title: CONDUCTOR_TITLE, message, signal});
     state = {threadId: made.threadId, project, createdAt: new Date(now()).toISOString(), ...(brief.env ? {env: brief.env} : {})};
     writeState(stateFile, state);
     log(had ? 'office bridge: conductor thread was gone; started a new one' : 'office bridge: started the conductor thread');
