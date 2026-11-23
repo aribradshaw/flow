@@ -76,6 +76,16 @@ A Flow that other people can join keeps each person within limits, so one accoun
 - AgentFlow: a card last changed by someone outside the environment (through an edit share) is left out of `agents.work` until the owner changes it again in Flow, so text from outside never starts a runner by itself. Runners use the owner's API key for one environment, and a member's key never reaches the owner's environments.
 - A public instance (OneProfileID on https) does not start without `OWNER_EMAIL`.
 
+## Voice and screen sharing
+
+The 3D office's meeting room, proximity voice and screen sharing connect browsers directly with WebRTC. Your server only relays the set-up messages. By default browsers find their public address with Google's public STUN server (`stun:stun.l.google.com:19302`). That is enough when at least one side has an ordinary home router. Some networks cannot be reached directly: carrier-grade NAT on mobile and some ISPs, strict corporate firewalls, and two symmetric NATs. Calls between those need a TURN relay, so set one up if your users are on such networks.
+
+- `OFFICE_STUN_URLS`: comma-separated STUN URLs that replace the default. Use `none` for no STUN.
+- `OFFICE_TURN_URLS`, `OFFICE_TURN_USERNAME`, `OFFICE_TURN_CREDENTIAL`: your own TURN server (for example coturn), such as `turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349`. The username and credential are sent to signed-in members of an office, so use an account that can only relay.
+- `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_KEY_API_TOKEN`: [Cloudflare Realtime TURN](https://developers.cloudflare.com/realtime/turn/). Create a TURN key in the Cloudflare dashboard (Realtime › TURN). Flow then fetches short-lived credentials (6 hours) for each person on the server. Only those credentials reach browsers, never the key ID or API token, and URLs on port 53 (which browsers block) are dropped. If Cloudflare cannot be reached, calls fall back to STUN.
+
+Browsers allow the microphone and screen capture only on HTTPS pages (or `localhost`). When Flow is embedded in another site, the embedding page's frame needs `allow="microphone; display-capture"`. Restart the server after changing these settings.
+
 ## Embed Flow in another site
 
 By default Flow refuses to be shown inside another site's frame (`Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`), which protects against clickjacking. To show Flow in a dashboard, a home-screen app or a kiosk, list the sites that may embed it in `FLOW_FRAME_ANCESTORS`, separated by spaces or commas:

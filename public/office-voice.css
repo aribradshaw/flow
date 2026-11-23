@@ -1,0 +1,28 @@
+/* Voice in the 3D office (public/office-voice.js): the voice bar, its settings, the take-over question and the full-screen shared screen. */
+.ofv{position:absolute;right:12px;bottom:12px;z-index:3;display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:6px;max-width:calc(100% - 24px)}
+.ofv>button,.ofv .ofv-where{height:34px;border:0;border-radius:17px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.12);font:600 12.5px/1 inherit;font-family:inherit;color:#1d2421}
+.ofv>.ib{width:34px;display:inline-grid;place-items:center;padding:0}
+.ofv>.ib[aria-pressed="true"],.ofv>.ib.on{background:#1d2421;color:#fff}
+.ofv .ofv-where{display:inline-flex;align-items:center;padding:0 12px;font-weight:500;background:rgba(255,255,255,.92)}
+.ofv-mic,.ofv-near{display:inline-flex;align-items:center;gap:6px;padding:0 13px 0 10px;cursor:pointer}
+.ofv-mic.on{background:#1f9d55;color:#fff}
+.ofv-mic.off{background:#c0392b;color:#fff}
+.ofv-near.on{background:#1d2421;color:#fff}
+.ofv-tap{height:34px;border-radius:17px}
+.ofv button:focus-visible{outline:2px solid var(--primary,#2e80ed);outline-offset:2px}
+.ofv-settings,.ofv-confirm{position:absolute;right:0;bottom:44px;width:min(300px,calc(100vw - 24px));padding:12px;border-radius:10px;background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.16);font-size:12.5px;display:flex;flex-direction:column;gap:8px}
+.ofv-settings label{display:flex;flex-direction:column;gap:3px;color:var(--muted,#5f6b66)}
+.ofv-settings select{height:30px;border:1px solid var(--line,#dfe4e1);border-radius:6px;background:#fff;font:inherit;color:#1d2421}
+.ofv-settings .ofv-check{flex-direction:row;align-items:center;gap:6px;color:#1d2421}
+.ofv-note{margin:0;color:var(--muted,#5f6b66);font-size:11.5px;line-height:1.4}
+.ofv-confirm{flex-direction:row;flex-wrap:wrap;align-items:center}
+.ofv-confirm span{flex:1 1 100%}
+.of-room.ofv-sign.live{border-color:#1f9d55}
+.of-room.ofv-sign.live small{color:#1f9d55;font-weight:700}
+.of-name.ofv-speaking{box-shadow:0 0 0 3px #38c172}
+.ofv-full{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:rgba(10,14,13,.94)}
+.ofv-full-top{display:flex;align-items:center;gap:8px;padding:8px 12px;color:#fff}
+.ofv-full-top .sp{flex:1}
+.ofv-full-top .ib{color:#fff;background:rgba(255,255,255,.12);border:0;width:34px;height:34px;border-radius:8px;display:inline-grid;place-items:center}
+.ofv-full video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
+@media (pointer:coarse){.ofv>button,.ofv .ofv-where{height:42px;border-radius:21px}.ofv>.ib{width:42px}}

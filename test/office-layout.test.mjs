@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {classicLayout,toWorld,ROOM_W,ROOM_D,DOOR_W,BACK_WALL_H,MAIN_WALL_H} from '../public/office-layout.js';
+import {classicLayout,toWorld,ROOM_W,ROOM_D,DOOR_W,BACK_WALL_H,MAIN_WALL_H,MEETING_W,MEETING_D} from '../public/office-layout.js';
+import {doorSpots} from '../public/office-portals.js';
 
 const local=(frame,p)=>{const dx=p.x-frame.x,dz=p.z-frame.z,c=Math.cos(frame.facing),s=Math.sin(frame.facing);return {x:dx*c-dz*s,z:dx*s+dz*c}};
 const keys=n=>Array.from({length:n},(_,i)=>'m'+i);
@@ -51,4 +52,26 @@ test('more rooms widen the ring rather than squeeze the rooms',()=>{
   assert.ok(b.radius>a.radius);
   const gap=(w,i,j)=>Math.hypot(w.rooms[i].x-w.rooms[j].x,w.rooms[i].z-w.rooms[j].z);
   assert.ok(gap(b,0,1)>=ROOM_W+2.9);
+});
+
+test('the meeting room has its own slot in the ring, its door facing the middle, clear of rooms, doors and the main wall',()=>{
+  for(const n of [0,1,2,3,6,12,20]){
+    const world=classicLayout(keys(n)),[m]=world.meetingAnchors(),w=world.mainWall;
+    assert.deepEqual([m.id,m.w,m.d,m.glass],['meeting',MEETING_W,MEETING_D,true]);
+    const door=toWorld(m,0,m.d/2+1);assert.ok(Math.hypot(door.x,door.z)<Math.hypot(m.x,m.z),`n=${n}: its door faces the middle`);
+    // Its corners (with a 1 m path) stay out of every room, and no room's door opens onto it.
+    for(const room of world.rooms){
+      for(const sx of [-1,1])for(const sz of [-1,1]){
+        const p=local(room,toWorld(m,sx*(m.w/2+1),sz*m.d/2));
+        assert.ok(Math.abs(p.x)>ROOM_W/2||Math.abs(p.z)>ROOM_D/2,`n=${n}: the meeting room stays out of a room`);
+      }
+      const rd=toWorld(room,0,ROOM_D/2+DOOR_W);assert.ok(local(m,rd).x**2+local(m,rd).z**2>(m.d/2+1)**2,`n=${n}: no door opens onto it`);
+    }
+    assert.ok(Math.hypot(w.x-m.x,w.z-m.z)>w.width/2+m.w/2,`n=${n}: clear of the main wall`);
+    // Doors to other offices go between, never into it.
+    const rooms=[...world.rooms.map(r=>({center:r})),{center:w},{center:m}];
+    for(const d of doorSpots(Array.from({length:6},(_,i)=>({env:'e'+i})),{rooms,ringRadius:world.radius})){
+      const p=local(m,d);assert.ok(Math.abs(p.x)>m.w/2+0.9||Math.abs(p.z)>m.d/2+0.5,`n=${n}: a door stays out of the meeting room`);
+    }
+  }
 });

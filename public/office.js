@@ -29,6 +29,7 @@ import {notifyOn,toggleNotify} from './office-alerts.js';
 import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
 import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
+import {createVoice} from './office-voice.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -79,7 +80,8 @@ export function openOffice(opts){
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
-        <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd></dl>
+        <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
+        <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
@@ -116,6 +118,7 @@ export function closeOffice(){
   s.presence?.destroy();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
+  s.voice?.dispose(); // every call ends; the mic and a shared screen are released
   s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
@@ -225,6 +228,7 @@ function connect(){
   on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
+  on('rtc',d=>S.voice?.event(d)); // voice signalling (office-voice.js, lib/office-rtc.mjs)
   on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents)});
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
@@ -460,6 +464,13 @@ function initScene(){
   S.reactions=createReactions(THREE);
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
     toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
+  // Voice (office-voice.js): the meeting room's call, proximity voice and screen sharing.
+  S.voice=createVoice({scene,world:S.world,stage:S.stage,root:S.root,interact:S.interact,label,clear,env:()=>office.env,me:()=>office.pos,
+    facing:()=>office.rig?office.rig.yaw+Math.PI:office.controller.state.heading,people:()=>office.people,meKey:()=>office.meKey,nameOf,
+    quiet:()=>presenceStatus.isQuiet(office.meKey), // Do not disturb: no proximity calls
+    layout:()=>({world:office.worldLayout,rooms:[...office.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:office.commonR||10,roomW:ROOM_W,roomD:ROOM_D}),
+    walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,
+    toast:(m,bad)=>office.opts.toast?.(m,bad)});
   const openCard=id=>openOverlay('card',id);
   S.boards=createOfficeBoards({env:S.env,envName:()=>{const name=office.opts.offices.find(o=>o.id===office.env)?.name||'This office';return office.portalList?.length?`This office ▸ ${name}`:name},world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
@@ -567,6 +578,7 @@ function buildRooms(){
   S.walls.push(...S.place.walls);
   buildDoors();
   S.presence?.syncDoors();
+  S.voice?.layout();S.walls.push(...(S.voice?.walls||[])); // the meeting room's glass stops people and the camera
   updateColliders();
   const anchors=S.worldLayout.boardAnchors();
   S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
@@ -858,6 +870,7 @@ function cardTargetAt(e){
 function pick(e){
   const hit=hitAt(e);closeMenu();if(!hit)return;
   if(S.replay?.active){if(hit.point)S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
+  if(S.voice?.pick(S.ray))return;
   if(S.boards?.pick(hit.board))return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
@@ -870,8 +883,9 @@ function pick(e){
 function buildDoors(){
   if(!S?.world)return;if(S.doorGroup)clear(S.doorGroup);
   const rooms=[...S.rooms.values()],ring=rooms.length?Math.hypot(rooms[0].center.x,rooms[0].center.z):(S.commonR||10)+7;
-  // The main board's wall holds a slot in the ring too: doors go in the gaps either side of it.
-  const wall=S.worldLayout?.mainWall,taken=wall?[...rooms,{center:{x:wall.x,z:wall.z}}]:rooms;
+  // The main board's wall holds a slot in the ring too: doors go in the gaps either side of it. So does the meeting room (office-voice.js).
+  const wall=S.worldLayout?.mainWall,meet=S.worldLayout?.meetingAnchors?.()||[];
+  const taken=[...rooms,...(wall?[{center:{x:wall.x,z:wall.z}}]:[]),...meet.map(a=>({center:{x:a.x,z:a.z}}))];
   // A world may have its own places for doors (the yacht: the swim platform); the office puts them in the ring's gaps.
   const spots=S.worldLayout?.doors?.(S.portalList)||doorSpots(S.portalList,{rooms:taken,ringRadius:ring});
   const d=buildDoors3d(spots);S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
@@ -1031,6 +1045,7 @@ function onKey(e){
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.interact?.closeOpen())return;
+    if(S.voice?.escape())return;
     if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
     if(S.presence?.closeOverlays())return;
@@ -1052,6 +1067,7 @@ function onKey(e){
   }
   if(e.code==='Space'&&e.target.closest?.('button,a'))return;
   if(S.presence?.onKey(e))return;
+  if(S.voice?.keyDown(e)){e.preventDefault();return} // M mute, hold V to talk
   if(S.input.keyDown(e.code,performance.now(),e.repeat,S.controller.jump)){e.preventDefault();return}
   if(k==='e'){e.preventDefault();if(!e.repeat&&!S.replay?.active)S.interact?.trigger();return}
   if(['z','c','f','o','?'].includes(k)){
@@ -1067,6 +1083,7 @@ function onKey(e){
   if(!S.replay?.active&&(e.key==='Enter'&&e.target===document.body||e.key==='t')){e.preventDefault();S.root.querySelector('.of-input').focus()}
 }
 function onKeyUp(e){
+  S?.voice?.keyUp(e); // push-to-talk ends even while typing
   if(S?.input.keyUp(e.code)&&!isTyping(e.target))e.stopPropagation();
 }
 const overlayOpen=()=>S.bridge?.dialog.open||S.overlays.length||S.root.querySelector('dialog[open]');
@@ -1169,6 +1186,7 @@ function frame(dt,t,delta){
   if(!replay)S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);
   if(!replay)S.interact?.update();
+  S.voice?.frame(dt);
   placeLabels();
 }
 // The E prompt names what it targets, so that thing's own name tag steps aside while it is targeted.

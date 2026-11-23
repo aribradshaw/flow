@@ -349,6 +349,8 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one).
 - **Press E.** Walk up to an agent, a person or a board and a prompt says what **E** does there ("E Talk to Chief of Staff", "E Wave at Joe"); on a gamepad it is X / Square, and on a touch screen you tap the prompt. E again, Esc or walking away closes what it opened. The camera turns with **Z** and **C**.
 - **Status.** Each person sets Available, Focus, Do not disturb or Away. It shows on their avatar, name tag and door sign. See [Status](#status).
+- **Meeting room and voice.** A glass meeting room has its own place in the ring of rooms. Walk in to join its call: the first time, the browser asks to use your microphone. Everyone in the room hears everyone else, and walking out leaves the call. The sign at its door says who is in it ("Live: 3 in Meeting room"), and a green ring under an avatar shows who is speaking. Outside the room, **Talk to people nearby** in the voice bar (bottom right) lets you hear people within about 6 m who also have it on. Their voices get quieter with distance and come from their side. See [Voice](#voice).
+- **Screen sharing.** In the meeting room, **Share screen** in the voice bar (or **E** at the table) shows your screen on the room's wall screen for everyone in the call. Click the wall screen, press **E** in front of it, or use the expand button to watch it full screen. One screen is shared at a time: if someone else is sharing, Flow asks before yours replaces theirs.
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
 - **Worlds.** The office can be the classic **Office** or a **Yacht**. See [Worlds](#worlds).
 - **Several offices.** If shares from other people's environments are placed in yours, the office's title becomes a menu: pick a shared environment to enter its office as a member. The shared office opens first, until you pick another.
@@ -380,6 +382,23 @@ Open **?** in the office header for the control list and the option to turn off 
 | Recenter | Middle-click or press **F** |
 | Top-down overview | Press **O** or select the overview button |
 | Gamepad | Left stick to walk, right stick to orbit, **A** to jump, **B** or **X** to sprint |
+| Mute / unmute | **M**, or the mic button in the voice bar |
+| Push to talk | Hold **V** (turn it on in the voice bar's settings) |
+
+### Voice
+
+The meeting room is in the classic office; on the yacht, **Talk to people nearby** works but there is no meeting room yet. The voice bar sits at the bottom right of the office. Its button walks you to the meeting room, and **Talk to people nearby** turns proximity voice on for this visit. While you are in a call it shows where you are and how many people are connected. It also has:
+
+- **The mic button.** It shows whether you are heard: **Mic on** (green), **Muted** (red), **Hold V to talk**, or **Listening only** when the browser was refused the microphone. Click it or press **M**.
+- **Deafen.** You hear nobody, and nobody hears you.
+- **Share screen.** Shown in the meeting room only.
+- **Settings.** Pick a microphone and, where the browser can, a speaker. Turn on push to talk (hold **V**). These choices are kept in this browser.
+
+Keyboard shortcuts never fire while you type in a text field. When you leave a room or turn proximity voice off, the browser gives the microphone back. If the browser blocks sound until you interact with the page (common on phones), the bar shows **Tap to hear**.
+
+**Do not disturb** keeps you out of proximity calls: nobody is connected to you nearby until you change your status. People in Do not disturb are never connected to you either. Walking into the meeting room is your choice, so the room's call ignores it. All calls end when the office closes or the tab has been hidden for more than two minutes, and pick up again when you come back.
+
+**Privacy.** Audio and video go straight between browsers over WebRTC, end-to-end encrypted with DTLS-SRTP. Flow's server only passes the connection set-up messages between two people in the same office. It never records anything, keeps no media, and does not log those messages. When two browsers cannot reach each other directly, a TURN relay you configure carries the encrypted stream (see [docs/self-hosting.md](../self-hosting.md#voice-and-screen-sharing)). Calls are a mesh, which works well for up to about 8 people in one call.
 
 ### Status
 
@@ -529,6 +548,8 @@ The snapshot carries `portals: [{env, label, sub, own}]`, the doors for this vie
 ### How it runs
 
 The office is live over Server-Sent Events: `GET /api/office/{env}/events` sends a snapshot (rooms, AgentFlow agents, live agents as this viewer may see them, who is here, each member's presence, and the last 50 chat lines, and the viewer's own live reporter sources), then moves, presence, chat, emotes, agent updates and answer results as they happen, with a heartbeat every 15 seconds. Moves (including an optional short status line saved with last-seen), chat (up to 280 characters), emotes, answers and steering are small POSTs to `/api/office/{env}/presence`, `say`, `emote`, `answer` and `steer` (`{kind: "message", source, agentId, text}` or `{kind: "stop", source, agentId}`; `answer` takes the same body, and a body without `kind` is Allow / Deny). Presence is `POST /api/office/{env}/status` with `available`, `focus`, `dnd` or `away` and a note of up to 60 characters. All of these are rate-limited per person. There is no API key operation for sending messages or stops: they come only from the signed-in owner in the office. Only the app's own page can call them, signed in. The events stream also takes an API key with the `read` scope for that environment (`Authorization: Bearer flow_…`), so a dashboard can watch the office. A stream that stops hearing heartbeats reconnects by itself; the header says "Reconnecting…" only after eight seconds without a stream.
+
+Voice (`lib/office-rtc.mjs`, `public/office-voice.js`) is signalled through the office stream. Each open connection gets an opaque peer id (`rtc {type: "welcome", peer, peers}`). The browser posts `POST /api/office/{env}/rtc {from, to, type, data}`, where `type` is `state` (its voice state: `room`, `near`, `dnd`, `muted`, `share`; sent to the whole office) or `offer`, `answer`, `ice` or `bye` (sent to the one peer `to`). The server checks that `from` is one of the caller's own open connections and that `to` is in the same office. An `offer` also needs both people in the same room's call, or both with proximity voice on outside rooms and neither in Do not disturb. Payloads are capped at 24 KB and rate-limited per connection. They are passed on as `rtc` events and never stored or logged. `GET /api/office/{env}/rtc` returns `{iceServers, ttl, turn}` for `RTCPeerConnection`.
 
 Alerts outside the office use one more stream, `GET /api/office/alerts`, which the app keeps open only while **Notify me when agents wait** is on. It belongs to the signed-in person and has no environment: it sends `mine` (`{waiting:[…]}`, their own agents that are waiting now) when it opens and whenever that changes, and `waiting` (one agent) each time one of their agents starts waiting or waits on a new prompt. An agent's first report from a source (a reporter starting, or the server restarting) does not count as starting to wait. Only the app's own page can open it, signed in; API keys cannot.
 
