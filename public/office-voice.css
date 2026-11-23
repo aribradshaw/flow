@@ -17,8 +17,6 @@
 .ofv-note{margin:0;color:var(--muted,#5f6b66);font-size:11.5px;line-height:1.4}
 .ofv-confirm{flex-direction:row;flex-wrap:wrap;align-items:center}
 .ofv-confirm span{flex:1 1 100%}
-.of-room.ofv-sign.live{border-color:#1f9d55}
-.of-room.ofv-sign.live small{color:#1f9d55;font-weight:700}
 .of-name.ofv-speaking{box-shadow:0 0 0 3px #38c172}
 .ofv-full{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:rgba(10,14,13,.94)}
 .ofv-full-top{display:flex;align-items:center;gap:8px;padding:8px 12px;color:#fff}

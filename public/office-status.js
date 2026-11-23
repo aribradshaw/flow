@@ -11,6 +11,7 @@ import * as THREE from './vendor/three/three.module.min.js';
 import {initials} from './devops-core.js';
 import {cleanPresenceStatus, doorPolicy, isQuietStatus, nextPresence, presenceMeta, PRESENCE_STATUSES, roomLocal} from './office-status-core.js';
 import {DOOR_W, ROOM_D, ROOM_W} from './office-layout.js';
+import {plaqueCopy} from './office-plaques-core.js';
 
 const STORE = 'flow.office.status';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -71,18 +72,14 @@ export function nameTagHtml({name, image, self, bg, fg, presence, key}) {
   return `<span class="of-name${self ? ' me' : ''}"${who} data-status="${esc(meta.id)}" style="--bg:${bg};--fg:${fg};--st:${meta.color}"><i class="of-avatar">${esc(initials(name))}${badge}</i><b>${esc(name)}</b><em class="of-st" title="${esc(meta.label)}">${meta.glyph}</em>${note}</span>`;
 }
 
+// Overview-only name chip (walk mode uses the wall plaque). Kept for tests and card-drop hit targets.
 export function roomTagHtml({name, me, fg, online, seen, presence, key, extra}) {
-  const show = online ? presenceMeta(presence?.status) : null;
-  const bits = [];
-  if (!online) bits.push(`offline${seen ? ` · last seen ${seen}` : ''}`);
-  else if (presence?.text) bits.push(presence.text);
-  else if (show && show.id !== 'available') bits.push(show.label);
-  if (extra) bits.push(extra);
-  const note = bits.length ? ` · ${bits.join(' · ')}` : '';
-  const mark = show ? `<em class="of-st" title="${esc(show.label)}">${show.glyph}</em>` : '';
-  const color = show ? show.color : fg;
+  const copy = plaqueCopy({name, me, online, seen, presence, extra});
+  const color = online ? copy.status.color : fg;
   const who = key ? ` data-office-person="${esc(key)}"` : '';
-  return `<span class="of-room"${who} data-status="${show ? esc(show.id) : 'offline'}" style="--c:${fg};--st:${color}">${mark}<b>${esc(name)}</b>${me ? ' · your room' : ''}<small>${esc(note)}</small></span>`;
+  const note = copy.lines.length ? ` · ${copy.lines.join(' · ')}` : '';
+  const mark = online && copy.status.id !== 'offline' ? `<em class="of-st" title="${esc(copy.status.label)}">${copy.status.glyph}</em>` : '';
+  return `<span class="of-room"${who} data-status="${esc(copy.status.id)}" style="--c:${fg};--st:${color}">${mark}<b>${esc(copy.title)}</b>${me ? ' · your room' : ''}<small>${esc(note)}</small></span>`;
 }
 
 function toast(root, text, {bad = false, html = '', actions = [], ms = 8000} = {}) {
@@ -227,10 +224,16 @@ export function attachOfficeStatus(office, {officeBox, refreshColliders} = {}) {
     ring.material.color.set(presenceMeta(presence.status).color);
   }
   function paintRoom(room, online) {
-    if (!room?.tag) return;
+    if (!room?.plaque && !room?.tag) return;
     const presence = byKey.get(room.member.key) || {status: 'available', text: ''};
     const seen = room.seen || '';
-    room.tag.el.innerHTML = roomTagHtml({name: room.member.name, me: room.member.me, fg: room.fg || '#888', online, seen, presence, key: room.member.key, extra: room.note || ''});
+    const state = {name: room.member.name, me: room.member.me, fg: room.fg || '#888', online, seen, presence, key: room.member.key, extra: room.note || ''};
+    room.plaque?.paint(state);
+    if (room.tag?.el) {
+      // Overview chip: name only (the plaque carries status and agent notes).
+      room.tag.el.innerHTML = `<span class="of-room of-room-overview" data-office-person="${esc(room.member.key)}" data-status="${esc(online ? (presenceMeta(presence.status).id) : 'offline')}" style="--c:${esc(room.fg || '#888')};--st:${esc(online ? presenceMeta(presence.status).color : (room.fg || '#888'))}"><b>${esc(room.member.name)}</b></span>`;
+      room.tag.el.classList.toggle('off', !online);
+    }
   }
   function paintAll() {
     if (!office.people) return;

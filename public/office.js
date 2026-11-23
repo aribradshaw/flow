@@ -33,6 +33,7 @@ import {createNpcs} from './office-npc.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
 import {attachOfficeStatus,status as presenceStatus} from './office-status.js';
+import {createRoomPlaque} from './office-plaques.js';
 import {attachOfficeReplay} from './office-replay.js';
 import {createWorld,WORLDS,worldId,wallsFrom} from './office-world.js';
 import {batch} from './office-batch.js';
@@ -696,12 +697,12 @@ function buildRooms(){
     for(const x of [-DOOR_W/2,DOOR_W/2]){trim.box(x,ROOM_D/2,0.16,0.26,0,1.5,'#ffffff');boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
     for(const [b,m] of [[shell,wallMat],[trim,accent]]){const mesh=b.mesh(m);mesh.userData={wall:b===shell,own:true,dispose:()=>mesh.geometry.dispose()};g.add(mesh)}
     S.world.add(g);
-    // The name plate hangs on the front wall beside the door: below the top of the wall on screen, so it
-    // never covers the room's board, which is higher and further back. It also says who is away and
-    // whether agents are running, so nothing floats inside the room.
-    const sign=new THREE.Object3D();sign.position.set(DOOR_W/2+side/2,0,ROOM_D/2+WALL_T/2+0.02);g.add(sign);
-    // Shown from across the floor, not from the far end of a long one (the overview shows them all).
-    const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true,show:()=>!!S.rig?.overview||Math.hypot(c.x-S.pos.x,c.z-S.pos.z)<46});
+    // A wall plaque on the front wall beside the door (not a floating bubble): name, presence and
+    // agent note. Overview still gets a small name-only label so rooms stay readable from above.
+    const plaqueX=DOOR_W/2+side/2,plaqueZ=ROOM_D/2+WALL_T/2+0.028;
+    const plaque=createRoomPlaque(g,{x:plaqueX,z:plaqueZ});
+    const overview=new THREE.Object3D();overview.position.set(plaqueX,0,plaqueZ);g.add(overview);
+    const tag=label(overview,`<span class="of-room of-room-overview" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b></span>`,{y:WALL_H+0.08,cls:'room overview',top:true,show:()=>!!S.rig?.overview});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     const entrance=new THREE.Vector3(0,0,ROOM_D/2).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     if(m.me){
@@ -713,7 +714,7 @@ function buildRooms(){
       const at=toWorld(slot,mx,mz);
       S.interact?.register({id:'mirror',position:()=>({x:at.x,y:0,z:at.z}),radius:2.1,height:2.15,priority:2,label:'Edit your look',onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
     }
-    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,backMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
+    S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,backMat,bg,fg,tag,plaque,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
@@ -771,12 +772,12 @@ function roomLook(key){
   r.floorMat.color.set(theme?.floor||r.bg);r.wallMat?.color.set(theme?.wall||'#f9fbfa');
   if(!on){r.floorMat.color.lerp(new THREE.Color('#d5d9d7'),.6);r.wallMat?.color.lerp(new THREE.Color('#d5d9d7'),.45)}
   if(r.backMat&&r.wallMat)r.backMat.color.copy(r.wallMat.color);
-  r.tag.el.classList.toggle('off',!on);
+  r.tag?.el.classList.toggle('off',!on);
   const seen=ago(r.member.lastSeen);r.seen=seen;
   if(S.presence)S.presence.paintRoom(r,on);
   else{
-    const parts=[on?'':`offline${seen?` · last seen ${seen}`:''}`,r.note].filter(Boolean);
-    r.tag.el.querySelector('small').textContent=parts.length?' · '+parts.join(' · '):'';
+    r.plaque?.paint({name:r.member.name,me:r.member.me,fg:r.fg,online:on,seen,extra:r.note||''});
+    if(r.tag?.el){const b=r.tag.el.querySelector('b');if(b)b.textContent=r.member.name}
   }
 }
 function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}

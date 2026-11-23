@@ -4,6 +4,8 @@ User-facing release notes will be recorded here when release tags are published.
 
 ## Unreleased
 
+- The 3D office hangs a wall plaque beside each room door (and the meeting room) for the name, presence and agent note, instead of a floating bubble; the top-down overview still shows a small name chip.
+
 - DevOps › Recently deleted (↺ in the board toolbar) lists every card removed in the last 180 days, whether by Delete, undo, a restored snapshot, an agent or the API, and restores it with its number (or the next one if taken). Agents and scripts use `cards.deleted` and `cards.restore` (API, MCP, CLI).
 
 - Settings › Sharing shows mind map / project / DevOps counts per share, warns when a mind map share includes no board cards, and offers one-click Widen to whole environment so people get the full board (not only a subtree).
