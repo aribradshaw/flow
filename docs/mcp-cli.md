@@ -133,6 +133,9 @@ flow refresh                       # refetch the API description
   with the arguments passed through unchanged. Built-in
   commands (`login`, `logout`, `env`, `refresh`, `mcp`, `help`, `inbox`, `workspace`) take
   precedence over generated ones.
+- `flow office bridge` reports the coding agents running on this machine (T3 Code, Claude Code) to the
+  3D office and carries out Allow / Deny answers given there; `--once --dry-run` prints what it would send.
+  See the 3D office concept in `/docs/index.html#3d-office`.
 - `flow mcp` is a stdio MCP server (newline-delimited JSON-RPC on stdin/stdout, logs on stderr). It
   offers the same tools, built from the cached OpenAPI document, and forwards each call to REST. With a
   default environment set, `env` becomes optional in its tools.
