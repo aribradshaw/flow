@@ -13,6 +13,7 @@ import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
 import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
+import {createInteractions} from './office-interact.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
@@ -38,7 +39,7 @@ export function openOffice(opts){
       ${opts.offices.length>1?`<select class="of-switch" aria-label="Office">${opts.offices.map(o=>`<option value="${esc(o.id)}"${o.id===opts.env?' selected':''}>${esc(o.name)}</option>`).join('')}</select>`:`<span class="of-env">${esc(opts.offices[0]?.name||'')}</span>`}
       <span class="of-status" role="status" aria-live="polite">Connecting…</span><span class="sp"></span>
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
-      <span class="of-keys">WASD · Shift sprint · Space jump · middle/right drag</span>
+      <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
       ${hudHtml(icon)}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
@@ -58,12 +59,13 @@ export function openOffice(opts){
       <dl><dt>Walk</dt><dd>WASD, arrows, or click/tap a destination</dd>
         <dt>Sprint</dt><dd>Hold Shift or double-tap a direction</dd>
         <dt>Jump</dt><dd>Space. Hold for height, press again to flip.</dd>
-        <dt>Orbit</dt><dd>Middle/right drag, Alt+drag, Q / E, or one-finger drag</dd>
+        <dt>Interact</dt><dd>E (gamepad X / Square, or tap the prompt) near an agent, a person or a board; E or Esc closes it</dd>
+        <dt>Orbit</dt><dd>Middle/right drag, Alt+drag, Z / C, or one-finger drag</dd>
         <dt>Zoom</dt><dd>Scroll, + / − buttons, or pinch</dd>
         <dt>Pan</dt><dd>Two-finger drag</dd>
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
-        <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B/X to sprint</dd>
+        <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
@@ -90,7 +92,7 @@ export function closeOffice(){
   if(!S)return;const s=S;S=null;
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
-  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();
+  s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
@@ -259,6 +261,8 @@ function initScene(){
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
   const office=S;
+  // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
+  S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN});
   const openCard=id=>{if(store.db.devops.cards.some(c=>c.id===id)){closeOffice();office.opts.openCard?.(id)}};
   S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
@@ -377,6 +381,10 @@ function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}=
   mascot.add(shadow(0.45));
   mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
   d.userData.mascot=mascot;
+  // E: the same panel as clicking it (the entry drops out when the desk leaves the scene).
+  const id=a.id;S.interact?.register({id:`agent:${key}:${id}`,object3D:mascot,radius:2.6,height:2.5*scale,priority:a.mine&&a.status==='waiting'?2:a.mine?1:0,
+    label:()=>{const x=agentOf(key,id)||a,n=x.private?'this agent':x.title||'this agent';return x.mine&&x.pending?.can?.length?`Answer ${n}`:x.mine?`Check on ${n}`:`Look at ${n}`},
+    onInteract:()=>{showAgent(key,id);return closePanel}});
   updateDesk(d,a,key,x,z,name,tagY,lounge);
   return d;
 }
@@ -435,10 +443,12 @@ function buildAgentflow(){
   }
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
   for(const it of items){const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);const a=afOf(it.id);
+    S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>{showAf(it.id);return closePanel}});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
   S.afPeople=people.map(({a,p,offline,dim})=>{
     const f=makeHuman(lookFor(a.member||a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.userData={kind:'af',id:a.id,rig:f.userData.rig};f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
     g.add(f);S.clickables.push(f);
+    S.interact?.register({id:'af:'+a.id,object3D:f,radius:2.2,height:2.4,label:()=>`Talk to ${a.name}`,onInteract:()=>{showAf(a.id);return closePanel}});
     label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
     return f;
   });
@@ -479,6 +489,9 @@ function upsertPerson(p,self=false){
     const [bg,fg]=memberColor(p.key),badge=p.image&&/^(https:|data:image\/)/.test(p.image)?`<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`:'';
     const tag=label(obj,`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}${badge}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person'});
     a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
+    if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
+      onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
+        openMenu(p.key,{clientX:r.left+(q.x+1)/2*r.width,clientY:r.top+(1-q.y)/2*r.height});return closeMenu}});
   }
   if(!self&&Number.isFinite(p.x)){
     const at=performance.now(),samples=a.samples,last=samples.at(-1);
@@ -583,6 +596,7 @@ function openMenu(key,e){
   S.menu.style.left=Math.min(e.clientX-r.left,r.width-180)+'px';S.menu.style.top=Math.min(e.clientY-r.top,r.height-150)+'px';
   S.menu.querySelector('button').focus({preventScroll:true});
 }
+const closePanel=()=>{if(S){S.panel.hidden=true;S.panelFor=null}};
 function closeMenu(){if(S&&!S.menu.hidden){S.menu.hidden=true;return true}return false}
 function onClick(e){
   const em=e.target.closest('[data-emote]');if(em){emote(em.dataset.emote);return}
@@ -656,6 +670,7 @@ function onKey(e){
   if(S.bridge?.dialog.open){e.stopPropagation();return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
+    if(S.interact?.closeOpen())return;
     if(S.pointer?.cancelGrab())return;
     if(closeMenu())return;
     if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
@@ -675,10 +690,11 @@ function onKey(e){
   }
   if(e.code==='Space'&&e.target.closest?.('button,a'))return;
   if(S.input.keyDown(e.code,performance.now(),e.repeat,S.controller.jump)){e.preventDefault();return}
-  if(['q','e','f','o','?'].includes(k)){
+  if(k==='e'){e.preventDefault();if(!e.repeat)S.interact?.trigger();return}
+  if(['z','c','f','o','?'].includes(k)){
     e.preventDefault();
     if(e.repeat)return;
-    if(k==='q'||k==='e')S.rig?.rotate((k==='q'?1:-1)*Math.PI/6);
+    if(k==='z'||k==='c')S.rig?.rotate((k==='z'?1:-1)*Math.PI/6);
     if(k==='f')recenterCamera();
     if(k==='o')toggleOverview();
     if(k==='?')toggleControls();
@@ -714,7 +730,7 @@ function frame(dt,t){
   const editing=S.bridge?.dialog.open||S.pointer.grabbing||isTyping(document.activeElement);
   const pads=editing?[]:navigator.getGamepads?.()||[];
   const gamepad=Array.prototype.find.call(pads,pad=>pad?.connected&&pad.mapping==='standard');
-  const input=S.input.sample(gamepad,controller.jump);
+  const input=S.input.sample(gamepad,controller.jump);S.interact?.gamepad(gamepad);
   const {right,forward,orbitX,orbitY}=input,steering=!!(right||forward);
   if(orbitX||orbitY)S.rig.rotate(-orbitX*2.6*dt,orbitY*1.9*dt);
 
@@ -769,6 +785,7 @@ function frame(dt,t){
   S.scene.fog.far=Math.max(110,S.camera.position.y+S.overviewRadius);
   S.boards?.frame(S.labelList);
   S.renderer.render(S.scene,S.camera);
+  S.interact?.update();
   placeLabels();
 }
 function placeLabels(){

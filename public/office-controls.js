@@ -437,7 +437,7 @@ export function createOfficeInput() {
         orbitX, orbitY,
         jumpHeld: keys.has('Space') || press,
         sprint: !!(doubleTap || keys.has('ShiftLeft') || keys.has('ShiftRight') ||
-          gamepad?.buttons[1]?.pressed || gamepad?.buttons[2]?.pressed),
+          gamepad?.buttons[1]?.pressed),  // B / Circle (X / Square is interact: office-interact.js)
       };
     },
   };
