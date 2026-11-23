@@ -46,7 +46,7 @@ export function orgField(items){
     if(!list.length)return;
     const im=new THREE.InstancedMesh(geometry,material,list.length),o=new THREE.Object3D(),c=new THREE.Color(),offs=[];
     list.forEach((it,i)=>{const p=place(it),[x,y,z,sx,sy,sz,ry=0]=p;offs.push(p);o.position.set(it.x+x,y,it.z+z);o.rotation.set(0,ry,0);o.scale.set(sx,sy,sz);o.updateMatrix();im.setMatrixAt(i,o.matrix);
-      if(colorOf){c.set(colorOf(it));if(it.dim)c.lerp(new THREE.Color('#c7ccca'),.65);im.setColorAt(i,c)}});
+      if(colorOf){c.set(colorOf(it));if(it.dim)c.lerp(new THREE.Color('#c7ccca'),.65);else if(it.pale)c.lerp(new THREE.Color('#dfe5e2'),.32);im.setColorAt(i,c)}});
     im.instanceMatrix.needsUpdate=true;if(im.instanceColor)im.instanceColor.needsUpdate=true;
     im.userData.kind='af';ids.set(im,list.map(it=>it.id));group.add(im);meshes.push(im);
     parts.push({im,offs,index:new Map(list.map((it,i)=>[it.id,i]))});

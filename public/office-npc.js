@@ -130,13 +130,14 @@ export function createNpcs(office){
       const key='af:'+r.id;seen.add(key);let n=npcs.get(key);
       if(!n){const entering=settled();n=make(key,'robot',{home:{x:r.x,z:r.z,yaw:r.yaw||0},entering,door:entering?office.entrance():null})}
       else{retarget(n,r.x,r.z);n.home.yaw=r.yaw||0}
+      n.size=r.size||1;
       if(n.anchor!==r.anchor){n.bubble=null;n.emote=null;n.emoteState=''} // the old anchor took its labels along
       n.anchor=r.anchor;n.status=r.busy?'running':'idle';n.still=!!r.still;n.wander=true;n.area='common';n.boardKey=null;n.removed=false;n.ghost=false;n.input.gone=false;
     }
     for(const h of humans){
       const key='af:'+h.id;seen.add(key);let n=npcs.get(key);
-      if(!n){const entering=settled()&&!h.fromAvatar;const from=h.from||office.entrance();n=make(key,'human',{home:{x:h.x,z:h.z,yaw:0},entering:entering||!!h.from,door:from})}
-      else{if(n.obj&&n.obj!==h.obj)drop(n);retarget(n,h.x,h.z)}
+      if(!n){const entering=settled()&&!h.fromAvatar;const from=h.from||office.entrance();n=make(key,'human',{home:{x:h.x,z:h.z,yaw:h.yaw||0},entering:entering||!!h.from,door:from})}
+      else{if(n.obj&&n.obj!==h.obj)drop(n);retarget(n,h.x,h.z);n.home.yaw=h.yaw||0}
       n.obj=h.obj;n.member=h.member||'';n.status='idle';n.still=!!h.still;n.wander=true;n.area='common';n.boardKey=null;n.removed=false;n.ghost=false;n.vanish=0;n.floorY=0;n.input.gone=false;
       n.bubble=null;n.emote=null;n.emoteState='';
       write(n,clock);
@@ -389,7 +390,9 @@ export function createNpcs(office){
     n.trail+=((go>0.15?1:0)-n.trail)*0.08;
     if(n.type==='robot'){
       const bob=Math.abs(Math.sin(n.phase))*0.07*go+(it.pose==='cheer'?Math.abs(Math.sin(t*9))*0.25:0)+hopY(n,t);
-      const s=n.alpha<1?n.alpha:1;
+      // Its size eases to its seat's: smaller while nobody works with it.
+      n.sized=(n.sized??(n.size||1))+((n.size||1)-(n.sized??(n.size||1)))*Math.min(1,(n.dt||0)*2);
+      const s=(n.alpha<1?n.alpha:1)*n.sized;
       n.field?.move?.(n.key.slice(3),n.x,y0+bob,n.z,n.yaw,s);
       if(n.anchor)n.anchor.position.set(n.x,y0,n.z);
       tile(n,t,y0+1.55);

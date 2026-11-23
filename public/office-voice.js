@@ -20,6 +20,7 @@
 // share), and on a collision the polite side (isPolite) yields.
 import * as THREE from './vendor/three/three.module.min.js';
 import {officeBox} from './office-controls.js';
+import {cutaway} from './office-cutaway.js';
 import {meetingAnchors,roomAt,roomReduce,announce,ROOM_OUT,wantedPeers,proximityMix,roomCount,toWorld,isPolite} from './office-voice-core.js';
 
 const PREF='flow.office.voice',HIDDEN_MS=120e3,RECONCILE_MS=900,SPEAKING=0.035;
@@ -247,8 +248,8 @@ export function createVoice(o){
   }
 
   // ---------- the meeting room ----------
-  const glass=new THREE.MeshLambertMaterial({color:'#bfe3ee',transparent:true,opacity:.28,depthWrite:false,side:THREE.DoubleSide});
-  const frameMat=new THREE.MeshLambertMaterial({color:'#7d8d92',flatShading:true});
+  const glass=cutaway(new THREE.MeshLambertMaterial({color:'#bfe3ee',transparent:true,opacity:.28,depthWrite:false,side:THREE.DoubleSide}));
+  const frameMat=cutaway(new THREE.MeshLambertMaterial({color:'#7d8d92',flatShading:true}));
   const floorMat=new THREE.MeshLambertMaterial({color:'#dfeaf0',flatShading:true});
   const tableMat=new THREE.MeshLambertMaterial({color:'#ece7df',flatShading:true});
   const screenOff=new THREE.MeshBasicMaterial({color:'#1d2421'});
@@ -391,6 +392,8 @@ export function createVoice(o){
   // "Go to the meeting room": out of your room's door, round the common area, in through its door.
   function goToRoom(){
     const a=V.anchors[0],m=o.me();if(!a||!o.walkTo)return;
+    // Along real paths when the office can plan them (office-travel-core.js): any world, never through a wall.
+    if(o.goTo){const p=toWorld(a,0,a.d/2-1.9);V.route=null;o.goTo(p.x,p.z);paint();return}
     const {commonR=10}=(()=>{try{return o.layout()}catch{return {}}})(),ring=commonR+2;
     const door=toWorld(a,0,a.d/2+1.6),inside=toWorld(a,0,a.d/2-1.6),ang=Math.atan2(door.z,door.x),r=Math.hypot(m.x,m.z);
     let route=[];

@@ -28,6 +28,12 @@
 //   common(radius)                   the common area grew or shrank with the AgentFlow org
 //   update(t, dt, {camera, motion})  each frame: water, sky, the deck's sway (motion: false stops it)
 //   dispose()
+// A world may also answer (the yacht does):
+//   org(list) may add tables and walls   the org at team tables: {pos, tables, walls, radius, sig} (office-tables-core.js)
+//   cutaway, masses                  a radius: what hides you is cut away in a circle that wide (office-cutaway.js),
+//                                    and the camera only keeps out of the solid masses
+//   bounds                           the plan's edges, for the minimap and paths (office-travel.js)
+// and its plan: names {room, owner} (its words for a room and for the owner's room) and view {zoom, pitch}.
 //
 // The layout math is in office-layout.js and office-world-core.js (no Three.js, tested by node);
 // office-world-classic.js and office-world-yacht.js draw it.

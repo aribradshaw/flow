@@ -11,7 +11,9 @@ export function officeBox(x, z, yaw, width, depth, height) {
 
 // Intersect the camera segment with each oriented wall via the slab test. Inflate walls
 // to leave room for the near plane, including when the orbit grazes a wall corner.
-export function cameraClearance(from, to, walls, padding = 0.18) {
+// through: the boom may pass through a box (what hides you is cut away, office-cutaway.js);
+// only a boom that ends inside one is cut short, where it went in.
+export function cameraClearance(from, to, walls, padding = 0.18, through = false) {
   let fraction = 1;
   const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
   for (const {x, z, c, s, halfX, halfZ, height} of walls) {
@@ -19,7 +21,7 @@ export function cameraClearance(from, to, walls, padding = 0.18) {
     const origins = [ox * c - oz * s, from.y - height / 2, ox * s + oz * c];
     const deltas = [dx * c - dz * s, dy, dx * s + dz * c];
     const extents = [halfX + padding, height / 2 + padding, halfZ + padding];
-    let enter = 0, exit = fraction;
+    let enter = 0, exit = through ? 1 : fraction;
     for (let i = 0; i < 3 && enter <= exit; i++) {
       const o = origins[i], d = deltas[i], e = extents[i];
       if (Math.abs(d) < 1e-8) {
@@ -30,7 +32,7 @@ export function cameraClearance(from, to, walls, padding = 0.18) {
         exit = Math.min(exit, Math.max(a, b));
       }
     }
-    if (enter <= exit) fraction = enter;
+    if (enter <= exit && (!through || exit >= 1)) fraction = Math.min(fraction, enter);
   }
   return fraction;
 }
@@ -38,7 +40,7 @@ export function cameraClearance(from, to, walls, padding = 0.18) {
 export function createOfficeCamera(camera) {
   let yaw = 0, wantedYaw = 0, pitch = 0.4, wantedPitch = pitch;
   let zoom = 6.4, overviewZoom = 1, distance = zoom, clearance = 1;
-  let idle = 0, overview = false, auto = true;
+  let idle = 0, overview = false, auto = true, back = null;
   let panX = 0, panZ = 0, centerX = 0, centerZ = 0, leadX = 0, leadZ = 0;
   const pivot = {x: 0, y: 1.1, z: 0}, origin = {...pivot}, end = {...pivot};
 
@@ -78,11 +80,14 @@ export function createOfficeCamera(camera) {
       panZ = clamp(panZ + unitsPerPixel * (dx * s - dy * c), -90, 90);
       idle = 0;
     },
-    toggleOverview() {
+    // lie: the yaw that lays a long world across the screen, kept while the overview is on.
+    toggleOverview(lie) {
       overview = !overview;
       overviewZoom = 1;
       panX = panZ = 0;
       idle = 0;
+      if (overview && Number.isFinite(lie)) { back = wantedYaw; wantedYaw = lie; }
+      else if (!overview && back !== null) { wantedYaw = back; back = null; }
       return overview;
     },
     setAuto(value) { auto = value; },
@@ -91,7 +96,7 @@ export function createOfficeCamera(camera) {
       if (Number.isFinite(p)) wantedPitch = clampPitch(p);
       if (Number.isFinite(z)) zoom = clamp(z, 2.9, 22);
     },
-    update(dt, position, heading, vx, vz, walls, radius, {held = false, align = true} = {}) {
+    update(dt, position, heading, vx, vz, walls, radius, {held = false, align = true, through = false} = {}) {
       idle = held ? 0 : idle + dt;
       if (!overview && auto && align && idle > 1.25 && Math.hypot(vx, vz) > 0.4) {
         wantedYaw += angleDelta(wantedYaw, heading + Math.PI) * (1 - Math.exp(-2.4 * dt));
@@ -125,7 +130,7 @@ export function createOfficeCamera(camera) {
       end.x = origin.x + s * horizontal;
       end.y = origin.y + Math.sin(pitch) * distance;
       end.z = origin.z + c * horizontal;
-      const safe = cameraClearance(origin, end, walls);
+      const safe = cameraClearance(origin, end, walls, 0.18, through);
       clearance = Math.min(safe, damp(clearance, safe, 5, dt));
       camera.position.set(
         origin.x + (end.x - origin.x) * clearance,

@@ -41,6 +41,8 @@
 // meterAnchors() is the same shape: a small screen inside each room's door wall (opposite the name sign,
 // clear of the door) and one on the common-area face of the main board's wall. nx, nz is the way the
 // screen faces. The room screen's turn matches meterAnchors() in office-meters-core.js.
+// The yacht (office-world-core.js yachtWorld) answers the same three: boards on each suite's back wall and on
+// the lounge's forward wall, and the glass meeting room at the lounge's aft end.
 export const ROOM_W=12,ROOM_D=9,WALL_T=0.2,WALL_H=1.1,BACK_WALL_H=3.9,DOOR_W=3;
 export const MAIN_WALL_H=5.2,MAIN_WALL_T=0.4;
 export const ROOM_BOARD={width:9.2,height:2.6,y:2.42};

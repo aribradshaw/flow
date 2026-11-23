@@ -39,6 +39,11 @@ import {batch} from './office-batch.js';
 import {createVoice} from './office-voice.js';
 import {createDecor} from './office-decor.js';
 import {createChief} from './office-chief.js';
+import {cutaway,aimCutaway} from './office-cutaway.js';
+import {createTravel} from './office-travel.js';
+import {planRoute} from './office-travel-core.js';
+import {buildNav} from './office-nav.js';
+import {meetingAnchors} from './office-voice-core.js';
 
 const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
@@ -61,9 +66,11 @@ export function openOffice(opts){
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <button type="button" class="txt" data-of-replay disabled>Replay</button>
       <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
-      <span class="of-keys">WASD · E interact · B board · Shift sprint · Space jump · middle/right drag</span>
+      <span class="of-keys">WASD · E interact · B board · G go to</span>
       <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
+      <button type="button" class="ib" data-of="goto" aria-label="Go to a place, a person or an agent" aria-expanded="false" data-tip="Go to… (G)">${icon('compass')}</button>
+      <button type="button" class="ib" data-of="map" aria-label="Minimap" aria-pressed="true" data-tip="Minimap (N)">${icon('map')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
       <button type="button" class="ib of-close" data-of="close" aria-label="Close the 3D office" data-tip="Close (Esc)">${icon('x')}</button></div>
@@ -90,6 +97,8 @@ export function openOffice(opts){
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>DevOps board</dt><dd>B opens the full board from anywhere; Esc goes back</dd>
+        <dt>Go to</dt><dd>G or the compass button: pick a place, a person or an agent, or type to find one. You run there; a long way fades.</dd>
+        <dt>Minimap</dt><dd>N or the map button. Waiting agents are orange. Click the map to walk there.</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
         <dt>DevOps board</dt><dd>The main board is your DevOps board. Press E at it, or click it, to work on it as in the DevOps tab; Esc returns.</dd>
         <dt>Room boards</dt><dd>Walk up to a room's whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
@@ -143,7 +152,7 @@ export function closeOffice(){
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   // Each part closes on its own (voice first: every call ends, the mic and a shared screen are released), so one
   // that fails cannot leave the office on screen.
-  for(const close of [()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.chief?.dispose(),()=>s.npc?.dispose()])
+  for(const close of [()=>s.travel?.dispose(),()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.chief?.dispose(),()=>s.npc?.dispose()])
     try{close()}catch(e){console.error('office close',e)}
   clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();const all=[];s.scene?.traverse(o=>all.push(o));for(const o of all)o.userData.dispose?.();disposeFigures();disposeMascots();s.renderer?.dispose();for(const o of all){o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()}}catch{}
@@ -488,7 +497,7 @@ function initScene(){
   Object.assign(M,{
     box:new THREE.BoxGeometry(1,1,1),ico:new THREE.IcosahedronGeometry(1,0),ico1:new THREE.IcosahedronGeometry(1,1),oct:new THREE.OctahedronGeometry(1,0),
     cyl:new THREE.CylinderGeometry(1,1,1,7),cone:new THREE.ConeGeometry(1,1,6),torus:new THREE.TorusGeometry(0.62,0.12,5,14),disc:new THREE.CircleGeometry(1,16),
-    wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:mat('#3d4c56'),glass:new THREE.MeshBasicMaterial({color:'#d3ebf3'}),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
+    wall:cutaway(mat('#f9fbfa')),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:cutaway(mat('#3d4c56')),glass:new THREE.MeshBasicMaterial({color:'#d3ebf3'}),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
   });
   S.world=new THREE.Group();scene.add(S.world);
   Object.assign(S,{renderer,scene,camera,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
@@ -531,7 +540,7 @@ function initScene(){
     facing:()=>office.rig?office.rig.yaw+Math.PI:office.controller.state.heading,people:()=>office.people,meKey:()=>office.meKey,nameOf,
     quiet:()=>presenceStatus.isQuiet(office.meKey), // Do not disturb: no proximity calls
     layout:()=>({world:office.worldLayout,rooms:[...office.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:office.commonR||10,roomW:ROOM_W,roomD:ROOM_D}),
-    walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,
+    walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,goTo:(x,z)=>goTo(x,z,{fast:true}),
     toast:(m,bad)=>office.opts.toast?.(m,bad)});
   // Your Chief of Staff (office-chief.js): your conductor as a companion that walks with you and takes /cos.
   S.chief=createChief({root:S.root,meKey:()=>office.meKey,members:()=>office.members,live:()=>office.live,af:afAgents,deskKey,npc:S.npc,
@@ -541,6 +550,10 @@ function initScene(){
     cards:()=>office.env===office.opts.current?store.db?.devops?.cards||[]:[],refs:()=>{const m=office.members.find(x=>x.me);return m?officeMemberRefs(store.db,m):[]},
     myName:()=>office.opts.me?.name||office.me?.name||'',afName:id=>afOf(id)?.name||'',lines:()=>office.lines,
     showAgent:(member,id)=>showAgent(member,id),repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
+  // "Go to…" and the minimap (office-travel.js): the same in every world.
+  S.travel=createTravel({root:S.root,stage:S.stage,places:travelPlaces,plan:travelPlan,dots:travelDots,
+    me:()=>({x:office.pos.x,z:office.pos.z,heading:office.controller.state.heading}),route:()=>office.route&&office.route.target===office.target?office.route.pts.slice(office.route.i):null,
+    go:p=>goTo(p.x,p.z,{stop:p.stop,fast:true}),goPoint:(x,z)=>goTo(x,z,{fast:true})});
   S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
@@ -558,12 +571,19 @@ function initScene(){
     api:(path,body)=>api(path,body),toast:(m,bad)=>S?.opts.toast?.(m,bad),camera:()=>office.camera,canvas:()=>office.renderer?.domElement,
     refresh:()=>updateColliders(),repaint:key=>roomLook(key),
   });
-  if(navigator.webdriver&&globalThis.__flowOffice)Object.assign(globalThis.__flowOffice,{project:(x,z)=>S.decor.project(x,z),decor:()=>S.decor.debug()});
+  if(navigator.webdriver&&globalThis.__flowOffice)Object.assign(globalThis.__flowOffice,{project:(x,z)=>S.decor.project(x,z),decor:()=>S.decor.debug(),places:travelPlaces,goTo});
   const loop=()=>{if(!S)return;S.raf=requestAnimationFrame(loop);const delta=S.clock.getDelta();frame(Math.min(.05,delta),S.clock.elapsedTime,delta)};loop();
+}
+// A world much longer than it is wide (the yacht) lies across a wide screen in the overview, bow to the left
+// like the minimap, and is framed by its own length and beam.
+const lying=()=>{const b=S.place?.bounds;return !!b&&S.camera.aspect>1.1&&(b.maxZ-b.minZ)>(b.maxX-b.minX)*1.6};
+function overviewRadius(){
+  if(!lying())return S.overviewRadius;
+  const b=S.place.bounds;return Math.max((b.maxX-b.minX)/2+4,((b.maxZ-b.minZ)/2+2)/S.camera.aspect)/1.12;
 }
 function toggleOverview(){
   if(!S.rig)return;
-  const on=S.rig.toggleOverview();
+  const on=S.rig.toggleOverview(lying()?-Math.PI/2:undefined);
   S.root.querySelector('[data-of="overview"]').setAttribute('aria-pressed',String(on));
   S.root.classList.toggle('of-overview',on);
 }
@@ -610,9 +630,10 @@ function arrive(){
   if(S.worldLayout?.view)S.rig?.frame(S.worldLayout.view);
 }
 // Walls as the camera needs them: measured up from the deck I stand on.
+// Where what hides you is cut away (office-cutaway.js), the camera only keeps out of the world's solid masses.
 function cameraWalls(){
-  const c=S.camWalls;
-  if(!c||c.src!==S.walls||c.n!==S.walls.length||Math.abs(c.floor-S.floor)>0.04)S.camWalls=Object.assign(wallsFrom(S.walls,S.floor),{src:S.walls,n:S.walls.length,floor:S.floor});
+  const c=S.camWalls,src=S.place.cutaway?S.place.masses||[]:S.walls;
+  if(!c||c.src!==src||c.n!==src.length||Math.abs(c.floor-S.floor)>0.04)S.camWalls=Object.assign(wallsFrom(src,S.floor),{src,n:src.length,floor:S.floor});
   return S.camWalls;
 }
 
@@ -643,16 +664,16 @@ function buildRooms(){
     const floorMat=mat(bg),floor=part(M.box,floorMat,[0,0.03,0],[ROOM_W,0.06,ROOM_D]);floor.userData.own=true;g.add(floor);
     // One material per room so a theme can recolour these walls without painting every room, and one mesh
     // for all of them (office-batch.js): a room is a few draw calls, however many walls it has.
-    const wallMat=M.wall.clone(),shell=batch(),trim=batch();
+    const wallMat=cutaway(M.wall.clone()),shell=batch(),trim=batch();
     const wall=(x,z,w,d,h=WALL_H)=>{shell.box(x,z,w,d,0,h,'#ffffff');boxAt(slot,x,z,w,d,h)};
     // The back wall. Where the world's own wall is behind the room (roomWalls.back false), a lining on it in
     // the room's colours, with a material of its own so the world can fade it with that wall.
     let backMat=null;
-    if(roomWalls?.back===false){backMat=wallMat.clone();const lining=part(M.box,backMat,[0,BACK_WALL_H/2,-ROOM_D/2+0.05],[ROOM_W-WALL_T,BACK_WALL_H,0.1]);lining.userData.wall=true;lining.userData.own=true;g.add(lining)}
+    if(roomWalls?.back===false){backMat=cutaway(wallMat.clone());const lining=part(M.box,backMat,[0,BACK_WALL_H/2,-ROOM_D/2+0.05],[ROOM_W-WALL_T,BACK_WALL_H,0.1]);lining.userData.wall=true;lining.userData.own=true;g.add(lining)}
     else wall(0,-ROOM_D/2,ROOM_W,WALL_T,BACK_WALL_H);
     wall(-ROOM_W/2,0,WALL_T,ROOM_D);wall(ROOM_W/2,0,WALL_T,ROOM_D);
     const side=(ROOM_W-DOOR_W)/2;wall(-(DOOR_W/2+side/2),ROOM_D/2,side,WALL_T);wall(DOOR_W/2+side/2,ROOM_D/2,side,WALL_T);
-    const accent=mat(fg);
+    const accent=cutaway(mat(fg));
     if(!backMat)trim.box(0,-ROOM_D/2,ROOM_W,WALL_T+0.04,BACK_WALL_H,BACK_WALL_H+0.06,'#ffffff');
     // Door posts in the member's colour mark the way in.
     for(const x of [-DOOR_W/2,DOOR_W/2]){trim.box(x,ROOM_D/2,0.16,0.26,0,1.5,'#ffffff');boxAt(slot,x,ROOM_D/2,0.16,0.26,1.5)}
@@ -719,7 +740,7 @@ function buildMainWall(){
   g.add(part(M.box,M.plinth,[0,0.09,0],[w.width+0.3,0.18,w.depth+0.3]));
   g.add(part(M.box,M.trim,[0,w.height+0.04,0],[w.width+0.1,0.08,w.depth+0.1]));
   S.walls.push(officeBox(w.x,w.z,w.facing,w.width+0.3,w.depth+0.3,w.height+y));
-  for(const x of [-w.width/2-0.75,w.width/2+0.75]){
+  if(w.planters!==false)for(const x of [-w.width/2-0.75,w.width/2+0.75]){
     g.add(part(M.cyl,M.pot,[x,0.3,0.4],[0.4,0.6,0.4]),part(M.cone,M.leaf,[x,1.15,0.4],[0.62,1.25,0.62]),part(M.cone,M.leaf,[x,1.75,0.4],[0.45,0.95,0.45]));
     const p=toWorld(w,x,0.4);S.walls.push(officeBox(p.x,p.z,w.facing,0.85,0.85,0.6+y));
   }
@@ -744,7 +765,7 @@ function roomLook(key){
 function presenceChanged(key){if(key)roomLook(key);else for(const k of S.rooms.keys())roomLook(k);buildAgentflow()}
 // A member's live agents at desks: up to 4 per row, rows towards the back wall.
 function updateColliders(){
-  S.decor?.stamp();
+  S.decor?.stamp();S.pnav=null;S.travel?.invalidate();
   S.colliders=[...S.walls,...[...S.rooms.values()].flatMap(room=>room.boxes),...(S.presence?.doorBoxes()||[])];
   S.npc?.invalidate(); // NPCs re-plan their walks around what is there now
 }
@@ -761,6 +782,78 @@ function roomSpots(key){
   const r=S.rooms.get(key);if(!r)return undefined;
   if(!r.npc){const f={x:r.center.x,z:r.center.z,facing:r.facing},l=S.activity?.loungeSpot()||{x:-ROOM_W/2+1.9,z:ROOM_D/2-1.6};r.npc={door:toWorld(f,0,ROOM_D/2+1.3),lounge:toWorld(f,l.x,l.z)}}
   return r.npc;
+}
+// ---------- getting about (office-travel.js): "Go to…", the minimap, and walking along real paths ----------
+// The floor as I walk it: everything that stops me (a closed door too), a little wider than my body.
+function playerNav(){
+  if(!S.pnav){const w=navWorld();try{S.pnav=buildNav({bounds:w.bounds,boxes:S.colliders,ground:w.ground,radius:0.36})}catch(e){console.error('office nav',e);return null}}
+  return S.pnav;
+}
+// Walk to (x, z) along a path, stopping `stop` short of it. fast: run; a long way fades to a few metres from it.
+function goTo(x,z,{stop=0,fast=false,jump=fast,tries=0}={}){
+  if(!S?.placed||!Number.isFinite(x)||!Number.isFinite(z))return null;
+  const from=S.controller.state,plan=planRoute(playerNav(),from,{x,z,stop},jump?{}:{far:Infinity});
+  const end=new THREE.Vector3(plan.points.at(-2),0,plan.points.at(-1));
+  S.follow=null;S.target=end;S.route={pts:plan.points,i:2,fast,target:end,at:performance.now(),sx:from.x,sz:from.z,tries,goal:{x,z,stop}};
+  if(plan.jump)fadeTo(plan.jump);
+  return plan;
+}
+function fadeTo(p){
+  const office=S;S.fading=true;S.root.classList.add('of-fading');
+  setTimeout(()=>{
+    if(S!==office)return;
+    const y=S.place.ground(p.x,p.z)??0;S.pos.set(p.x,y,p.z);S.floor=y;S.controller.reset(S.pos,p.heading);S.rig.reset(S.pos,p.heading);sendPresence(true);
+    if(S.route){S.route.at=performance.now();S.route.sx=p.x;S.route.sz=p.z}
+    S.fading=false;S.root.classList.remove('of-fading');
+  },170);
+}
+// A route that makes no headway (someone shut a door, a desk appeared): plan again, then give up.
+function routeWatch(r,state,now){
+  if(now-r.at<1500)return;
+  const moved=Math.hypot(state.x-r.sx,state.z-r.sz);r.at=now;r.sx=state.x;r.sz=state.z;
+  if(moved>=0.4)return;
+  if(r.tries>=2){S.target=null;S.route=null;return}
+  goTo(r.goal.x,r.goal.z,{stop:r.goal.stop,fast:r.fast,jump:false,tries:r.tries+1});
+}
+const mascotAt=d=>{const m=d?.userData?.mascot||d?.children?.[0]?.userData?.mascot;return m?S.world.worldToLocal(m.getWorldPosition(new THREE.Vector3())):null};
+const meetingRoom=()=>meetingAnchors({world:S.worldLayout,rooms:[...S.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:S.commonR||10,roomW:ROOM_W,roomD:ROOM_D})[0]||null;
+// Everything "Go to…" lists (office-travel-core.js placeList), where it is now.
+function travelPlaces(){
+  // A plan that lists its own places (office-layout.js places()) knows best where to stand at each; the rest is worked out here.
+  const L=S.worldLayout,own=typeof L?.places==='function'?L.places():[],named=id=>own.find(p=>p.id===id);
+  const main=L?.boardAnchors?.().main,meet=meetingRoom(),sessions=[];
+  const rooms=[...S.rooms.values()].map(r=>{const at=r.member.me?own.find(p=>p.kind==='office'&&p.key===r.member.key)||r.door:roomSpots(r.member.key)?.door||r.entrance;return {key:r.member.key,name:r.member.name,x:at.x,z:at.z,me:!!r.member.me,owner:!!r.member.owner}});
+  for(const [member,list] of S.live)for(const a of list||[]){
+    const key=deskKey(member,a),p=mascotAt(S.seatEntries?.get(key)||S.rooms.get(member)?.desks?.userData.entries.get(key));
+    if(p)sessions.push({id:a.id,member,name:a.private?'Private project':a.title||(VENDOR[a.vendor]||VENDOR.other).name,owner:member===S.meKey?'':nameOf(member),mine:member===S.meKey,x:p.x,z:p.z,waiting:a.status==='waiting'});
+  }
+  const here=new Set(S.people.keys());
+  return {places:own.filter(p=>!['board','meeting','office'].includes(p.kind)),names:L?.names||{},rooms,sessions,
+    board:named('board')||(main?{x:main.x+main.nx*2.6,z:main.z+main.nz*2.6}:null),
+    meeting:named('meeting')||(meet?{name:meet.name,...toWorld(meet,0,meet.d/2-1.9)}:null),
+    people:[...S.people.values()].filter(p=>!p.self).map(p=>({key:p.key,name:p.name,x:p.obj.position.x,z:p.obj.position.z})),
+    agents:afAgents().filter(a=>S.afPos?.has(a.id)&&!(a.member&&here.has(a.member))).map(a=>{const p=S.afPos.get(a.id);return {id:a.id,name:a.name,title:a.title||'',x:p.x,z:p.z}})};
+}
+// The minimap's plan: floors and walls from the path grid, then rooms, tables, the board and doors on top.
+function travelPlan(){
+  const w=navWorld(),L=S.worldLayout,main=L?.boardAnchors?.().main,meet=meetingRoom(),shapes=[],labels=[];
+  // A plan that knows its floor as rectangles (office-layout.js plan()): its pods are drawn, its areas named.
+  const zones=typeof L?.plan==='function'?L.plan().zones||[]:[];
+  for(const z of zones)if(z.kind==='pod')shapes.push({kind:'pod',x:z.x,z:z.z,w:z.w,d:z.d,yaw:0,color:z.color});
+  for(const r of S.rooms.values()){shapes.push({kind:'room',x:r.center.x,z:r.center.z,w:ROOM_W,d:ROOM_D,yaw:r.facing,color:r.bg});labels.push({x:r.center.x,z:r.center.z,text:r.member.me?'You':String(r.member.name||'').split(/\s+/)[0].slice(0,10)})}
+  for(const t of S.seating?.tables||[])shapes.push({kind:'table',x:t.x,z:t.z,w:t.width,d:t.depth,yaw:0});
+  if(meet){shapes.push({kind:'meeting',x:meet.x,z:meet.z,w:meet.w,d:meet.d,yaw:meet.facing});labels.push({x:meet.x,z:meet.z,text:'Meeting'})}
+  if(main){shapes.push({kind:'board',x:main.x,z:main.z,w:S.devops?.width()||main.width,d:0.5,yaw:Math.atan2(main.nx,main.nz)});labels.push({x:main.x+main.nx*2.2,z:main.z+main.nz*2.2,text:'Board'})}
+  for(const d of S.doorSpots||[])shapes.push({kind:'door',x:d.x,z:d.z});
+  for(const p of typeof L?.places==='function'?L.places():[])if(!['board','meeting','office','pod'].includes(p.kind))labels.push({x:p.at?.x??p.x,z:p.at?.z??p.z,text:p.short??p.name});
+  for(const z of zones)if(z.kind==='pod'||z.kind==='bay')labels.push({x:z.x,z:z.z,text:z.name});
+  return {bounds:w.bounds,nav:playerNav(),ground:w.ground,shapes,labels};
+}
+function travelDots(){
+  const out=[];
+  for(const p of S.people.values())if(!p.self)out.push({x:p.obj.position.x,z:p.obj.position.z,color:p.colors[1],kind:'person'});
+  for(const [member,list] of S.live)for(const a of list||[])if(a.status==='waiting'){const key=deskKey(member,a),p=mascotAt(S.seatEntries?.get(key)||S.rooms.get(member)?.desks?.userData.entries.get(key));if(p)out.push({x:p.x,z:p.z,kind:'waiting'})}
+  return out;
 }
 function buildDesks(key,refresh=true){
   const room=S.rooms.get(key);if(!room)return;
@@ -851,6 +944,8 @@ function buildAgentflow(){
   if(S.afGroup){clear(S.afGroup);S.org?.dispose();S.org=null}
   const g=new THREE.Group();S.afGroup=g;S.world.add(g);
   const list=afAgents().slice(0,200),lay=S.place.org?.(list,memberOrder().map(m=>m.key))||orgLayout(list),{pos,radius}=lay;S.afList=list;
+  // A world that seats the org at tables (the yacht) says so: lay.tables.
+  const seating=lay.tables?lay:null;S.seating=seating;
   // Seats: which agents have a place here decides which sessions leave their owners' rooms; an AI agent with
   // nobody at its desk is dimmed.
   const was=[...S.afPlaced||[]].join('\n');S.afPlaced=new Set(list.filter(a=>pos.has(a.id)).map(a=>a.id));S.afPos=pos;
@@ -863,21 +958,32 @@ function buildAgentflow(){
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
     if(a.kind==='human'){if(a.member&&(a.member===S.meKey||S.people.has(a.member)))continue;people.push({a,p,offline:!!a.member,dim})}
-    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent';items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||kind==='agent'&&!seats.has(a.id),still:dim})}
+    // At a table, a team is the table itself; everyone sits, and the ones nobody is working with sit smaller.
+    else if(seating&&a.kind==='team')continue;
+    else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent',free=kind==='agent'&&!seats.has(a.id);
+      items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||free&&!seating,pale:free&&!!seating,size:seating&&free?0.8:1,still:dim||!!seating})}
   }
   // Robots that just left the org are still drawn while they walk out (office-npc.js).
   const robots=items.filter(it=>it.kind==='agent');
   if(S.npc)items.push(...S.npc.orgGhosts(new Set(robots.map(it=>it.id))));
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
   const anchors=new Map();
+  // At tables everyone is close together: a name shows for the few nearest, and for what is hovered or open.
+  const reach=seating?3.4:7;
   for(const it of items){if(it.ghost)continue;const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);anchors.set(it.id,o);const a=afOf(it.id);
-    S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
-    label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
+    S.interact?.register({id:'af:'+it.id,object3D:o,radius:seating?1.5:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
+    label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65*it.size,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||!S.rig?.overview&&o.position.distanceTo(S.pos)<reach})}
+  // Each table carries its team's name; a team's own table opens the team.
+  for(const t of seating?.tables||[]){
+    const o=new THREE.Object3D();o.position.set(t.sign.x,0,t.sign.z);g.add(o);const id=t.node||t.head;
+    if(t.node)S.interact?.register({id:'af:'+t.node,object3D:o,radius:1.6,height:1.6,label:()=>`Visit ${t.name}`,onInteract:()=>afOf(t.node)?openPanel({type:'af',id:t.node}):false});
+    label(o,`<button type="button" class="of-tag af of-table"${id?` data-af-id="${esc(id)}"`:''}><b>${esc(t.name)}</b><small>${t.seats}</small></button>`,{y:1.5,cls:'af click table',near:24});
+  }
   S.afPeople=people.map(({a,p,offline,dim})=>{
-    const f=makeHuman(a.member?lookOf(a.member):lookFor(a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);Object.assign(f.userData,{kind:'af',id:a.id,member:a.member||''});f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
+    const f=makeHuman(a.member?lookOf(a.member):lookFor(a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.rotation.y=p.yaw||0;Object.assign(f.userData,{kind:'af',id:a.id,member:a.member||''});f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
     g.add(f);S.clickables.push(f);
     S.interact?.register({id:'af:'+a.id,object3D:f,radius:2.2,height:2.4,label:()=>`Talk to ${a.name}`,onInteract:()=>afOf(a.id)?openPanel({type:'af',id:a.id}):false});
-    label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
+    label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<(seating?4.5:9)});
     return f;
   });
   // The org as NPCs: robots walk about when nobody is at their desk; someone who just left the office walks
@@ -885,9 +991,9 @@ function buildAgentflow(){
   if(S.npc){
     const humans=people.map(({a,p,dim},i)=>{
       const left=a.member&&S.leftAt?.get(a.member),from=left&&Date.now()-left.at<20000?left:null;if(from)S.leftAt.delete(a.member);
-      return {id:a.id,obj:S.afPeople[i],x:p.x,z:p.z,member:a.member||'',still:dim,from};
+      return {id:a.id,obj:S.afPeople[i],x:p.x,z:p.z,yaw:p.yaw||0,member:a.member||'',still:dim||!!seating,from};
     });
-    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,yaw:it.yaw,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
+    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,yaw:it.yaw,size:it.size,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
   }
   buildSeats(seats);
   S.chief?.update();
@@ -904,8 +1010,10 @@ function buildSeats(seats=seatsByAgent(S.live,S.afPlaced)){
       // Its own anchor, turned so the mascot sits between the agent and its desk: the activity's frame (office-activity.js).
       const key=deskKey(member,agent);visible.add(key);
       let at=entries.get(key);
-      if(!at){at=new THREE.Group();at.rotation.y=-Math.PI/2;g.add(at);entries.set(key,at)}
-      at.position.set(p.x+1.12,0,p.z+(i-(Math.min(list.length,3)-1)/2)*0.85);
+      if(!at){at=new THREE.Group();g.add(at);entries.set(key,at)}
+      // Beside the agent; at a table, behind its seat (p.out points away from the table).
+      const out=p.out||{x:1,z:0},d=p.out?1.02:1.12,k=(i-(Math.min(list.length,3)-1)/2)*0.85;
+      at.rotation.y=Math.atan2(-out.x,-out.z);at.position.set(p.x+out.x*d-out.z*k,0,p.z+out.z*d+out.x*k);
       makeDesk(at,agent,member,0,0,seatTag(agent,a.name),{tagY:list.length>1&&i%2?1.15:1.6,phase:i*1.7,scale:0.5,lounge:false},at.children[0]);
     });
   }
@@ -1100,7 +1208,7 @@ function pick(e){
   if(hit.kind==='person'){openMenu(hit.obj.userData.key,e);return}
   if(hit.kind==='portal'){goDoor(hit.obj.userData.portal);return}
   const at=S.world.worldToLocal(hit.point.clone());if(S.place.ground(at.x,at.z)===null)return;
-  S.follow=null;S.target=at;
+  goTo(at.x,at.z);
 }
 // ---------- doors to other offices (office-portals.js; docs/concepts/12-office.md) ----------
 function buildDoors(){
@@ -1155,7 +1263,7 @@ function onClick(e){
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
   ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},closeMeter:()=>S.meters?.close(),
-    look:openLook,
+    look:openLook,goto:()=>S.travel?.toggle(),map:()=>S.travel?.toggleMap(),
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();S.composer.directTo(key)},
@@ -1273,6 +1381,7 @@ function onKey(e){
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.composer?.escape(e.target))return;
+    if(S.travel?.escape())return;
     if(S.decor?.escape())return;
     if(S.interact?.closeOpen())return;
     if(S.voice?.escape())return;
@@ -1314,6 +1423,8 @@ function onKey(e){
   }
   if(k==='b'){e.preventDefault();if(!e.repeat&&!S.replay?.active){if(S.rig?.overview)toggleOverview();S.devops?.focus()}return}
   if(k==='l'){e.preventDefault();if(!e.repeat)openLook();return}
+  if(k==='g'){e.preventDefault();if(!e.repeat)S.travel?.open();return}
+  if(k==='n'){e.preventDefault();if(!e.repeat)S.travel?.toggleMap();return}
   if(/^[1-4]$/.test(e.key)){e.preventDefault();emote(EMOTES[+e.key-1][0]);return}
   if(!S.replay?.active&&(e.key==='Enter'&&e.target===document.body||e.key==='t')){e.preventDefault();S.root.querySelector('.of-input').focus()}
 }
@@ -1341,7 +1452,7 @@ function remoteMotion(p, now){
   return out;
 }
 
-const rigPos=new THREE.Vector3();
+const rigPos=new THREE.Vector3(),chest=new THREE.Vector3(),routeAim=new THREE.Vector3();
 function frame(dt,t,delta){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
   const paused=overlayOpen(),replay=S.replay?.active;
@@ -1355,19 +1466,28 @@ function frame(dt,t,delta){
 
   const c=Math.cos(yaw),s=Math.sin(yaw);
   let x=right*c-forward*s,z=-right*s-forward*c;
-  if(steering){S.follow=null;S.target=null}
+  let fast=false;
+  if(steering){S.follow=null;S.target=null;S.route=null}
   else{
     const target=S.people.get(S.follow)?.obj.position||S.target;
-    if(target&&!paused){
-      const dx=target.x-state.x,dz=target.z-state.z,d=Math.hypot(dx,dz),stop=S.follow?1.8:0.18;
-      if(d>stop){
-        const throttle=Math.min(1,Math.sqrt(2*24*(d-stop))/(input.sprint?RUN_SPEED:WALK_SPEED));
-        x=dx/d*throttle;z=dz/d*throttle;
-      }else if(!S.follow)S.target=null;
+    if(target&&!paused&&!S.fading){
+      // A route (goTo) is walked point by point, at full speed; only its last leg eases in.
+      const r=S.route&&S.route.target===target?S.route:(S.route=null);
+      let aim=target,last=true;
+      if(r){
+        const p=r.pts;while(r.i<p.length-2&&Math.hypot(p[r.i]-state.x,p[r.i+1]-state.z)<0.5)r.i+=2;
+        if(r.i<p.length-2){aim=routeAim.set(p[r.i],0,p[r.i+1]);last=false}
+        fast=r.fast;routeWatch(r,state,now);
+      }
+      const dx=aim.x-state.x,dz=aim.z-state.z,d=Math.hypot(dx,dz),stop=S.follow?1.8:0.18;
+      if(!last||d>stop){
+        const throttle=last?Math.min(1,Math.sqrt(2*24*(d-stop))/(input.sprint||fast?RUN_SPEED:WALK_SPEED)):1;
+        x=dx/Math.max(d,1e-6)*throttle;z=dz/Math.max(d,1e-6)*throttle;
+      }else if(!S.follow){S.target=null;S.route=null}
     }
   }
   S.presence?.beforeMove();
-  let player=controller.advance(dt,{...input,x,z},S.colliders,S.place.terrain);
+  let player=controller.advance(dt,{...input,sprint:input.sprint||fast,x,z},S.colliders,S.place.terrain);
   // In the water: a splash, then back on the nearest deck.
   if(player.y<S.place.sea-1.1){
     S.place.splash(player,t);const r=S.place.respawn(player);
@@ -1416,14 +1536,16 @@ function frame(dt,t,delta){
   if(S.reactions)for(const c of S.clickables){const u=c.userData;if(u.kind==='agent'&&u.mascot)S.reactions.apply(u.member+'|'+u.id,u.mascot,animation.t)}
   if(!paused){
     // The camera works as if my deck were the ground, then rides up to it; the overview frames the whole world.
-    S.rig.update(dt,rigPos.set(S.pos.x,S.pos.y-S.floor,S.pos.z),player.heading,player.vx,player.vz,cameraWalls(),S.overviewRadius,
-      {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1)});
+    S.rig.update(dt,rigPos.set(S.pos.x,S.pos.y-S.floor,S.pos.z),player.heading,player.vx,player.vz,cameraWalls(),overviewRadius(),
+      {held:S.pointer.orbiting||S.pointer.grabbing||!!(orbitX||orbitY),align:!steering||(forward>0&&Math.abs(right)<0.1),through:!!S.place.cutaway});
     S.ov+=((S.rig.overview?1:0)-S.ov)*Math.min(1,dt*9);
     S.camera.position.x+=S.place.center.x*S.ov;S.camera.position.y+=S.floor*(1-S.ov);S.camera.position.z+=S.place.center.z*S.ov;
   }
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
   // A world that fades the wall the camera is behind hides the room boards on it too.
   if(S.place.veilRev!==undefined&&S.place.veilRev!==S.veilRev){S.veilRev=S.place.veilRev;S.boards?.veil(S.place.veiled)}
+  // What stands between the camera and me is cut away (the overview and a focused board see everything as it is).
+  {const r=S.place.cutaway&&!S.rig.overview&&!S.devops?.focused()?S.place.cutaway:0;S.world.updateMatrixWorld();aimCutaway(S.camera,chest.set(S.pos.x,S.pos.y+1.1,S.pos.z).applyMatrix4(S.world.matrixWorld),chest.y-1.1,r)}
   S.devops?.frame(dt,!paused);
   if(!replay)S.boards?.frame(S.labelList);
   S.meters?.frame();
@@ -1431,14 +1553,15 @@ function frame(dt,t,delta){
   if(!S.lookEditor){S.renderer.render(S.scene,S.camera);S.devops?.render();if(!document.hidden)paceFigures(delta)}
   if(!replay)S.interact?.update();
   S.voice?.frame(dt);
+  S.travel?.frame(t);
   placeLabels();
 }
 // The E prompt names what it targets, so that thing's own name tag steps aside while it is targeted.
-const NAME_TAG=/\b(af|agent|person)\b/;
+const NAME_TAG=/\b(af|agent|person)\b/,PLAN_TAG=/\b(sign|table)\b/;
 function placeLabels(){
-  const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3(),target=S.interact?.current()?.object3D;
+  const w=S.stage.clientWidth,h=S.stage.clientHeight,p=new THREE.Vector3(),target=S.interact?.current()?.object3D,over=!!S.rig?.overview;
   for(const l of S.labelList){
-    l.obj.getWorldPosition(p);const far=(l.near&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show())||(target===l.obj&&NAME_TAG.test(l.cls));p.y+=l.y;p.project(S.camera);
+    l.obj.getWorldPosition(p);const far=(l.near&&!(over&&PLAN_TAG.test(l.cls))&&p.distanceTo(S.pos)>l.near)||(l.show&&!l.show())||(target===l.obj&&NAME_TAG.test(l.cls));p.y+=l.y;p.project(S.camera);
     const off=far||p.z>1||p.x<-1.2||p.x>1.2||p.y<-1.2||p.y>1.2;
     if(off){if(!l.hidden){l.el.style.display='none';l.hidden=true}continue}
     if(l.hidden){l.el.style.display='';l.hidden=false}

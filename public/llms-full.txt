@@ -404,6 +404,8 @@ Open **?** in the office header for the control list and the option to turn off 
 | Pan | Drag with two fingers |
 | Recenter | Middle-click or press **F** |
 | Top-down overview | Press **O** or select the overview button |
+| Go to a place, a person or an agent | Press **G** or select the compass button, then pick from the list or type to find one |
+| Minimap | Press **N** or select the map button to show or hide it. Click the map to walk there |
 | Edit your look | Press **L**, select the shirt button, click yourself, or press **E** at the mirror in your room or on yourself |
 | Gamepad | Left stick to walk, right stick to orbit, **A** to jump, **B** or **X** to sprint |
 | Mute / unmute | **M**, or the mic button in the voice bar |
@@ -412,7 +414,7 @@ Open **?** in the office header for the control list and the option to turn off 
 
 ### Voice
 
-The meeting room is in the classic office; on the yacht, **Talk to people nearby** works but there is no meeting room yet. The voice bar sits at the bottom right of the office. Its button walks you to the meeting room, and **Talk to people nearby** turns proximity voice on for this visit. While you are in a call it shows where you are and how many people are connected. It also has:
+Every world has a meeting room: in the classic office it stands in the ring of rooms, and on the yacht it is the glass room at the aft end of the lounge. The voice bar sits at the bottom right of the office. Its button walks you to the meeting room, and **Talk to people nearby** turns proximity voice on for this visit. While you are in a call it shows where you are and how many people are connected. It also has:
 
 - **The mic button.** It shows whether you are heard: **Mic on** (green), **Muted** (red), **Hold V to talk**, or **Listening only** when the browser was refused the microphone. Click it or press **M**.
 - **Deafen.** You hear nobody, and nobody hears you.
@@ -463,13 +465,51 @@ A knock is one per 10 seconds between the same two people. Letting someone in, t
 An environment's office is drawn as one of two worlds. Everyone who enters sees the same one.
 
 - **Office** (the default). One floor of a tower, laid out as a real office. You arrive in **reception**, in the middle of the south side, with the doors to other offices beside you and the main board straight ahead across the floor. Between them is the **open-plan core**: team pods either side of a clear walkway. **Member offices** line the north and south sides, glass-fronted, each with its name plate, door, meter and board; the owner's is beside the main board. The glass **meeting room** and the **lounge** (a coffee bar, where idle agents hang about) are either side of reception. More members make the floor wider, never deeper, and a bigger org adds pods; an office place nobody has is an open bay with seats, a library, focus booths or a games table by the windows. The outer walls fade when the camera is behind them, so you always see yourself.
-- **Yacht.** A superyacht under way at sea. The AgentFlow org stands in the sunken seating of the main-deck lounge, with the main board on the wall ahead of it. Stairs lead up to the upper deck, where each member has a cabin with their name at the door and their board on its back wall. The environment's owner has the bridge at the front. Above the cabins is the sundeck with a pool and a bar, forward of the bridge is the helipad, and at the stern steps go down to the swim platform, where doors to other offices stand. Rails keep you on board unless you jump them. Jump a rail or walk off the swim platform's open end and you fall in with a splash, then come back on the nearest deck.
+- **Yacht.** A compact superyacht under way at sea, about 70 metres long and 14 wide. It has two decks:
+  - **The main deck** is the lounge, where you arrive. The main board hangs on the wall ahead of you, the AgentFlow org sits at team tables on both sides of the centre aisle, and the glass meeting room is behind you. Steps at the stern go down to the swim platform, where doors to other offices stand.
+  - **The upper deck** is one stair up from the lounge's forward starboard corner. Each member has a suite there, one after another along a single corridor, with their name at the door and their board on the back wall. The environment's owner has the bridge at the front. A few steps at the end of the corridor go down to the sun deck on the bow.
+
+  Rails keep you on board unless you jump them. Jump a rail or walk off the swim platform's open end and you fall in with a splash, then come back on the nearest deck.
 
 To change the world, open the office of your own environment and pick **Office** or **Yacht** in the menu beside the environment's name. The choice is saved with the environment (in its AgentFlow data, as `office.world`), so it syncs like any other edit and applies to everyone, within about 15 seconds for people already inside. When you visit a shared environment's office you see the world its owner picked, and the menu is hidden.
 
 The yacht's deck sways a little. **Sea motion** in the controls panel (**?**) turns that off; it starts off when your system asks for reduced motion. The setting is kept in this browser.
 
 The yacht's decks are terraced and never stacked, so each spot has exactly one floor height and everyone agrees where a person stands.
+
+#### Team tables on the yacht
+
+The yacht keeps the same hull however big the AgentFlow org is. Only more members make it longer, by one suite each from the third member on. The org sits at tables instead of standing like the org chart:
+
+- **A team is a table.** Someone with reports sits at the head, and their reports sit along the sides. A report who leads people has a table of their own.
+- **A team in AgentFlow is a table too.** Its reports sit at it under the team's name. When its only report leads people, that lead takes the head and their reports fill the table.
+- **Each table carries its team's name** and how many sit at it. Small teams share a row.
+- **An agent someone is working with sits full size**, with the live session at a small desk behind its seat. The others sit smaller and paler.
+- **Names show only for what is near you**, hovered or open, so a full lounge stays readable.
+
+The lounge seats about 120. An org larger than that seats as many as fit; the rest are not shown on the yacht.
+
+#### Seeing past walls on the yacht
+
+On the yacht the camera starts a little further out and higher than in the classic office. A wall, a rail, the meeting room's glass or the deck above is cut away in a circle round you whenever it stands between you and the camera, so you can always see yourself and what is beside you. Each deck area has its own colour: a pale runner down the aisle and along the corridor, mint under the tables, and dark blue in front of the main board.
+
+### Getting about
+
+Both worlds have the same two tools for finding your way.
+
+**Go to…** opens with **G** or the compass button in the header. It lists:
+
+- agents that are waiting on someone, first;
+- the places of this world, the main board and the meeting room;
+- your room and each member's room;
+- the people who are here;
+- every live agent and everyone in the AgentFlow org.
+
+Type to filter the list, move with the arrow keys and press **Enter**, or click a row. You run there along a real path, round walls and up stairs, and stop a step short of a person or an agent. When the way is longer than about 55 metres, the screen fades and you arrive a few metres from the place instead. Press a movement key to stop.
+
+**The minimap** sits at the top left of the office; **N** or the map button hides and shows it, and the choice is kept in this browser. It shows the floor plan with the rooms, the tables, the main board and the meeting room. You are the white arrow, other people are coloured dots, and agents waiting on someone are orange dots that pulse. Click anywhere on the map to walk there. A long world such as the yacht lies on its side, with the bow to the left; the overview (**O**) shows it the same way.
+
+Clicking the floor also walks you along a path now, so a click behind a wall takes you round it.
 
 ### Your look
 

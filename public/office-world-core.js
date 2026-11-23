@@ -10,7 +10,8 @@
 // stacked. So a box is solid from its top down, a wall between two heights stops walkers on both of
 // them, and office-controls.js needs only ground() to walk the decks and the stairs between them.
 import {officeBox} from './office-controls.js';
-import {classicLayout,toWorld,roomMeterMount,officeMeterMount,ROOM_W,ROOM_D,WALL_T,BACK_WALL_H,ROOM_BOARD,MAIN_WALL_H,MAIN_WALL_T} from './office-layout.js';
+import {classicLayout,toWorld,roomMeterMount,officeMeterMount,ROOM_W,ROOM_D,WALL_T,ROOM_BOARD,MAIN_WALL_T} from './office-layout.js';
+import {orgTeams,seatTables,TABLE} from './office-tables-core.js';
 export {ROOM_W,ROOM_D};
 
 export const WORLDS=[{id:'classic',name:'🏢 Office'},{id:'yacht',name:'🛥️ Yacht'}];
@@ -77,152 +78,133 @@ export function classicWorld(members,opts={}){
 }
 
 // ---------- yacht ----------
-// Bow at -z, stern at +z, the lounge's sunken seating centred on the origin at height 0 (so the AgentFlow
-// org, laid out round the origin, stands in it). From the stern forward: swim platform, main-deck lounge,
-// upper deck with a cabin per member, the sundeck on its block with the pool, the bridge (the owner's
-// room), then the foredeck and helipad in the tapering bow.
-export const YACHT={PIT:0,MAIN:0.45,SWIM:-2.2,UPPER:3.6,SUN:6.8,FORE:1.5,SEA:-3.3,RAIL:1.05,EDGE:0.6};
-export function yachtWorld(members,{commonR=10}={}){
+// A compact superyacht: about 68 long and 14 in the beam, the same hull however big the AgentFlow org is.
+// Bow at -z, stern at +z, starboard at +x. Two decks people use:
+//   main deck (height 0)  the lounge: the main board on the forward bulkhead, the org at team tables either
+//                         side of a centre aisle (office-tables-core.js), the glass meeting room aft, and the
+//                         swim platform astern, down a few steps
+//   upper deck            one stair up from the lounge's starboard forward corner: a suite per member in a
+//                         single file, each door on the one starboard corridor, the owner's bridge furthest
+//                         forward; the corridor ends in a few steps down to the sun deck on the bow
+// Only more members make it longer: one suite's length each, from the third member on.
+export const YACHT={MAIN:0,SWIM:-1.5,UPPER:2.6,FORE:1.3,SEA:-2.4,RAIL:1.05,EDGE:0.6,HB:7};
+export function yachtWorld(members,opts={}){
   const keys=keysOf(members),n=Math.max(1,keys.length),roomW=ROOM_W,roomD=ROOM_D;
-  const {PIT,MAIN,SWIM,UPPER,SUN,FORE,SEA,RAIL,EDGE}=YACHT;
-  const R=clamp(commonR,9,24),HB=Math.max(14,R+4);          // half beam
-  const px=R+0.6,pz=R+0.6;                                   // the sunken seating's half size
-  const zL0=-(pz+4),zL1=pz+4.4;                               // lounge: forward bulkhead, aft rail
-  const swimRamp=5.2,zSw=zL1+8.5;                            // swim platform's aft edge
-  const upRamp=7.2,zT0=zL0-upRamp-2;                         // aft terrace ends, cabins begin
-  const pairs=Math.max(1,Math.ceil((n-1)/2)),pitch=roomW+1.6;
-  const zC0=zT0-pairs*pitch-0.8;                             // forward end of the cabins
-  const SB=HB-4.4,sunLen=24,sunRamp=7.6,slot=2.1;            // sundeck block: half width, length, stair slot
-  const zS1=zC0-3,zS0=zS1-sunLen;
-  const zB1=zS0-8,zB0=zB1-roomD-1.6;                         // bridge: door line, front
-  const bow=Math.max(34,HB*2.2),zBow=zB0-bow,foreRamp=5.4;       // a wider yacht (a big org in the lounge) gets a longer bow, so it still tapers
-  const pool={x:0,z:zS1-sunRamp-5.6,halfX:3.6,halfZ:2.5};
-  const pad={x:0,z:zB0-foreRamp-9,r:7};
+  const {MAIN,SWIM,UPPER,FORE,SEA,RAIL,EDGE,HB}=YACHT,T=0.24,E=HB-EDGE;
+  const zL0=-9.5,zL1=14.6;                                   // lounge: forward bulkhead, aft rail
+  const swimRamp=2.8,zSw=zL1+6.2;                            // steps down to the swim platform, its aft edge
+  const stairX=4.2,upRamp=4.8;                               // the stair up: its inboard edge, its length
+  const pitch=roomW+0.8,slots=Math.max(2,n);                 // suites in a file; a solo owner has a sun terrace in the first place
+  const zC1=zL0-0.4,zB0=zC1-(slots-1)*pitch-roomW-0.4;       // suites' aft end; the bridge's front
+  const foreRamp=2.6,bow=13,zBow=zB0-bow;
+  const cx=-(E-0.2-roomD/2);                                 // rooms stand to port, their tall back walls on the hull side
+  const meet={x:0,z:10.7,w:9,d:7};                           // the meeting room, its door forward
+  const zone={aisle:1.1,reach:E-0.35,front:-3.5,back:5.2,forward:1};
   // Half beam of the hull at z: full amidships, fining to the stem, a little tumblehome at the stern.
-  const halfBeam=z=>z<zBow||z>zSw?0:z<zB0?HB*(1-((zB0-z)/bow)**2.2):z>zL1?HB-1.6*((z-zL1)/(zSw-zL1))**2:HB;
-  const inSwimRamp=(ax,z)=>ax>=HB-4.8&&ax<=HB-1.6&&z>=zL1&&z<=zL1+swimRamp;
-  const inUpRamp=(ax,z)=>ax>=HB-3.6&&z<=zL0&&z>=zL0-upRamp;
-  const inForeRamp=(ax,z)=>ax>=HB-4.2&&z<=zB0&&z>=zB0-foreRamp;
+  const halfBeam=z=>z<zBow||z>zSw?0:z<zB0?HB*(1-((zB0-z)/bow)**2.2):z>zL1?HB-1.2*((z-zL1)/(zSw-zL1))**2:HB;
   function ground(x,z){
     if(!Number.isFinite(x)||!Number.isFinite(z))return null;
     const ax=Math.abs(x),edge=halfBeam(z)-EDGE;
     if(ax>edge)return null;
     if(z>zL1){
-      if(z>zSw-0.2||(z<=zL1+swimRamp&&ax>HB-1.6))return null;
-      return inSwimRamp(ax,z)?lerp(MAIN,SWIM,(z-zL1)/swimRamp):SWIM;
+      if(z>zSw-0.2)return null;
+      return ax>=stairX&&z<=zL1+swimRamp?lerp(MAIN,SWIM,(z-zL1)/swimRamp):SWIM;
     }
-    if(z>=zL0){
-      if(ax>px||Math.abs(z)>pz)return MAIN;
-      // steps into the sunken seating, in the middle of each side
-      if(ax<=1.7&&Math.abs(z)>pz-1.3)return lerp(PIT,MAIN,(Math.abs(z)-(pz-1.3))/1.3);
-      if(Math.abs(z)<=1.7&&ax>px-1.3)return lerp(PIT,MAIN,(ax-(px-1.3))/1.3);
-      return PIT;
-    }
-    if(z>=zB0){
-      if(inUpRamp(ax,z))return lerp(MAIN,UPPER,(zL0-z)/upRamp);
-      if(ax<=SB&&z>=zS0&&z<=zS1){
-        if(ax<slot&&z>zS1-sunRamp)return lerp(UPPER,SUN,(zS1-z)/sunRamp);
-        if(Math.abs(x-pool.x)<pool.halfX&&Math.abs(z-pool.z)<pool.halfZ)return SUN-0.5;
-        return SUN;
-      }
-      return UPPER;
-    }
+    if(z>=zL0)return MAIN;
+    if(z>=zB0)return x>=stairX&&z>=zL0-upRamp?lerp(MAIN,UPPER,(zL0-z)/upRamp):UPPER;
     if(edge<0.5)return null;
-    return inForeRamp(ax,z)?lerp(UPPER,FORE,(zB0-z)/foreRamp):FORE;
+    return x>=stairX&&z>=zB0-foreRamp?lerp(UPPER,FORE,(zB0-z)/foreRamp):FORE;
   }
   // Stepping off is possible only from the aft end of the swim platform, which has no rail.
   const open=(x,z)=>z>zL1+swimRamp+0.2;
 
-  // ----- rooms: the owner (first) has the bridge, everyone else a cabin, port and starboard in turn -----
-  const rooms=[{key:keys[0],x:0,y:UPPER,z:zB1-roomD/2,facing:0,kind:'bridge'}],cx=HB-1.2-roomD/2;
-  for(let i=0;i<n-1;i++){const port=i%2===0,row=Math.floor(i/2);rooms.push({key:keys[i+1],x:port?-cx:cx,y:UPPER,z:zT0-0.8-roomW/2-row*pitch,facing:port?Math.PI/2:-Math.PI/2,kind:'cabin'})}
-  // Cabin places nobody has: open deck with loungers.
-  const spare=[];for(let i=n-1;i<pairs*2;i++){const port=i%2===0,row=Math.floor(i/2);spare.push({x:port?-cx:cx,y:UPPER,z:zT0-0.8-roomW/2-row*pitch,facing:port?Math.PI/2:-Math.PI/2})}
+  // ----- rooms: the owner (first) has the bridge, furthest forward; everyone else a suite, from the stair forward -----
+  const slotZ=i=>zC1-roomW/2-i*pitch,place=(key,i,kind)=>({key,x:cx,y:UPPER,z:slotZ(i),facing:Math.PI/2,kind});
+  const rooms=[place(keys[0],slots-1,'bridge')];
+  for(let i=1;i<n;i++)rooms.push(place(keys[i],i-1,'cabin'));
+  // A suite place nobody has: an open sun terrace.
+  const spare=[];for(let i=n-1;i<slots-1;i++)spare.push({x:cx,y:UPPER,z:slotZ(i),facing:Math.PI/2});
 
   // ----- collision: rails, bulkheads and the big furniture -----
-  const walls=[],T=0.24;
-  // Between two cabins on the same side the deckhouse wall carries on, so from the sea it is one long house.
-  for(let i=2;i<n-1;i++){const r=rooms[i+1],prev=rooms[i-1];walls.push(wallBox(r.x+Math.sign(r.x)*roomD/2,(r.z+prev.z)/2,0,WALL_T,pitch-roomW,BACK_WALL_H,UPPER,'infill'))}
+  const walls=[];
   // slope: the heights a handrail starts and ends at, where it follows stairs (for drawing).
   const rail=(x1,z1,x2,z2,y,kind='rail',tall=RAIL,slope=null)=>walls.push(Object.assign(along(x1,z1,x2,z2,T,tall,y,kind),slope?{slope}:{}));
+  const e=E+T/2,hb=z=>halfBeam(z)-EDGE+T/2;
   for(const s of [-1,1]){
-    const e=HB-EDGE+T/2;
-    // hull sides, by level
-    rail(s*e,zL0,s*e,zL1,MAIN,'bulwark');
-    rail(s*e,zB0,s*e,zL0,UPPER);
+    rail(s*e,zL0,s*e,zL1,MAIN,'bulwark');                                                   // lounge sides
+    rail(s*e,zB0,s*e,zL0,UPPER);                                                            // upper deck sides
     // the bow, following the taper
-    const seg=9;for(let i=0;i<seg;i++){
+    const seg=7;for(let i=0;i<seg;i++){
       const za=zB0-(bow-1.2)*i/seg,zb=zB0-(bow-1.2)*(i+1)/seg;
-      rail(s*(halfBeam(za)-EDGE+T/2),za,s*Math.max(0.2,halfBeam(zb)-EDGE+T/2),zb,FORE,'bulwark');
+      rail(s*hb(za),za,s*Math.max(0.2,hb(zb)),zb,FORE,'bulwark');
     }
-    // swim stairs: hull side outboard, a rail inboard; the transom between them
-    rail(s*(HB-1.6+T/2),zL1,s*(HB-1.6+T/2),zL1+swimRamp,SWIM,'wing',MAIN-SWIM+RAIL-0.2);
-    rail(s*(HB-4.8-T/2),zL1,s*(HB-4.8-T/2),zL1+swimRamp-1.2,SWIM,'rail',MAIN-SWIM+RAIL-0.6,[MAIN,lerp(MAIN,SWIM,1-1.2/swimRamp)]);
-    rail(s*(HB-1.6),zL1,s*(HB-EDGE),zL1,MAIN,'bulwark');
-    // stairs up from the lounge: a trench in the upper deck, railed along its inboard side and its head
-    rail(s*(HB-3.6-T/2),zL0-upRamp,s*(HB-3.6-T/2),zL0,MAIN,'rail',UPPER-MAIN+RAIL);
-    // sundeck block: sides, aft face either side of its stair, the stair slot
-    rail(s*SB,zS0,s*SB,zS1,UPPER,'block',SUN-UPPER+RAIL);
-    rail(s*slot,zS1,s*SB,zS1,UPPER,'block',SUN-UPPER+RAIL);
-    rail(s*(slot+T/2),zS1-sunRamp+0.2,s*(slot+T/2),zS1,UPPER,'rail',SUN-UPPER+RAIL);
-    // foredeck stairs: railed inboard, the bridge front outboard of them
-    rail(s*(HB-4.2-T/2),zB0-foreRamp+1.2,s*(HB-4.2-T/2),zB0,FORE,'rail',UPPER-FORE+RAIL,[lerp(UPPER,FORE,1-1.2/foreRamp),UPPER]);
-    // the radar arch's legs on the sundeck
-    walls.push(wallBox(s*(SB-0.55),zS0+4.2,0,1.1,2.2,3.2,SUN,'arch'));
+    // steps down to the swim platform: the hull's side outboard, a rail inboard
+    rail(s*e,zL1,s*hb(zL1+swimRamp),zL1+swimRamp,SWIM,'wing',MAIN-SWIM+RAIL-0.2);
+    rail(s*(stairX-T/2),zL1,s*(stairX-T/2),zL1+swimRamp-1,SWIM,'rail',MAIN-SWIM+RAIL-0.5,[MAIN,lerp(MAIN,SWIM,1-1/swimRamp)]);
   }
-  rail(-(HB-4.8),zL1,HB-4.8,zL1,SWIM,'transom',MAIN-SWIM+RAIL);            // lounge's aft rail over the swim platform
-  rail(-(HB-3.6),zL0,HB-3.6,zL0,MAIN,'bulkhead',UPPER-MAIN+RAIL);          // lounge's forward bulkhead, the terrace rail on top
-  rail(-SB,zS0,SB,zS0,UPPER,'block',SUN-UPPER+RAIL);                       // sundeck block's forward face
-  rail(-(HB-4.2),zB0,HB-4.2,zB0,FORE,'block',UPPER-FORE+RAIL);             // bridge front over the foredeck
-  rail(-0.9,zBow+1.3,0.9,zBow+1.3,FORE,'bulwark');                         // the stem
-  // the sunken seating: sofas along its rim, open at the steps
-  for(const s of [-1,1]){
-    for(const t of [-1,1]){
-      walls.push(wallBox(t*(px+1.7)/2,s*(pz-0.5),0,px-1.7,1,MAIN+0.5,PIT,'sofa'));
-      walls.push(wallBox(s*(px-0.5),t*(pz+1.7)/2,0,1,pz-1.7,MAIN+0.5,PIT,'sofa'));
-    }
-  }
-  for(const s of [-1,1]){
-    walls.push(wallBox(s*6,zL1-1.32,0,5.4,2.4,0.56,MAIN,'pad'));               // sun pads aft
-    walls.push(wallBox(s*(HB-1.15),zL1-0.75,0,1,1,0.8,MAIN,'planter'));      // palms
-  }
-  walls.push(wallBox(0,zS0+3,0,7,1,1.15,SUN,'bar'));                       // the sundeck bar
-  walls.push(wallBox(pad.x,pad.z+0.4,0,2.3,5.2,2.3,FORE,'heli'));          // the helicopter on its pad
-  for(const s of [-1,1])walls.push(wallBox(s*(HB-4.6),zL1+swimRamp+1.9,0,1.3,2.7,0.95,SWIM,'jetski'));
+  rail(-stairX,zL1,stairX,zL1,SWIM,'transom',MAIN-SWIM+RAIL);                                // the lounge's aft rail over the swim platform
+  rail(-e,zL0,stairX,zL0,MAIN,'bulkhead',UPPER-MAIN+RAIL);                                   // the lounge's forward bulkhead, the upper deck's rail on top
+  rail(stairX-T/2,zL0-upRamp,stairX-T/2,zL0,MAIN,'rail',UPPER-MAIN+RAIL);                    // the stair's inboard side
+  rail(-e,zB0,stairX,zB0,FORE,'block',UPPER-FORE+RAIL);                                      // the bridge front over the sun deck
+  rail(stairX-T/2,zB0-foreRamp+0.9,stairX-T/2,zB0,FORE,'rail',UPPER-FORE+RAIL,[lerp(UPPER,FORE,1-0.9/foreRamp),UPPER]);
+  rail(hb(zB0),zB0,hb(zB0-foreRamp),zB0-foreRamp,FORE,'rail',UPPER-FORE+RAIL,[UPPER,FORE]);  // and its outboard side, as high as the stair
+  const zBreak=zB0-10;rail(-hb(zBreak),zBreak,hb(zBreak),zBreak,FORE,'bulwark');              // a breakwater: the bow's tip, ahead of it, is for sunbathing
+  // between two suites: a low hedge, so the gap is not a blind alley
+  for(let i=0;i<slots-1;i++)walls.push(wallBox(cx,zC1-i*pitch-roomW-(pitch-roomW)/2,0,roomD,pitch-roomW-0.22,1.2,UPPER,'hedge'));
+  const sofa={x:-(E-0.75),z:zL0+2.6,w:1,d:3.2};
+  walls.push(wallBox(sofa.x,sofa.z,0,sofa.w,sofa.d,0.9,MAIN,'sofa'));                         // a sofa to port of the main board
+  const tub={x:0.2,z:zB0-6.3,r:1.3};
+  walls.push(wallBox(tub.x,tub.z,0,tub.r*2,tub.r*2,0.75,FORE,'tub'));                         // the sun deck's hot tub
+  for(const s of [-1,1])walls.push(wallBox(s*1.9,zSw-1.6,0,1.2,2.5,0.9,SWIM,'jetski'));
 
-  // The main board hangs on a wall at the forward end of the lounge, facing the seating; each room's board
-  // hangs on its tall back wall (the cabin's outboard side, the bridge's front).
-  const OFF=0.07,wallW=Math.min(15.5,(HB-3.6)*2-5.2);
-  const mainWall={x:0,y:MAIN,z:zL0+0.5,facing:0,width:wallW,depth:MAIN_WALL_T,height:MAIN_WALL_H};
+  // The main board hangs on its own wall in front of the forward bulkhead, facing the tables; each room's
+  // board hangs on its tall back wall (the hull side).
+  const OFF=0.07,wallW=10.3,wallH=4.3,boardW=8.2;
+  const mainWall={x:(stairX-0.2-E)/2+0.02,y:MAIN,z:zL0+0.45,facing:0,width:wallW,depth:MAIN_WALL_T,height:wallH,planters:false};
   const mount=(frame,lx,lz,size)=>{const p=toWorld(frame,lx,lz);return {x:p.x,y:frame.y+size.y,z:p.z,nx:Math.sin(frame.facing),nz:Math.cos(frame.facing),width:size.width,height:size.height}};
-  const boardWidth=Math.min(14,wallW-1.4);
   const boardAnchors=()=>({rooms:rooms.map(r=>({key:r.key,...mount(r,0,-roomD/2+WALL_T/2+OFF,ROOM_BOARD)})),
-    main:mount(mainWall,0,MAIN_WALL_T/2+OFF,{width:boardWidth,height:3.9,y:2.5})});
-  const meterAnchors=()=>({rooms:rooms.map(r=>({key:r.key,...roomMeterMount(r)})),main:officeMeterMount(mainWall,boardWidth)});
-  // Doors to other offices: along the transom on the swim platform (you arrive by tender), then the lounge's sides.
+    main:mount(mainWall,0,MAIN_WALL_T/2+OFF,{width:boardW,height:3.25,y:2.3})});
+  const meterAnchors=()=>({rooms:rooms.map(r=>({key:r.key,...roomMeterMount(r)})),main:officeMeterMount(mainWall,boardW)});
+  // The glass meeting room at the lounge's aft end (office-voice.js draws it), its door towards the tables.
+  const meetingAnchors=()=>[{id:'meeting',name:'Meeting room',x:meet.x,y:MAIN,z:meet.z,facing:Math.PI,w:meet.w,d:meet.d,glass:true}];
+  // Doors to other offices: along the transom on the swim platform (you arrive by tender), then on the sun deck:
+  // under the bridge front, then down its sides.
+  const side=(s,off)=>{const z=zB0-off;return {x:s*(halfBeam(z)-EDGE-1.3),y:FORE,z,facing:-s*Math.PI/2}};
+  const fore=[...[-4.6,-2.1,0.4].map(x=>({x,y:FORE,z:zB0-0.75,facing:Math.PI})),side(-1,3.3),side(1,4.4),side(-1,5.65),side(1,6.6),side(-1,8),side(1,8.7)];
   function doors(portals){
-    const list=(Array.isArray(portals)?portals:[]).filter(p=>p&&typeof p.env==='string'&&p.env).slice(0,12),out=[];
-    const aft=Math.min(list.length,5);
-    list.forEach((portal,i)=>{
-      if(i<aft)out.push({portal,x:(i-(aft-1)/2)*3,y:SWIM,z:zL1+1.3,facing:0});
-      else{const k=i-aft,side=k%2?1:-1;out.push({portal,x:side*(HB-1.7),y:MAIN,z:-pz+3+Math.floor(k/2)*3.4,facing:side>0?-Math.PI/2:Math.PI/2})}
-    });
-    return out;
+    const list=(Array.isArray(portals)?portals:[]).filter(p=>p&&typeof p.env==='string'&&p.env).slice(0,12);
+    const aft=Math.min(list.length,3);
+    return list.map((portal,i)=>i<aft?{portal,x:(i-(aft-1)/2)*2.7,y:SWIM,z:zL1+1.1,facing:0}:{portal,...fore[i-aft]});
   }
   const mid=(zBow+zSw)/2;
-  const spots=[{x:0,y:SWIM,z:zL1+3.6,heading:Math.PI},{x:0,y:MAIN,z:pz+2.2,heading:Math.PI},{x:0,y:UPPER,z:zL0-3.5,heading:0},
-    {x:0,y:UPPER,z:zS1+1.5,heading:Math.PI},{x:0,y:SUN,z:zS1-sunRamp-1.5,heading:Math.PI},{x:0,y:FORE,z:pad.z-4.6,heading:Math.PI}];
-  const world={id:'yacht',rooms,spare,walls,mainWall,boardAnchors,meterAnchors,doors,sea:SEA,center:{x:0,z:mid},radius:(zSw-zBow)/2+6,
-    bounds:{minX:-HB,maxX:HB,minZ:zBow,maxZ:zSw},spawn:spots[1],lounge:{x:px-2.2,y:PIT,z:pz-2.2},
-    signs:[{x:0,y:UPPER+4.7,z:zB1-roomD,text:'Bridge'},{x:0,y:SUN+2.9,z:zS0+3,text:'Sundeck bar'},{x:0,y:FORE+4,z:pad.z,text:'Helipad'},
-      {x:0,y:SWIM+2.4,z:zL1+0.3,text:'Beach club'}],
+  const spots=[{x:0,y:SWIM,z:zL1+4,heading:Math.PI},{x:0,y:MAIN,z:6.1,heading:Math.PI},{x:stairX+1,y:UPPER,z:zL0-upRamp-1.5,heading:Math.PI},{x:stairX+1,y:UPPER,z:zB0+2,heading:0},{x:2.6,y:FORE,z:zB0-4,heading:Math.PI}];
+  // Where to stand at each place, for "Go to…" and the minimap (office-travel.js), in the shape office-layout.js
+  // gives the classic office. The places office.js knows itself (rooms, the main board, the meeting room) are not
+  // listed. at: where its name goes on the minimap; short: a shorter name for it there.
+  const places=()=>[{id:'lounge',kind:'lounge',name:'Lounge',x:0,z:6.1,heading:Math.PI,at:{x:0,z:0.6}},{id:'sundeck',kind:'deck',name:'Sun deck',x:2.6,z:zB0-4,heading:Math.PI,at:{x:0,z:zB0-7.5}},
+    {id:'beach',kind:'deck',name:'Beach club',short:'Beach',x:0,z:zL1+4.2,heading:0}];
+  const world={id:'yacht',rooms,spare,walls,mainWall,boardAnchors,meterAnchors,meetingAnchors,doors,sea:SEA,center:{x:0,z:mid},radius:(zSw-zBow)/2+3,
+    bounds:{minX:-HB,maxX:HB,minZ:zBow,maxZ:zSw},spawn:spots[1],entrance:{x:spots[1].x,z:spots[1].z},places,names:{room:'suite',owner:'Bridge'},
+    // People arrive in the lounge, not at their own door; the camera starts further out and higher than usual.
+    arriveAtSpawn:true,view:{zoom:7.6,pitch:0.5},
+    // Idle characters of the common area gather by the sofa and at the lounge's aft end (office-npc.js).
+    lounge:[...[-1.1,0,1.1].map(dz=>({x:sofa.x+1.25,z:sofa.z+dz,fx:sofa.x,fz:sofa.z+dz})),...[-3.4,3.4].map(x=>({x,z:zone.back+1,fx:x,fz:zL0}))],
+    signs:[{x:0,y:3.1,z:6.6,text:'Lounge'},{x:mainWall.x,y:wallH+0.55,z:mainWall.z,text:'Main board'},{x:stairX+1.1,y:UPPER+2.5,z:zL0-upRamp,text:'Suites ↑'},
+      {x:cx+roomD/2+0.2,y:UPPER+3.2,z:slotZ(slots-1),text:'Bridge'},{x:2,y:FORE+2.6,z:zB0-foreRamp-1.5,text:'Sun deck'},{x:0,y:SWIM+3,z:zL1+0.3,text:'Beach club'}],
+    // The solid parts a camera must not be inside: the upper deck's block and the bow under the sun deck.
+    masses:[wallBox(0,(zB0+zL0)/2,0,HB*2,zL0-zB0,UPPER-0.2,0,'mass'),wallBox(0,(zBow+zB0)/2,0,HB*2,zB0-zBow,FORE-0.2,0,'mass')],
     ground,open,halfBeam,
     step:(from,to,all=walls)=>stepIn(world,from,to,all),
     // What office-controls.js walks on: the deck's height, the sea bed where there is none, and how far out is still the world.
     terrain:{ground,floor:SEA-6,limit:Math.hypot(HB,Math.max(zSw,-zBow))+40},
     // Back on deck: the nearest safe spot, so a swimmer comes back up the swim platform.
     respawn:p=>({...nearest(spots,p||spots[1])}),
-    plan:{R,HB,px,pz,zL0,zL1,zSw,swimRamp,upRamp,zT0,pairs,pitch,zC0,SB,sunLen,sunRamp,slot,zS0,zS1,zB0,zB1,bow,zBow,foreRamp,pool,pad,cx,roomW,roomD}};
+    // The AgentFlow org at team tables in the lounge (office-tables-core.js); their boxes stop walkers too.
+    seat(list,opts){
+      const s=seatTables(orgTeams(list,opts),zone);
+      return {...s,walls:s.tables.map(t=>wallBox(t.x,t.z,0,t.width,t.depth,TABLE.height,MAIN,'table'))};
+    },
+    plan:{HB,E,zL0,zL1,zSw,swimRamp,stairX,upRamp,pitch,slots,zC1,zB0,bow,zBow,zBreak,foreRamp,cx,roomW,roomD,meet,zone,sofa,tub,wallW,wallH}};
   return world;
 }
 export const buildWorld=(id,members,opts)=>worldId(id)==='yacht'?yachtWorld(members,opts):classicWorld(members,opts);
