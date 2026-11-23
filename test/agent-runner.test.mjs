@@ -708,3 +708,70 @@ test('the jobs table shows TZ and ORIGIN; older servers get the older fields',as
   assert.deepEqual([r.bodies[1].timezone,r.bodies[1].jobs[0].triggers,r.bodies[1].jobs[0].id],[undefined,undefined,'vercel:repo:/api/x'],'sent again without the newer fields');
   assert.match(r.stdout,/server does not accept schedule details yet/);
 });
+
+// ---------- tick: Doing means working now ----------
+// A stub Flow server and a fake `t3` (threads.json in its folder says each thread's status).
+async function tickAgainst({queues,cards={},runs={},threads={},dry=false,maxRunning=1}){
+  const moves=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{
+    const send=(body,code=200)=>{res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))};
+    if(req.headers.authorization!=='Bearer k')return send({error:'no'},401);
+    const p=new URL(req.url,'http://x').pathname.replace('/api/v1/envs/e','');
+    if(req.method==='POST'&&p.startsWith('/runners/'))return send({changed:false});
+    if(p==='/agents')return send({items:Object.keys(queues).map(id=>({id,name:id,kind:'agent',runtime:'box',live:true,models:['claudeAgent:claude-sonnet-5-5']})),nextCursor:null});
+    if(p==='/projects')return send({items:[],nextCursor:null});
+    let m=/^\/agents\/([^/]+)\/work$/.exec(p);if(m)return send({brief:'Brief',items:queues[m[1]]});
+    m=/^\/cards\/(\d+)\/move$/.exec(p);if(m&&req.method==='POST'){moves.push({card:Number(m[1]),...JSON.parse(s)});return send({card:{}})}
+    m=/^\/cards\/(\d+)$/.exec(p);if(m)return send({card:cards[m[1]]||{number:Number(m[1]),column:'doing'}});
+    send({error:'not found'},404);
+  })});
+  await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+  const home=mkdtempSync(join(tmpdir(),'runner-tick-'));
+  try{
+    const bin=join(home,'bin');mkdirSync(bin);mkdirSync(join(home,'.config','flygon-flow'),{recursive:true});mkdirSync(join(home,'.state','flygon-flow'),{recursive:true});
+    writeFileSync(join(bin,'threads.json'),JSON.stringify(threads));
+    writeFileSync(join(bin,'t3'),`#!${process.execPath}
+const fs=require('fs'),path=require('path'),f=path.join(__dirname,'threads.json'),a=process.argv.slice(2),t=JSON.parse(fs.readFileSync(f,'utf8'));
+if(a[0]==='thread'&&a[1]==='start'){const id='t-new-'+Object.keys(t).length;t[id]='running';fs.writeFileSync(f,JSON.stringify(t));console.log(JSON.stringify({threadId:id}))}
+else if(a[0]==='thread'&&a[1]==='show')console.log(JSON.stringify({thread:{status:t[a[2]]||'completed',title:a[2]},messages:[]}));
+else process.exit(1);
+`,{mode:0o755});
+    writeFileSync(join(home,'.state','flygon-flow','runner-state.json'),JSON.stringify({runs}));
+    writeFileSync(join(home,'.config','flygon-flow','runner.json'),JSON.stringify({name:'box',env:'e',url:`http://127.0.0.1:${srv.address().port}`,key:'k',
+      t3:join(bin,'t3'),t3Home:join(home,'t3'),opencode:'',grok:'',jobs:false,project:home,maxRunning,dryRun:dry}));
+    const env={...process.env,HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.state')};
+    for(const k of Object.keys(env))if(k.startsWith('FLOW_'))delete env[k];
+    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,'tick'],{env,timeout:30000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
+    const state=JSON.parse(readFileSync(join(home,'.state','flygon-flow','runner-state.json'),'utf8'));
+    return {...out,moves,state};
+  }finally{srv.close();rmSync(home,{recursive:true,force:true})}
+}
+const card=(n,column)=>({id:'c'+n,number:n,title:'Card '+n,column,project:''});
+
+test('tick: a card is in Doing only while its thread runs; idle Doing cards go back to Requests',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(2,'doing'),card(3,'requests')],Reviewer:[card(4,'doing'),card(5,'doing')]}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c2.status,'running','the first Doing card starts');
+  // Reviewer waits behind maxRunning, so its cards leave Doing, keeping their order at the top of Requests.
+  assert.deepEqual(r.moves,[{card:5,column:'requests',index:0},{card:4,column:'requests',index:0}]);
+});
+test('tick: a Requests card moves into Doing when its thread starts',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(3,'requests')]}});
+  assert.equal(r.code,0,r.stderr);
+  assert.deepEqual(r.moves,[{card:3,column:'doing'}]);assert.equal(r.state.runs.c3.status,'running');
+});
+test('tick: a thread stopped in T3 sends its card to Blocked; a waiting thread keeps it in Doing',async()=>{
+  const run=(n,thread)=>({agent:'Builder',agentId:'Builder',number:n,thread,model:'claudeAgent:claude-sonnet-5-5',order:['claudeAgent:claude-sonnet-5-5'],status:'running',attempts:[]});
+  // The queue is read after the stop is handled, so Flow no longer lists #1 (now Blocked) in it.
+  const r=await tickAgainst({queues:{Builder:[card(6,'doing')]},runs:{c1:run(1,'t1'),c6:run(6,'t6')},threads:{t1:'interrupted',t6:'waiting'},
+    cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c1.status,'stopped');assert.equal(r.state.runs.c6.status,'running');
+  assert.deepEqual(r.moves,[{card:1,column:'blocked'}]);
+});
+test('tick: a dry run only says what it would move',async()=>{
+  const r=await tickAgainst({dry:true,queues:{Builder:[card(2,'doing')],Reviewer:[card(4,'doing')]}});
+  assert.equal(r.code,0,r.stderr);assert.deepEqual(r.moves,[]);
+  assert.match(r.stdout,/dry run: would start "\[Flow\] Builder: #2 Card 2"/);
+  assert.match(r.stdout,/dry run: would move #4 from Doing back to Requests/);
+  assert.doesNotMatch(r.stdout,/would move #2 /);
+});

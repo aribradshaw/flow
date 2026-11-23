@@ -13,9 +13,14 @@
 // One pass per call: run `tick` from a timer (cron, a systemd timer) every few minutes.
 // For each AgentFlow agent with `live` on whose `runtime` is this runner's name, it takes the first
 // card in the agent's queue (Doing, then Requests), starts a T3 thread with the agent's brief and the
-// card, and remembers it. When the thread finishes it moves the card to UAT for a person to approve.
-// A thread waiting on a question is left for you to answer in T3; one interrupted or cancelled in T3
-// is left alone (the card stays where it is).
+// card, moves the card into Doing as the thread starts, and remembers it. When the thread finishes it
+// moves the card to UAT for a person to approve. A thread waiting on a question is left for you to
+// answer in T3 (the card stays in Doing).
+//
+// Doing means an agent is working the card now. After starting work, every pass sends any card in a
+// live agent's queue that sits in Doing with no thread running for it (waiting behind maxRunning, no
+// T3 project, no model would start) back to the top of Requests. A thread interrupted or cancelled in
+// T3, or a card that failed on every model, moves to Blocked; `retry <number>` puts it back in Requests.
 //
 // Models. An agent lists `models` in order: the primary first, then fallbacks. If `t3 thread start`
 // fails on a model, the runner tries the next one. If a started thread fails (T3 status failed or
@@ -1625,7 +1630,7 @@ async function tickLocal(){
     const end=outcome(th,shown.messages),attempts=r.attempts||(r.attempts=[]),now=new Date().toISOString();
     const cur=attempts.find(x=>x.thread===r.thread);
     if(cur){cur.result=end.failed?'failed':end.stopped?'stopped':'done';cur.why=end.why||'';cur.ended=now}
-    if(end.stopped){log(`#${r.number} (${r.agent}): ${end.why}; leaving the card where it is`);r.status='stopped';r.finished=now;save();continue}
+    if(end.stopped){log(`#${r.number} (${r.agent}): ${end.why}`);await block(r.number);r.status='stopped';r.finished=now;save();continue}
     if(end.failed){
       const order=r.order||[],rest=order.slice(order.indexOf(r.model)+1);
       log(`#${r.number} (${r.agent}) failed on ${r.model}: ${end.why}`);
@@ -1633,7 +1638,7 @@ async function tickLocal(){
       const again=rest.length&&r.card?startOn(rest,startArgv(r.title,r.project),prompt(r.card.agent,r.card.brief,r.card,r.model),`#${r.number}`):{thread:null,tried:[]};
       attempts.push(...attemptsOf(again.tried,again.thread,now));
       if(again.thread){Object.assign(r,{thread:again.thread,model:again.model});log(`#${r.number} restarted on ${again.model}: thread ${again.thread}`)}
-      else{r.status='failed';r.finished=now;log(`#${r.number} (${r.agent}): every model failed (${attempts.map(x=>x.model).join(', ')}); left where it is. Run "retry ${r.number}" to start it over.`)}
+      else{r.status='failed';r.finished=now;log(`#${r.number} (${r.agent}): every model failed (${attempts.map(x=>x.model).join(', ')}). Run "retry ${r.number}" to start it over.`);await block(r.number)}
       save();continue;
     }
     log(`#${r.number} (${r.agent}) finished on ${r.model||'its model'}; moving it to UAT`);
@@ -1644,18 +1649,21 @@ async function tickLocal(){
   const agents=(await all('/agents?live=true')).filter(a=>a.kind==='agent'&&same(a.runtime,cfg.name));
   if(!agents.length){log(`no live agents run on "${cfg.name}"`);return}
   const projects=await all('/projects').catch(()=>[]);
+  // Every card in these agents' queues, so Doing can be checked once the starts are done; dry-run starts count as started.
+  const queued=[],wouldStart=new Set();let full=false;
   for(const a of agents){
-    if(running()>=(cfg.maxRunning??1)){log(`at maxRunning (${cfg.maxRunning??1}); the rest wait for the next pass`);break}
-    if(Object.values(state.runs).some(r=>r.status==='running'&&r.agentId===a.id))continue;
-    if(!modelsOf(a).some(m=>splitModel(m)[0])){log(`${a.name}: live but no model of the form provider:model; skipped`);continue}
     const work=await flow('GET',`/agents/${encodeURIComponent(a.id)}/work?columns=doing,requests&limit=20`);
-    const card=work.items.find(c=>!state.runs[c.id]);
+    queued.push(...work.items);
+    if(!modelsOf(a).some(m=>splitModel(m)[0])){log(`${a.name}: live but no model of the form provider:model; skipped`);continue}
+    if(running()+wouldStart.size>=(cfg.maxRunning??1)){if(!full)log(`at maxRunning (${cfg.maxRunning??1}); the rest wait for the next pass`);full=true;continue}
+    if(Object.values(state.runs).some(r=>r.status==='running'&&r.agentId===a.id))continue;
+    const card=work.items.find(c=>!state.runs[c.id]&&!wouldStart.has(c.id));
     if(!card){log(`${a.name}: nothing to do`);continue}
     const project=projectFor(card,projects);
     if(!project){log(`${a.name}: #${card.number} has no T3 project (set "project" or "projects"); skipped`);continue}
     const title=titleOf(a,card),{order,why}=await plan(a,card,project,catalogue);
     log(`${a.name}: #${card.number} on ${order[0]} (${why})${order.length>1?`; then ${order.slice(1).join(', ')}`:''}`);
-    if(DRY){log(`dry run: would start "${title}" on ${order[0]} in ${project}`);continue}
+    if(DRY){log(`dry run: would start "${title}" on ${order[0]} in ${project}`);wouldStart.add(card.id);continue}
     const st=startOn(order,startArgv(title,project),prompt(a,work.brief,card),a.name);
     if(!st.thread){log(`${a.name}: #${card.number} could not start on any model; left for the next pass`);continue}
     if(card.column==='requests'){
@@ -1670,6 +1678,24 @@ async function tickLocal(){
     save();
     log(`started ${title} on ${st.model}: thread ${st.thread}`);
   }
+  // Doing means working now: a queued card in Doing with no thread running for it goes back to the top of
+  // Requests. Last first, each to index 0, so they keep their order.
+  const seen=new Set(),idle=queued.filter(c=>c.column==='doing'&&!seen.has(c.id)&&seen.add(c.id)&&state.runs[c.id]?.status!=='running'&&!wouldStart.has(c.id));
+  for(const c of idle.reverse()){
+    const last=state.runs[c.id],why=last?`its last run ${last.status}; "retry ${c.number}" starts it again`:'no thread is running for it';
+    if(DRY){log(`dry run: would move #${c.number} from Doing back to Requests (${why})`);continue}
+    try{await flow('POST',`/cards/${encodeURIComponent(c.number)}/move`,{column:'requests',index:0});log(`#${c.number} back to Requests: ${why}`)}
+    catch(e){log(`#${c.number}: could not move back to Requests: ${e.message}`)}
+  }
+}
+// A card whose run stopped or failed: to Blocked, if it is still in Doing (a person may have moved it meanwhile).
+async function block(number){
+  if(DRY){log(`dry run: would move #${number} to Blocked`);return}
+  try{
+    const {card}=await flow('GET',`/cards/${encodeURIComponent(number)}`);
+    if(card.column!=='doing')return;
+    await flow('POST',`/cards/${encodeURIComponent(number)}/move`,{column:'blocked'});log(`#${number} moved to Blocked`);
+  }catch(e){log(`#${number}: could not move to Blocked: ${e.message}`)}
 }
 async function status(){
   const state=readJson(stateFile)||{runs:{}};
@@ -1684,7 +1710,11 @@ async function retry(){
   const hit=Object.entries(state.runs).find(([,r])=>String(r.number)===n);
   if(!hit){console.error(`No card #${n} in ${stateFile}`);process.exit(1)}
   if(hit[1].status==='running'){console.error(`#${n} is running (thread ${hit[1].thread})`);process.exit(1)}
-  delete state.runs[hit[0]];writeJson(stateFile,state);log(`#${n} forgotten; the next tick may start it again`);
+  delete state.runs[hit[0]];writeJson(stateFile,state);
+  // A card the runner blocked goes back to the queue (Requests) so the next tick can take it.
+  if(!DRY)try{const {card}=await flow('GET',`/cards/${encodeURIComponent(n)}`);if(card.column==='blocked')await flow('POST',`/cards/${encodeURIComponent(n)}/move`,{column:'requests',index:0})}
+  catch(e){log(`#${n}: could not move back to Requests: ${e.message}`)}
+  log(`#${n} forgotten; the next tick may start it again`);
 }
 
 // `jobs` prints this machine's jobs; `jobs --remote <name>` a remote's; `jobs --all` both.
