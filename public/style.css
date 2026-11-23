@@ -481,6 +481,7 @@ select optgroup{color:var(--muted);font-weight:600}
 .pk-btn:hover{border-color:#aab6b1}
 .pk-btn>.i{flex:none;color:var(--muted)}
 .pk-btn.on{border-color:var(--flygon-green);background:var(--flygon-tint);color:var(--flygon-dark)}
+.pk-btn.not{max-width:260px}
 .pk-btn[aria-expanded=true]{border-color:var(--flygon-green);box-shadow:0 0 0 2px var(--flygon-light)}
 .pk-t{overflow:hidden;text-overflow:ellipsis}
 .pk-dots{display:inline-flex;align-items:center;gap:2px}
@@ -498,6 +499,9 @@ select optgroup{color:var(--muted);font-weight:600}
 .pk-opt[aria-selected=true] .pk-l{font-weight:600}
 .pk-chk{display:inline-flex;align-items:center;justify-content:center;flex:none;width:15px;height:15px;border:1.5px solid var(--line2);border-radius:4px;background:#fff;color:#fff}
 .pk-opt[aria-selected=true] .pk-chk{border-color:var(--flygon-dark);background:var(--flygon-dark)}
+.pk-opt.ex .pk-l,.pk-opt.ex .pill{text-decoration:line-through;color:var(--muted)}
+.pk-opt.ex .pk-chk{border-color:var(--ink);background:#fff;color:var(--ink)}
+.pk-hint{padding:2px 8px 0;font-size:10.5px;color:var(--faint)}
 .pk-sw{flex:none;width:10px;height:10px;border-radius:3px}
 .pk-av{width:20px;height:20px;margin:0;border:0;font-size:8.5px}
 .pk-l{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}

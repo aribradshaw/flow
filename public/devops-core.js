@@ -144,21 +144,36 @@ export function entityProjects(db,nodeId){
 }
 export const isOpen=c=>c.column!=='done';
 
-// f = {projects:[ids|'none'], entity, assignees[], agents[], labels[], q, hideDone, snoozed} (assignee / label: single-value forms).
+// f includes and excludes. Include is "any of these"; exclude is "none of these"; they combine.
+// projects / notProjects: ids or "none". entity / entities and notEntity / notEntities: chart cards.
+// assignee / assignees and notAssignee / notAssignees: person ids. agents / notAgent / notAgents:
+// AgentFlow ids (a card delegated to any excluded agent is left out). label / labels and notLabel / notLabels.
 // snoozed: true keeps only cards snoozed now, false only awake ones; left out, both.
-// agents: AgentFlow agent ids; matches cards delegated to any of them. q matches "#12"/"12" or the title.
+// q matches "#12"/"12" or the title.
 export function filterCards(db,f={}){
   const q=(f.q||'').trim().toLowerCase(),num=/^#?\d+$/.test(q)?Number(q.replace('#','')):null;
-  const ent=f.entity?new Set(entityProjects(db,f.entity).map(p=>p.id)):null;
-  const delegated=f.agents?.length?new Set((db.agentflow?.agents||[]).filter(a=>f.agents.includes(a.id)).flatMap(a=>a.cards)):null;
+  const ids=(one,many)=>[...(one?[one]:[]),...(Array.isArray(many)?many:[])];
+  const projectSet=list=>{const s=new Set();for(const id of list)for(const p of entityProjects(db,id))s.add(p.id);return s};
+  const entIds=ids(f.entity,f.entities),notEntIds=ids(f.notEntity,f.notEntities);
+  const ent=entIds.length?projectSet(entIds):null,notEnt=notEntIds.length?projectSet(notEntIds):null;
+  const agentCards=list=>{const want=new Set(list);return new Set((db.agentflow?.agents||[]).filter(a=>want.has(a.id)).flatMap(a=>a.cards))};
+  const delegated=f.agents?.length?agentCards(f.agents):null,blocked=ids(f.notAgent,f.notAgents);
+  const notDelegated=blocked.length?agentCards(blocked):null;
+  const notProjects=ids(f.notProject,f.notProjects),notPeople=ids(f.notAssignee,f.notAssignees),notLabels=ids(f.notLabel,f.notLabels);
+  const onProject=(c,p)=>p==='none'?!c.project:c.project===p;
   return db.devops.cards.filter(c=>(!f.hideDone||isOpen(c))
-    &&(!f.projects?.length||f.projects.some(p=>p==='none'?!c.project:c.project===p))
+    &&(!f.projects?.length||f.projects.some(p=>onProject(c,p)))
+    &&(!notProjects.length||!notProjects.some(p=>onProject(c,p)))
     &&(!ent||ent.has(c.project))
+    &&(!notEnt||!notEnt.has(c.project))
     &&(!f.assignee||c.assignees.some(a=>a.node===f.assignee))
     &&(!f.assignees?.length||c.assignees.some(a=>f.assignees.includes(a.node)))
+    &&(!notPeople.length||!c.assignees.some(a=>notPeople.includes(a.node)))
     &&(!delegated||delegated.has(c.id))
+    &&(!notDelegated||!notDelegated.has(c.id))
     &&(!f.label||c.labels.includes(f.label))
     &&(!f.labels?.length||f.labels.some(l=>c.labels.includes(l)))
+    &&(!notLabels.length||!notLabels.some(l=>c.labels.includes(l)))
     &&(f.snoozed===undefined||isSnoozed(c)===f.snoozed)
     &&(!q||c.number===num||c.title.toLowerCase().includes(q)));
 }

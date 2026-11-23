@@ -323,6 +323,19 @@ test('cards: create, get, update, list, and move through the board gates',async(
   assert.deepEqual(r.body.items.map(x=>x.number),[2]);
   r=await op('cards.list',{env:ENV,label:'Frontend'});
   assert.deepEqual(r.body.items.map(x=>x.number),[1]);
+  // Exclude is the opposite of include, and the two combine.
+  r=await op('cards.list',{env:ENV,notAssignee:'cleo'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[2]);
+  r=await op('cards.list',{env:ENV,project:'Lantern',notAssignee:'Bo Marsh'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[]);
+  r=await op('cards.list',{env:ENV,notProject:'none'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[1]);
+  r=await op('cards.list',{env:ENV,notLabel:'Frontend'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[2]);
+  r=await op('cards.list',{env:ENV,notEntity:'Kestrel Group'});
+  assert.deepEqual(r.body.items.map(x=>x.number),[2]);
+  assert.equal((await op('cards.list',{env:ENV,notAssignee:'nobody'})).body.code,'unknown_person');
+  assert.equal((await op('cards.list',{env:ENV,notEntity:'nope'})).body.code,'unknown_entity');
 });
 
 test('AgentFlow: agents and workflows, with briefs for runners',async()=>{

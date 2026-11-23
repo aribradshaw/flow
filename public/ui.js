@@ -180,13 +180,15 @@ export function personAvatar(n,{size=0,cls='',tip=''}={}){
 document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains('pa-img')){t.parentElement?.classList.remove('has-photo');t.remove()}},true);
 
 // ---------- picker: a popover listbox for multi-select (default) or single-select ----------
-// pickerButton(key, label, items, selected) renders the trigger ("Projects · 2" plus colour dots);
-// openPicker(trigger, {items, selected, onChange, multi, placeholder}) opens the list under it.
+// pickerButton(key, label, items, selected, {excluded}) renders the trigger ("Projects · 2", or
+// "Not: Joe Basrawi" when a value is excluded).
+// openPicker(trigger, {items, selected, excluded, cycle, onChange, multi, placeholder}) opens the list.
 // items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg,img?} | icon | pill:{bg,fg}}].
 // avatar.img (an http(s) or data:image URL) shows a photo over the initials; icon names an icons.js icon.
-// onChange(values) fires on every change (live); the caller re-renders and the picker stays open,
-// re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
-// Esc, Tab; typing filters. Click outside closes.
+// onChange(values, excluded) fires on every change (live). With cycle, a click includes, the next
+// excludes (struck through, with a minus), and the next clears. excluded is only passed when cycle is on.
+// The caller re-renders and the picker stays open, re-anchoring to the same data-picker key.
+// Keyboard: arrows, Enter/Space, Esc, Tab; typing filters. Click outside closes.
 let picker=null;
 // The session photo's, the session portrait's and linked cards' object URLs (blob:) are the only non-http(s),
 // non-data URLs allowed.
@@ -198,9 +200,14 @@ const swatch=it=>it.avatar?av(it.avatar,'pk-av')
 const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;
 export const pickerOpen=key=>picker?.key===key;
-export function pickerButton(key,label,items,selected,{cls='',tip='',count=true,disabled=false}={}){
-  const sel=items.filter(i=>selected.includes(i.value)),n=sel.length;
-  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}${disabled?' disabled':''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n&&count?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
+export function pickerButton(key,label,items,selected,{cls='',tip='',count=true,disabled=false,excluded=[]}={}){
+  const sel=items.filter(i=>selected.includes(i.value)),ex=items.filter(i=>excluded.includes(i.value)),n=sel.length,xn=ex.length;
+  let text=label;
+  if(!n&&xn===1)text=`Not: ${ex[0].label}`;
+  else if(!n&&xn)text=`Not · ${xn}`;
+  else{if(n&&count)text+=` · ${n}`;if(xn===1)text+=` · Not: ${ex[0].label}`;else if(xn)text+=` · Not ${xn}`}
+  const dots=(n?sel:ex).slice(0,3),fullTip=[tip,xn?`Not: ${ex.map(i=>i.label).join(', ')}`:''].filter(Boolean).join('\n');
+  return `<button type="button" class="pk-btn${n||xn?' on':''}${xn?' not':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${fullTip?` data-tip="${esc(fullTip)}"`:''}${disabled?' disabled':''}>${dots.length?`<span class="pk-dots">${dots.map(dot).join('')}</span>`:''}<span class="pk-t">${esc(text)}</span>${icon('chevD',12)}</button>`;
 }
 export function closePicker(refocus=false){
   if(!picker)return;const p=picker;picker=null;p.el.classList.remove('picker');p.el.classList.add('picker','leaving');popOut(p.el);document.removeEventListener('pointerdown',p.out,true);removeEventListener('resize',p.place);
@@ -212,31 +219,37 @@ export function openPicker(trigger,o){
   const key=trigger.dataset.picker;
   if(picker?.key===key){closePicker();return}
   closePicker();
-  const multi=o.multi!==false,sel=new Set(o.selected||[]),id='pk-'+uid().slice(0,8),host=trigger.closest('dialog[open]')||document.body,anchor=()=>host.querySelector(`[data-picker="${CSS.escape(key)}"]`);
+  const multi=o.multi!==false,sel=new Set(o.selected||[]),ex=new Set(o.cycle?o.excluded||[]:[]),id='pk-'+uid().slice(0,8),host=trigger.closest('dialog[open]')||document.body,anchor=()=>host.querySelector(`[data-picker="${CSS.escape(key)}"]`);
   const el=document.createElement('div');el.className='picker';
   const search=o.search!==false;
   el.innerHTML=`<input class="pk-q" type="search" placeholder="${esc(o.placeholder||'Search')}" aria-label="Filter options" aria-controls="${id}" autocomplete="off" role="combobox" aria-expanded="true">
     <div class="pk-list" role="listbox" id="${id}" aria-multiselectable="${multi}" aria-label="${esc(o.label||'Options')}" tabindex="${search?-1:0}"></div>
+    ${o.cycle?'<div class="pk-hint">Click again to exclude</div>':''}
     ${multi?`<div class="pk-foot"><button type="button" class="txt" data-pk="all">Select all</button><button type="button" class="txt" data-pk="clear">Clear</button></div>`:''}`;
   // Inside a modal dialog the popover must live in it (the top layer covers everything else).
   host.append(el);
   const list=el.querySelector('.pk-list'),input=el.querySelector('.pk-q');if(!search)input.hidden=true;
   const focusEl=search?input:list;let typed='',typedAt=0;
-  let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value))),q='';
+  let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value)||ex.has(i.value))),q='';
   const vis=()=>o.items.filter(i=>!q||i.label.toLowerCase().includes(q)||String(i.sub||'').toLowerCase().includes(q));
   function draw(){
     const v=vis();active=Math.max(0,Math.min(active,v.length-1));let g;
-    list.innerHTML=v.length?v.map((it,k)=>{const on=sel.has(it.value),head=it.group&&it.group!==g?(g=it.group,`<div class="pk-group" role="presentation">${esc(it.group)}</div>`):'';
-      return head+`<div class="pk-opt${k===active?' active':''}" role="option" id="${id}-${k}" data-k="${k}" aria-selected="${on}">${multi?`<span class="pk-chk">${on?icon('check',11):''}</span>`:''}${swatch(it)}${it.pill?`<span class="pill" style="background:${it.pill.bg};color:${it.pill.fg}">${esc(it.label)}</span>`:`<span class="pk-l">${esc(it.label)}</span>`}${it.sub?`<small>${esc(it.sub)}</small>`:''}${!multi&&on?`<span class="pk-cur">${icon('check',13)}</span>`:''}</div>`}).join('')
+    list.innerHTML=v.length?v.map((it,k)=>{
+      const mode=ex.has(it.value)?'ex':sel.has(it.value)?'in':'',head=it.group&&it.group!==g?(g=it.group,`<div class="pk-group" role="presentation">${esc(it.group)}</div>`):'';
+      const mark=mode==='in'?icon('check',11):mode==='ex'?icon('minus',11):'';
+      return head+`<div class="pk-opt${k===active?' active':''}${mode==='ex'?' ex':''}" role="option" id="${id}-${k}" data-k="${k}" aria-selected="${mode==='in'}"${mode==='ex'?' title="Excluded"':''}>${multi?`<span class="pk-chk">${mark}</span>`:''}${swatch(it)}${it.pill?`<span class="pill" style="background:${it.pill.bg};color:${it.pill.fg}">${esc(it.label)}</span>`:`<span class="pk-l">${esc(it.label)}</span>`}${it.sub?`<small>${esc(it.sub)}</small>`:''}${!multi&&mode==='in'?`<span class="pk-cur">${icon('check',13)}</span>`:''}</div>`}).join('')
       :`<div class="pk-empty">${esc(o.empty||'No matches')}</div>`;
     focusEl.setAttribute('aria-activedescendant',v.length?`${id}-${active}`:'');
     list.querySelector('.active')?.scrollIntoView({block:'nearest'});
   }
-  const emit=()=>o.onChange?.(o.items.map(i=>i.value).filter(v=>sel.has(v)));
+  const chosen=set=>o.items.map(i=>i.value).filter(v=>set.has(v));
+  const emit=()=>o.onChange?.(chosen(sel),o.cycle?chosen(ex):undefined);
   function toggle(k){
     const it=vis()[k];if(!it)return;
     if(!multi){sel.clear();sel.add(it.value);emit();closePicker(true);return}
-    if(sel.has(it.value))sel.delete(it.value);else sel.add(it.value);active=k;draw();emit();place();
+    if(o.cycle){if(ex.has(it.value))ex.delete(it.value);else if(sel.has(it.value)){sel.delete(it.value);ex.add(it.value)}else sel.add(it.value)}
+    else if(sel.has(it.value))sel.delete(it.value);else sel.add(it.value);
+    active=k;draw();emit();place();
   }
   function place(){
     const a=anchor()||trigger,r=a.getBoundingClientRect();el.style.minWidth=Math.max(220,r.width)+'px';
@@ -261,7 +274,7 @@ export function openPicker(trigger,o){
   el.addEventListener('click',e=>{
     const opt=e.target.closest('.pk-opt');if(opt){toggle(+opt.dataset.k);if(picker)focusEl.focus();return}
     const b=e.target.closest('[data-pk]');if(!b)return;
-    if(b.dataset.pk==='all')for(const it of vis())sel.add(it.value);else sel.clear();
+    if(b.dataset.pk==='all'){for(const it of vis()){sel.add(it.value);ex.delete(it.value)}}else{sel.clear();ex.clear()}
     draw();emit();place();
   });
   const out=e=>{if(!el.contains(e.target)&&!e.target.closest?.(`[data-picker="${CSS.escape(key)}"]`))closePicker()};
