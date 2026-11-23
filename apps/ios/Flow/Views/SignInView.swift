@@ -1,5 +1,7 @@
 import SwiftUI
 
+// The welcome screen: Flow's mark, one obvious way in (OneProfileID), email as the alternative, and the
+// server tucked away for people who host their own Flow.
 struct SignInView: View {
     @Environment(AppModel.self) private var model
 
@@ -8,174 +10,134 @@ struct SignInView: View {
     @State private var checking = false
     @State private var busy = false
     @State private var error: String?
-
-    @State private var showPassword = false
-    @State private var email = ""
-    @State private var password = ""
-    @State private var needsCode = false
-    @State private var code = ""
-    @State private var trustDevice = true
-
-    @State private var showKey = false
-    @State private var pastedKey = ""
+    @State private var showEmail = false
+    @State private var showServer = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    VStack(spacing: 8) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                            .font(.system(size: 44, weight: .semibold))
-                            .foregroundStyle(.tint)
-                        Text("Flow")
-                            .font(.largeTitle.bold())
-                        Text("Mind maps, timelines and your DevOps board.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .listRowBackground(Color.clear)
-                }
-
-                Section {
-                    TextField("flow.flygonlc.com", text: $serverText)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit { Task { await check() } }
-                } header: {
-                    Text("Server")
-                } footer: {
-                    if checking {
-                        Text("Connecting…")
-                    } else if let session {
-                        Text(session.mode == "local" ? "This server runs in local mode: no sign-in needed." : "Connected.")
-                    }
-                }
-
-                if let session { signInSection(session) }
-
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: 14) {
+                FlowMark(size: 96)
+                Text("Flow")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                Text("Your board, your agents and everything\nwaiting on you, in your pocket.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Spacer()
+            VStack(spacing: 12) {
                 if let error {
-                    Section {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                    }
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 4)
+                        .transition(.opacity)
                 }
-
-                Section {
-                    DisclosureGroup("Use an API key instead", isExpanded: $showKey) {
-                        SecureField("flow_live_…", text: $pastedKey)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Button("Use this key") { useKey() }
-                            .disabled(!pastedKey.hasPrefix("flow_") || busy)
+                primary
+                if let session, session.mode != "local" {
+                    Button {
+                        showEmail = true
+                    } label: {
+                        Text("Sign in with email").font(.body.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 6)
                     }
-                } footer: {
-                    Text("For testing. Make a key in Flow under Settings › Connect. The mind map and timeline still ask you to sign in on the web.")
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(busy)
                 }
+                Button {
+                    showServer = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(serverLabel).foregroundStyle(.secondary)
+                        Text("Change").fontWeight(.medium)
+                    }
+                    .font(.footnote)
+                }
+                .padding(.top, 6)
+                Text("Signing in gives this device its own key. You can revoke it on the web under Settings › Connect.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 2)
             }
-            .disabled(busy)
-            .overlay { if busy { ProgressView().controlSize(.large) } }
-            .navigationTitle("Sign in")
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                if serverText.isEmpty { serverText = model.server.host(percentEncoded: false).map { host in
-                    model.server.port.map { "\(host):\($0)" } ?? host
-                } ?? "" }
-                await check()
-                #if DEBUG
-                // UI testing: `-autoSignIn YES` continues as an already signed-in (or local-mode) user.
-                if UserDefaults.standard.bool(forKey: "autoSignIn"), let user = session?.user { await finish(user) }
-                #endif
-            }
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+        }
+        .frame(maxWidth: .infinity)
+        .background {
+            LinearGradient(colors: [Theme.green.opacity(0.16), Color(.systemBackground)], startPoint: .top, endPoint: .center)
+                .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showEmail) {
+            if let auth { EmailSignIn(auth: auth) { user in await finish(user) } }
+        }
+        .sheet(isPresented: $showServer) {
+            ServerSheet(serverText: $serverText) { Task { await check() } }
+        }
+        .task {
+            if serverText.isEmpty { serverText = Self.display(model.server) }
+            await check()
+            #if DEBUG
+            // UI testing: `-autoSignIn YES` continues as an already signed-in (or local-mode) user.
+            if UserDefaults.standard.bool(forKey: "autoSignIn"), let user = session?.user { await finish(user) }
+            #endif
         }
     }
 
     @ViewBuilder
-    private func signInSection(_ session: AuthSession) -> some View {
-        Section {
-            if let user = session.user {
-                Button {
-                    Task { await finish(user) }
-                } label: {
-                    Label("Continue as \(user.name ?? user.email)", systemImage: "person.crop.circle.badge.checkmark")
-                }
+    private var primary: some View {
+        let label: String = {
+            if let user = session?.user { return "Continue as \(user.name ?? user.email)" }
+            if session?.mode == "local" { return "Continue" }
+            if session?.device == true { return "Continue with OneProfileID" }
+            return "Sign in"
+        }()
+        Button {
+            Task {
+                if let user = session?.user { await finish(user) }
+                else if session?.device == true { await run { try await $0.signInWithOneProfileID() } }
+                else { showEmail = true }
             }
-            if session.mode != "local" {
-                if session.device == true {
-                    Button {
-                        Task { await oneProfileID() }
-                    } label: {
-                        Label("Continue with OneProfileID", systemImage: "person.badge.key")
-                    }
-                }
-                DisclosureGroup("Sign in with email", isExpanded: $showPassword) {
-                    if needsCode {
-                        TextField("Code from your authenticator app", text: $code)
-                            .textContentType(.oneTimeCode)
-                            .keyboardType(.asciiCapable)
-                        Toggle("Trust this device", isOn: $trustDevice)
-                        Button("Verify") { Task { await verify() } }
-                            .disabled(code.count < 4)
-                    } else {
-                        TextField("Email", text: $email)
-                            .textContentType(.username)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        SecureField("Password", text: $password)
-                            .textContentType(.password)
-                        Button("Sign in") { Task { await passwordSignIn() } }
-                            .disabled(email.isEmpty || password.isEmpty)
-                    }
-                }
+        } label: {
+            ZStack {
+                Text(label).font(.headline).opacity(busy || checking ? 0 : 1)
+                if busy || checking { ProgressView().tint(.white) }
             }
-        } footer: {
-            if session.mode != "local" {
-                Text("Signing in makes a key for this device, named \"Flow app\". You can revoke it on the web under Settings › Connect.")
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(busy || checking || session == nil)
     }
 
-    private var auth: AuthService? {
-        normalizedServer(serverText).map(AuthService.init)
+    private var serverLabel: String {
+        if checking { return "Connecting to \(serverText)…" }
+        if session == nil { return "Can't reach \(serverText)." }
+        return serverText == Self.display(AppModel.defaultServer) ? "Flygon Flow" : serverText
     }
+
+    private static func display(_ url: URL) -> String {
+        guard let host = url.host(percentEncoded: false) else { return url.absoluteString }
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private var auth: AuthService? { normalizedServer(serverText).map(AuthService.init) }
 
     private func check() async {
-        error = nil
+        withAnimation { error = nil }
         session = nil
         guard let auth else {
-            if !serverText.isEmpty { error = "Enter a server address such as flow.flygonlc.com." }
+            if !serverText.isEmpty { error = "That isn't a server address. Try flow.flygonlc.com." }
             return
         }
         checking = true
         defer { checking = false }
-        do { session = try await auth.session() } catch { self.error = error.localizedDescription }
-    }
-
-    private func oneProfileID() async {
-        await run { auth in try await auth.signInWithOneProfileID() }
-    }
-
-    private func passwordSignIn() async {
-        await run { auth in
-            switch try await auth.signIn(email: email, password: password) {
-            case .done(let user): return user
-            case .twoFactor: needsCode = true; return nil
-            }
-        }
-    }
-
-    private func verify() async {
-        await run { auth in
-            switch try await auth.verify(code: code, trustDevice: trustDevice) {
-            case .done(let user): return user
-            case .twoFactor: return nil
-            }
-        }
+        do { session = try await auth.session() } catch { withAnimation { self.error = error.localizedDescription } }
     }
 
     private func finish(_ user: SessionUser) async {
@@ -185,7 +147,7 @@ struct SignInView: View {
     // Runs one sign-in step; a user it returns gets this device's key.
     private func run(_ step: (AuthService) async throws -> SessionUser?) async {
         guard let auth else { return }
-        error = nil
+        withAnimation { error = nil }
         busy = true
         defer { busy = false }
         do {
@@ -193,12 +155,151 @@ struct SignInView: View {
             model.signedIn(try await auth.makeCredential(for: user))
         } catch is CancellationError {
         } catch {
+            withAnimation { self.error = error.localizedDescription }
+        }
+    }
+}
+
+// Email, password and (when asked) the authenticator code.
+private struct EmailSignIn: View {
+    @Environment(\.dismiss) private var dismiss
+    let auth: AuthService
+    let done: (SessionUser) async -> Void
+
+    @State private var email = ""
+    @State private var password = ""
+    @State private var needsCode = false
+    @State private var code = ""
+    @State private var trustDevice = true
+    @State private var busy = false
+    @State private var error: String?
+    @FocusState private var focus: Field?
+
+    private enum Field { case email, password, code }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if needsCode {
+                    Section {
+                        TextField("123456", text: $code)
+                            .textContentType(.oneTimeCode)
+                            .keyboardType(.numberPad)
+                            .font(.title2.monospacedDigit())
+                            .focused($focus, equals: .code)
+                        Toggle("Trust this device", isOn: $trustDevice)
+                    } header: {
+                        Text("Authenticator code")
+                    } footer: {
+                        Text("Enter the code from your authenticator app, or a recovery code.")
+                    }
+                } else {
+                    Section {
+                        TextField("Email", text: $email)
+                            .textContentType(.username)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($focus, equals: .email)
+                            .submitLabel(.next)
+                            .onSubmit { focus = .password }
+                        SecureField("Password", text: $password)
+                            .textContentType(.password)
+                            .focused($focus, equals: .password)
+                            .submitLabel(.go)
+                            .onSubmit { Task { await submit() } }
+                    }
+                }
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote) }
+                }
+            }
+            .navigationTitle(needsCode ? "Two-factor" : "Sign in with email")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy { ProgressView() } else {
+                        Button(needsCode ? "Verify" : "Sign in") { Task { await submit() } }
+                            .disabled(needsCode ? code.count < 4 : email.isEmpty || password.isEmpty)
+                    }
+                }
+            }
+            .onAppear { focus = .email }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func submit() async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let step = needsCode ? try await auth.verify(code: code, trustDevice: trustDevice) : try await auth.signIn(email: email, password: password)
+            switch step {
+            case .done(let user):
+                await done(user)
+                dismiss()
+            case .twoFactor:
+                withAnimation { needsCode = true }
+                focus = .code
+            }
+        } catch {
             self.error = error.localizedDescription
         }
     }
+}
 
-    private func useKey() {
-        guard let server = normalizedServer(serverText) else { return }
-        model.signedIn(Credential(server: server, key: pastedKey.trimmingCharacters(in: .whitespaces), keyId: nil, email: nil, prefix: String(pastedKey.prefix(18))))
+// Another Flow server, or (for testing) an API key.
+private struct ServerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var model
+    @Binding var serverText: String
+    let onChange: () -> Void
+    @State private var draft = ""
+    @State private var pastedKey = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("flow.flygonlc.com", text: $draft)
+                        .textContentType(.URL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Use Flygon Flow") { draft = "flow.flygonlc.com" }
+                } header: {
+                    Text("Server")
+                } footer: {
+                    Text("Only change this if you run your own Flow.")
+                }
+                Section {
+                    SecureField("flow_live_…", text: $pastedKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Use this key") {
+                        guard let server = normalizedServer(draft) else { return }
+                        model.signedIn(Credential(server: server, key: pastedKey.trimmingCharacters(in: .whitespaces), keyId: nil, email: nil, prefix: String(pastedKey.prefix(18))))
+                        dismiss()
+                    }
+                    .disabled(!pastedKey.hasPrefix("flow_"))
+                } header: {
+                    Text("API key (for testing)")
+                } footer: {
+                    Text("Notifications, the inbox and the map need a normal sign-in.")
+                }
+            }
+            .navigationTitle("Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Connect") { serverText = draft; onChange(); dismiss() }
+                        .disabled(normalizedServer(draft) == nil)
+                }
+            }
+            .onAppear { draft = serverText }
+        }
     }
 }

@@ -8,6 +8,7 @@ final class BoardStore {
     private(set) var cards: [FlowCard] = []
     private(set) var projects: [String: FlowProject] = [:]
     private(set) var labels: [String: FlowLabel] = [:]
+    private(set) var people: [FlowPerson] = []
     private(set) var loading = false
     private(set) var loadedEnv: String?
     var projectFilter: String?
@@ -15,6 +16,8 @@ final class BoardStore {
     func cards(in column: BoardColumn) -> [FlowCard] {
         cards.filter { $0.column == column.rawValue }
     }
+
+    var loadedOnce: Bool { loadedEnv != nil }
 
     var sortedProjects: [FlowProject] {
         projects.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -30,7 +33,9 @@ final class BoardStore {
         async let c = api.cards(env: env, project: projectFilter)
         async let p = api.projects(env: env)
         async let l = api.labels(env: env)
+        async let ppl = api.people(env: env)
         let (cards, projects, labels) = try await (c, p, l)
+        people = (try? await ppl) ?? people
         self.cards = cards
         self.projects = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         self.labels = Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })

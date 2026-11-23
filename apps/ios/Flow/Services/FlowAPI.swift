@@ -36,6 +36,16 @@ struct FlowAPI {
         try await all("/api/v1/envs/\(seg(env))/labels")
     }
 
+    // Everyone on any chart (person cards), with photos.
+    func people(env: String) async throws -> [FlowPerson] {
+        let charts: [FlowChart] = try await all("/api/v1/envs/\(seg(env))/charts")
+        var out = [FlowPerson]()
+        for chart in charts.prefix(20) {
+            out += try await all("/api/v1/envs/\(seg(env))/charts/\(seg(chart.id))/nodes", query: [URLQueryItem(name: "type", value: "person")])
+        }
+        return out
+    }
+
     func cards(env: String, project: String?) async throws -> [FlowCard] {
         var query = [URLQueryItem]()
         if let project { query.append(URLQueryItem(name: "project", value: project)) }

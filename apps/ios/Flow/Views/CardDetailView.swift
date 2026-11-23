@@ -10,6 +10,9 @@ struct CardDetailView: View {
     @State private var mover = CardMover()
     @State private var editing = false
     @State private var error: String?
+    @State private var ticked = 0
+    @State private var moved = 0
+    @State private var moving = false
 
     init(ref: CardRef, initial: FlowCard? = nil, onChange: @escaping (FlowCard) -> Void = { _ in }) {
         self.ref = ref
@@ -24,98 +27,230 @@ struct CardDetailView: View {
             } else if let error {
                 ContentUnavailableView("Can't open this card", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
-                ProgressView()
+                details(.placeholder).redacted(reason: .placeholder).disabled(true)
             }
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(card?.numberText ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let card {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Edit") { editing = true }
-                    MoveMenu(card: card) { to in
-                        guard let api = model.api else { return }
-                        Task { await mover.move(api, env: ref.env, card: card, to: to) }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        MoveMenu(card: card) { to in move(card, to) }
+                        if let url = webURL(card) {
+                            ShareLink(item: url) { Label("Share link", systemImage: "square.and.arrow.up") }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
+                    Button("Edit") { editing = true }
                 }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let card, let next = BoardColumn(rawValue: card.column)?.nextStep {
+                Button {
+                    move(card, next.to)
+                } label: {
+                    Label(next.title, systemImage: next.systemImage)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.columnColor(next.to.rawValue))
+                .controlSize(.large)
+                .disabled(moving)
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
             }
         }
         .sheet(isPresented: $editing) {
-            if let card {
-                CardEditorView(mode: .edit(env: ref.env, card: card)) { updated($0) }
-            }
+            if let card { CardEditorView(mode: .edit(env: ref.env, card: card)) { updated($0) } }
         }
         .cardMoveDialog(mover)
-        .task { mover.onMoved = { updated($0) }; await refresh() }
+        .sensoryFeedback(.selection, trigger: ticked)
+        .sensoryFeedback(.success, trigger: moved)
+        .task { mover.onMoved = { updated($0); moved += 1 }; await refresh() }
         .refreshable { await refresh() }
     }
 
-    @ViewBuilder
     private func details(_ card: FlowCard) -> some View {
-        let column = BoardColumn(rawValue: card.column)
-        List {
-            if let message = error ?? mover.error {
-                Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let message = error ?? mover.error {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .cardSurface()
+                }
+                header(card)
+                facts(card)
+                if let text = card.description, !text.isEmpty {
+                    section("Description") {
+                        Text(markdown(text))
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .tint(Theme.green)
+                    }
+                }
+                if let items = card.checklist, !items.isEmpty { checklist(items) }
+                if let links = card.links, !links.isEmpty { linksSection(links) }
             }
-            Section {
-                Text(card.title)
-                    .font(.title3.weight(.semibold))
-                    .textSelection(.enabled)
-                LabeledContent("Column") {
+            .padding()
+            .padding(.bottom, 12)
+        }
+    }
+
+    private func header(_ card: FlowCard) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ColumnPill(column: card.column)
+                if let snoozed = card.snoozedUntil, let d = ISO8601DateFormatter().date(from: snoozed), d > .now {
+                    Label("Snoozed", systemImage: "moon.zzz").labelStyle(TightLabel()).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            Text(card.title)
+                .font(.title2.weight(.bold))
+                .textSelection(.enabled)
+            let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
+            if card.project != nil || !labels.isEmpty {
+                FlowLayout(spacing: 6) {
+                    if let p = card.project.flatMap({ meta.projects[$0] }) {
+                        ProjectTag(project: p, font: .caption.weight(.medium))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color(.tertiarySystemFill), in: .capsule)
+                    }
+                    ForEach(labels) { LabelChip(label: $0) }
+                }
+            }
+        }
+    }
+
+    private func facts(_ card: FlowCard) -> some View {
+        let people = meta.assignees(card)
+        let roles = Dictionary((card.assignees ?? []).map { ($0.node, $0.role ?? "developer") }, uniquingKeysWith: { a, _ in a })
+        return VStack(spacing: 0) {
+            if !people.isEmpty {
+                ForEach(people) { person in
+                    factRow {
+                        Avatar(name: person.name, image: person.image, size: 28)
+                    } label: {
+                        Text(person.name).font(.body)
+                    } value: {
+                        Text((roles[person.id] ?? "developer").capitalized).foregroundStyle(.secondary)
+                    }
+                    Divider().padding(.leading, 52)
+                }
+            }
+            if let due = card.due, !due.isEmpty {
+                factRow { icon("calendar", .red) } label: { Text("Due") } value: {
                     HStack(spacing: 6) {
-                        Image(systemName: column?.systemImage ?? "square").imageScale(.small)
-                        Text(column?.title ?? card.column)
-                    }
-                }
-                if let id = card.project, let p = meta.projects[id] {
-                    LabeledContent("Project") {
-                        HStack(spacing: 6) {
-                            Circle().fill(Color(flow: p.color)).frame(width: 9, height: 9)
-                            Text(p.name)
+                        // "Tomorrow · Dec 1": the relative words only when they say more than the date.
+                        if let info = DueLabel.describe(due), (-1...6).contains(info.days) || info.days < -1 {
+                            DueLabel(due: due, done: card.column == "done")
+                            Text("·").foregroundStyle(.tertiary)
                         }
+                        if let d = DueLabel.parser.date(from: due) { Text(d.formatted(.dateTime.month(.abbreviated).day().year())).foregroundStyle(.secondary) }
                     }
                 }
-                let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
-                if !labels.isEmpty {
-                    LabeledContent("Labels") {
-                        HStack(spacing: 4) { ForEach(labels) { LabelChip(label: $0) } }
-                    }
-                }
-                if let points = card.points {
-                    LabeledContent("Points", value: points.formatted())
-                }
-                if let due = card.due, !due.isEmpty {
-                    LabeledContent("Due", value: due)
+                Divider().padding(.leading, 52)
+            }
+            if let points = card.points {
+                factRow { icon("gauge.with.needle", .indigo) } label: { Text("Points") } value: { Text(points.formatted()).foregroundStyle(.secondary) }
+                Divider().padding(.leading, 52)
+            }
+            factRow { icon("clock", .gray) } label: { Text("Updated") } value: {
+                if let u = card.updated, let d = ISO8601DateFormatter.withFraction.date(from: u) ?? ISO8601DateFormatter().date(from: u) {
+                    Text(d, format: .relative(presentation: .named)).foregroundStyle(.secondary)
+                } else {
+                    Text("—").foregroundStyle(.secondary)
                 }
             }
+        }
+        .padding(.horizontal, 14)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: Theme.corner, style: .continuous))
+    }
 
-            if let text = card.description, !text.isEmpty {
-                Section("Description") {
-                    Text(text).textSelection(.enabled)
-                }
+    private func factRow<I: View, L: View, V: View>(@ViewBuilder icon: () -> I, @ViewBuilder label: () -> L, @ViewBuilder value: () -> V) -> some View {
+        HStack(spacing: 12) {
+            icon().frame(width: 28)
+            label()
+            Spacer()
+            value().font(.subheadline)
+        }
+        .padding(.vertical, 11)
+    }
+
+    private func icon(_ name: String, _ color: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 28, height: 28)
+            .background(color.gradient, in: .rect(cornerRadius: 7, style: .continuous))
+    }
+
+    private func section<C: View>(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if let trailing { Text(trailing).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
             }
+            .padding(.horizontal, 4)
+            content().cardSurface()
+        }
+    }
 
-            if let items = card.checklist, !items.isEmpty {
-                Section("Checklist · \(items.filter(\.done).count)/\(items.count)") {
-                    ForEach(items) { item in
-                        Button {
-                            Task { await toggle(item) }
-                        } label: {
-                            Label(item.text, systemImage: item.done ? "checkmark.circle.fill" : "circle")
+    private func checklist(_ items: [FlowCard.ChecklistItem]) -> some View {
+        let done = items.filter(\.done).count
+        return section("Checklist", trailing: "\(done) of \(items.count)") {
+            VStack(alignment: .leading, spacing: 12) {
+                ProgressView(value: Double(done), total: Double(max(items.count, 1)))
+                    .tint(done == items.count ? .green : Theme.green)
+                ForEach(items) { item in
+                    Button {
+                        Task { await toggle(item) }
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(item.done ? Color.green : Color.secondary)
+                                .font(.body)
+                                .contentTransition(.symbolEffect(.replace))
+                            Text(item.text)
+                                .strikethrough(item.done, color: .secondary)
                                 .foregroundStyle(item.done ? .secondary : .primary)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
+                        .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
                 }
             }
+        }
+    }
 
-            if let links = card.links, !links.isEmpty {
-                Section("Links") {
-                    ForEach(links, id: \.url) { link in
-                        if let url = URL(string: link.url) {
-                            Link(destination: url) {
-                                Label(link.url, systemImage: link.kind == "pr" ? "arrow.triangle.pull" : link.kind == "commit" ? "smallcircle.filled.circle" : "link")
-                                    .lineLimit(1)
+    private func linksSection(_ links: [FlowCard.CardLink]) -> some View {
+        section("Links") {
+            VStack(spacing: 12) {
+                ForEach(links, id: \.url) { link in
+                    if let url = URL(string: link.url) {
+                        Link(destination: url) {
+                            HStack(spacing: 12) {
+                                icon(link.kind == "pr" ? "arrow.triangle.pull" : link.kind == "commit" ? "smallcircle.filled.circle" : "link",
+                                     link.kind == "pr" ? .purple : link.kind == "commit" ? .gray : .blue)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(LinkInfo(url).title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                                    Text(LinkInfo(url).subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                             }
                         }
                     }
@@ -124,8 +259,26 @@ struct CardDetailView: View {
         }
     }
 
+    private func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+
+    private func webURL(_ card: FlowCard) -> URL? {
+        guard let n = card.number else { return nil }
+        return URL(string: "/#devops/card/\(n)", relativeTo: model.server)?.absoluteURL
+    }
+
+    private func move(_ card: FlowCard, _ to: BoardColumn) {
+        guard let api = model.api else { return }
+        moving = true
+        Task {
+            await mover.move(api, env: ref.env, card: card, to: to, approve: card.column == BoardColumn.uat.rawValue && to == .done)
+            moving = false
+        }
+    }
+
     private func updated(_ fresh: FlowCard) {
-        card = fresh
+        withAnimation(.snappy) { card = fresh }
         error = nil
         onChange(fresh)
     }
@@ -141,9 +294,10 @@ struct CardDetailView: View {
         }
     }
 
-    // Ticks one item: the whole list is sent, with ifUpdated so a change made elsewhere is not lost.
+    // Ticks one item at once (optimistically), sending the whole list with ifUpdated.
     private func toggle(_ item: FlowCard.ChecklistItem) async {
         guard let api = model.api, let card else { return }
+        ticked += 1
         let list = (card.checklist ?? []).map { CardPatch.ChecklistEdit(id: $0.id, text: $0.text, done: $0.id == item.id ? !$0.done : $0.done) }
         do {
             updated(try await api.updateCard(env: ref.env, card: card.id, CardPatch(checklist: list, ifUpdated: card.updated)))
@@ -154,4 +308,59 @@ struct CardDetailView: View {
             self.error = error.localizedDescription
         }
     }
+}
+
+// GitHub links read as "PR #12" / "repo", anything else as its host and path.
+struct LinkInfo {
+    let title: String
+    let subtitle: String
+
+    init(_ url: URL) {
+        let parts = url.pathComponents.filter { $0 != "/" }
+        if url.host?.hasSuffix("github.com") == true, parts.count >= 4 {
+            let repo = "\(parts[0])/\(parts[1])"
+            switch parts[2] {
+            case "pull": title = "Pull request #\(parts[3])"; subtitle = repo; return
+            case "issues": title = "Issue #\(parts[3])"; subtitle = repo; return
+            case "commit": title = "Commit \(parts[3].prefix(7))"; subtitle = repo; return
+            default: break
+            }
+        }
+        title = url.host ?? url.absoluteString
+        subtitle = url.path.isEmpty ? url.absoluteString : url.path
+    }
+}
+
+// Wraps chips onto as many lines as they need.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0, widest: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > 0 && x + s.width > width { y += row + spacing; x = 0; row = 0 }
+            x += s.width + spacing; row = max(row, s.height); widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + row)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, row: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + s.width > bounds.maxX { y += row + spacing; x = bounds.minX; row = 0 }
+            v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing; row = max(row, s.height)
+        }
+    }
+}
+
+extension ISO8601DateFormatter {
+    static let withFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 }

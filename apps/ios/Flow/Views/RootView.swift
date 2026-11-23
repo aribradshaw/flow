@@ -15,7 +15,7 @@ struct RootView: View {
 // Tabs on iPhone, a sidebar on iPad (.sidebarAdaptable).
 struct MainView: View {
     enum Section: Hashable {
-        case inbox, board, canvas, settings
+        case inbox, board, canvas
     }
 
     @Environment(AppModel.self) private var model
@@ -24,15 +24,14 @@ struct MainView: View {
     @State private var inboxPath = NavigationPath()
     @State private var section: Section = {
         #if DEBUG
-        // UI testing: `-startTab inbox`, `canvas` or `settings`.
+        // UI testing: `-startTab board` or `canvas`.
         switch UserDefaults.standard.string(forKey: "startTab") {
-        case "inbox": return .inbox
+        case "board": return .board
         case "canvas": return .canvas
-        case "settings": return .settings
-        default: return .board
+        default: return .inbox
         }
         #else
-        return .board
+        return .inbox
         #endif
     }()
 
@@ -45,14 +44,12 @@ struct MainView: View {
             Tab("Board", systemImage: "rectangle.split.3x1", value: .board) {
                 BoardScreen(path: $boardPath)
             }
-            Tab("Flow", systemImage: "point.3.connected.trianglepath.dotted", value: .canvas) {
+            Tab("Map", systemImage: "point.3.connected.trianglepath.dotted", value: .canvas) {
                 CanvasScreen()
-            }
-            Tab("Settings", systemImage: "gearshape", value: .settings) {
-                SettingsScreen()
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .sheet(isPresented: Binding(get: { model.showingSettings }, set: { model.showingSettings = $0 })) { SettingsScreen() }
         .onChange(of: model.route, initial: true) { open(model.route) }
         .task {
             PushManager.shared.onActivity = {
@@ -80,5 +77,19 @@ struct MainView: View {
             inboxPath = NavigationPath()
             inboxPath.append(ref)
         }
+    }
+}
+
+// The signed-in person, top left of Inbox and Board: opens Settings.
+struct ProfileButton: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Button {
+            model.showingSettings = true
+        } label: {
+            Avatar(name: model.credential?.email ?? "Flow", size: 30)
+        }
+        .accessibilityLabel("Account and settings")
     }
 }

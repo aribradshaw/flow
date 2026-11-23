@@ -21,6 +21,17 @@ struct FlowProject: Decodable, Identifiable, Hashable {
     let color: String?
 }
 
+struct FlowPerson: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let image: String?
+}
+
+struct FlowChart: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
 struct FlowLabel: Decodable, Identifiable, Hashable {
     let id: String
     let name: String

@@ -21,10 +21,15 @@ final class AppModel {
     var env: FlowEnv? { envs.first { $0.id == envID } }
     // A notification or widget tap waiting to be shown (MainView takes it).
     var route: AppRoute?
+    var showingSettings = false
     var api: FlowAPI? { credential.map(FlowAPI.init) }
 
     init() {
         let saved = UserDefaults.standard.string(forKey: "server").flatMap(URL.init(string:))
+        #if DEBUG
+        // UI testing: `-resetSignIn YES` starts signed out.
+        if UserDefaults.standard.bool(forKey: "resetSignIn") { Keychain.delete() }
+        #endif
         let stored = Keychain.load()
         credential = stored
         server = stored?.server ?? saved ?? Self.defaultServer
@@ -62,14 +67,27 @@ final class AppModel {
     struct EnvMeta {
         var projects: [String: FlowProject] = [:]
         var labels: [String: FlowLabel] = [:]
+        var people: [String: FlowPerson] = [:]
+
+        // The people on a card; a share member without a person card shows by email.
+        func assignees(_ card: FlowCard) -> [FlowPerson] {
+            var seen = Set<String>()
+            return (card.assignees ?? []).compactMap { a in
+                guard seen.insert(a.node).inserted else { return nil }
+                if let p = people[a.node] { return p }
+                if a.node.hasPrefix("@") { return FlowPerson(id: a.node, name: String(a.node.dropFirst()), image: nil) }
+                return nil
+            }
+        }
         var sortedProjects: [FlowProject] { projects.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending } }
         var sortedLabels: [FlowLabel] { labels.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending } }
     }
     private(set) var metas: [String: EnvMeta] = [:]
 
-    func setMeta(_ env: String, projects: [FlowProject], labels: [FlowLabel]) {
+    func setMeta(_ env: String, projects: [FlowProject], labels: [FlowLabel], people: [FlowPerson]? = nil) {
         metas[env] = EnvMeta(projects: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
-                             labels: Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }))
+                             labels: Dictionary(labels.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                             people: people.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) } ?? metas[env]?.people ?? [:])
     }
 
     func meta(_ env: String) async -> EnvMeta {
@@ -77,7 +95,8 @@ final class AppModel {
         guard let api else { return EnvMeta() }
         async let p = api.projects(env: env)
         async let l = api.labels(env: env)
-        if let (projects, labels) = try? await (p, l) { setMeta(env, projects: projects, labels: labels) }
+        async let ppl = api.people(env: env)
+        if let (projects, labels) = try? await (p, l) { setMeta(env, projects: projects, labels: labels, people: (try? await ppl) ?? []) }
         return metas[env] ?? EnvMeta()
     }
 
