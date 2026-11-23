@@ -233,9 +233,9 @@ async function inbox(req,res){
 // (OWNER_EMAIL) for imports and for a local app syncing to production.
 // With FLOW_SYNC_URL + FLOW_SYNC_TOKEN set (e.g. Owner's local app), these calls are relayed to that
 // server; the local file copy is the offline fallback.
-let officeHistory;
+let officeHistory,appPush;
 const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null),
-  onSaved:(env,before,after)=>officeHistory?.cards(env,before,after)});
+  onSaved:(env,before,after,meta)=>{officeHistory?.cards(env,before,after);appPush?.saved(env,before,after,meta)}});
 const CAPS=auth.CAPS,isOwnerEmail=e=>sameEmail(e,auth.OWNER_EMAIL),limitsOf=email=>limitsMod.limitsFor(CAPS,{owner:isOwnerEmail(email)});
 const users=userStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Someone with no row yet who already owns data used Flow before people were recorded: not new.
@@ -1263,6 +1263,7 @@ const {apiV1,envCheckFor,memoryRateLimit}=await import('./lib/api-v1.mjs');
 const registryMod=await import('./lib/registry.mjs');
 const {apiKeyStore,authenticateApiKey,bearerKey,allows:keyAllows,SCHEMA:APIKEY_SCHEMA}=await import('./lib/apikeys.mjs');
 const {apiKeyRoutes}=await import('./lib/apikeys-routes.mjs');
+const appDeviceMod=await import('./lib/app-device.mjs'),apnsMod=await import('./lib/apns.mjs');
 const {mcpHandler}=await import('./lib/mcp.mjs');
 // 'live' keys only on the public deploy; local mode and verify make flow_test_ keys. db without a catch:
 // a database error fails closed.
@@ -1503,6 +1504,27 @@ async function officeApi(req,res){
 const apiRateLimit=a=>a.operation?.tags?.includes('office')?officeLimit(a):apiLimit(a);
 // Share additions for the API and MCP (proposals.*): never for the owner token.
 const apiProposals={list:(envId,user,o)=>user.token?[]:proposalsFor(envId,user,o),decide:(id,user,approve,env)=>user.token?{status:404,body:{error:'Not found',code:'proposal_not_found'}}:decideShareProposal(id,user,approve,env)};
+// ---------- the Flow app on iPhone and iPad (lib/app-device.mjs, lib/apns.mjs, docs/ios-app.md) ----------
+// Device keys only (scope device). Pushes go out only when APNS_* is set; FLOW_PUSH_PREVIEWS=off leaves card
+// titles and prompt text out of them.
+const appDevices=appDeviceMod.pushDeviceStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+const apnsCfg=apnsMod.apnsConfig(process.env);
+const appHub=appDeviceMod.pushHub({store:appDevices,sender:apnsCfg?apnsMod.apnsSender(apnsCfg):null,apiKeys,previews:process.env.FLOW_PUSH_PREVIEWS!=='off',
+  emailOf:async opid=>(await users.list()).find(u=>u.opidId===opid)?.email||null,isQuiet:email=>officeHub.isQuiet(email)});
+if(apnsCfg){
+  officeState.on(e=>{if(e.type==='waiting')return appHub.agentWaiting(e.email,e.agent).catch(()=>{})});
+  appPush={saved(env,before,after,meta){const ev=appDeviceMod.cardEvents(before,after,meta);if(ev.length)appHub.cards({id:env,name:after?.environment?.name||''},ev).catch(()=>{})}};
+}
+const appApi=appDeviceMod.appRoutes({authenticate:r=>authenticateApiKey(r,apiKeys),readJson,json,
+  async envsFor(user,a){
+    const st=apiStore(a,{id:'key:'+a.keyId,email:user.email,key:a}),out=[];
+    for(const w of (await st.owned(user.email)).slice(0,25)){const g=await st.get(w.envId).catch(()=>null);if(g?.data)out.push({id:w.envId,name:w.name||g.data.environment?.name||'Workspace',data:g.data})}
+    return out;
+  },
+  opidIdOf:async email=>(await users.get(email).catch(()=>null))?.opidId||'',
+  office:{waitingOf:email=>officeHub.waitingOf(email),answer:(user,b)=>officeHub.answer(null,user,b),refresh:emails=>officeState.refresh(emails)},
+  store:appDevices,hub:appHub});
+
 async function apiV1Route(req,res){
   if(!req.url.startsWith('/api/v1'))return false;
   // One authentication per request (it also counts towards the key's rate limit).
@@ -1606,7 +1628,7 @@ const server=http.createServer(async(req,res)=>{
     json(res,200,{name,accent,logo:/^\/(?!\/)[A-Za-z0-9/_-]+\.(?:svg|png|webp)$/.test(logo)&&!logo.includes('..')?logo:''});return;
   }
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
-  if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
+  if(await apiV1Route(req,res)||await mcpRoute(req,res)||await appApi(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
   if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await officeApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.

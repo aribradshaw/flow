@@ -86,6 +86,17 @@ The 3D office's meeting room, proximity voice and screen sharing connect browser
 
 Browsers allow the microphone and screen capture only on HTTPS pages (or `localhost`). When Flow is embedded in another site, the embedding page's frame needs `allow="microphone; display-capture"`. Restart the server after changing these settings.
 
+## Push notifications for the iPhone and iPad app
+
+The Flow app (`apps/ios`, see [the app's guide](ios-app.md)) works without this. Push notifications need an Apple developer account and an APNs authentication key (a `.p8` file from Certificates, Identifiers & Profiles › Keys). Set all four of these, or none:
+
+- `APNS_KEY`: the `.p8` file's contents. Literal `\n` sequences are accepted, so it fits in one line. You can use `APNS_KEY_FILE` (a path) instead.
+- `APNS_KEY_ID`: the key's 10-character id.
+- `APNS_TEAM_ID`: your 10-character team id.
+- `APNS_TOPIC`: the app's bundle id. It must match the build people install.
+
+`FLOW_PUSH_PREVIEWS=off` leaves card titles and agent prompts out of notifications, so they never pass through Apple. The notification just says to open Flow. If only some of these settings are set, the server refuses to start.
+
 ## Embed Flow in another site
 
 By default Flow refuses to be shown inside another site's frame (`Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`), which protects against clickjacking. To show Flow in a dashboard, a home-screen app or a kiosk, list the sites that may embed it in `FLOW_FRAME_ANCESTORS`, separated by spaces or commas:
