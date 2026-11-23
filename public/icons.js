@@ -3,6 +3,8 @@ const P={
   logo:'<path d="M12 2 22 12 12 22 2 12z"/><path d="M12 7 17 12 12 17 7 12z"/>',
   building:'<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M10 21v-4h4v4M9 7h.01M15 7h.01M12 7h.01M9 11h.01M12 11h.01M15 11h.01"/>',
   user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  shirt:'<path d="M8 3 3 6l2 4 2-1v11h10V9l2 1 2-4-5-3a4 4 0 0 1-8 0Z"/>',
+  dice:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01"/>',
   area:'<rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="3.5 3"/>',
   note:'<path d="M4 4h16v10l-6 6H4z"/><path d="M14 20v-6h6"/>',
   connect:'<circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5 17.5 6.5"/>',

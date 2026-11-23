@@ -22,6 +22,7 @@ import {createOfficeMeters} from './office-meters.js';
 import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
+import {cleanLook} from './office-look-core.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
 import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
@@ -56,6 +57,7 @@ export function openOffice(opts){
       <button type="button" class="txt" data-of-replay disabled>Replay</button>
       <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
       <span class="of-keys">WASD · E interact · Shift sprint · Space jump · middle/right drag</span>
+      <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="overview" aria-label="Office overview" aria-pressed="false" data-tip="Overview (O)">${icon('cube3d')}</button>
       <button type="button" class="ib" data-of="controls" aria-label="Office controls" aria-expanded="false" data-tip="Office controls">?</button>
@@ -87,14 +89,15 @@ export function openOffice(opts){
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
         <dt>Voice</dt><dd>Walk into the Meeting room to talk. M mutes; hold V to talk if push-to-talk is on. Talk to people nearby from the voice bar.</dd>
-        <dt>Decorate</dt><dd>Inside your room: place props, R to rotate, Delete to remove, Esc to leave</dd></dl>
+        <dt>Decorate</dt><dd>Inside your room: place props, R to rotate, Delete to remove, Esc to leave</dd>
+        <dt>Your look</dt><dd>L, the shirt button, the mirror in your room, or click yourself</dd></dl>
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
   root.tabIndex=-1;document.body.append(root);
   S={opts,root,overlays:[],overlaySession:uid(),lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
-    input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
+    input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),looks:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
   // Browser automation only (navigator.webdriver): end-to-end checks can place the avatar and read the office.
@@ -121,13 +124,13 @@ export const officeOpen=()=>!!S;
 export const officePeek=()=>S; // the open office's state, for tests and the screenshot harness
 export function closeOffice(){
   if(!S)return;S.replay?.destroy();const s=S;S=null;
-  s.presence?.destroy();
+  s.presence?.destroy();s.lookEditor?.close();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
   s.voice?.dispose(); // every call ends; the mic and a shared screen are released
   s.decor?.dispose();
   s.meters?.dispose();s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
-  try{s.place?.dispose();s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
+  try{s.place?.dispose();s.org?.dispose();const all=[];s.scene?.traverse(o=>all.push(o));for(const o of all)o.userData.dispose?.();disposeFigures();disposeMascots();s.renderer?.dispose();for(const o of all){o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()}}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
@@ -235,6 +238,8 @@ function connect(){
   on('leave',({key,at})=>{S.absent.delete(key);removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
+  // Someone saved a new look (office-look-editor.js), or went back to their default (look: null).
+  on('look',({key,look})=>setLook(key,look));
   on('rtc',d=>S.voice?.event(d)); // voice signalling (office-voice.js, lib/office-rtc.mjs)
   on('agents',({member,agents})=>{S.live.set(member,agents);if(member===S.meKey)answersSeen(agents);if(S.world){buildDesks(member);seatsChanged()}refreshPanel();focusPending();S.presence?.observeWaiting(member,agents);S.meters?.invalidate()});
   on('meters',d=>{S.sparks=d.sparks||{};S.meters?.invalidate()});
@@ -381,6 +386,7 @@ function snapshot(d){
   S.decor?.load(d.decor);
   S.live=new Map(Object.entries(d.live||{}));S.sparks=d.sparks||{};S.portalList=d.portals||[];
   S.serverWorld=d.env?.world;if(S.world)usePlace(wantedWorld());
+  for(const key of new Set([...S.looks.keys(),...Object.keys(d.looks||{})]))setLook(key,d.looks?.[key]||null);
   updateSources(d.yourSources||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();S.meters?.invalidate();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
@@ -459,7 +465,7 @@ function initScene(){
   Object.assign(M,{
     box:new THREE.BoxGeometry(1,1,1),ico:new THREE.IcosahedronGeometry(1,0),ico1:new THREE.IcosahedronGeometry(1,1),oct:new THREE.OctahedronGeometry(1,0),
     cyl:new THREE.CylinderGeometry(1,1,1,7),cone:new THREE.ConeGeometry(1,1,6),torus:new THREE.TorusGeometry(0.62,0.12,5,14),disc:new THREE.CircleGeometry(1,16),
-    wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:mat('#3d4c56'),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
+    wall:mat('#f9fbfa'),hit:new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),desk:mat('#b98d63'),screenOff:mat('#3b4542'),dark:mat('#1d2421'),white:mat('#ffffff'),plinth:mat('#c9d2cd'),trim:mat('#3d4c56'),glass:new THREE.MeshBasicMaterial({color:'#d3ebf3'}),pot:mat('#b5835a'),leaf:mat('#5f9e6e'),shadow:new THREE.MeshBasicMaterial({color:'#000',transparent:true,opacity:.14,depthWrite:false}),
   });
   S.world=new THREE.Group();scene.add(S.world);
   Object.assign(S,{renderer,scene,camera,ray:new THREE.Raycaster(),clock:new THREE.Clock()});
@@ -531,7 +537,7 @@ function toggleControls(){
 }
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
-function clear(group){group.removeFromParent();group.traverse(o=>{if(o.material&&o.userData.own)o.material.dispose()});const g=new Set();group.traverse(o=>g.add(o));S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
+function clear(group){group.removeFromParent();const g=new Set();group.traverse(o=>g.add(o));for(const o of g){if(o.material&&o.userData.own)o.material.dispose();o.userData.dispose?.()}S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
 // top: the label hangs below its point (a plate on a wall) instead of standing on it.
 function label(obj,html,{y=1.6,cls='',near=0,show=null,top=false}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show,top};S.labelList.push(l);return l}
 
@@ -575,6 +581,7 @@ function buildRooms(){
   for(const r of previous.values())clear(r.group);
   if(S.mainWall){clear(S.mainWall);S.mainWall=null}
   S.walls=[];
+  S.interact?.unregister('mirror');
   const list=[...S.members].sort((a,b)=>(b.owner-a.owner)||String(a.name).localeCompare(b.name));
   const byKey=new Map(list.map(m=>[m.key,m]));
   S.worldLayout=S.place.layout(list.map(m=>m.key),{commonR:S.commonR||10});
@@ -604,6 +611,14 @@ function buildRooms(){
     const tag=label(sign,`<span class="of-room" data-office-person="${esc(m.key)}" style="--c:${fg}"><b>${esc(m.name)}</b>${m.me?' · your room':''}<small></small></span>`,{y:WALL_H-0.08,cls:'room',top:true});
     const door=new THREE.Vector3(0,0,ROOM_D/2-1.6).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
     const entrance=new THREE.Vector3(0,0,ROOM_D/2).applyAxisAngle(new THREE.Vector3(0,1,0),facing).add(c);
+    if(m.me){
+      // A standing mirror by your door: E there opens the look editor.
+      const mx=ROOM_W/2-0.42,mz=ROOM_D/2-1.9,mirror=new THREE.Group();mirror.position.set(mx,0,mz);mirror.rotation.y=-Math.PI/2;
+      mirror.add(part(M.box,M.trim,[0,1.02,-0.03],[0.86,1.9,0.06]),part(M.box,M.glass,[0,1.04,0.006],[0.72,1.72,0.02]),part(M.box,M.trim,[0,0.04,0],[0.7,0.08,0.36]));
+      g.add(mirror);boxAt(slot,mx,mz,0.36,0.86,1.9);
+      const at=toWorld(slot,mx-0.7,mz);
+      S.interact?.register({id:'mirror',position:()=>({x:at.x,y:0,z:at.z}),radius:1.7,height:2.15,priority:1,label:'Edit your look',onInteract:()=>{openLook();return {close:()=>S?.lookEditor?.close(),isOpen:()=>!!S?.lookEditor}}});
+    }
     S.rooms.set(m.key,{member:m,group:g,center:c,facing,door,entrance,desks:previous.get(m.key)?.desks,boxes:[],floorMat,wallMat,bg,fg,tag,note:previous.get(m.key)?.note||'',seen:''});roomLook(m.key);
     buildDesks(m.key,false);
   }
@@ -795,7 +810,7 @@ function buildAgentflow(){
     S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
   S.afPeople=people.map(({a,p,offline,dim})=>{
-    const f=makeHuman(lookFor(a.member||a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.userData={kind:'af',id:a.id,rig:f.userData.rig};f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
+    const f=makeHuman(a.member?lookOf(a.member):lookFor(a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);Object.assign(f.userData,{kind:'af',id:a.id,member:a.member||''});f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
     g.add(f);S.clickables.push(f);
     S.interact?.register({id:'af:'+a.id,object3D:f,radius:2.2,height:2.4,label:()=>`Talk to ${a.name}`,onInteract:()=>afOf(a.id)?openPanel({type:'af',id:a.id}):false});
     label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
@@ -836,17 +851,40 @@ function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(s
 
 // ---------- people ----------
 // A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
-function makeAvatar(key){return makeHuman(lookFor(key),{shadow:false})}
+function makeAvatar(key){return makeHuman(lookOf(key),{shadow:false})}
+// What someone looks like: the look they saved (office-look-core.js), else the default for their key.
+const lookOf=key=>S.looks.get(key)||lookFor(key);
+function setLook(key,look){
+  const next=look?cleanLook(look,{key}):null,was=S.looks.get(key)||null;
+  if(JSON.stringify(next)===JSON.stringify(was))return;
+  if(next)S.looks.set(key,next);else S.looks.delete(key);
+  S.people.get(key)?.figure.userData.setLook(lookOf(key));
+  for(const f of S.afPeople||[])if(f.userData.member===key)f.userData.setLook(lookOf(key));
+}
+// The look editor (office-look-editor.js): a dialog over the office, so walking pauses like under any overlay.
+async function openLook(){
+  const office=S;if(!office?.meKey||office.lookEditor||office.lookOpening)return;
+  clearKeys();office.pointer?.cancelOrbit();closeMenu();office.lookOpening=true;
+  let mod;try{mod=await import('./office-look-editor.js')}catch(e){office.lookOpening=false;office.opts.toast?.('The look editor could not load',true);return}
+  office.lookOpening=false;if(S!==office||office.lookEditor)return;
+  const opener=document.activeElement,key=office.meKey;
+  const editor=mod.openLookEditor({key,name:office.people.get(key)?.name||office.me?.name||'You',look:lookOf(key),host:office.root,toast:office.opts.toast,
+    save:look=>api('look',{look}).then(d=>{if(S===office)setLook(key,d.look)}),
+    onClose(){if(office.lookEditor===editor)office.lookEditor=null;if(S===office)(opener?.isConnected&&office.root.contains(opener)?opener:office.root).focus({preventScroll:true})}});
+  office.lookEditor=editor;
+}
 function upsertPerson(p,self=false){
   if(!S)return;S.absent.delete(p.key);let a=S.people.get(p.key);
   if(!a){
     const obj=new THREE.Group(),pose=new THREE.Group(),figure=makeAvatar(p.key),shade=shadow(0.45);
     figure.position.y=-0.88;pose.add(figure);pose.position.y=0.88;obj.add(pose,shade);
     obj.position.set(p.x??0,p.y??0,p.z??0);obj.rotation.y=p.heading||0;obj.userData={kind:'person',key:p.key,rig:figure.userData.rig};S.world.add(obj);
-    if(!self){obj.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));S.clickables.push(obj)}
+    // Your own avatar is clickable too: its menu opens the look editor.
+    // The click target is never drawn (the raycaster still finds it): one draw call less per person.
+    const hit=part(M.box,M.hit,self?[0,0.95,0]:[0,1,0],self?[0.6,1.9,0.6]:[0.9,2,0.9]);hit.visible=false;obj.add(hit);S.clickables.push(obj);
     const [bg,fg]=memberColor(p.key);
     const tag=label(obj,S.presence?S.presence.nameTag({name:p.name,image:p.image,self,bg,fg,key:p.key,presence:{status:'available',text:''}}):`<span class="of-name${self?' me':''}" data-office-person="${esc(p.key)}" style="--bg:${bg};--fg:${fg}"><i>${esc(initials(p.name))}</i>${esc(p.name)}</span>`,{y:2.05,cls:'person',show:self?()=>!!S.rig?.overview:null});
-    a={key:p.key,name:p.name,image:p.image||'',colors:[bg,fg],obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
+    a={key:p.key,name:p.name,image:p.image||'',colors:[bg,fg],obj,figure,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
         if(!S.people.has(p.key))return false;
@@ -993,8 +1031,9 @@ function showGone(){
 }
 function openMenu(key,e){
   const r=S.root.getBoundingClientRect();S.menu.hidden=false;S.menu.dataset.key=key;
-  const af=afFor(key);
-  S.menu.innerHTML=`<div class="of-mh">${esc(nameOf(key))}${af?.title?`<small>${esc(af.title)}</small>`:''}</div>${af?`<button type="button" role="menuitem" data-of="afInfo" data-id="${esc(af.id)}">${icon('user',13)}AgentFlow role</button>`:''}<button type="button" role="menuitem" data-of="wave">👋 Wave</button><button type="button" role="menuitem" data-of="follow">${icon('arrowR',13)}${S.follow===key?'Stop following':'Follow'}</button><button type="button" role="menuitem" data-of="message">${icon('send',13)}Message</button>`;
+  const af=afFor(key),head=`<div class="of-mh">${esc(nameOf(key))}${af?.title?`<small>${esc(af.title)}</small>`:''}</div>${af?`<button type="button" role="menuitem" data-of="afInfo" data-id="${esc(af.id)}">${icon('user',13)}AgentFlow role</button>`:''}`;
+  if(key===S.meKey)S.menu.innerHTML=head+`<button type="button" role="menuitem" data-of="look">${icon('shirt',13)}Edit look</button><button type="button" role="menuitem" data-of="wave">👋 Wave</button>`;
+  else S.menu.innerHTML=head+`<button type="button" role="menuitem" data-of="wave">👋 Wave</button><button type="button" role="menuitem" data-of="follow">${icon('arrowR',13)}${S.follow===key?'Stop following':'Follow'}</button><button type="button" role="menuitem" data-of="message">${icon('send',13)}Message</button>`;
   S.menu.style.left=Math.min(e.clientX-r.left,r.width-180)+'px';S.menu.style.top=Math.min(e.clientY-r.top,r.height-150)+'px';
   S.menu.querySelector('button').focus({preventScroll:true});
 }
@@ -1011,6 +1050,7 @@ function onClick(e){
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
   ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},closeMeter:()=>S.meters?.close(),
+    look:openLook,
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
     message(){closeMenu();const i=S.root.querySelector('.of-input');i.value=`@${nameOf(key)} `+i.value.replace(/^@\S+\s/,'');i.focus()},
@@ -1162,6 +1202,7 @@ function onKey(e){
     if(k==='?')toggleControls();
     return;
   }
+  if(k==='l'){e.preventDefault();if(!e.repeat)openLook();return}
   if(/^[1-4]$/.test(e.key)){e.preventDefault();emote(EMOTES[+e.key-1][0]);return}
   if(!S.replay?.active&&(e.key==='Enter'&&e.target===document.body||e.key==='t')){e.preventDefault();S.root.querySelector('.of-input').focus()}
 }
@@ -1239,14 +1280,13 @@ function frame(dt,t,delta){
     const run=THREE.MathUtils.clamp((motion.speed-WALK_SPEED)/(RUN_SPEED-WALK_SPEED),0,1);
     const stride=Math.min(1,motion.speed/WALK_SPEED);
     p.phase+=animation.dt*motion.speed*(2.35-run*0.37);
-    const step=motion.grounded?Math.abs(Math.sin(p.phase))*0.065*stride:0;
     const scale=1-squash+(motion.jumping?0.07:0);
     p.pose.scale.set(1+squash*0.5,scale,1+squash*0.5);
-    p.pose.position.y=0.88*scale+step;
+    p.pose.position.y=0.88*scale;
     p.pose.rotation.x=motion.flip|| (motion.jumping?-0.17:stride*(0.05+run*0.13));
-    p.pose.rotation.z=motion.grounded?Math.sin(p.phase)*stride*0.045:0;
+    p.pose.rotation.z=motion.grounded?Math.sin(p.phase)*stride*0.02:0;
     p.shade.position.y=0.02-o.position.y;
-    animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9});
+    animateHuman(o.userData.rig,animation.t,{speed:motion.speed,grounded:motion.grounded,jumping:motion.jumping,emote:p.emote,phase:(o.id%7)*0.9,cycle:p.phase});
   }
   if(!S.npc)for(const f of S.afPeople||[])animateHuman(f.userData.rig,animation.t,{phase:(f.id%7)*0.9});
   // Agents: running bob and type, waiting hop and glow, idle still; subagents circle.
@@ -1271,7 +1311,8 @@ function frame(dt,t,delta){
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
   if(!replay)S.boards?.frame(S.labelList);
   S.meters?.frame();
-  S.renderer.render(S.scene,S.camera);
+  // The look editor covers the office: nothing to draw under it.
+  if(!S.lookEditor)S.renderer.render(S.scene,S.camera);
   if(!replay)S.interact?.update();
   S.voice?.frame(dt);
   placeLabels();

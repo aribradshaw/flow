@@ -46,7 +46,8 @@ export const PRESETS={
 };
 export const PRESET_NAMES=Object.keys(PRESETS);
 
-// Avatar looks. Colours match office-figures.js so a saved look is the same mesh the office draws.
+// Avatar looks: the first wardrobe's palette. What the office stores and draws is the fuller look in
+// office-look-core.js (cleanLook there migrates this shape); new code should use that module.
 export const SKINS=['#f7d9c4','#eec1a0','#dca47c','#c08259','#94603f','#68412a'];
 export const HAIR_COLORS=['#2b1d14','#4a3120','#7a4b2a','#b9874b','#ddc48d','#1c1c1c','#8f8f8f','#a3412f'];
 export const HAIR_STYLES=[0,1,2,3];

@@ -16,7 +16,7 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **Transcript.** Your own agent's panel shows the latest lines of its conversation (up to 12: what you asked, what it said, and one line per tool call), scrolled to the newest. Only you ever see it: not the environment's owner, not someone who can see its project. Reporters mask secrets before sending, and Flow masks tokens, keys, `Authorization` headers and `.env`-looking lines again on the way in.
 - **Send to agent and Stop.** When its reporter can carry them out (T3 Code threads, through `flow office bridge` or another reporter that says so), your own agent's panel has a **Send to agent** box and a **Stop** button. Type a message and press **Enter** to send it (**Shift+Enter** for a new line): it reaches the agent as your next message, after its current turn when it is busy. **Stop** asks you to confirm, then interrupts its running turn. Each one shows as sending, then sent (waiting for the reporter), then how it went. While you type in the box, the movement and shortcut keys go to the box, not the office. Only the agent's owner ever gets these, they are rate-limited, and the reporter checks the agent is still the same before it acts. Claude Code in a terminal cannot be reached from outside, so its panel has neither.
 - **Allow and Deny.** When your own agent waits on a permission prompt that its reporter can answer, its panel shows the prompt with **Allow** and **Deny**. Your answer goes to the reporter on that machine (usually within a second), and the panel shows how it went. Only the agent's owner ever gets these buttons. The agent nods (or shakes its head for Deny) the moment you click, and works with a few gold sparks over it until the answer is through; everyone in the office sees it react, never the prompt. The panel says **Approved** or **Denied** at once, **Running…** when the agent's next report has it working again, and the reporter's message in red if it did not go through. If nothing comes back in 20 seconds it says **Still waiting on** its machine.
-- **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one).
+- **People.** Everyone who has the office open is an avatar with a name tag (and their account photo when they have one). Each person has a look: a face, hair, an outfit and shoes. Until you choose one, yours is picked for you and stays the same every visit. See [Your look](#your-look).
 - **Press E.** Walk up to an agent, a person or a board and a prompt says what **E** does there ("E Talk to Chief of Staff", "E Wave at Joe"); on a gamepad it is X / Square, and on a touch screen you tap the prompt. E again, Esc or walking away closes what it opened. The camera turns with **Z** and **C**.
 - **Status.** Each person sets Available, Focus, Do not disturb or Away. It shows on their avatar, name tag and door sign. See [Status](#status).
 - **Meeting room and voice.** A glass meeting room has its own place in the ring of rooms. Walk in to join its call: the first time, the browser asks to use your microphone. Everyone in the room hears everyone else, and walking out leaves the call. The sign at its door says who is in it ("Live: 3 in Meeting room"), and a green ring under an avatar shows who is speaking. Outside the room, **Talk to people nearby** in the voice bar (bottom right) lets you hear people within about 6 m who also have it on. Their voices get quieter with distance and come from their side. See [Voice](#voice).
@@ -52,6 +52,7 @@ Open **?** in the office header for the control list and the option to turn off 
 | Pan | Drag with two fingers |
 | Recenter | Middle-click or press **F** |
 | Top-down overview | Press **O** or select the overview button |
+| Edit your look | Press **L**, select the shirt button, click yourself, or press **E** at the mirror in your room |
 | Gamepad | Left stick to walk, right stick to orbit, **A** to jump, **B** or **X** to sprint |
 | Mute / unmute | **M**, or the mic button in the voice bar |
 | Push to talk | Hold **V** (turn it on in the voice bar's settings) |
@@ -117,6 +118,28 @@ To change the world, open the office of your own environment and pick **Office**
 The yacht's deck sways a little. **Sea motion** in the controls panel (**?**) turns that off; it starts off when your system asks for reduced motion. The setting is kept in this browser.
 
 The yacht's decks are terraced and never stacked, so each spot has exactly one floor height and everyone agrees where a person stands.
+
+## Your look
+
+Press **L**, use the shirt button in the header, click your own avatar, or walk up to the mirror by the door of your room and press **E**. The editor fills the screen, with you on a turntable: drag to turn, scroll or pinch to zoom in to your face. Walking pauses while it is open.
+
+Each tab is one part of you, with every choice shown as a small picture of you wearing it:
+
+| Tab | Choices |
+| --- | --- |
+| Body | Skin tone (twelve tones, or any colour), build and height |
+| Face | Eyes and eye colour, eyebrows, nose, mouth, facial hair, glasses, freckles and blush |
+| Hair | Twelve styles, from buzz cut to braids, and a colour |
+| Hat | Cap, beanie, bucket hat, captain's hat or headphones, and a colour |
+| Top | T-shirt, hoodie, button-up, blazer, sweater or tank top, with a colour and an optional pattern in an accent colour |
+| Bottoms | Jeans, chinos, shorts, skirt or joggers, and a colour |
+| Shoes | Sneakers, boots, loafers or sandals, and a colour |
+
+**Randomize** tries a new look, **Undo** steps back (also Ctrl or Cmd+Z), and **Reset to default** returns to the look picked for you. The buttons under the preview play a walk, a run and the four emotes. Nothing changes for anyone else until you press **Save**; then everyone in the office sees it at once.
+
+Your look belongs to you, not to one office: it follows you into every office you are in, and it is saved on the server (in Postgres, or under `BACKUP_DIR`), so it survives a restart. Only you can change it. The server accepts only the listed choices and plain colours, and keeps colours from being pure black or pure white so a face stays readable.
+
+People blink, look around and shift their weight while they stand, swing their arms when they walk or run, and each emote has its own face: a wink with the thumbs up, closed smiling eyes with a clap, a blush with the heart.
 
 ## Who sees what
 
@@ -258,7 +281,7 @@ Voice (`lib/office-rtc.mjs`, `public/office-voice.js`) is signalled through the 
 
 Alerts outside the office use one more stream, `GET /api/office/alerts`, which the app keeps open only while **Notify me when agents wait** is on. It belongs to the signed-in person and has no environment: it sends `mine` (`{waiting:[…]}`, their own agents that are waiting now) when it opens and whenever that changes, and `waiting` (one agent) each time one of their agents starts waiting or waits on a new prompt. An agent's first report from a source (a reporter starting, or the server restarting) does not count as starting to wait. Only the app's own page can open it, signed in; API keys cannot.
 
-During a reconnect, the office keeps the last scene and chat. The next snapshot updates that scene, and each browser sends its last position and status again. A source event ID identifies the previous connection; the server sends a fresh, access-checked snapshot on each connection. Reports keep their original timestamps, and a report still expires 90 seconds after the server last received it. The latest 50 chat lines per office, member status and last-seen times, and recent actions are saved in Postgres or under `BACKUP_DIR`. Live avatar positions remain in memory. Office actions are claimed before they are returned, so a restart cannot return an already claimed action a second time. If the connection dies between the claim and the response, the reporter can miss that action.
+During a reconnect, the office keeps the last scene and chat. The next snapshot updates that scene, and each browser sends its last position and status again. A source event ID identifies the previous connection; the server sends a fresh, access-checked snapshot on each connection. Reports keep their original timestamps, and a report still expires 90 seconds after the server last received it. The latest 50 chat lines per office, member status and last-seen times, each person's look, and recent actions are saved in Postgres or under `BACKUP_DIR`. Live avatar positions remain in memory. Office actions are claimed before they are returned, so a restart cannot return an already claimed action a second time. If the connection dies between the claim and the response, the reporter can miss that action.
 
 The 24 hour sparkline of how many agents are running (one sample a minute, per member) stays in memory, and is kept across a restart only when a persistence module exports sparkline load and save.
 
