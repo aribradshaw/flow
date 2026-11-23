@@ -13,12 +13,12 @@ export const TELEPORT_OVER=55;   // metres of path: a longer walk fades to a few
 export const ARRIVE_WALK=7;      // and walks this much of it
 
 const KIND_ORDER={place:0,room:1,person:2,session:3,agent:4};
-// office: {places:[{id,name,x,z,short}], rooms:[{key,name,x,z,me,owner}], names:{room,owner}, board:{x,z}|null,
+// office: {places:[{id,kind,name,x,z}] (kind 'pod': a team's table or pod), rooms:[{key,name,x,z,me,owner}], names:{room,owner}, board:{x,z}|null,
 //   meeting:{name,x,z}|null, people:[{key,name,x,z}], agents:[{id,name,title,x,z}],
 //   sessions:[{id,member,name,owner,mine,x,z,waiting}]}
 export function placeList({places=[],rooms=[],names={},board=null,meeting=null,people=[],agents=[],sessions=[]}={}){
   const room=names.room||'room',cap=s=>s.charAt(0).toUpperCase()+s.slice(1),out=[];
-  for(const p of places)out.push({id:'place:'+p.id,kind:'place',name:p.name,sub:'',x:p.x,z:p.z,stop:0});
+  for(const p of places)out.push({id:'place:'+p.id,kind:'place',name:p.name,sub:p.kind==='pod'?'Team':'',x:p.x,z:p.z,stop:0});
   if(board)out.push({id:'place:board',kind:'place',name:'Main board',sub:'DevOps',x:board.x,z:board.z,stop:0});
   if(meeting)out.push({id:'place:meeting',kind:'place',name:meeting.name||'Meeting room',sub:'Voice',x:meeting.x,z:meeting.z,stop:0});
   const mine=rooms.find(r=>r.me);

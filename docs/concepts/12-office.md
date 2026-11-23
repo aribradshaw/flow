@@ -147,7 +147,8 @@ The yacht keeps the same hull however big the AgentFlow org is. Only more member
 
 - **A team is a table.** Someone with reports sits at the head, and their reports sit along the sides. A report who leads people has a table of their own.
 - **A team in AgentFlow is a table too.** Its reports sit at it under the team's name. When its only report leads people, that lead takes the head and their reports fill the table.
-- **Each table carries its team's name** and how many sit at it. Small teams share a row.
+- **Each table carries its team's name** and how many sit at it. A green number counts the agents someone is working with, and an orange one the sessions waiting on someone; a table with someone waiting has an orange ring. Small teams share a row.
+- **Press E at a table, or click its name, for its roster:** who sits there and what each is doing now. Click a row to open that agent.
 - **An agent someone is working with sits full size**, with the live session at a small desk behind its seat. The others sit smaller and paler.
 - **Names show only for what is near you**, hovered or open, so a full lounge stays readable.
 
@@ -164,14 +165,14 @@ Both worlds have the same two tools for finding your way.
 **Go to…** opens with **G** or the compass button in the header. It lists:
 
 - agents that are waiting on someone, first;
-- the places of this world, the main board and the meeting room;
+- the places of this world, the main board, the meeting room and each team's table;
 - your room and each member's room;
 - the people who are here;
 - every live agent and everyone in the AgentFlow org.
 
 Type to filter the list, move with the arrow keys and press **Enter**, or click a row. You run there along a real path, round walls and up stairs, and stop a step short of a person or an agent. When the way is longer than about 55 metres, the screen fades and you arrive a few metres from the place instead. Press a movement key to stop.
 
-**The minimap** sits at the top left of the office; **N** or the map button hides and shows it, and the choice is kept in this browser. It shows the floor plan with the rooms, the tables, the main board and the meeting room. You are the white arrow, other people are coloured dots, and agents waiting on someone are orange dots that pulse. Click anywhere on the map to walk there. A long world such as the yacht lies on its side, with the bow to the left; the overview (**O**) shows it the same way.
+**The minimap** sits at the top left of the office; **N** or the map button hides and shows it, and the choice is kept in this browser. It shows the floor plan with the rooms, the tables, the main board and the meeting room; point at something to see its name. You are the white arrow, other people are coloured dots, and agents waiting on someone are orange dots that pulse. Click anywhere on the map to walk there. A long world such as the yacht lies on its side, with the bow to the left; the overview (**O**) shows it the same way.
 
 Clicking the floor also walks you along a path now, so a click behind a wall takes you round it.
 

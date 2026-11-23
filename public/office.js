@@ -66,7 +66,7 @@ export function openOffice(opts){
       <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
       <button type="button" class="txt" data-of-replay disabled>Replay</button>
       <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
-      <span class="of-keys">WASD · E interact · B board · G go to</span>
+      <span class="of-keys">E interact · B board · G go to</span>
       <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
       ${hudHtml(icon,{notify:true})}<button type="button" class="ib" data-of="zoomOut" aria-label="Zoom out" data-tip="Zoom out">${icon('minus')}</button><button type="button" class="ib" data-of="zoomIn" aria-label="Zoom in" data-tip="Zoom in">${icon('plus')}</button>
       <button type="button" class="ib" data-of="goto" aria-label="Go to a place, a person or an agent" aria-expanded="false" data-tip="Go to… (G)">${icon('compass')}</button>
@@ -828,7 +828,9 @@ function travelPlaces(){
     if(p)sessions.push({id:a.id,member,name:a.private?'Private project':a.title||(VENDOR[a.vendor]||VENDOR.other).name,owner:member===S.meKey?'':nameOf(member),mine:member===S.meKey,x:p.x,z:p.z,waiting:a.status==='waiting'});
   }
   const here=new Set(S.people.keys());
-  return {places:own.filter(p=>!['board','meeting','office'].includes(p.kind)),names:L?.names||{},rooms,sessions,
+  // Tables (the yacht's lounge) are places too: you stop beside one.
+  const tables=(S.seating?.tables||[]).map(t=>({id:'table:'+t.index,kind:'pod',name:t.name,x:t.x,z:t.z}));
+  return {places:[...own.filter(p=>!['board','meeting','office'].includes(p.kind)),...tables],names:L?.names||{},rooms,sessions,
     board:named('board')||(main?{x:main.x+main.nx*2.6,z:main.z+main.nz*2.6}:null),
     meeting:named('meeting')||(meet?{name:meet.name,...toWorld(meet,0,meet.d/2-1.9)}:null),
     people:[...S.people.values()].filter(p=>!p.self).map(p=>({key:p.key,name:p.name,x:p.obj.position.x,z:p.obj.position.z})),
@@ -840,8 +842,8 @@ function travelPlan(){
   // A plan that knows its floor as rectangles (office-layout.js plan()): its pods are drawn, its areas named.
   const zones=typeof L?.plan==='function'?L.plan().zones||[]:[];
   for(const z of zones)if(z.kind==='pod')shapes.push({kind:'pod',x:z.x,z:z.z,w:z.w,d:z.d,yaw:0,color:z.color});
-  for(const r of S.rooms.values()){shapes.push({kind:'room',x:r.center.x,z:r.center.z,w:ROOM_W,d:ROOM_D,yaw:r.facing,color:r.bg});labels.push({x:r.center.x,z:r.center.z,text:r.member.me?'You':String(r.member.name||'').split(/\s+/)[0].slice(0,10)})}
-  for(const t of S.seating?.tables||[])shapes.push({kind:'table',x:t.x,z:t.z,w:t.width,d:t.depth,yaw:0});
+  for(const r of S.rooms.values()){shapes.push({kind:'room',x:r.center.x,z:r.center.z,w:ROOM_W,d:ROOM_D,yaw:r.facing,color:r.bg,name:r.member.me?'Your room':r.member.name});labels.push({x:r.center.x,z:r.center.z,text:r.member.me?'You':String(r.member.name||'').split(/\s+/)[0].slice(0,10)})}
+  for(const t of S.seating?.tables||[])shapes.push({kind:'table',x:t.x,z:t.z,w:t.width,d:t.depth,yaw:0,name:t.name});
   if(meet){shapes.push({kind:'meeting',x:meet.x,z:meet.z,w:meet.w,d:meet.d,yaw:meet.facing});labels.push({x:meet.x,z:meet.z,text:'Meeting'})}
   if(main){shapes.push({kind:'board',x:main.x,z:main.z,w:S.devops?.width()||main.width,d:0.5,yaw:Math.atan2(main.nx,main.nz)});labels.push({x:main.x+main.nx*2.2,z:main.z+main.nz*2.2,text:'Board'})}
   for(const d of S.doorSpots||[])shapes.push({kind:'door',x:d.x,z:d.z});
@@ -961,7 +963,7 @@ function buildAgentflow(){
     // At a table, a team is the table itself; everyone sits, and the ones nobody is working with sit smaller.
     else if(seating&&a.kind==='team')continue;
     else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent',free=kind==='agent'&&!seats.has(a.id);
-      items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||free&&!seating,pale:free&&!!seating,size:seating&&free?0.8:1,still:dim||!!seating})}
+      items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||free&&!seating,pale:free&&!!seating,size:seating&&free?0.7:1,still:dim||!!seating})}
   }
   // Robots that just left the org are still drawn while they walk out (office-npc.js).
   const robots=items.filter(it=>it.kind==='agent');
@@ -973,12 +975,14 @@ function buildAgentflow(){
   for(const it of items){if(it.ghost)continue;const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);anchors.set(it.id,o);const a=afOf(it.id);
     S.interact?.register({id:'af:'+it.id,object3D:o,radius:seating?1.5:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65*it.size,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||!S.rig?.overview&&o.position.distanceTo(S.pos)<reach})}
-  // Each table carries its team's name; a team's own table opens the team.
-  for(const t of seating?.tables||[]){
-    const o=new THREE.Object3D();o.position.set(t.sign.x,0,t.sign.z);g.add(o);const id=t.node||t.head;
-    if(t.node)S.interact?.register({id:'af:'+t.node,object3D:o,radius:1.6,height:1.6,label:()=>`Visit ${t.name}`,onInteract:()=>afOf(t.node)?openPanel({type:'af',id:t.node}):false});
-    label(o,`<button type="button" class="of-tag af of-table"${id?` data-af-id="${esc(id)}"`:''}><b>${esc(t.name)}</b><small>${t.seats}</small></button>`,{y:1.5,cls:'af click table',near:24});
-  }
+  // Each table carries its team's name, and how many at it are being worked with or are waiting on someone.
+  // E at a table, or a click on its name, opens its roster.
+  S.tableSigns=(seating?.tables||[]).map(t=>{
+    const o=new THREE.Object3D();o.position.set(t.sign.x,0,t.sign.z);g.add(o);
+    S.interact?.register({id:'table:'+t.index,object3D:o,radius:1.7,height:1.6,label:()=>`See who is at ${t.name}`,onInteract:()=>S.seating?.tables[t.index]?openPanel({type:'table',id:t.index}):false});
+    return {t,l:label(o,'',{y:1.5,cls:'af click table',near:24}),html:''};
+  });
+  paintTables(seats);
   S.afPeople=people.map(({a,p,offline,dim})=>{
     const f=makeHuman(a.member?lookOf(a.member):lookFor(a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.rotation.y=p.yaw||0;Object.assign(f.userData,{kind:'af',id:a.id,member:a.member||''});f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
     g.add(f);S.clickables.push(f);
@@ -1019,8 +1023,22 @@ function buildSeats(seats=seatsByAgent(S.live,S.afPlaced)){
   }
   for(const [key,at] of entries)if(!visible.has(key)){clear(at);entries.delete(key)}
 }
+// Who sits at a table: its head first. -> [{id, agent, sessions:[{member, agent}]}]
+function tableRoster(t,seats=seatsByAgent(S.live,S.afPlaced)){
+  const out=[];
+  for(const [id,p] of S.afPos||[])if(p.table===t.index&&p.role!=='table'){const a=afOf(id);if(a)out.push({id,agent:a,head:p.role==='head',sessions:seats.get(id)||[]})}
+  return out.sort((a,b)=>b.head-a.head);
+}
+// A table's sign: its name and seats, a green count of agents being worked with, an orange one of sessions waiting.
+function paintTables(seats=seatsByAgent(S.live,S.afPlaced)){
+  for(const sign of S.tableSigns||[]){
+    const {t}=sign,roster=tableRoster(t,seats),live=roster.filter(r=>r.sessions.length).length,waiting=roster.reduce((n,r)=>n+r.sessions.filter(x=>x.agent.status==='waiting').length,0);
+    const html=`<button type="button" class="of-tag af of-table${waiting?' waiting':''}" data-table="${t.index}" aria-label="${esc(t.name)}: ${t.seats} seats${live?`, ${live} at work`:''}${waiting?`, ${waiting} waiting`:''}"><b>${esc(t.name)}</b><small>${t.seats}</small>${live?`<i class="live">${live}</i>`:''}${waiting?`<i class="wait">${waiting}</i>`:''}</button>`;
+    if(html!==sign.html){sign.html=html;sign.l.el.innerHTML=html}
+  }
+}
 // A session report changed: re-seat, and redraw the org only when who is busy changed (that dims or lights robots).
-function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(seats)!==S.seatSig)buildAgentflow();else buildSeats(seats)}
+function seatsChanged(){const seats=seatsByAgent(S.live,S.afPlaced);if(seatSig(seats)!==S.seatSig)buildAgentflow();else{buildSeats(seats);paintTables(seats);if(S.panelFor?.type==='table')refreshPanel()}}
 
 // ---------- people ----------
 // A person (office-figures.js); the controller's pose group squashes and tilts it, its shadow stays on the ground.
@@ -1259,6 +1277,7 @@ function onClick(e){
   if(S.replay?.active&&e.target.closest('.of-labels'))return;
   const ag=e.target.closest('.of-labels [data-agent]');if(ag){showAgent(ag.dataset.member,ag.dataset.agent);return}
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
+  const tb=e.target.closest('.of-labels [data-table]');if(tb){S.panelFor={type:'table',id:+tb.dataset.table};refreshPanel();return}
   const dr=e.target.closest('.of-labels [data-door]');if(dr){goDoor(S.doorSpots?.find(x=>x.portal.env===dr.dataset.door)?.portal);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
@@ -1287,6 +1306,20 @@ function refreshPanel(){
   const p=S?.panelFor;if(!p)return;
   let html='';
   if(p.type==='chief'){S.chief.before(S.panel);S.panel.innerHTML=S.chief.panelHtml();S.panel.hidden=false;S.chief.attach(S.panel);return}
+  if(p.type==='table'){
+    // A table's roster: who sits at it, what each is doing now. A row opens that agent, or the session working with it.
+    const t=S.seating?.tables[p.id];if(!t){S.panel.hidden=true;S.panelFor=null;return}
+    const rows=tableRoster(t).map(r=>{
+      const s=r.sessions[0]?.agent,state=s?s.status==='waiting'?'waiting':'running':'',what=s?s.status==='waiting'?'Waiting on '+(r.sessions[0].member===S.meKey?'you':nameOf(r.sessions[0].member)):s.private?'At work':s.seat?.card?`#${s.seat.card.number} ${s.seat.card.title}`:s.title||'At work':r.agent.status==='paused'||r.agent.status==='retired'?r.agent.status:'';
+      return `<li><button type="button" class="of-seat ${state}" data-roster="${esc(r.id)}"><i class="of-sd"></i>${esc(r.agent.name)}${r.head?' <em>lead</em>':''}<span>${esc(what||r.agent.title||'')}</span></button></li>`;
+    }).join('');
+    html=`<div class="of-ph">${icon('users',16)}<b>${esc(t.name)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>
+      <div class="of-pb"><p class="of-note">${t.seats} at this table.${t.node?' A team in AgentFlow.':''}</p><div class="of-desk of-roster"><ul>${rows}</ul></div>
+      ${t.node?`<div class="of-btns"><button type="button" class="txt" data-roster="${esc(t.node)}">${icon('users',13)}Team details</button></div>`:''}</div>`;
+    S.steer.before(S.panel);S.panel.innerHTML=html;S.panel.hidden=false;
+    for(const b of S.panel.querySelectorAll('[data-roster]'))b.addEventListener('click',()=>showAf(b.dataset.roster));
+    return;
+  }
   if(p.type==='af'){
     const a=afAgents().find(x=>x.id===p.id);if(!a){S.panel.hidden=true;return}
     const here=S.env===S.opts.current&&S.opts.overlays?.agent;

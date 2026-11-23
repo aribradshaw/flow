@@ -62,11 +62,12 @@ export function createTravel(o){
 
   // ---------- the minimap ----------
   const map=document.createElement('div');map.className='of-map';
-  map.innerHTML=`<canvas class="of-map-c" role="img" aria-label="Minimap: click to walk there"></canvas>`;
+  map.innerHTML=`<canvas class="of-map-c" role="img" aria-label="Minimap: click to walk there"></canvas>
+    <div class="of-map-l" aria-hidden="true"><span><i class="me"></i>You</span><span><i></i>People</span><span><i class="w"></i>Waiting on someone</span></div>`;
   o.stage.append(map);
   const cv=map.querySelector('canvas'),ctx=cv.getContext('2d');
   let on=true;try{on=localStorage.getItem(MAP_KEY)!=='0'}catch{}
-  let fit=null,base=null,dirty=true,drawnAt=-1;
+  let fit=null,base=null,dirty=true,drawnAt=-1,named=[];
   const paintToggle=()=>{map.hidden=!on;o.root.querySelector('[data-of="map"]')?.setAttribute('aria-pressed',String(on))};
   function toggleMap(){on=!on;try{localStorage.setItem(MAP_KEY,on?'1':'0')}catch{}paintToggle();dirty=true}
   // The plan that does not move: floors by height, what stops you, rooms, tables, the board. Drawn once per layout.
@@ -93,6 +94,8 @@ export function createTravel(o){
       const p=fit.toMap(s.x,s.z);g.save();g.translate(p.x,p.y);g.rotate(fit.turned?-(s.yaw||0)-Math.PI/2:-(s.yaw||0));
       const w=s.w*fit.scale,d=s.d*fit.scale;if(fill){g.fillStyle=fill;g.fillRect(-w/2,-d/2,w,d)}if(stroke){g.strokeStyle=stroke;g.lineWidth=1.2;g.strokeRect(-w/2,-d/2,w,d)}g.restore();
     };
+    // What the pointer names as it moves over the map.
+    named=[...(plan.shapes||[]).filter(s=>s.name),...(plan.labels||[]).filter(l=>l.text).map(l=>({...l,name:l.text}))].map(s=>({...fit.toMap(s.x,s.z),name:s.name}));
     for(const s of plan.shapes||[]){
       if(s.kind==='room')rect(s,s.color||'#dfe8e2','rgba(40,60,50,.55)');
       else if(s.kind==='meeting')rect(s,'rgba(120,190,215,.75)','#3c88a3');
@@ -127,6 +130,11 @@ export function createTravel(o){
     ctx.save();ctx.translate(p.x,p.y);ctx.rotate(fit.turn(m.heading));ctx.fillStyle='#fff';ctx.strokeStyle='#1d2725';ctx.lineWidth=1.6;ctx.lineJoin='round';
     ctx.beginPath();ctx.moveTo(0,-7);ctx.lineTo(5,5.5);ctx.lineTo(0,2.6);ctx.lineTo(-5,5.5);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
   }
+  cv.addEventListener('pointermove',e=>{
+    if(!fit)return;const b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*fit.w/b.width,y=(e.clientY-b.top)*fit.h/b.height;
+    let best='',bd=22;for(const n of named){const d=Math.hypot(n.x-x,n.y-y);if(d<bd){bd=d;best=n.name}}
+    const tip=best?`${best}: click to go there`:'Click to walk there';if(cv.title!==tip)cv.title=tip;
+  });
   cv.addEventListener('click',e=>{
     if(!fit)return;const b=cv.getBoundingClientRect(),w=fit.toWorld((e.clientX-b.left)*fit.w/b.width,(e.clientY-b.top)*fit.h/b.height);
     o.goPoint(w.x,w.z);

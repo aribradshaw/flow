@@ -189,7 +189,7 @@ export function yachtWorld(members,opts={}){
     arriveAtSpawn:true,view:{zoom:7.6,pitch:0.5},
     // Idle characters of the common area gather by the sofa and at the lounge's aft end (office-npc.js).
     lounge:[...[-1.1,0,1.1].map(dz=>({x:sofa.x+1.25,z:sofa.z+dz,fx:sofa.x,fz:sofa.z+dz})),...[-3.4,3.4].map(x=>({x,z:zone.back+1,fx:x,fz:zL0}))],
-    signs:[{x:0,y:3.1,z:6.6,text:'Lounge'},{x:mainWall.x,y:wallH+0.55,z:mainWall.z,text:'Main board'},{x:stairX+1.1,y:UPPER+2.5,z:zL0-upRamp,text:'Suites ↑'},
+    signs:[{x:stairX+1.1,y:2.35,z:zL0+2.6,text:'Lounge'},{x:mainWall.x,y:wallH+0.55,z:mainWall.z,text:'Main board'},{x:stairX+1.1,y:UPPER+2.5,z:zL0-upRamp,text:'Suites ↑'},
       {x:cx+roomD/2+0.2,y:UPPER+3.2,z:slotZ(slots-1),text:'Bridge'},{x:2,y:FORE+2.6,z:zB0-foreRamp-1.5,text:'Sun deck'},{x:0,y:SWIM+3,z:zL1+0.3,text:'Beach club'}],
     // The solid parts a camera must not be inside: the upper deck's block and the bow under the sun deck.
     masses:[wallBox(0,(zB0+zL0)/2,0,HB*2,zL0-zB0,UPPER-0.2,0,'mass'),wallBox(0,(zBow+zB0)/2,0,HB*2,zB0-zBow,FORE-0.2,0,'mass')],
