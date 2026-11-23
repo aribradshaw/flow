@@ -95,7 +95,7 @@ test('registry: every operation is documented, has examples and schemas, and the
     }
     assert.doesNotThrow(()=>JSON.stringify(o),`${o.id}: plain data`);
   }
-  const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.delete',
+  const want=['envs.list','envs.get','charts.list','nodes.list','nodes.get','nodes.create','nodes.update','nodes.move','edges.list','edges.create','edges.update','edges.delete',
     'projects.list','projects.create','projects.update','items.list','items.get','items.create','items.update','cards.list','cards.get','cards.create','cards.update','cards.move','cards.deleted','cards.restore','labels.list','labels.create','search',
     'agents.list','agents.get','agents.work','agents.create','agents.update','agents.delete','runners.list','runners.report','workflows.list','workflows.get','workflows.create','workflows.update','office.agents.report','office.agents.list','office.actions.wait','office.actions.result','proposals.list','proposals.approve','proposals.deny',
     'shares.list','shares.preview','shares.create','shares.update','shares.revoke','shares.incoming','shares.requests.list','shares.requests.create','shares.requests.decide'];
@@ -195,7 +195,7 @@ test('nodes: a person\'s photo and email',async()=>{
   const w=await store.get(ENV);assert.equal('image' in w.data.charts[0].nodes.find(n=>n.id==='bo'),false);
 });
 
-test('edges: list, create, delete',async()=>{
+test('edges: list, create, update, delete',async()=>{
   let r=await op('edges.create',{env:ENV,chart:'c1',from:'cleo',to:'quill',percent:50});
   assert.equal(r.status,201);assert.equal(r.body.edge.percent,'50');const id=r.body.edge.id;
   assert.equal((await op('edges.create',{env:ENV,chart:'c1',from:'cleo',to:'quill'})).status,409);
@@ -204,6 +204,14 @@ test('edges: list, create, delete',async()=>{
   assert.equal((await op('edges.create',{env:ENV,chart:'c1',from:'bo',to:'ghost'})).status,404);
   r=await op('edges.list',{env:ENV,chart:'c1',node:'cleo'});
   assert.deepEqual(r.body.items.map(e=>e.id),[id]);
+  r=await op('edges.update',{env:ENV,chart:'c1',edge:id,percent:'100'});
+  assert.equal(r.status,200);assert.equal(r.body.edge.percent,'100');assert.equal(r.body.edge.from,'cleo');
+  assert.equal((await op('edges.update',{env:ENV,chart:'c1',edge:id,percent:101})).body.code,'invalid_percent');
+  assert.equal((await op('edges.update',{env:ENV,chart:'c1',edge:'ghost',percent:'1'})).status,404);
+  r=await op('edges.update',{env:ENV,chart:'c1',edge:id,type:'group'});
+  assert.equal(r.body.edge.type,'group');assert.equal(r.body.edge.percent,'','a group edge carries no percent');
+  r=await op('edges.update',{env:ENV,chart:'c1',edge:id,type:'ownership',percent:''});
+  assert.equal(r.body.edge.type,'ownership');assert.equal(r.body.edge.percent,'');
   r=await op('edges.delete',{env:ENV,chart:'c1',edge:id});
   assert.deepEqual(r.body.deleted,id);
   assert.equal((await op('edges.delete',{env:ENV,chart:'c1',edge:id})).status,404);

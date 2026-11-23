@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (56)
+## Operations (57)
 
 ### Environments
 
@@ -56,6 +56,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `edges.list` | `edges_list` | `GET /api/v1/envs/{env}/charts/{chart}/edges` | read | List edges |
 | `edges.create` | `edges_create` | `POST /api/v1/envs/{env}/charts/{chart}/edges` | write | Create an edge |
+| `edges.update` | `edges_update` | `PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}` | write | Update an edge |
 | `edges.delete` | `edges_delete` | `DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` | write | Delete an edge |
 
 ### Projects
@@ -266,6 +267,19 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"from":"cleo","to":"quill","percent":"50"}'
+```
+
+### Full ownership
+
+MCP: call `edges_update` with `{"env":"default-workspace","chart":"active","edge":"o1","percent":"100"}`
+
+```sh
+flow edges update --input '{"env":"default-workspace","chart":"active","edge":"o1","percent":"100"}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges/o1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"percent":"100"}'
 ```
 
 ### Delete

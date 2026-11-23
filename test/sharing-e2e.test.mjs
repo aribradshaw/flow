@@ -272,7 +272,7 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   assert.equal((await v1('flow_test_'+'x'.repeat(40),'GET','/envs')).status,401);
   r=await fetch(BASE+'/api/v1/openapi.json');assert.equal(r.status,200);assert.equal((await r.json()).openapi,'3.1.0');
   // Bo's key over his own environment: his data plus the linked copies of the share placed there, as the app shows them.
-  const s=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['marsh']},permission:'edit'});
+  const s=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['marsh','campaign']},permission:'edit'});
   const sid=s.data.share.id,M=`sh.${sid}.marsh`,SC=`sh.${sid}.chart`;
   await bo('POST',`/api/shares/${sid}/attach`,{env:boEnv});
   assert.ok(linked((await bo('GET','/api/workspace?env='+boEnv)).data.data).length>0);
@@ -307,7 +307,14 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
     assert.equal((await bo('GET','/api/workspace?env='+boEnv)).data.rev,before,why+': nothing saved')};
   await refused('PATCH',node+encodeURIComponent(stub.id),{name:'Hacked'},'share_read_only','a stub');
   await refused('PATCH',node+encodeURIComponent(M),{type:'area'},'share_read_only_field','a field the share does not carry');
-  const ledge=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`)).data.items.find(e=>e.id.startsWith('sh.'));
+  const ledge=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`)).data.items.find(e=>e.id.startsWith('sh.')&&!e.linked?.stub);
+  assert.ok(ledge,'a linked edge inside the share is listed');
+  {const edge=`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges/${encodeURIComponent(ledge.id)}`;
+    r=await v1(jw,'PATCH',edge,{percent:'100'});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.edge.percent,'100');
+    const theirs=(await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].edges.find(e=>e.id===ledge.id.split('.').pop());
+    assert.equal(theirs.percent,'100','an edge percent edit reaches the owner');
+    await refused('PATCH',edge,{type:ledge.type==='group'?'ownership':'group'},'share_read_only_field','an edge type the share does not carry');
+    assert.equal((await v1(jw,'PATCH',edge,{percent:ledge.percent})).status,200,'put it back')}
   await refused('DELETE',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges/${encodeURIComponent(ledge.id)}`,undefined,'share_delete','deleting a linked edge');
   assert.equal((await owner('PATCH',`/api/shares/${sid}`,{permission:'view'})).status,200);
   await refused('PATCH',node+encodeURIComponent(M),{name:'Not allowed'},'share_permission','a view share');

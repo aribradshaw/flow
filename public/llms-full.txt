@@ -1095,6 +1095,58 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges" \
 }
 ```
 
+### `edges.update`
+
+Update an edge
+
+`PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}` · scope `write` · MCP tool `edges_update`
+
+Change a connection's ownership percent or its type, keeping the edge. Fields left out stay as they are; a group edge carries no percent. On a share's chart an edit share lets you change the percent, and the change goes back to its owner; the type stays the owner's.
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `env` | string | yes | Environment id (see envs.list). |
+| `chart` | string | yes | Chart id, or "active" for the chart open in the app. |
+| `edge` | string | yes | Edge id. |
+| `type` | enum |  | One of `ownership`, `group`. |
+| `percent` | string | number |  | 0-100, or "" for unspecified. |
+
+**Output**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rev` | integer | yes | Workspace revision after (or at) this call. |
+| `edge` | object | yes |  |
+| `edge.id` | string | yes |  |
+| `edge.from` | string | yes |  |
+| `edge.to` | string | yes |  |
+| `edge.type` | enum | yes | One of `ownership`, `group`. |
+| `edge.percent` | string | yes |  |
+
+**Example: Full ownership**
+
+```sh
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges/o1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"percent":"100"}'
+```
+
+```json
+{
+  "rev": 46,
+  "edge": {
+    "id": "o1",
+    "from": "cleo",
+    "to": "quill",
+    "type": "ownership",
+    "percent": "100"
+  }
+}
+```
+
 ### `edges.delete`
 
 Delete an edge

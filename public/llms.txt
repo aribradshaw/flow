@@ -41,6 +41,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 
 - [edges.list](/docs/edges.html#op-edges-list): `GET /api/v1/envs/{env}/charts/{chart}/edges` (read). List edges
 - [edges.create](/docs/edges.html#op-edges-create): `POST /api/v1/envs/{env}/charts/{chart}/edges` (write). Create an edge
+- [edges.update](/docs/edges.html#op-edges-update): `PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}` (write). Update an edge
 - [edges.delete](/docs/edges.html#op-edges-delete): `DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` (write). Delete an edge
 
 ## API: Projects
