@@ -147,3 +147,17 @@ test('answers stay backward compatible: no kind is an answer, and answers say ki
     assert.deepEqual(got.map(x=>x.kind),['answer','message']);
   }finally{hub.close();st.close()}
 });
+
+test('a click on a prompt with a long T3 request id and agent id reaches the reporter unchanged',async()=>{
+  const st=officeState(),ann='ann@example.test',src='saguaro';
+  const rid='runtime-request:provider:claudeAgent:provider-turn:'+'p%3A'.repeat(90),aid='homebox:t3:thread:delegated-task:'+'c%3A'.repeat(50);
+  st.report(ann,{source:src,agents:[{...STEERABLE,id:aid,status:'waiting',pending:{requestId:rid,kind:'approval',summary:'Run: true',can:['allow','deny']}}]});
+  const hub=officeHub({state:st,context:{env:async()=>({id:'e',name:'E',ownerEmail:ann,members:[{email:ann,name:'Ann'}],projects:[],agents:[]})},heartbeatMs:60e3});
+  try{
+    assert.ok(rid.length>300&&aid.length>200);
+    const a=hub.answer('e',{email:ann},{source:src,agentId:aid,requestId:rid,decision:'allow'});
+    assert.equal(a.requestId,rid);
+    const [got]=await st.wait(ann,src,0);
+    assert.deepEqual([got.agentId,got.requestId],[aid,rid]);
+  }finally{hub.close();st.close()}
+});
