@@ -565,7 +565,8 @@ function initScene(){
     cardId:n=>office.env===office.opts.current&&office.opts.overlays?.card?store.db?.devops?.cards?.find(c=>c.number===n)?.id||null:null,openCard,
     cards:()=>office.env===office.opts.current?store.db?.devops?.cards||[]:[],refs:()=>{const m=office.members.find(x=>x.me);return m?officeMemberRefs(store.db,m):[]},
     myName:()=>office.opts.me?.name||office.me?.name||'',afName:id=>afOf(id)?.name||'',lines:()=>office.lines,
-    showAgent:(member,id)=>showAgent(member,id),repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
+    showAgent:(member,id)=>showAgent(member,id),models:()=>store.db?.agentflow?.runners||[],
+    repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
   // "Go to…" and the minimap (office-travel.js): the same in every world.
   S.travel=createTravel({root:S.root,stage:S.stage,places:travelPlaces,plan:travelPlan,dots:travelDots,
     me:()=>({x:office.pos.x,z:office.pos.z,heading:office.controller.state.heading}),route:()=>office.route&&office.route.target===office.target?office.route.pts.slice(office.route.i):null,

@@ -8,6 +8,9 @@
 .of-cos-card{display:inline;padding:0 3px;border:0;border-radius:4px;background:rgba(122,90,0,.14);color:#6b4d00;font:inherit;font-weight:650;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .of-cos-card:hover,.of-cos-card:focus-visible{background:rgba(122,90,0,.26)}
 .of-line .of-cos-card{color:inherit}
+.of-model{align-items:center}
+.of-model .pk-btn{flex:1;min-width:0;max-width:none}
+.of-model .pk-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .of-cos-ask{display:grid;gap:4px;margin:8px 0}
 .of-cos-row{display:flex;gap:6px}
 .of-cos-row input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line2,#d8dde3);border-radius:7px;font:inherit;font-size:13px}

@@ -88,6 +88,21 @@ test('transcript privacy over the live channel: shared-project viewers and stran
 
 // ---------- steering: messages and stops ----------
 const STEERABLE={...AGENT,id:'host:t3:2',can:['message','stop','dance','STOP']};
+test('a model change is provider:model, kept on the agent for its owner, and queued as text',()=>{
+  const st=officeState(),ann='ann@example.test',src='bridge:laptop';
+  st.report(ann,{source:src,agents:[{...STEERABLE,id:'chief',can:['message','model'],modelId:' claudeAgent:claude-opus-5-5 '}]});
+  const a=st.live(ann)[0];
+  assert.equal(a.modelId,'claudeAgent:claude-opus-5-5');
+  assert.deepEqual(a.can,['message','model']);
+  assert.equal(viewAgent(a,{owner:true}).modelId,a.modelId);
+  assert.equal(viewAgent(a,{full:true,key:()=>'k'}).modelId,undefined,'only the owner gets the id');
+  assert.equal(cleanReport({source:'s',agents:[{id:'b',modelId:'nope'}]}).agents[0].modelId,undefined);
+  const m=st.steer({by:ann,owner:ann,source:src,agentId:'chief',kind:'model',text:' cursor_personal:grok-4.7 '});
+  assert.deepEqual({kind:m.kind,text:m.text},{kind:'model',text:'cursor_personal:grok-4.7'});
+  assert.throws(()=>st.steer({by:ann,owner:ann,source:src,agentId:'chief',kind:'model',text:'grok:has space'}),{status:400});
+  st.close();
+});
+
 test('can: only message and stop are kept, and only the owner sees them',()=>{
   const [a,b]=cleanReport({source:'s',agents:[STEERABLE,{id:'x',can:'message'}]}).agents;
   assert.deepEqual(a.can,['message','stop']);assert.equal(b.can,undefined);
@@ -103,6 +118,8 @@ test('steer: owner only, only what can allows, messages checked, stops not doubl
   const base={by:ann,owner:ann,source:src,agentId:STEERABLE.id};
   assert.throws(()=>st.steer({...base,by:'bo@example.test',kind:'message',text:'hi'}),{status:403,code:'not_owner'});
   assert.throws(()=>st.steer({...base,kind:'dance'}),{status:400});
+  assert.throws(()=>st.steer({...base,kind:'model',text:'cursor_personal:grok-4.7'}),{status:409,code:'cannot_steer'});
+  assert.throws(()=>st.steer({...base,kind:'model',text:'nope'}),{status:400});
   assert.throws(()=>st.steer({...base,kind:'message',text:'   '}),{status:400});
   assert.throws(()=>st.steer({...base,kind:'message',text:'x'.repeat(2001)}),{status:400});
   assert.throws(()=>st.steer({...base,kind:'message'}),{status:400});

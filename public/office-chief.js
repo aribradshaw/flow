@@ -11,6 +11,7 @@
 //   chief.update()             members, AgentFlow or live agents changed: who follows whom (office-npc.js setFollow)
 //   chief.agents(member, list) a member's live agents arrived (yours: replies and "needs you" lines)
 //   chief.send(text)           ask it (the /cos channel, the panel's Ask box) -> Promise (rejects with what went wrong)
+//   o.models()                 reported runners ({models:[{id, label, provider, billing}]}), for the model picker
 // The /cos channel is registered with officeChat (public/office-chat.js) while the office is open.
 //   chief.frame()              once per frame: keeps bubbles and E on the figures as they are rebuilt
 //   chief.panelHtml() / chief.before(panel) / chief.attach(panel)   the panel E opens (redrawn like the agent panel)
@@ -95,6 +96,30 @@ export function createChief(o){
     try{await o.post({kind:'message',source:c.source,agentId:c.id,text:t})}
     catch(e){pending=null;dropBubble();paint();throw Error(e.message||'Could not reach your Chief of Staff')}
   }
+  // The model its next turn uses (provider:model). A pick sticks until the next report says the same.
+  let picked='';
+  function modelItems(){
+    const seen=new Set(),out=[];
+    for(const r of o.models?.()||[])for(const m of r.models||[]){
+      if(!m?.id||seen.has(m.id))continue;seen.add(m.id);
+      out.push({value:m.id,label:m.label||m.id,group:m.provider||m.id.split(':')[0],sub:m.billing==='metered'?'Metered':m.billing==='included'?'Included':''});
+    }
+    out.sort((a,b)=>a.group.localeCompare(b.group)||a.label.localeCompare(b.label));
+    return out;
+  }
+  function currentModel(){
+    const c=mine(),reported=c?.modelId||'';
+    if(picked&&picked!==reported)return picked;
+    picked='';return reported;
+  }
+  async function choose(id){
+    const c=mine();
+    if(!c?.can?.includes('model')){o.toast?.('Your Chief of Staff cannot change models from here yet.',true);return}
+    if(!id||id===currentModel())return;
+    picked=id;paint();
+    try{await o.post({kind:'model',source:c.source,agentId:c.id,text:id});o.toast?.('Next message uses that model.')}
+    catch(e){if(picked===id)picked='';paint();o.toast?.(e.message||'Could not change the model',true)}
+  }
   function agents(member,list){
     if(member!==o.meKey())return;
     const c=conductorOf(list),sig=replySig(c?.reply);
@@ -150,7 +175,12 @@ export function createChief(o){
       :'<p class="of-note">Nothing is waiting on you.</p>';
     const said=(c.transcript||[]).filter(l=>l.role==='user'||l.role==='assistant').slice(-6);
     const recent=said.length?`<ol class="of-cos-log">${said.map(l=>`<li class="${l.role}"><span class="of-tx-who">${l.role==='user'?'You':'Chief'}${l.at?` · ${esc(time(l.at))}`:''}</span><div>${linked(l.text)}</div></li>`).join('')}</ol>`:'<p class="of-note">Nothing asked yet.</p>';
-    return head+`<div class="of-pb"><div class="of-row"><span>Status</span><b>${esc(state)}</b></div>${c.hostLabel?`<div class="of-row"><span>Where</span><b>${esc(c.hostLabel)}</b></div>`:''}
+    const items=c.can?.includes('model')?modelItems():[],id=currentModel();
+    if(id&&!items.some(i=>i.value===id))items.unshift({value:id,label:c.model||id,group:'Current'});
+    const named=items.find(i=>i.value===id);
+    const modelLabel=named?.label||c.model||'Choose a model';
+    const modelRow=c.can?.includes('model')?`<div class="of-row of-model"><span>Model</span><button type="button" class="pk-btn on" data-picker="cos-model" aria-haspopup="listbox" aria-expanded="false"><span class="pk-t">${esc(modelLabel)}</span></button></div>`:'';
+    return head+`<div class="of-pb"><div class="of-row"><span>Status</span><b>${esc(state)}</b></div>${c.hostLabel?`<div class="of-row"><span>Where</span><b>${esc(c.hostLabel)}</b></div>`:''}${modelRow}
       <div class="of-cos-ask-slot"></div><div class="of-pk">Waiting on you</div>${waitHtml}<div class="of-pk">Recent</div>${recent}</div>`;
   }
   let panelEl=null;
@@ -165,9 +195,16 @@ export function createChief(o){
   const paint=()=>o.repaint?.();
 
   // Card links in bubbles, the log and the panel; your waiting agents in the panel.
-  const onClick=e=>{
+  const onClick=async e=>{
     const card=e.target.closest?.('[data-cos-card]');if(card){e.preventDefault();e.stopPropagation();o.openCard(card.dataset.cosCard);return}
-    const agent=e.target.closest?.('[data-cos-agent]');if(agent){e.preventDefault();e.stopPropagation();o.showAgent(o.meKey(),agent.dataset.cosAgent)}
+    const agent=e.target.closest?.('[data-cos-agent]');if(agent){e.preventDefault();e.stopPropagation();o.showAgent(o.meKey(),agent.dataset.cosAgent);return}
+    const model=e.target.closest?.('[data-picker="cos-model"]');if(!model)return;
+    e.preventDefault();e.stopPropagation();
+    const id=currentModel(),items=modelItems();
+    if(id&&!items.some(i=>i.value===id))items.unshift({value:id,label:mine()?.model||id,group:'Current'});
+    const {openPicker}=await import('./ui.js');
+    openPicker(model,{multi:false,items,selected:id?[id]:[],label:'Model',placeholder:'Search models',empty:items.length?'No matches':'No models reported yet',
+      onChange:([next])=>choose(next)});
   };
   o.root?.addEventListener('click',onClick,true);
   try{unregister=officeChat.registerChannel(chiefChannel(text=>send(text)))}catch(e){console.error('office chief: /cos channel',e)}

@@ -18,6 +18,7 @@ import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'no
 import {dirname} from 'node:path';
 
 import {transcriptText} from '../lib/office-mask.mjs';
+import {parseModel} from '../lib/office.mjs';
 import {parseJson, short, t3Env, transcriptEntry} from './office-bridge-t3.mjs';
 import {readLive} from './office-bridge-threads.mjs';
 
@@ -99,10 +100,13 @@ function writeState(file, data) {
   renameSync(tmp, file);
 }
 
-// `t3 thread start --json --title <title> <project> -`, the brief on stdin. -> {threadId, …}
-export function startThread({bin = 't3', path, project, title, message, signal}) {
+// `t3 thread start --json --title <title> [--provider <id> --model <slug>] <project> -`, the brief on stdin.
+// provider and model are the office's choice (parseModel); without them T3 uses the project's default model.
+export function startThread({bin = 't3', path, project, title, message, signal, provider, model}) {
   return new Promise((resolve, reject) => {
-    const args = ['thread', 'start', '--json', '--title', title, project, '-'];
+    const args = ['thread', 'start', '--json', '--title', title];
+    if (provider && model) args.push('--provider', provider, '--model', model);
+    args.push(project, '-');
     const child = process.platform === 'win32' && bin === 't3'
       ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 't3', ...args], {env: t3Env(path), windowsHide: true, signal})
       : spawn(bin, args, {env: t3Env(path), windowsHide: true, signal});
@@ -154,8 +158,10 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
     const brief = await fetchBrief().catch(() => ({}));
     const message = conductorBrief(brief);
     const had = state.threadId;
-    const made = await runT3({bin, path, project, title: CONDUCTOR_TITLE, message, signal});
-    state = {threadId: made.threadId, project, createdAt: new Date(now()).toISOString(), ...(brief.env ? {env: brief.env} : {})};
+    const choice = state.model;
+    const made = await runT3({bin, path, project, title: CONDUCTOR_TITLE, message, signal,
+      ...(choice ? {provider: choice.instanceId, model: choice.model} : {})});
+    state = {threadId: made.threadId, project, createdAt: new Date(now()).toISOString(), ...(brief.env ? {env: brief.env} : {}), ...(choice ? {model: choice} : {})};
     writeState(stateFile, state);
     log(had ? 'office bridge: conductor thread was gone; started a new one' : 'office bridge: started the conductor thread');
     return made.threadId;
@@ -202,13 +208,18 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
           const text = item.type === 'assistant_message' ? parseReply(data.text).prose || parseReply(data.text).say : data.text;
           return transcriptEntry(item.type, {...data, text}, at);
         }).filter(Boolean).map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
-        const model = parseJson(row.payload_json).modelSelection?.model;
+        const selection = parseJson(row.payload_json).modelSelection || {};
+        const slug = typeof selection.model === 'string' ? selection.model : '';
+        const instance = (typeof selection.instanceId === 'string' && selection.instanceId) || row.provider_instance_id || live?.provider || '';
+        const chosen = parseModel(instance && slug ? `${instance}:${slug}` : '');
+        const model = chosen?.model || slug;
+        const provider = chosen?.instanceId || instance;
         const status = pending ? 'waiting' : live ? 'running' : 'idle';
         return {
-          id, title: 'Chief of Staff', role: 'conductor', model, provider: live?.provider || row.provider_instance_id,
+          id, title: 'Chief of Staff', role: 'conductor', model, provider, ...(chosen ? {modelId: chosen.id} : {}),
           status, activity: status === 'running' ? 'Working on your message' : status === 'waiting' ? 'Waiting for you in T3 Code' : 'Listening',
           activityKind: status === 'running' ? 'think' : 'idle', host, cwd: null,
-          can: live ? ['message', 'stop', 'history'] : ['message', 'history'], runId: live?.run_id, transcript, ...(reply ? {reply} : {}),
+          can: live ? ['message', 'stop', 'model', 'history'] : ['message', 'model', 'history'], runId: live?.run_id, transcript, ...(reply ? {reply} : {}),
           // What it is doing while it works: its reasoning and tool steps (owner only in Flow).
           ...(live ? {live: readLive(db, id, live.run_id)} : {}),
         };
@@ -227,6 +238,23 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
         return {ok: true, message: 'Chief of Staff has it.'};
       } catch {
         return {ok: false, message: 'Could not reach the Chief of Staff thread. Check T3 Code.'};
+      }
+    },
+    // The next turn uses this model (T3's thread.model-selection.set). Remembered so a replacement thread starts on it.
+    async setModel(id, signal) {
+      const parsed = parseModel(id);
+      if (!parsed) return {ok: false, message: 'Pick a model like cursor_personal:grok-4.7.'};
+      const threadId = state.threadId;
+      if (!threadId) return {ok: false, message: 'The Chief of Staff thread is not ready yet.'};
+      try {
+        const commandId = randomUUID();
+        await dispatch({type: 'thread.model-selection.set', commandId, threadId,
+          modelSelection: {instanceId: parsed.instanceId, model: parsed.model}}, () => current() === threadId, signal);
+        state = {...state, model: {instanceId: parsed.instanceId, model: parsed.model}};
+        writeState(stateFile, state);
+        return {ok: true, message: `Next turn uses ${parsed.model}.`};
+      } catch {
+        return {ok: false, message: 'Could not switch its model. Check T3 Code.'};
       }
     },
   };

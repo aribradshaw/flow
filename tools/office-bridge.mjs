@@ -119,7 +119,8 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
     const transcript = (conductor.transcript ?? []).slice(-12).map(entry => ({...entry, text: transcriptText(entry.text, 400)})).filter(entry => entry.text);
     agents.push({...describe(conductor), role: 'conductor', activity: short(conductor.activity), activityKind: conductor.activityKind,
       host, hostLabel: short(host + ' · T3', 120), repo: null, children: [], pending: null,
-      can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop' || k === 'history'),
+      ...(conductor.modelId ? {modelId: String(conductor.modelId).slice(0, 200)} : {}),
+      can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop' || k === 'model' || k === 'history'),
       ...(conductor.live && conductor.status !== 'idle' ? {live: conductor.live} : {}),
       ...(transcript.length ? {transcript} : {}),
       ...(conductor.reply ? {reply: {...conductor.reply, text: transcriptText(conductor.reply.text, 600)}} : {})});
@@ -357,6 +358,7 @@ export function conductorResponder(conductor, respond, {DatabaseSync, path, disp
   return async (action, signal) => {
     if (!conductor.owns(action.agentId)) return respond(action, signal);
     if (action.kind === 'message') return conductor.send(action.text, signal);
+    if (action.kind === 'model') return conductor.setModel(action.text, signal);
     if (action.kind === 'stop') {
       const runId = conductor.entry('')?.runId;
       if (!runId) return {ok: false, message: 'It has no running turn to stop.'};

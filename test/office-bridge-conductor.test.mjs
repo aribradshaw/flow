@@ -108,7 +108,7 @@ test('its office entry: idle, the latest finished reply (never a running turn\'s
   item('r1', 'assistant_message', 2, 'Two cards: #12 and #40.\n[[office]] {"say":"Two in UAT: #12, #40","cards":[12,40]}', '2026-11-22T10:00:05Z');
   f.insert(prefix + 'runs', 'r1', id, 'completed', 'claudeAgent', 1, '{}');
   let e = c.entry('box');
-  assert.deepEqual([e.role, e.status, e.title, e.can], ['conductor', 'idle', 'Chief of Staff', ['message', 'history']]);
+  assert.deepEqual([e.role, e.status, e.title, e.can, e.modelId], ['conductor', 'idle', 'Chief of Staff', ['message', 'model', 'history'], 'claudeAgent:claude-opus-5-5']);
   assert.deepEqual(e.reply, {text: 'Two in UAT: #12, #40', cards: [12, 40], at: '2026-11-22T10:00:05Z'});
   assert.ok(e.transcript.some(l => l.role === 'assistant' && l.text === 'Two cards: #12 and #40.'), 'the tag line is not in the transcript');
   // A new message is being answered: running, and the reply stays the last finished one until the tagged answer.
@@ -116,7 +116,7 @@ test('its office entry: idle, the latest finished reply (never a running turn\'s
   item('r2', 'assistant_message', 4, 'Let me check the agents first.', '2026-11-22T10:01:02Z');
   f.insert(prefix + 'runs', 'r2', id, 'running', 'claudeAgent', 2, '{}');
   e = c.entry('box');
-  assert.deepEqual([e.status, e.can, e.runId], ['running', ['message', 'stop', 'history'], 'r2']);
+  assert.deepEqual([e.status, e.can, e.runId], ['running', ['message', 'stop', 'model', 'history'], 'r2']);
   assert.equal(e.reply.text, 'Two in UAT: #12, #40', 'until the new answer, the last finished one stays (the office tells them apart)');
   item('r2', 'assistant_message', 5, 'Done.\n[[office]] {"say":"Routed to Builder as #461","cards":[461]}', '2026-11-22T10:01:09Z');
   assert.equal(c.entry('box').reply.text, 'Routed to Builder as #461');
@@ -144,6 +144,17 @@ test('the report carries the conductor once, as role conductor with no repo; its
   assert.equal((await respond({kind: 'stop', agentId: id})).ok, false, 'nothing running to stop');
   await respond({kind: 'message', agentId: 'other', text: 'hi'});
   assert.equal(fallback.length, 1, 'other agents keep the ordinary T3 path');
+  assert.deepEqual(await respond({kind: 'model', agentId: id, text: 'cursor_personal:grok-4.7'}), {ok: true, message: 'Next turn uses grok-4.7.'});
+  assert.equal(sent.at(-1).type, 'thread.model-selection.set');
+  assert.deepEqual(sent.at(-1).modelSelection, {instanceId: 'cursor_personal', model: 'grok-4.7'});
+  assert.deepEqual(JSON.parse(readFileSync(f.stateFile, 'utf8')).model, {instanceId: 'cursor_personal', model: 'grok-4.7'});
+  assert.equal((await respond({kind: 'model', agentId: id, text: 'not a model'})).ok, false);
+  // A replacement thread starts on the model the office picked.
+  f.exec(`UPDATE ${prefix}threads SET deleted_at='2026-11-22T00:00:00Z' WHERE thread_id='${id}'`);
+  const again = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, bin: f.bin, now: () => Date.now() + 120_000});
+  assert.equal(await again.ensure(), 'thread-cos-2');
+  const started = f.calls().at(-1).args;
+  assert.deepEqual(started.slice(started.indexOf('--provider'), started.indexOf('--provider') + 4), ['--provider', 'cursor_personal', '--model', 'grok-4.7']);
 });
 
 test('the brief comes from the first environment with a Chief of Staff agent', async () => {
