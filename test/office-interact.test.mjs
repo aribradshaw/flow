@@ -43,3 +43,30 @@ test('E opens and E closes; walking away closes; Esc closes; removed objects dro
   ix.closeOpen();scene.remove(o);ix.update();assert.equal(ix.current(),null);assert.equal(ix.trigger(),false);
   assert.throws(()=>ix.register({label:'no id'}));
 });
+
+test('stale targets: a gone target toasts and drops, a moved one is followed live, one on top of you is not offered, a panel closed elsewhere opens again',()=>{
+  const {me,ix,at}=setup(),toasts=[],stale=[];
+  // A fresh picker with toast and stale hooks.
+  const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();scene.add(camera);
+  const ix2=createInteractions({scene,camera,stage:{...el(),clientWidth:800,clientHeight:600},player:()=>me,facing:()=>NaN,toast:m=>toasts.push(m),stale:id=>stale.push(id)});
+  const o=new THREE.Object3D();o.position.set(0,0,1.6);scene.add(o);
+  ix2.register({id:'agent',object3D:o,label:'Check on Flygon Builder',onInteract:()=>false});
+  ix2.update();assert.equal(ix2.current()?.id,'agent');
+  assert.equal(ix2.trigger(),true);assert.deepEqual(toasts,['Check on Flygon Builder: it isn\'t here any more.']);assert.deepEqual(stale,['agent']);
+  ix2.update();assert.equal(ix2.current(),null,'dropped');
+  // Re-registered by its owner on a different object that later moves away: positions are read every frame.
+  const p=new THREE.Object3D();p.position.set(0,0,1.5);scene.add(p);
+  ix2.register({id:'agent',object3D:p,label:'Check on Flygon Builder',onInteract(){}});
+  ix2.update();assert.equal(ix2.current()?.id,'agent');p.position.set(8,0,8);ix2.update();assert.equal(ix2.current(),null,'it walked off');
+  // Something standing exactly where you are (a stale position) is never offered, unless it is you.
+  ix2.register({id:'onme',position:()=>({x:me.x+0.1,y:0,z:me.z}),label:'On me',onInteract(){}});
+  ix2.update();assert.equal(ix2.current(),null);
+  ix2.register({id:'onme',position:()=>({x:me.x+0.1,y:0,z:me.z}),self:true,label:'Me',onInteract(){}});ix2.update();assert.equal(ix2.current()?.id,'onme');
+  ix2.unregister('onme');ix2.register({id:'nan',position:()=>({x:NaN,y:0,z:1}),label:'NaN',onInteract(){}});ix2.update();assert.equal(ix2.current(),null,'a broken position is skipped');
+  // A panel closed with its own button: the next E opens it again instead of "closing" it.
+  let shown=false,opens=0;p.position.set(0,0,1.5);
+  ix2.register({id:'agent',object3D:p,label:'Check on Flygon Builder',onInteract:()=>{shown=true;opens++;return {close:()=>{shown=false},isOpen:()=>shown}}});
+  ix2.update();ix2.trigger();assert.equal(shown,true);shown=false;ix2.trigger();assert.deepEqual([shown,opens],[true,2]);
+  ix2.trigger();assert.equal(shown,false,'E closes what is open');
+  ix.dispose();
+});

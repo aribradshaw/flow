@@ -79,6 +79,8 @@ export function openOffice(opts){
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,people:new Map(),members:[],rooms:new Map(),live:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
   S.controller.reset(S.pos,0);
+  // Browser automation only (navigator.webdriver): end-to-end checks can place the avatar and read the office.
+  if(navigator.webdriver)globalThis.__flowOffice={state:()=>S,place:(x,z,heading=0)=>{S.pos.set(x,0,z);S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading)}};
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
   root.addEventListener('click',onClick);
   bindHud(root,{icon,notify:{on:notifyOn,toggle:toggleNotify},toast:opts.toast});
@@ -308,7 +310,8 @@ function initScene(){
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
   const office=S;
   // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
-  S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN});
+  S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
+    toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
   const openCard=id=>openOverlay('card',id);
   S.boards=createOfficeBoards({env:S.env,envName:S.opts.offices.find(o=>o.id===S.env)?.name,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
@@ -458,9 +461,9 @@ function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}=
   mascot.add(part(M.box,M.hit,[0,0.9,0],[1.1,1.9,1.1]));S.clickables.push(mascot);
   d.userData.mascot=mascot;
   // E: the same panel as clicking it (the entry drops out when the desk leaves the scene).
-  const id=a.id;S.interact?.register({id:`agent:${key}:${id}`,object3D:mascot,radius:2.6,height:2.5*scale,priority:a.mine&&a.status==='waiting'?2:a.mine?1:0,
+  const id=a.id;S.interact?.register({id:'desk:'+d.uuid,object3D:mascot,radius:2.6,height:2.5*scale,priority:a.mine&&a.status==='waiting'?2:a.mine?1:0,
     label:()=>{const x=agentOf(key,id)||a,n=x.private?'this agent':x.title||'this agent';return x.mine&&x.pending?.can?.length?`Answer ${n}`:x.mine?`Check on ${n}`:`Look at ${n}`},
-    onInteract:()=>{showAgent(key,id);return closePanel}});
+    onInteract:()=>agentOf(key,id)?openPanel({type:'agent',member:key,id}):false});
   updateDesk(d,a,key,x,z,name,tagY,lounge);
   return d;
 }
@@ -519,12 +522,12 @@ function buildAgentflow(){
   }
   S.org=orgField(items);g.add(S.org.group);for(const m of S.org.meshes)S.clickables.push(m);
   for(const it of items){const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);const a=afOf(it.id);
-    S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>{showAf(it.id);return closePanel}});
+    S.interact?.register({id:'af:'+it.id,object3D:o,radius:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||o.position.distanceTo(S.pos)<7})}
   S.afPeople=people.map(({a,p,offline,dim})=>{
     const f=makeHuman(lookFor(a.member||a.id),{dim:offline||dim});f.position.set(p.x,0,p.z);f.userData={kind:'af',id:a.id,rig:f.userData.rig};f.add(part(M.box,M.hit,[0,1,0],[0.9,2,0.9]));
     g.add(f);S.clickables.push(f);
-    S.interact?.register({id:'af:'+a.id,object3D:f,radius:2.2,height:2.4,label:()=>`Talk to ${a.name}`,onInteract:()=>{showAf(a.id);return closePanel}});
+    S.interact?.register({id:'af:'+a.id,object3D:f,radius:2.2,height:2.4,label:()=>`Talk to ${a.name}`,onInteract:()=>afOf(a.id)?openPanel({type:'af',id:a.id}):false});
     label(f,`<button type="button" class="of-tag af person${offline?' off':''}" data-af-id="${esc(a.id)}">${esc(a.name)}${offline?' · offline':''}</button>`,{y:2.05,cls:'af click',show:()=>S.hover===a.id||S.panelFor?.id===a.id||f.position.distanceTo(S.pos)<9});
     return f;
   });
@@ -567,7 +570,8 @@ function upsertPerson(p,self=false){
     a={key:p.key,name:p.name,obj,tag,pose,shade,self,samples:[],remote:{},phase:0,landing:0,wasAirborne:false};S.people.set(p.key,a);
     if(!self)S.interact?.register({id:'person:'+p.key,object3D:obj,radius:2.4,height:2.6,priority:1,label:()=>`Wave at ${a.name}`,
       onInteract:()=>{const q=obj.getWorldPosition(new THREE.Vector3()).setY(2.2).project(S.camera),r=S.stage.getBoundingClientRect();
-        openMenu(p.key,{clientX:r.left+(q.x+1)/2*r.width,clientY:r.top+(1-q.y)/2*r.height});return closeMenu}});
+        if(!S.people.has(p.key))return false;
+        openMenu(p.key,{clientX:r.left+(q.x+1)/2*r.width,clientY:r.top+(1-q.y)/2*r.height});return {close:closeMenu,isOpen:()=>!S.menu.hidden&&S.menu.dataset.key===p.key}}});
   }
   if(!self&&Number.isFinite(p.x)){
     const at=performance.now(),samples=a.samples,last=samples.at(-1);
@@ -700,6 +704,8 @@ function openMenu(key,e){
   S.menu.querySelector('button').focus({preventScroll:true});
 }
 const closePanel=()=>{if(S){S.panel.hidden=true;S.panelFor=null}};
+// Opens a side panel for an interaction, which then knows whether it is still open (E again closes it).
+function openPanel(p){S.panelFor=p;refreshPanel();return {close:closePanel,isOpen:()=>!S.panel.hidden&&S.panelFor?.type===p.type&&S.panelFor?.id===p.id}}
 function closeMenu(){if(S&&!S.menu.hidden){S.menu.hidden=true;return true}return false}
 function onClick(e){
   const em=e.target.closest('[data-emote]');if(em){emote(em.dataset.emote);return}
