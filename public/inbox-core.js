@@ -4,7 +4,7 @@
 //   {id, createdAt, source, env?, ops:[...]}
 //   upsertProject {name, color?, entity?}            match by name
 //   upsertLabel   {id, name, section?, color?}       match by id
-//   upsertItem    {id?, title, project?, ...}        match by id, else exact title + project
+//   upsertItem    {id?, title, project?, ...}        match by id, else exact title + project (or first of projects)
 //   upsertCard    {id?, title, project?, ...}        match by id, else exact title + project
 //   patchCard     {number? | id?, ...fields}         partial update of an existing card
 // References are names: project, assignees [{name, role}], timeline item and release by title,
@@ -78,7 +78,8 @@ export function applyPatch(db,patch,{now=new Date().toISOString(),palette=['#7cb
     }
     else if(o.op==='upsertItem'){
       const p=o.project!==undefined?project(o.project):null,ps=[...(o.projects||[]).map(n=>project(n)),p].filter(Boolean).map(x=>x.id);
-      let i=o.id?db.timeline.find(x=>x.id===o.id):db.timeline.find(x=>norm(x.title)===norm(o.title)&&(p?x.projects.includes(p.id):!x.projects.length));
+      const key=p?.id||ps[0]; // project, else the first of projects: so the same patch finds what it made
+      let i=o.id?db.timeline.find(x=>x.id===o.id):db.timeline.find(x=>norm(x.title)===norm(o.title)&&(key?x.projects.includes(key):!x.projects.length));
       const rel=o.release?item(o.release):null;if(o.release&&!rel)note(`No release titled "${o.release}"`);
       const fields={title:o.title.trim().slice(0,200),kind:ITEM_KINDS.includes(o.kind)?o.kind:undefined,status:ITEM_STATUS.includes(o.status)?o.status:undefined,priority:PRIORITY.includes(o.priority)?o.priority:undefined,
         start:o.start,end:o.end,owner:str(o.owner)?o.owner.slice(0,120):undefined,link:str(o.link)?o.link.slice(0,500):undefined,notes:str(o.notes)?o.notes.slice(0,4000):undefined,release:rel?.id};

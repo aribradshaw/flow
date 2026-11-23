@@ -154,7 +154,7 @@ async function main(argv){
     child.on('exit',(code,sig)=>process.exit(sig?1:code??1));return;
   }
   if(cmd==='login'){
-    const opt=k=>{const i=rest.indexOf('--'+k);return i>=0?rest[i+1]:undefined};
+    const opt=k=>{const i=rest.indexOf('--'+k);if(i>=0)return rest[i+1];const eq=rest.find(a=>a.startsWith(`--${k}=`));return eq?eq.slice(k.length+3):undefined}; // --url X or --url=X
     let url=opt('url')||saved().url,key=opt('key')||process.env.FLOW_API_KEY||'';
     if(rest.includes('--key-stdin'))key=readFileSync(0,'utf8').trim();
     if(!url||!/^https?:\/\/[^/]+/.test(url))fail('Usage: flow login --url <server URL> --key <flow_… API key>  (or --key-stdin)');
