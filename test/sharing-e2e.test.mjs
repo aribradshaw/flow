@@ -226,7 +226,7 @@ test("hand-picked share for Bo: exactly Marsh and Campfire Studio, stubs Kestrel
 });
 
 // API keys, /api/v1 and /mcp mounted on the real server (docs/api.md, docs/api-keys.md, docs/mcp-cli.md).
-test('API keys: /api/v1 and /mcp work with a key, within its environment and scopes; shared copies never appear',async()=>{
+test('API keys: /api/v1 and /mcp work with a key, within its environment and scopes, and see the shares placed there',async()=>{
   const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json'});
   let r=await owner('POST','/api/keys',{name:'ci',env:'default-workspace',scopes:['read']});
   assert.equal(r.status,201,JSON.stringify(r.data));const ro=r.data.key;assert.match(ro,/^flow_test_/);
@@ -241,14 +241,52 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   assert.equal((await v1(ro,'GET',`/envs/${boEnv}`)).status,404,"Owner's key cannot see Bo's environment");
   assert.equal((await v1('flow_test_'+'x'.repeat(40),'GET','/envs')).status,401);
   r=await fetch(BASE+'/api/v1/openapi.json');assert.equal(r.status,200);assert.equal((await r.json()).openapi,'3.1.0');
-  // Bo's key over his own environment: his data only, never the linked copies of a share.
+  // Bo's key over his own environment: his data plus the linked copies of the share placed there, as the app shows them.
   const s=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['marsh']},permission:'edit'});
-  await bo('POST',`/api/shares/${s.data.share.id}/attach`,{env:boEnv});
+  const sid=s.data.share.id,M=`sh.${sid}.marsh`,SC=`sh.${sid}.chart`;
+  await bo('POST',`/api/shares/${sid}/attach`,{env:boEnv});
   assert.ok(linked((await bo('GET','/api/workspace?env='+boEnv)).data.data).length>0);
   const jk=(await bo('POST','/api/keys',{name:'bo',env:boEnv,scopes:['read']})).data.key;
+  const jw=(await bo('POST','/api/keys',{name:'bo-rw',env:boEnv,scopes:['read','write']})).data.key;
   r=await v1(jk,'GET','/envs');assert.deepEqual(r.data.items.map(e=>e.id),[boEnv]);
-  r=await v1(jk,'GET',`/envs/${boEnv}/search?q=Marsh`);assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.items.length,0,'no linked copies through the API');
+  r=await v1(jk,'GET',`/envs/${boEnv}/search?q=Marsh`);assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.ok(r.data.items.some(x=>x.id===M),'the linked copy is found through the API');
+  r=await v1(jk,'GET',`/envs/${boEnv}/charts`);assert.ok(r.data.items.some(c=>c.id===SC),"the share's chart is listed");
+  r=await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`);
+  const body=JSON.stringify(r.data);assert.ok(body.includes('Marsh Holdings'));
+  for(const x of PRIVATE)assert.ok(!body.includes(x),x+' must never reach Bo through the API');
   assert.equal((await v1(jk,'GET','/envs/default-workspace')).status,404);
+  assert.equal((await v1(jk,'PATCH',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes/${encodeURIComponent(M)}`,{name:'Nope'})).status,403,'a read key cannot write');
+  // Edits the share allows reach the owner, with history; layout stays Bo's.
+  const node=`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes/`;
+  r=await v1(jw,'PATCH',node+encodeURIComponent(M),{notes:'Set by Bo via API'});assert.equal(r.status,200,JSON.stringify(r.data));
+  r=await v1(jw,'POST',node+encodeURIComponent(M)+'/move',{x:3000,y:40});assert.equal(r.status,200,JSON.stringify(r.data));
+  let home=(await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].nodes.find(n=>n.id==='marsh');
+  assert.equal(home.notes,'Set by Bo via API','an allowed edit reaches the owner');assert.notEqual(home.x,3000,"Bo's layout is his own");
+  assert.ok((await owner('GET',`/api/shares/${sid}/history?kind=node&id=marsh`)).data.history.some(e=>e.field==='notes'&&e.by===BO));
+  r=await v1(jk,'GET',node+encodeURIComponent(M));assert.equal(r.data.node.x,3000,'placement kept');assert.equal(r.data.node.notes,'Set by Bo via API');
+  // Bo's own card in the share's chart, with a private edge to the linked one: his, never the owner's.
+  r=await v1(jw,'POST',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`,{name:'Bo API Side',type:'entity'});assert.equal(r.status,201,JSON.stringify(r.data));
+  r=await v1(jw,'POST',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`,{from:r.data.node.id,to:M,type:'ownership',percent:'5'});assert.equal(r.status,201,JSON.stringify(r.data));
+  assert.ok(!JSON.stringify((await owner('GET','/api/workspace?env=default-workspace')).data).includes('Bo API Side'));
+  // Refused: nothing is saved, and the reason is in the error.
+  const stub=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`)).data.items.find(n=>n.linked?.stub);
+  assert.ok(stub,'a stub is listed');
+  const refused=async(method,path,b,code,why)=>{const before=(await bo('GET','/api/workspace?env='+boEnv)).data.rev,x=await v1(jw,method,path,b);
+    assert.equal(x.status,403,why+': '+JSON.stringify(x.data));assert.equal(x.data.error?.code||x.data.code,code,JSON.stringify(x.data));
+    assert.equal((await bo('GET','/api/workspace?env='+boEnv)).data.rev,before,why+': nothing saved')};
+  await refused('PATCH',node+encodeURIComponent(stub.id),{name:'Hacked'},'share_read_only','a stub');
+  await refused('PATCH',node+encodeURIComponent(M),{type:'area'},'share_read_only_field','a field the share does not carry');
+  const ledge=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`)).data.items.find(e=>e.id.startsWith('sh.'));
+  await refused('DELETE',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges/${encodeURIComponent(ledge.id)}`,undefined,'share_delete','deleting a linked edge');
+  assert.equal((await owner('PATCH',`/api/shares/${sid}`,{permission:'view'})).status,200);
+  await refused('PATCH',node+encodeURIComponent(M),{name:'Not allowed'},'share_permission','a view share');
+  home=(await owner('GET','/api/workspace?env=default-workspace')).data.data;
+  assert.notEqual(home.charts[0].nodes.find(n=>n.id==='marsh').name,'Not allowed');assert.equal(home.charts[0].nodes.find(n=>n.id===stub.id.split('.').pop()).name,stub.name);
+  assert.equal((await owner('PATCH',`/api/shares/${sid}`,{permission:'edit'})).status,200);
+  // MCP sees the same.
+  {const m=await fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(jw),accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:9,method:'tools/call',params:{name:'search',arguments:{env:boEnv,q:'Marsh'}}})}).then(x=>x.json());
+    assert.ok(!m.result.isError&&JSON.stringify(m.result).includes(M),JSON.stringify(m).slice(0,300))}
   // MCP over HTTP with the same keys.
   const mcp=(k,body)=>fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(k),accept:'application/json, text/event-stream'},body:JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
   r=await mcp(ro,{jsonrpc:'2.0',id:1,method:'tools/list'});assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.data.result.tools.some(t=>t.name==='nodes_list'));
@@ -323,5 +361,18 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   const hist=(await bo('GET',`/api/shares/${s.id}/history?kind=card&id=k-ad`)).data.history;
   assert.ok(hist.some(e=>e.field==='description'&&e.by===OWNER&&e.new==='Owner notes'),"the owner's edits are in the share's history too");
   assert.ok(hist.every(e=>e.over===undefined),'who lost is not part of the history a recipient reads');
+
+  // The same card through Bo's API key: allowed fields reach the owner; a card he may only see is not deleted.
+  const key=(await bo('POST','/api/keys',{name:'bo-cards',env:boEnv,scopes:['read','write']})).data.key;
+  const v1=(method,path,b)=>fetch(BASE+'/api/v1/envs/'+boEnv+path,{method,headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:b&&JSON.stringify(b)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  let x=await v1('GET','/cards?q=Ad%20copy');assert.ok(x.data.items.some(c=>c.id===L('k-ad')),JSON.stringify(x.data));
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{title:'Ad copy v2',points:3});assert.equal(x.status,200,JSON.stringify(x.data));
+  x=await v1('POST','/cards/'+encodeURIComponent(L('k-ad'))+'/move',{column:'doing'});assert.equal(x.status,200,JSON.stringify(x.data));
+  h=await home();const k=h.data.devops.cards.find(c=>c.id==='k-ad');
+  assert.deepEqual([k.title,k.points,k.column],['Ad copy v2',3,'doing'],'API edits to a shared card reach the owner');
+  assert.ok(k.assignees.some(a=>a.node==='cleo'),"the owner's hidden assignee stays");
+  assert.equal((await v1('POST','/projects',{name:'Bo own project'})).status,201);
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{project:'Bo own project'});
+  assert.equal(x.status,403,'a shared card keeps its project: '+JSON.stringify(x.data));
   await owner('DELETE',`/api/shares/${s.id}`);
 });

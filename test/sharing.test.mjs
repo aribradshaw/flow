@@ -9,7 +9,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import net from 'node:net';
-import {resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
+import {lockedChanges,resolveScope,projectForRecipient,applyProjection,applyRecipientEdit,applyOwnerPatch,revokeEffects,extractRecipientChanges,
   createShare,requestReshare,decideRequest,linkedId,parseLinkedId,walkDown,validScope,linkedShareIds,
   shareMembers,memberId,historyForRecipient,ownerChanges,overwritten,conflictView} from '../lib/sharing-core.mjs';
 import {fieldBase,clashes,withHeld} from '../public/sync-core.js';
@@ -443,4 +443,16 @@ describe('storage',()=>{
       await storageChecks(shareStore({dir,db:async()=>pool}));
     });
   });
+});
+
+test('lockedChanges: deletes, stub edits and fields a share does not carry; layout and whitelisted fields are fine',()=>{
+  const seen={charts:[{id:'c',nodes:[{id:'sh.s1.a',name:'A',type:'entity',x:0,y:0,notes:''},{id:'sh.s1.b',name:'B',type:'entity',x:0,y:0,linked:{stub:true}},{id:'own',name:'Mine',type:'entity',x:0,y:0}],
+    edges:[{id:'sh.s1.e',from:'sh.s1.b',to:'sh.s1.a',type:'ownership',percent:'50'}]}],devops:{cards:[{id:'sh.s1.k',title:'K',column:'doing',project:'p',updated:'t1'}]}};
+  const edit=f=>{const d=structuredClone(seen);f(d);return lockedChanges(seen,d)};
+  assert.deepEqual(edit(d=>{const n=d.charts[0].nodes[0];n.name='A2';n.notes='x';n.x=500;d.charts[0].nodes[2].type='area';d.devops.cards[0].title='K2';d.devops.cards[0].updated='t2'}),[]);
+  assert.deepEqual(edit(d=>{d.charts[0].nodes[0].type='area'}),[{kind:'node',id:'sh.s1.a',field:'type'}]);
+  assert.deepEqual(edit(d=>{d.charts[0].nodes[1].name='Hacked'}),[{kind:'node',id:'sh.s1.b',field:'name',stub:true}]);
+  assert.deepEqual(edit(d=>{d.charts[0].nodes[1].x=9}),[],'a stub can still be moved');
+  assert.deepEqual(edit(d=>{d.charts[0].edges=[]}),[{kind:'edge',id:'sh.s1.e',field:'deleted'}]);
+  assert.deepEqual(edit(d=>{d.devops.cards[0].project='mine'}),[{kind:'card',id:'sh.s1.k',field:'project'}]);
 });

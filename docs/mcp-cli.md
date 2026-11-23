@@ -173,7 +173,7 @@ a JSON body for POST, PATCH and PUT. Errors are JSON `{error: {code, message}}` 
   default server URL, so nothing points anywhere until `flow login`.
 
 ## Integrated (2026-10-29)
-Mounted in `server.mjs`: `/api/v1` (REST + `/api/v1/openapi.json`), `/api/keys` (Settings › API keys) and `/mcp`. Both `/api/v1` and `/mcp` take `Authorization: Bearer flow_…` keys or the owner token (`FLOW_SYNC_TOKEN`); the browser session also works for `/api/v1` from the app's own origin. A key only reaches the environment it was made for (`*` = all the owner's) and only its scopes; writes need `write`. The API works on each environment's own stored data, so linked copies of shares (docs/sharing.md) never appear through it. End-to-end checks: `test/sharing-e2e.test.mjs` (API keys, /api/v1 and /mcp on the real server).
+Mounted in `server.mjs`: `/api/v1` (REST + `/api/v1/openapi.json`), `/api/keys` (Settings › API keys) and `/mcp`. Both `/api/v1` and `/mcp` take `Authorization: Bearer flow_…` keys or the owner token (`FLOW_SYNC_TOKEN`); the browser session also works for `/api/v1` from the app's own origin. A key only reaches the environment it was made for (`*` = all the owner's) and only its scopes; writes need `write`. In your own environments the API also shows the linked copies of shares placed there (ids `sh.<share>.<id>`, docs/sharing.md), as the app does, and changes to them go back to their owner with the share's permission. A change the share does not allow is refused with 403 (`share_permission`, `share_read_only`, `share_read_only_field`, `share_delete`) and nothing is saved. The owner token sees stored data only. End-to-end checks: `test/sharing-e2e.test.mjs` (API keys, /api/v1 and /mcp on the real server).
 
 ## INTEGRATION (for the main agent)
 

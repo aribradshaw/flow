@@ -38,12 +38,12 @@ const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
 // OneProfileID photos on person cards a person linked to their account (docs/concepts/10-opid-photos.md).
 const opidPhotos=await import('./lib/opid-photos.mjs');
-const {validOpidUser}=await import('./lib/cleaners.mjs');
+const {validOpidUser,normalize:normalizeDb}=await import('./lib/cleaners.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
 const flowSessions=sessionStore({db:()=>cloud(),max:auth.SESSION_MAX});auth.useSessionStore(flowSessions);
 // Removing people from Flow (lib/revocations.mjs): the owner's removals and OneProfileID's membership events.
 const {revocationStore,membershipControl,SCHEMA:REVOCATION_SCHEMA}=await import('./lib/revocations.mjs');
-const {shrinks,size,keepCounters}=await import('./public/sync-core.js');
+const {shrinks,size,keepCounters,fieldBase}=await import('./public/sync-core.js');
 const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
 const appHost=auth.appOrigin?new URL(auth.appOrigin).host:'';
@@ -937,8 +937,8 @@ async function sharesApi(req,res){
 // ---------- public API: /api/v1 (REST + OpenAPI), API keys (Settings › API keys) and MCP at /mcp ----------
 // docs/api.md, docs/api-keys.md, docs/mcp-cli.md. /api/v1 and /mcp take Authorization: Bearer flow_… keys
 // (or the owner token); they are not tied to the page origin. A key is limited to its environment and
-// scopes on top of the usual ownership rules. Linked copies of shares never appear here: the API sees
-// each environment's own stored data only.
+// scopes on top of the usual ownership rules. In the caller's own environments it sees the linked copies of
+// the shares placed there too (apiStore below), like the app.
 const {apiV1,envCheckFor,memoryRateLimit}=await import('./lib/api-v1.mjs');
 const registryMod=await import('./lib/registry.mjs');
 const {apiKeyStore,authenticateApiKey,bearerKey,allows:keyAllows,SCHEMA:APIKEY_SCHEMA}=await import('./lib/apikeys.mjs');
@@ -950,8 +950,10 @@ const apiKeys=apiKeyStore({dir:fileURLToPath(backupRoot),db:()=>cloud(),mode:aut
 const keyEnvs=async u=>[...new Set([...(await workspaces.owned(u.email)).map(w=>w.envId),...(sameEmail(u.email,auth.OWNER_EMAIL)?[DEFAULT_ENV.id]:[])])];
 const keysApi=apiKeyRoutes({userFor:auth.userFor,store:apiKeys,readJson,trusted,envsFor:keyEnvs,maxKeys:u=>limitsOf(u.email).maxApiKeys});
 const apiLimit=memoryRateLimit({perMinute:120}),baseEnvCheck=envCheckFor(workspaces);
-// The store the API works on: each environment's own data (no linked copies; edges to them left out),
-// and for a key, only the environments it is for.
+// The store the API works on: each environment's own data (edges to linked copies it cannot see left
+// out), and for a key, only the environments it is for. In the caller's own environments it also holds
+// the linked copies of the shares placed there, as the app shows them, and a write sends their changes
+// back with the same rules as a browser save (applyRecipientSave). Never for the owner token.
 // Readers other than the owner (members, public environments) see only that a card is linked, as in the app.
 // Cards whose latest change came from a share recipient, not the environment's owner (agents.work holds them).
 async function heldCards(envId,ids){
@@ -961,11 +963,48 @@ async function heldCards(envId,ids){
   for(const id of ids){const h=(await shares.history({envId,kind:'card',recordId:id,limit:1}))[0];if(h&&!sameEmail(h.by,w.owner))out.add(id)}
   return out;
 }
-const apiStore=(key,user)=>({...workspaces,
-  async get(id){const w=await workspaces.get(id);if(!w?.data)return w;const data=dropDangling(structuredClone(stripLinked(w.data)));
-    if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
-  async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
-});
+const SHARE_REFUSAL={permission:[403,'share_permission','This share does not let you change that'],stub:[403,'share_read_only','That record is read-only: it belongs to someone outside the share'],
+  forbidden:[403,'share_permission','This share does not let you change that'],revoked:[409,'share_revoked','That share was revoked'],
+  'out-of-scope':[409,'share_out_of_scope','That record is no longer shared with you'],'not-found':[409,'share_out_of_scope','That record is no longer shared with you'],invalid:[400,'invalid_shared_field','Invalid value for a shared record']};
+// What a write to linked records would be refused for, checked before anything is saved:
+// {status, code, error} | null. seen: the workspace as get() served it.
+async function sharedRefusal(envId,user,seen,data,base){
+  const locked=core.lockedChanges(seen,data)[0];
+  if(locked)return locked.field==='deleted'?{status:403,code:'share_delete',error:`${locked.id} is shared with you: only its owner can delete it`}
+    :locked.stub?{status:403,code:SHARE_REFUSAL.stub[1],error:SHARE_REFUSAL.stub[2]}
+    :{status:403,code:'share_read_only_field',error:`The ${locked.field} of a shared ${locked.kind} can only be changed by its owner`};
+  for(const {share:s,home} of await attachedShares(envId,user)){
+    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
+    for(const e of core.extractRecipientChanges(p,data,base).edits){
+      const r=core.applyRecipientEdit(home.data,s,e,user,{members});if(r.ok)continue;
+      const [status,code,error]=SHARE_REFUSAL[r.error]||[403,'share_permission','This share does not let you change that'];
+      return {status,code,error:r.field&&r.error==='invalid'?`${error}: ${r.field}`:error};
+    }
+  }
+  return null;
+}
+const apiStore=(key,user)=>{
+  // What get() served for each environment that holds linked copies, cleaned the way every operation cleans
+  // what it reads, so a write sends only the fields the caller changed (fieldBase), and a copy that is
+  // merely out of date never overwrites the owner.
+  const served=new Map(),withLinked=w=>!!user?.email&&!user.token&&sameEmail(w.owner,user.email);
+  return {...workspaces,
+    async get(id){const w=await workspaces.get(id);if(!w?.data)return w;
+      if(withLinked(w)){const {data}=await withShares(id,user,w.data);if(core.linkedShareIds(data).length){served.set(id,normalizeDb(structuredClone(data)));return {...w,data}}}
+      served.delete(id);
+      const data=dropDangling(structuredClone(stripLinked(w.data)));
+      if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
+    async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
+    async put(id,opts){
+      const seen=served.get(id);if(!seen)return workspaces.put(id,opts);
+      const base=fieldBase(seen,opts.data),refused=await sharedRefusal(id,user,seen,opts.data,base);
+      if(refused)return {refused};
+      const out=await workspaces.put(id,{...opts,data:stripLinked(opts.data)});
+      if(out.ok)await applyRecipientSave(id,user,opts.data,base).catch(e=>console.error('share write-back failed',e?.message));
+      return out;
+    },
+  };
+};
 const keyEnvCheck=async(envId,user,mode)=>(!user?.key||keyAllows(user.key,mode==='write'?'write':'read',envId))&&baseEnvCheck(envId,user,mode);
 // Authorization: Bearer flow_… (an API key) or the owner token. -> {user, scopes} | null
 async function apiAuth(req){

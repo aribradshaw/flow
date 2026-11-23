@@ -19,7 +19,7 @@ List environments
 
 `GET /api/v1/envs` · scope `read` · MCP tool `envs_list`
 
-Environments (workspaces) you own, newest first. Use an id from here as {env} in every other call.
+Environments (workspaces) you own, newest first. Use an id from here as {env} in every other call. What others share with you is inside the environment you added it to: a chart named "Shared · <their environment>" (unless you moved its cards), with ids sh.<share>.<id>. Edits to it go back to its owner when the share allows them.
 
 **Input**
 
