@@ -224,6 +224,17 @@ test('AgentFlow: a card last changed by an edit-share recipient waits for the ow
   assert.equal(r.status,404);
 });
 
+test('parallel first saves cannot pass the environment cap together (card #677)',async()=>{
+  const envs=new Map(),later=()=>new Promise(r=>setTimeout(r,5));
+  const raw={get:async id=>envs.get(id)||null,owned:async o=>{await later();return [...envs.values()].filter(w=>w.owner===o)},bytesOwned:async()=>({}),
+    put:async(id,o)=>{await later();envs.set(id,{owner:o.owner,data:o.data});return {ok:true,rev:1}}};
+  const s=cappedWorkspaces(raw,{caps:caps({FLOW_MAX_ENVIRONMENTS:'5'}),isOwner:()=>false,accountOf:async()=>null,count:()=>1});
+  const out=await Promise.all(Array.from({length:12},(_,i)=>s.put('env-'+i,{data:{},owner:'a@x.test'})));
+  assert.equal(out.filter(r=>r.ok).length,5);assert.equal(out.filter(r=>r.refused?.code==='too_many_environments').length,7);
+  assert.equal(envs.size,5);
+  assert.equal((await s.put('env-0',{data:{n:2},owner:'a@x.test'})).ok,true,'saving an existing one still works');
+});
+
 test('the capped store refuses without writing, and mirrors are not checked',async()=>{
   const writes=[];const raw={get:async()=>null,owned:async()=>[],bytesOwned:async()=>({}),put:async(id,o)=>{writes.push(o);return {ok:true,rev:1}}};
   const s=cappedWorkspaces(raw,{caps:caps({FLOW_MAX_ITEMS:'1'}),isOwner:()=>false,accountOf:async()=>null,count:d=>d.n});

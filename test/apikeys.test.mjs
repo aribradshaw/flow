@@ -83,6 +83,15 @@ function suite(label,makeStore){
       assert.ok(log.some(e=>e.op==='revoke'&&e.ip==='10.0.0.9')&&log.some(e=>e.op==='denied-revoked'));
     });
 
+    test('refused requests are audited at most once a minute per key, so a flood cannot push out other history (card #677)',async()=>{
+      const {key,apiKey}=await store.create({owner:OWNER,name:'flood',env:'*',scopes:['read']});
+      await store.revoke(apiKey.id,OWNER);
+      for(let i=0;i<20;i++)assert.equal(await authenticateApiKey(reqWith(key),store),null);
+      assert.equal((await store.auditLog(apiKey.id)).filter(e=>e.op==='denied-revoked').length,1);
+      clock.t+=61e3;await authenticateApiKey(reqWith(key),store);
+      assert.equal((await store.auditLog(apiKey.id)).filter(e=>e.op==='denied-revoked').length,2,'and again after a minute');
+    });
+
     test('last use is recorded, at most once a minute',async()=>{
       const {key,apiKey}=await store.create({owner:OWNER,name:'t',env:'*',scopes:['read']});
       await authenticateApiKey(reqWith(key,'192.0.2.1'),store);
@@ -266,4 +275,12 @@ describe('postgres',{skip:!EmbeddedPostgres&&'embedded-postgres is not installed
     assert.ok(await authenticateApiKey(reqWith(key),store));
     assert.throws(()=>readdirSync(join(dir,'files')),'no JSON files when Postgres is in use');
   });
+});
+
+// Card #677: the client address is the last X-Forwarded-For hop (the proxy's), never the client's own claim.
+test('clientIp takes the last X-Forwarded-For hop',async()=>{
+  const {clientIp}=await import('../lib/apikeys.mjs');
+  assert.equal(clientIp({headers:{'x-forwarded-for':'1.2.3.4, 203.0.113.9'},socket:{remoteAddress:'10.0.0.1'}}),'203.0.113.9');
+  assert.equal(clientIp({headers:{'x-forwarded-for':'spoofed'},socket:{}}),'spoofed');
+  assert.equal(clientIp({headers:{},socket:{remoteAddress:'10.0.0.1'}}),'10.0.0.1');
 });
