@@ -221,6 +221,7 @@ struct Avatar: View {
     let name: String
     var image: String?
     var size: CGFloat = 22
+    var ring = true
 
     var body: some View {
         Group {
@@ -236,7 +237,7 @@ struct Avatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().strokeBorder(Theme.surface, lineWidth: size > 24 ? 2 : 1.5))
+        .overlay { if ring { Circle().strokeBorder(Theme.surface, lineWidth: size > 24 ? 2 : 1.5) } }
         .accessibilityLabel(name)
     }
 
@@ -380,6 +381,88 @@ extension BoardColumn {
         case .blocked: ("Unblock", .doing, "arrow.uturn.forward")
         case .uat: ("Approve", .done, "checkmark")
         case .done: nil
+        }
+    }
+}
+
+// A titled group of rows on one Flow surface, divided by hairlines (the app's form and list section).
+struct FlowGroup<Content: View>: View {
+    var title: String?
+    var footer: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let title { Text(title).flowSectionTitle().padding(.horizontal, 2) }
+            VStack(spacing: 0) {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 12) }
+                        row
+                    }
+                }
+            }
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.panelCorner))
+            .overlay(RoundedRectangle(cornerRadius: Theme.panelCorner).strokeBorder(Theme.line))
+            if let footer { Text(footer).font(.caption).foregroundStyle(Theme.muted).padding(.horizontal, 2) }
+        }
+    }
+}
+
+// One row: an optional icon, a label, and whatever goes on the right.
+struct FlowRow<Trailing: View>: View {
+    var icon: String?
+    let title: String
+    var tint: Color = Theme.muted
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(tint).frame(width: 22)
+            }
+            Text(title).font(.subheadline).foregroundStyle(Theme.ink)
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 46)
+    }
+}
+
+extension FlowRow where Trailing == EmptyView {
+    init(icon: String? = nil, title: String, tint: Color = Theme.muted) {
+        self.init(icon: icon, title: title, tint: tint) { EmptyView() }
+    }
+}
+
+// The web's checkbox: a 4px square, dark green when done.
+struct FlowCheckbox: View {
+    let done: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(done ? Theme.accent : Theme.surface)
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(done ? Theme.accent : Theme.line2, lineWidth: 1.5))
+            .overlay { if done { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.surface) } }
+            .frame(width: 18, height: 18)
+    }
+}
+
+// A quiet, value-on-the-right menu (project, column) that reads like a row value, not a button.
+struct ValueMenu<Content: View>: View {
+    let value: String
+    var color: Color?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Menu { content } label: {
+            HStack(spacing: 5) {
+                if let color { RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 8, height: 8) }
+                Text(value).foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Theme.faint)
+            }
+            .font(.subheadline)
         }
     }
 }

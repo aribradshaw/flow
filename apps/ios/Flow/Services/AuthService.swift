@@ -137,7 +137,7 @@ final class AuthService {
         guard r.status == 201, let reply = try? r.decode(KeyReply.self) else {
             throw FlowError(status: r.status, code: nil, message: r.errorMessage)
         }
-        return Credential(server: server, key: reply.key, keyId: reply.apiKey.id, email: user.email, prefix: reply.apiKey.prefix)
+        return Credential(server: server, key: reply.key, keyId: reply.apiKey.id, email: user.email, prefix: reply.apiKey.prefix, name: user.name)
     }
 
     // Revoke the app's key, end the web session and forget both. Best effort on the server side.

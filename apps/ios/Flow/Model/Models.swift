@@ -129,6 +129,10 @@ struct Credential: Codable, Equatable {
     let keyId: String?
     let email: String?
     let prefix: String?
+    var name: String? = nil
+
+    // How the person shows: their name, else their email.
+    var displayName: String { (name?.isEmpty == false ? name : nil) ?? email ?? "Flow" }
 }
 
 // MARK: The Flow app's own routes (/api/app, docs/ios-app.md)

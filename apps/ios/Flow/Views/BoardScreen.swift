@@ -81,14 +81,17 @@ struct BoardScreen: View {
                 .buttonStyle(.borderedProminent)
             }
         } else if sizeClass == .regular {
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(BoardColumn.allCases) { col in
-                        ColumnView(board: board, meta: meta, column: col, onMove: requestMove, onAdd: { newCardColumn = col })
-                            .frame(width: 280)
+            GeometryReader { geo in
+                ScrollView([.horizontal, .vertical]) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(BoardColumn.allCases) { col in
+                            ColumnView(board: board, meta: meta, column: col, onMove: requestMove, onAdd: { newCardColumn = col })
+                                .frame(width: 292)
+                        }
                     }
+                    .padding(16)
+                    .frame(minHeight: geo.size.height, alignment: .top)
                 }
-                .padding(12)
             }
         } else {
             VStack(spacing: 0) {
@@ -120,7 +123,7 @@ struct BoardScreen: View {
                     .background { NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) { EmptyView() }.opacity(0) }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if let next = col.nextStep {
                         Button { requestMove(card, next.to) } label: { Label(next.title, systemImage: next.systemImage) }
@@ -234,12 +237,11 @@ private struct ColumnStrip: View {
                     }
                 }
                 .padding(2)
-                .background(Theme.bg, in: .rect(cornerRadius: Theme.corner))
-                .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line))
-                .padding(.horizontal, 12)
+                .background(Theme.hover.opacity(0.6), in: .rect(cornerRadius: Theme.corner))
+                .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+            .scrollClipDisabled()
             .onChange(of: column) { withAnimation(.snappy) { proxy.scrollTo(column, anchor: .center) } }
         }
         .sensoryFeedback(.selection, trigger: column)
@@ -271,8 +273,7 @@ private struct ColumnView: View {
                 .accessibilityLabel("Add a card to \(column.title)")
             }
             .padding(.leading, 6)
-            ScrollView {
-                LazyVStack(spacing: 5) {
+            VStack(spacing: 5) {
                     ForEach(cards) { card in
                         NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) {
                             CardTile(card: card, meta: meta)
@@ -281,15 +282,20 @@ private struct ColumnView: View {
                         .contextMenu { MoveMenu(card: card) { onMove(card, $0) } }
                         .draggable(card.id)
                     }
-                    if cards.isEmpty {
-                        Text("No cards").font(.footnote).foregroundStyle(Theme.faint).frame(maxWidth: .infinity).padding(.vertical, 20)
+                    Button(action: onAdd) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus").font(.caption.weight(.semibold))
+                            Text("Add a card")
+                        }
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .contentShape(.rect)
                     }
-                }
-                .padding(.bottom, 12)
+                    .buttonStyle(.plain)
             }
         }
         .padding(6)
-        .frame(maxHeight: .infinity, alignment: .top)
         .background(targeted ? Theme.accentWash : Theme.bg, in: .rect(cornerRadius: Theme.panelCorner))
         .overlay(RoundedRectangle(cornerRadius: Theme.panelCorner).strokeBorder(targeted ? Theme.green : Theme.line))
         .dropDestination(for: String.self) { ids, _ in
@@ -319,16 +325,15 @@ struct CardTile: View {
                 Spacer(minLength: 4)
                 Text(card.numberText).font(.caption2.monospacedDigit()).foregroundStyle(Theme.faint)
             }
-            if !labels.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(labels.prefix(3)) { LabelChip(label: $0) }
-                    if labels.count > 3 { Text("+\(labels.count - 3)").font(.caption2).foregroundStyle(.secondary) }
+            // The details wrap onto a second line rather than squeezing; people stay on the right.
+            HStack(alignment: .bottom, spacing: 8) {
+                FlowLayout(spacing: 8) {
+                    ProjectTag(project: card.project.flatMap { meta.projects[$0] }).fixedSize()
+                    ForEach(labels.prefix(2)) { LabelChip(label: $0).fixedSize() }
+                    if labels.count > 2 { Text("+\(labels.count - 2)").font(.caption2).foregroundStyle(Theme.faint) }
+                    if let due = card.due, !due.isEmpty { DueLabel(due: due, done: card.column == "done").fixedSize() }
+                    if !items.isEmpty { ChecklistProgress(done: items.filter(\.done).count, total: items.count).fixedSize() }
                 }
-            }
-            HStack(spacing: 8) {
-                ProjectTag(project: card.project.flatMap { meta.projects[$0] })
-                if let due = card.due, !due.isEmpty { DueLabel(due: due, done: card.column == "done") }
-                if !items.isEmpty { ChecklistProgress(done: items.filter(\.done).count, total: items.count) }
                 Spacer(minLength: 0)
                 if !people.isEmpty { AvatarStack(people: people) }
             }

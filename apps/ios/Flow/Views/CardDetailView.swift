@@ -31,8 +31,9 @@ struct CardDetailView: View {
             }
         }
         .background(Theme.bg)
-        .navigationTitle(card?.numberText ?? "")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if let card {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -58,12 +59,11 @@ struct CardDetailView: View {
                 .buttonStyle(.flow(.primary, large: true))
                 .disabled(moving)
                 .padding(.horizontal)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
-                .background(Theme.bg.opacity(0.97))
-                .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+                .background(Theme.bg.opacity(0.96))
             }
         }
         .sheet(isPresented: $editing) {
@@ -72,7 +72,14 @@ struct CardDetailView: View {
         .cardMoveDialog(mover)
         .sensoryFeedback(.selection, trigger: ticked)
         .sensoryFeedback(.success, trigger: moved)
-        .task { mover.onMoved = { updated($0); moved += 1 }; await refresh() }
+        .task {
+            mover.onMoved = { updated($0); moved += 1 }
+            await refresh()
+            #if DEBUG
+            // UI testing: `-editCard YES` opens the editor on the card that opened.
+            if UserDefaults.standard.bool(forKey: "editCard"), card != nil { editing = true }
+            #endif
+        }
         .refreshable { await refresh() }
     }
 
@@ -110,6 +117,7 @@ struct CardDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 ColumnPill(column: card.column)
+                Text(card.numberText).font(.caption.monospacedDigit()).foregroundStyle(Theme.faint)
                 if let snoozed = card.snoozedUntil, let d = ISO8601DateFormatter().date(from: snoozed), d > .now {
                     Tag(text: "Snoozed", color: Theme.muted, icon: "moon.zzz")
                 }
@@ -120,15 +128,8 @@ struct CardDetailView: View {
                 .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
             let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
-            if card.project != nil || !labels.isEmpty {
-                FlowLayout(spacing: 6) {
-                    if let p = card.project.flatMap({ meta.projects[$0] }) {
-                        ProjectTag(project: p, font: .caption.weight(.medium))
-                            .padding(.horizontal, 6).frame(height: 18)
-                            .background(Theme.hover, in: .rect(cornerRadius: 3))
-                    }
-                    ForEach(labels) { LabelChip(label: $0) }
-                }
+            if !labels.isEmpty {
+                FlowLayout(spacing: 6) { ForEach(labels) { LabelChip(label: $0) } }
             }
         }
     }
@@ -137,10 +138,14 @@ struct CardDetailView: View {
         let people = meta.assignees(card)
         let roles = Dictionary((card.assignees ?? []).map { ($0.node, $0.role ?? "developer") }, uniquingKeysWith: { a, _ in a })
         return VStack(spacing: 0) {
+            if let p = card.project.flatMap({ meta.projects[$0] }) {
+                factRow { icon("folder") } label: { Text("Project").foregroundStyle(Theme.ink) } value: { ProjectTag(project: p, font: .subheadline) }
+                Divider().overlay(Theme.line).padding(.leading, 40)
+            }
             if !people.isEmpty {
                 ForEach(people) { person in
                     factRow {
-                        Avatar(name: person.name, image: person.image, size: 28)
+                        Avatar(name: person.name, image: person.image, size: 24, ring: false)
                     } label: {
                         Text(person.name).foregroundStyle(Theme.ink)
                     } value: {

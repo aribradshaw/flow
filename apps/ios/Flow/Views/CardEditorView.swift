@@ -50,77 +50,150 @@ struct CardEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                }
-                Section {
-                    TextField("Title", text: $title, axis: .vertical)
-                        .font(.headline)
-                    TextField("Description", text: $text, axis: .vertical)
-                        .lineLimit(3...12)
-                }
-                Section {
-                    if original == nil {
-                        Picker("Column", selection: $column) {
-                            ForEach(BoardColumn.allCases) { Text($0.title).tag($0) }
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Theme.danger)
                     }
-                    Picker("Project", selection: $project) {
-                        Text("None").tag(String?.none)
-                        ForEach(meta.sortedProjects) { Text($0.name).tag(Optional($0.id)) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        TextField("Card title", text: $title, axis: .vertical)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Theme.ink)
+                            .padding(12)
+                        Rectangle().fill(Theme.line).frame(height: 1)
+                        TextField("Add a description (Markdown works)", text: $text, axis: .vertical)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.ink)
+                            .lineLimit(4...14)
+                            .padding(12)
                     }
-                    NavigationLink {
-                        LabelPicker(labels: meta.sortedLabels, selected: $labels)
-                    } label: {
-                        LabeledContent("Labels", value: labels.isEmpty ? "None" : meta.sortedLabels.filter { labels.contains($0.id) }.map(\.name).joined(separator: ", "))
-                    }
-                    TextField("Points", text: $points)
-                        .keyboardType(.decimalPad)
-                    Toggle("Due date", isOn: $hasDue.animation())
-                    if hasDue {
-                        DatePicker("Due", selection: $due, displayedComponents: .date)
-                    }
-                }
-                Section("Checklist") {
-                    ForEach($checklist, id: \.localID) { $item in
-                        HStack {
-                            Button {
-                                item.done.toggle()
-                            } label: {
-                                Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                    .background(Theme.surface, in: .rect(cornerRadius: Theme.panelCorner))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.panelCorner).strokeBorder(Theme.line))
+
+                    FlowGroup(title: "Details") {
+                        if original == nil {
+                            FlowRow(icon: "rectangle.split.3x1", title: "Column") {
+                                ValueMenu(value: column.shortTitle, color: Theme.columnColor(column.rawValue)) {
+                                    Picker("Column", selection: $column) {
+                                        ForEach(BoardColumn.allCases) { Text($0.title).tag($0) }
+                                    }
+                                }
                             }
-                            .buttonStyle(.plain)
-                            TextField("Item", text: $item.text)
+                        }
+                        FlowRow(icon: "folder", title: "Project") {
+                            let p = project.flatMap { meta.projects[$0] }
+                            ValueMenu(value: p?.name ?? "None", color: p.map { Color(flow: $0.color) }) {
+                                Picker("Project", selection: $project) {
+                                    Text("None").tag(String?.none)
+                                    ForEach(meta.sortedProjects) { Text($0.name).tag(Optional($0.id)) }
+                                }
+                            }
+                        }
+                        NavigationLink {
+                            LabelPicker(labels: meta.sortedLabels, selected: $labels)
+                        } label: {
+                            FlowRow(icon: "tag", title: "Labels") {
+                                let chosen = meta.sortedLabels.filter { labels.contains($0.id) }
+                                if chosen.isEmpty { Text("None").font(.subheadline).foregroundStyle(Theme.muted) }
+                                else { HStack(spacing: 4) { ForEach(chosen.prefix(3)) { LabelChip(label: $0) } } }
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        FlowRow(icon: "gauge.with.needle", title: "Points") {
+                            TextField("–", text: $points)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.ink)
+                                .frame(maxWidth: 80)
+                        }
+                        FlowRow(icon: "calendar", title: "Due") {
+                            if hasDue {
+                                DatePicker("Due", selection: $due, displayedComponents: .date).labelsHidden()
+                                Button { withAnimation { hasDue = false } } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.faint)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove the due date")
+                            } else {
+                                Button("Add a date") { withAnimation { hasDue = true } }
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
                         }
                     }
-                    .onDelete { checklist.remove(atOffsets: $0) }
-                    .onMove { checklist.move(fromOffsets: $0, toOffset: $1) }
-                    HStack {
-                        TextField("Add an item", text: $newItem)
-                            .onSubmit(addItem)
-                        Button("Add", systemImage: "plus.circle.fill", action: addItem)
-                            .labelStyle(.iconOnly)
-                            .disabled(newItem.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    FlowGroup(title: checklist.isEmpty ? "Checklist" : "Checklist · \(checklist.filter(\.done).count) of \(checklist.count)") {
+                        ForEach($checklist, id: \.localID) { $item in
+                            HStack(spacing: 10) {
+                                Button { item.done.toggle() } label: { FlowCheckbox(done: item.done) }
+                                    .buttonStyle(.plain)
+                                TextField("Item", text: $item.text, axis: .vertical)
+                                    .font(.subheadline)
+                                    .foregroundStyle(item.done ? Theme.muted : Theme.ink)
+                                Button { checklist.removeAll { $0.localID == item.localID } } label: {
+                                    Image(systemName: "minus.circle").foregroundStyle(Theme.faint)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove this item")
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                        }
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(width: 18)
+                            TextField("Add an item", text: $newItem)
+                                .font(.subheadline)
+                                .onSubmit(addItem)
+                                .submitLabel(.done)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                    }
+
+                    FlowGroup(title: "Links") {
+                        ForEach(links, id: \.self) { link in
+                            HStack(spacing: 10) {
+                                Image(systemName: link.kind == "pr" ? "arrow.triangle.pull" : link.kind == "commit" ? "smallcircle.filled.circle" : "link")
+                                    .foregroundStyle(Theme.accent).frame(width: 18)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    if let url = URL(string: link.url) {
+                                        Text(LinkInfo(url).title).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(1)
+                                        Text(LinkInfo(url).subtitle).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+                                    } else {
+                                        Text(link.url).font(.subheadline).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Button { links.removeAll { $0 == link } } label: { Image(systemName: "minus.circle").foregroundStyle(Theme.faint) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Remove this link")
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 48)
+                        }
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).frame(width: 18)
+                            TextField("Paste a link", text: $newLink)
+                                .font(.subheadline)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onSubmit(addLink)
+                                .submitLabel(.done)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
                     }
                 }
-                Section("Links") {
-                    ForEach(links, id: \.self) { link in
-                        Text(link.url).lineLimit(1).font(.callout)
-                    }
-                    .onDelete { links.remove(atOffsets: $0) }
-                    HStack {
-                        TextField("https://…", text: $newLink)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .onSubmit(addLink)
-                        Button("Add", systemImage: "plus.circle.fill", action: addLink)
-                            .labelStyle(.iconOnly)
-                            .disabled(URL(string: newLink)?.scheme?.hasPrefix("http") != true)
-                    }
-                }
+                .padding()
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.bg)
+            .tint(Theme.accent)
             .navigationTitle(original.map { "Edit \($0.numberText)" } ?? "New card")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -231,18 +304,29 @@ private struct LabelPicker: View {
     @Binding var selected: Set<String>
 
     var body: some View {
-        List(labels) { label in
-            Button {
-                if selected.contains(label.id) { selected.remove(label.id) } else { selected.insert(label.id) }
-            } label: {
-                HStack {
-                    LabelChip(label: label)
-                    Spacer()
-                    if selected.contains(label.id) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+        ScrollView {
+            FlowGroup {
+                ForEach(labels) { label in
+                    Button {
+                        if selected.contains(label.id) { selected.remove(label.id) } else { selected.insert(label.id) }
+                    } label: {
+                        HStack {
+                            LabelChip(label: label)
+                            Spacer()
+                            FlowCheckbox(done: selected.contains(label.id))
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .buttonStyle(.plain)
+            .padding()
         }
+        .background(Theme.bg)
         .navigationTitle("Labels")
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.selection, trigger: selected)
     }
 }

@@ -83,7 +83,6 @@ struct CanvasScreen: View {
         HStack {
             modeSwitcher
             Spacer()
-            if mode == .timeline { timelineSwitcher }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -105,10 +104,10 @@ struct CanvasScreen: View {
                 .overlay(alignment: .bottomTrailing) {
                     Button { camera.overview = true; camera.fitRequest += 1 } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.muted)
-                            .frame(width: 38, height: 38)
-                            .background(Theme.surface, in: .rect(cornerRadius: Theme.corner))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line2))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 44, height: 44)
+                            .background(.regularMaterial, in: .circle)
+                            .overlay(Circle().strokeBorder(Theme.line))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Fit the whole map")
@@ -134,10 +133,7 @@ struct CanvasScreen: View {
         ToolbarItem(placement: .topBarLeading) { ProfileButton() }
         if landscapePhone {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 10) {
-                    modeSwitcher
-                    if mode == .timeline { timelineSwitcher }
-                }
+                modeSwitcher
             }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -145,18 +141,23 @@ struct CanvasScreen: View {
                 Button { searching = true } label: { Image(systemName: "magnifyingglass") }
                     .accessibilityLabel("Find a card on the map")
             }
-            if mode == .map && map.charts.count > 1 {
-                Menu {
+            Menu {
+                if mode == .timeline {
+                    Picker("View", selection: Binding(get: { currentTimelineMode }, set: { timelineMode = $0 })) {
+                        Label("Roadmap", systemImage: "chart.bar.xaxis").tag(TimelineMode.roadmap)
+                        Label("List", systemImage: "list.bullet").tag(TimelineMode.list)
+                    }
+                }
+                if mode == .map && map.charts.count > 1 {
                     Picker("Mind map", selection: Binding(get: { map.chartID }, set: { map.chartID = $0 })) {
                         ForEach(map.charts) { c in Text(c.name).tag(Optional(c.id)) }
                     }
-                } label: {
-                    Image(systemName: "rectangle.stack")
                 }
-                .accessibilityLabel("Choose a mind map")
+                Button { showOffice = true } label: { Label("Open the 3D office", systemImage: "building.2") }
+            } label: {
+                Image(systemName: "ellipsis")
             }
-            Button { showOffice = true } label: { Image(systemName: "building.2") }
-                .accessibilityLabel("Open the 3D office")
+            .accessibilityLabel("More")
         }
     }
 

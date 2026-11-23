@@ -61,6 +61,8 @@ struct MainView: View {
             if let ref = UserDefaults.standard.string(forKey: "openCard")?.split(separator: "/", maxSplits: 1), ref.count == 2 {
                 model.route = .card(CardRef(env: String(ref[0]), id: String(ref[1])))
             }
+            // `-showSettings YES` opens Settings.
+            if UserDefaults.standard.bool(forKey: "showSettings") { model.showingSettings = true }
             #endif
         }
     }
@@ -88,7 +90,7 @@ struct ProfileButton: View {
         Button {
             model.showingSettings = true
         } label: {
-            Avatar(name: model.credential?.email ?? "Flow", size: 30)
+            Avatar(name: model.credential?.displayName ?? "Flow", size: 28, ring: false)
         }
         .accessibilityLabel("Account and settings")
     }

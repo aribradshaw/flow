@@ -158,11 +158,13 @@ private struct ChartCanvas: View {
                 } else {
                     ctx.stroke(path, with: .color(Theme.edge), style: StrokeStyle(lineWidth: max(1, 1.5 * z), lineJoin: .round))
                     if let pct = e.percent, !pct.isEmpty, z > 0.42 {
-                        let text = Text("\(pct)%").font(.system(size: 10.5 * z, weight: .semibold)).foregroundStyle(Theme.ink)
-                        let w = CGFloat(pct.count + 1) * 6.2 * z + 10 * z, h = 16 * z
+                        // Never smaller than 9 points on screen.
+                        let fs = max(9, 10.5 * z), k = fs / 10.5
+                        let text = Text("\(pct)%").font(.system(size: fs, weight: .semibold)).foregroundStyle(Theme.ink)
+                        let w = CGFloat(pct.count + 1) * 6.2 * k + 10 * k, h = 16 * k
                         let box = CGRect(x: label.x - w / 2, y: label.y - h / 2, width: w, height: h)
-                        ctx.fill(Path(roundedRect: box, cornerRadius: 3 * z), with: .color(Theme.surface))
-                        ctx.stroke(Path(roundedRect: box, cornerRadius: 3 * z), with: .color(Theme.line2), lineWidth: 1)
+                        ctx.fill(Path(roundedRect: box, cornerRadius: 3), with: .color(Theme.surface))
+                        ctx.stroke(Path(roundedRect: box, cornerRadius: 3), with: .color(Theme.line2), lineWidth: 1)
                         ctx.draw(text, at: label)
                     }
                 }

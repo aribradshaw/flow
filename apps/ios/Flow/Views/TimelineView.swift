@@ -85,8 +85,8 @@ struct TimelineList: View {
                             HStack {
                                 Text(month.formatted(.dateTime.month(.wide).year()))
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(month == thisMonth ? Theme.brick : Theme.ink)
-                                if month == thisMonth { Tag(text: "This month", color: Theme.brick) }
+                                    .foregroundStyle(Theme.ink)
+                                if month == thisMonth { Tag(text: "This month", color: Theme.accent) }
                                 Spacer()
                             }
                             .padding(.horizontal)
@@ -106,10 +106,9 @@ struct TimelineList: View {
 
     private func row(_ item: TimelineItem) -> some View {
         HStack(spacing: 0) {
-            Rectangle().fill(store.color(item)).frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: item.symbol).font(.caption).foregroundStyle(store.color(item))
+                    Image(systemName: item.symbol).font(.caption).foregroundStyle(Theme.muted)
                     Text(item.title).font(.subheadline.weight(.medium)).foregroundStyle(item.status == "cancelled" ? Theme.faint : Theme.ink)
                         .strikethrough(item.status == "cancelled").lineLimit(2).multilineTextAlignment(.leading)
                     Spacer(minLength: 0)

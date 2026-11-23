@@ -16,6 +16,7 @@ struct SignInView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
+            Spacer()
             VStack(spacing: 14) {
                 FlowMark(size: 76)
                 Text("Flygon Flow")
@@ -26,6 +27,8 @@ struct SignInView: View {
                     .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
             }
+            Spacer()
+            Spacer()
             Spacer()
             VStack(spacing: 12) {
                 if let error {
@@ -59,7 +62,7 @@ struct SignInView: View {
                 .padding(.top, 6)
                 Text("Signing in gives this device its own key. You can revoke it on the web under Settings › Connect.")
                     .font(.caption2)
-                    .foregroundStyle(Theme.faint)
+                    .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
                     .padding(.top, 2)
             }

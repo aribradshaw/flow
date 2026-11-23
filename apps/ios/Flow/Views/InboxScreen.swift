@@ -20,7 +20,7 @@ struct InboxScreen: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    summary.padding(.horizontal, 4)
+                    summary
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Theme.danger)
                     }
@@ -31,7 +31,7 @@ struct InboxScreen: View {
                     }
                     if !inbox.agents.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            header("Agents waiting on you", systemImage: "", color: Theme.warn)
+                            header("Agents waiting on you", systemImage: "", color: Theme.brick)
                             ForEach(inbox.agents) { agent in agentCard(agent).cardSurface(padding: 12) }
                         }
                     }
@@ -70,6 +70,7 @@ struct InboxScreen: View {
                 }
             }
             .navigationTitle("Inbox")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { ProfileButton() } }
             .navigationDestination(for: CardRef.self) { ref in CardDetailView(ref: ref) }
             .refreshable { await load() }
@@ -170,9 +171,9 @@ struct InboxScreen: View {
                     .buttonStyle(.flow(.primary))
                 } else {
                     Button { Task { await send(agent, decision: "deny") } } label: {
-                        Text("Deny").frame(maxWidth: .infinity)
+                        Text("Deny").padding(.horizontal, 10)
                     }
-                    .buttonStyle(.flow(.danger))
+                    .buttonStyle(.flow(.secondary))
                     Button { Task { await send(agent, decision: "allow") } } label: {
                         Text("Allow").frame(maxWidth: .infinity)
                     }
@@ -234,15 +235,20 @@ struct InboxScreen: View {
         NavigationLink(value: CardRef(env: card.env, id: card.id)) {
           HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(2)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(2)
+                    Spacer(minLength: 6)
+                    Text(card.numberText).font(.caption2.monospacedDigit()).foregroundStyle(Theme.faint)
+                }
                 HStack(spacing: 10) {
                     if let p = card.project {
                         ProjectTag(project: FlowProject(id: p.id, name: p.name, color: p.color))
                     }
                     if let due = card.due, !due.isEmpty { DueLabel(due: due) }
-                    Text(card.roles.map(\.capitalized).joined(separator: ", ")).font(.caption).foregroundStyle(Theme.muted)
+                    // Developer is the usual role: only the others are worth a word.
+                    let roles = card.roles.filter { $0 != "developer" }
+                    if !roles.isEmpty { Text(roles.map(\.capitalized).joined(separator: ", ")).font(.caption).foregroundStyle(Theme.muted) }
                     Spacer(minLength: 0)
-                    Text(card.numberText).font(.caption2.monospacedDigit()).foregroundStyle(Theme.faint)
                 }
                 if model.envs.count > 1, let env = card.envName {
                     Text(env).font(.caption2).foregroundStyle(Theme.faint)

@@ -21,6 +21,19 @@ struct LabelTone {
     let background: String
     let text: String
 
+    // Light: the pastel wash with the dark text (the web's pairing). Dark: the same pair inverted, the strong
+    // color as a soft wash with the pastel as text, so tags never glare on dark surfaces.
+    static func ink(_ t: LabelTone) -> Color {
+        let light = UIColor(Color(hex: t.text) ?? .primary), dark = UIColor(Color(hex: t.background) ?? .primary)
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
+
+    static func wash(_ t: LabelTone, custom: String? = nil) -> Color {
+        let light = UIColor(Color(hex: custom) ?? Color(hex: t.background) ?? .gray)
+        let dark = UIColor(Color(hex: custom) ?? Color(hex: t.text) ?? .gray).withAlphaComponent(0.32)
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
+
     static func of(_ key: String?) -> LabelTone {
         tones[key ?? ""] ?? LabelTone(background: "#e8e9eb", text: "#3f4247")
     }
@@ -49,7 +62,7 @@ struct LabelChip: View {
             .lineLimit(1)
             .padding(.horizontal, 6)
             .frame(height: 18)
-            .foregroundStyle(Color(hex: tone.text) ?? .primary)
-            .background(Color(hex: label.color) ?? Color(hex: tone.background) ?? .gray.opacity(0.2), in: .rect(cornerRadius: 3))
+            .foregroundStyle(LabelTone.ink(tone))
+            .background(LabelTone.wash(tone, custom: label.color), in: .rect(cornerRadius: 3))
     }
 }

@@ -11,91 +11,109 @@ struct SettingsScreen: View {
     @State private var agentsOn = PushManager.shared.agentsOn
     @State private var cardsOn = PushManager.shared.cardsOn
 
+    private var notificationFooter: String {
+        if InboxStore.shared.pushEnabledOnServer == false { return "This Flow server doesn't send notifications yet. These take effect once it does." }
+        if let error = push.lastError { return error }
+        return "Answer an agent right from the notification: Allow, Deny or Reply."
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
                     HStack(spacing: 14) {
-                        Avatar(name: model.credential?.email ?? "Flow", size: 52)
+                        Avatar(name: model.credential?.displayName ?? "Flow", size: 48, ring: false)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(model.credential?.email ?? "Signed in with a key").font(.headline)
-                            Text(model.server.host(percentEncoded: false) ?? model.server.absoluteString).font(.subheadline).foregroundStyle(.secondary)
+                            Text(model.credential?.name ?? model.credential?.email ?? "Signed in with a key").font(.headline).foregroundStyle(Theme.ink)
+                            if model.credential?.name != nil, let email = model.credential?.email {
+                                Text(email).font(.subheadline).foregroundStyle(Theme.muted)
+                            }
+                            if model.server != AppModel.defaultServer {
+                                Text(model.server.host(percentEncoded: false) ?? model.server.absoluteString).font(.caption).foregroundStyle(Theme.faint)
+                            }
                         }
+                        Spacer()
                     }
-                    .padding(.vertical, 4)
-                }
+                    .padding(14)
+                    .background(Theme.surface, in: .rect(cornerRadius: Theme.panelCorner))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.panelCorner).strokeBorder(Theme.line))
 
-                Section {
-                    switch status {
-                    case .authorized, .provisional, .ephemeral:
-                        Toggle(isOn: $agentsOn) {
-                            Label("Agents waiting on you", systemImage: "hand.raised.fill")
-                        }
-                        .onChange(of: agentsOn) { push.agentsOn = agentsOn }
-                        Toggle(isOn: $cardsOn) {
-                            Label("Cards assigned or moved", systemImage: "rectangle.split.3x1.fill")
-                        }
-                        .onChange(of: cardsOn) { push.cardsOn = cardsOn }
-                    case .denied:
-                        Button {
-                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
-                        } label: {
-                            Label("Turn on in iOS Settings", systemImage: "bell.slash")
-                        }
-                    default:
-                        Button {
-                            Task { await push.enable(); status = await push.authorization() }
-                        } label: {
-                            Label("Turn on notifications", systemImage: "bell.badge")
+                    if InboxStore.shared.pushEnabledOnServer != false {
+                    FlowGroup(title: "Notifications", footer: notificationFooter) {
+                        switch status {
+                        case .authorized, .provisional, .ephemeral:
+                            FlowRow(icon: "hand.raised", title: "Agents waiting on you") {
+                                Toggle("", isOn: $agentsOn).labelsHidden().tint(Theme.green)
+                                    .onChange(of: agentsOn) { push.agentsOn = agentsOn }
+                            }
+                            FlowRow(icon: "rectangle.split.3x1", title: "Cards assigned or moved") {
+                                Toggle("", isOn: $cardsOn).labelsHidden().tint(Theme.green)
+                                    .onChange(of: cardsOn) { push.cardsOn = cardsOn }
+                            }
+                        case .denied:
+                            Button {
+                                if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+                            } label: {
+                                FlowRow(icon: "bell.slash", title: "Turn on in iOS Settings") {
+                                    Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        default:
+                            Button {
+                                Task { await push.enable(); status = await push.authorization() }
+                            } label: {
+                                FlowRow(icon: "bell.badge", title: "Turn on notifications", tint: Theme.accent) {
+                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                } header: {
-                    Text("Notifications")
-                } footer: {
-                    if InboxStore.shared.pushEnabledOnServer == false {
-                        Text("This Flow server doesn't send notifications yet. These settings take effect once it does.")
-                    } else if let error = push.lastError {
-                        Text(error)
-                    } else {
-                        Text("Answer an agent right from the notification: Allow, Deny or Reply.")
-                    }
-                }
 
-                Section {
-                    Link(destination: model.server) {
-                        Label("Open Flow in Safari", systemImage: "safari")
                     }
-                    if let prefix = model.credential?.prefix {
-                        LabeledContent {
-                            Text(prefix + "…").font(.caption.monospaced())
-                        } label: {
-                            Label("This device's key", systemImage: "key")
+
+                    FlowGroup(title: "This device", footer: "This device has its own key, listed in Flow under Settings › Connect, where you can revoke it.") {
+                        Link(destination: model.server) {
+                            FlowRow(icon: "safari", title: "Open Flow on the web") {
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        if let prefix = model.credential?.prefix {
+                            FlowRow(icon: "checkmark.shield", title: "Signed in") {
+                                Text("Connected").font(.subheadline).foregroundStyle(Theme.muted)
+                            }
+                            .contextMenu { Button("Copy key prefix", systemImage: "doc.on.doc") { UIPasteboard.general.string = prefix } }
                         }
                     }
-                } footer: {
-                    Text("This iPhone has its own key, listed in Flow under Settings › Connect, where you can revoke it.")
-                }
 
-                Section {
                     Button(role: .destructive) {
                         confirmSignOut = true
                     } label: {
-                        HStack {
-                            Spacer()
-                            if signingOut { ProgressView() } else { Text("Sign out") }
-                            Spacer()
+                        ZStack {
+                            Text("Sign out").opacity(signingOut ? 0 : 1)
+                            if signingOut { ProgressView() }
                         }
                     }
+                    .buttonStyle(.flow(.danger, large: true))
                     .disabled(signingOut)
-                }
 
-                Section {
-                } footer: {
                     let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
                     let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-                    Text("Flow \(v) (\(b))").frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        FlowMark(size: 16)
+                        Text("Flygon Flow \(v) (\(b))")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Theme.faint)
+                    .frame(maxWidth: .infinity)
                 }
+                .padding()
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
+            .background(Theme.bg)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
