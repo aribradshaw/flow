@@ -11,6 +11,16 @@ test('parseHash reads split hashes and keeps every older hash working', ()=>{
   assert.deepEqual(parseHash('#agentflow'),{tab:'agentflow',tabs:null});
   assert.deepEqual(parseHash('#devops/card/12'),{tab:'devops',tabs:null});
   assert.deepEqual(parseHash('#nope'),{tab:'chart',tabs:null});
+  // '#office' opens AgentFlow and its 3D office; '#office/<id>' focuses an agent there.
+  assert.deepEqual(parseHash('#office'),{tab:'agentflow',tabs:null,office:true});
+  assert.deepEqual(parseHash('#office/'),{tab:'agentflow',tabs:null,office:true});
+  assert.deepEqual(parseHash('#office/homebox%3At3%3Aabc'),{tab:'agentflow',tabs:null,office:true,agent:'homebox:t3:abc'});
+  assert.deepEqual(parseHash('#office/laptop:claude:1'),{tab:'agentflow',tabs:null,office:true,agent:'laptop:claude:1'});
+  assert.deepEqual(parseHash('#office/%E0%A4%A'),{tab:'agentflow',tabs:null,office:true},'a bad escape is just the office');
+  assert.equal(parseHash('#office/'+'x'.repeat(300)).agent.length,200);
+  assert.deepEqual(parseHash('#officer'),{tab:'chart',tabs:null});
+  assert.deepEqual(parseHash('#office|devops'),{tab:'chart',tabs:null},'the office is not a split pane');
+  assert.equal(parseHash('#agentflow').office,undefined);
   // A split needs two different known tabs; otherwise the first part is a single view.
   assert.deepEqual(parseHash('#devops|devops'),{tab:'devops',tabs:null});
   assert.deepEqual(parseHash('#timeline|nope'),{tab:'timeline',tabs:null});

@@ -796,11 +796,27 @@ async function openPending(){
   }finally{opening=false}
 }
 window.addEventListener('flow:session',()=>openPending());
+// #office and #office/<agentId> (split-core.js parseHash): AgentFlow, then its 3D office once the
+// session is known (signed in, where sign-in is required) and the workspace has synced.
+let officeLinking=false;
+async function openOfficeLink(){
+  if(officeLinking||!parseHash(location.hash).office)return;officeLinking=true;
+  try{
+    await sessionKnown;
+    if(signInMode()==='opid'&&!sessionUser())return;
+    await synced();
+    const h=parseHash(location.hash);if(!h.office)return;
+    if(!isOpen('agentflow'))setTab('agentflow');
+    await af.openOfficeLink({focus:h.agent||''});
+  }finally{officeLinking=false}
+}
+window.addEventListener('flow:session',()=>openOfficeLink());
+window.addEventListener('popstate',()=>openOfficeLink());
 // Chat with OneProfileID friends (chat.js): the launcher shows only when it is available.
 window.addEventListener('flow:chat',()=>render());
 startChat({openLink:openRef,toast});
 
-initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();
+initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();openOfficeLink();
 // Rebinding a shortcut re-renders, so tooltips show the new keys.
 onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}});syncPrefs();
 document.body.removeAttribute('aria-busy');

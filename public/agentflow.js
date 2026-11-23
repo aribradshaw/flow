@@ -546,8 +546,10 @@ function action(name,b){
   })[name]?.();
 }
 // The 3D office (office.js, loaded on first use with Three.js): this environment's, or the office of an
-// environment whose share is placed here.
-async function openOffice(){
+// environment whose share is placed here. link: {focus} when it opens from the #office hash (app.js):
+// focus is the agent to show, and closing it takes the address back to #agentflow.
+export const openOfficeLink=({focus=''}={})=>openOffice({focus,link:true});
+async function openOffice(link={}){
   if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
   let m;try{m=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
   const env=currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
@@ -558,7 +560,8 @@ async function openOffice(){
   const u=sessionUser();
   m.openOffice({env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
     openProjects,openCard,
-    focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()}});
+    focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()},
+    ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
 function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){

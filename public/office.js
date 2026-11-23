@@ -22,7 +22,8 @@ let S=null; // the open office
 
 // ---------- opening and closing ----------
 // opts: {env, current (the app's environment), offices:[{id,name}], agentflow():[] (the local store's agents, for current),
-//        focusAgent(id) (opens an AgentFlow agent; current env only), me:{name,image}, toast(msg,bad)}
+//        focusAgent(id) (opens an AgentFlow agent; current env only), me:{name,image}, toast(msg,bad),
+//        focus (optional: a live agent's id, or an AgentFlow agent's id or name, to show once it arrives), onClose()}
 export function openOffice(opts){
   if(S)return;
   const root=document.createElement('div');root.className='of';root.setAttribute('role','dialog');root.setAttribute('aria-modal','true');root.setAttribute('aria-label','3D office');
@@ -85,8 +86,19 @@ export function closeOffice(){
   s.boards?.dispose();
   try{s.org?.dispose();disposeFigures();disposeMascots();s.renderer?.dispose();s.scene?.traverse(o=>{o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()})}catch{}
   s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
+  if(!s.switching)try{s.opts.onClose?.()}catch{}
 }
-function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env};closeOffice();openOffice(opts)}
+function switchTo(env){if(!S||env===S.env)return;S.opts.remember?.(env);const opts={...S.opts,env,focus:''};S.switching=true;closeOffice();openOffice(opts)}
+// opts.focus (#office/<id>): show that agent's panel as soon as it is in the office (live agents can
+// arrive a few seconds after the snapshot); given up after 20 seconds.
+function focusPending(){
+  const id=S?.opts.focus;if(!id||S.focused)return;
+  if(!S.focusUntil)S.focusUntil=Date.now()+20e3;
+  if(Date.now()>S.focusUntil){S.focused=true;return}
+  for(const [member,list] of S.live)if(list.some(a=>a.id===id)){S.focused=true;showAgent(member,id);return}
+  const f=afAgents().find(a=>a.id===id||String(a.name||'').toLowerCase()===id.toLowerCase());
+  if(f){S.focused=true;showAf(f.id)}
+}
 const status=t=>{const el=S?.root.querySelector('.of-status');if(el)el.textContent=t};
 
 // ---------- the network ----------
@@ -106,7 +118,7 @@ function connect(){
   on('leave',({key,at})=>{removePerson(key);const m=S.members.find(x=>x.key===key);if(m&&at)m.lastSeen=at;if(S.world)presenceChanged(key)});
   on('say',line=>addLine(line));
   on('emote',({key,emote})=>showEmote(key,emote));
-  on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel()});
+  on('agents',({member,agents})=>{S.live.set(member,agents);buildDesks(member);refreshPanel();focusPending()});
   on('members',({members,agentflow})=>{S.members=members;S.snapAgentflow=agentflow;if(S.world){buildAgentflow();buildRooms()}refreshPanel()});
   on('action',a=>{S.answers.set(a.agentId,{...a,state:'sent'});refreshPanel()});
   on('result',a=>{S.answers.set(a.agentId,{...a,state:'done'});refreshPanel();S.opts.toast?.(a.result?.message||'Done',a.result&&!a.result.ok)});
@@ -127,7 +139,7 @@ function snapshot(d){
   S.people.forEach((p,k)=>{if(k!==S.meKey)removePerson(k)});
   for(const a of d.actions||[])S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
   watch();
-  if(!S.world)return;
+  if(!S.world){focusPending();return}
   buildAgentflow();buildRooms();
   if(!S.placed){
     S.placed=true;const r=S.rooms.get(S.meKey),heading=r?.facing??0;
@@ -139,6 +151,7 @@ function snapshot(d){
   for(const p of d.people)if(p.key!==S.meKey)upsertPerson(p);
   S.lines.innerHTML='';S.chat=[];for(const l of d.chat||[])addLine(l,{quiet:true});
   watch();sendPresence(true);presenceChanged();
+  focusPending();
 }
 function updateSources(sources){
   S.sources=sources;S.bridge?.updateSources(sources);
