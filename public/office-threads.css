@@ -104,3 +104,5 @@
 .of-cos-say.live::after{border-top-color:#fff7db}
 .of-ts .txt,.of-th .txt{display:inline-flex;align-items:center;gap:5px}
 .of-ts .txt[hidden],.of-th .txt[hidden]{display:none}
+/* At the DevOps board (office-devops.js) the office's overlays step away; these too. */
+.of-board-focus .of-th,.of-board-focus .of-ts{visibility:hidden}
