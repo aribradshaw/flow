@@ -1,6 +1,6 @@
 import {icon} from './icons.js';
 import {$,esc,ib,uid,clone,download,pickerButton,openPicker,prop,hint} from './ui.js';
-import {store,change,checkpoint,commit,snapshot,save,PALETTE} from './store.js';
+import {store,change,checkpoint,commit,snapshot,save,PALETTE,cleanRepos} from './store.js';
 import {cardsForItem,isOpen,readyToClose} from './devops-core.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {detailModal,ask} from './modal.js';
@@ -445,7 +445,7 @@ function projectsHtml(){
     <div class="ibody" id="pedit">${projectOrder(db().projects).map(p=>{const n=db().timeline.filter(i=>i.projects.includes(p.id)).length,items=`${n} item${n===1?'':'s'}`,l=linkOf(p),ro=canEdit(p)?'':' disabled';
       // A shared project: its name and colour follow the share's permission; where it sits is the owner's.
       return `<div class="prow${l?' linked':''}">${sharedBadge(p,{inline:true})}<input type="color" value="${p.color}" data-pcolor="${esc(p.id)}" data-tip="Color" aria-label="Color for ${esc(p.name)}"${ro}><input value="${esc(p.name)}" maxlength="80" data-pname="${esc(p.id)}" aria-label="Project name"${ro}><em tabindex="0" role="img" data-tip="${items}" aria-label="${items}">${n}</em>${l?'':ib('trash','Delete project',{cls:'danger',attrs:`data-pdel="${esc(p.id)}"`})}
-        <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"${l?' disabled':''}><option value="">Not under an entity</option>${cs.filter(c=>c.id===p.entity||sameSource(c,p)).map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select>${clashHtml(p,'name')}${clashHtml(p,'color')}</div>`}).join('')}
+        <select class="under" data-punder="${esc(p.id)}" data-tip="The mind map entity this project sits under" aria-label="Under entity"${l?' disabled':''}><option value="">Not under an entity</option>${cs.filter(c=>c.id===p.entity||sameSource(c,p)).map(c=>`<option value="${esc(c.id)}"${p.entity===c.id?' selected':''}>Under ${esc(c.name)}</option>`).join('')}</select>${l?'':`<input class="repos" data-prepos="${esc(p.id)}" value="${esc((p.repos||[]).join(', '))}" maxlength="2000" placeholder="Repos: owner/name, …" data-tip="Code repositories of this project, comma separated (a name, owner/name or a git remote). In the 3D office, teammates' agents working in them show their details to everyone who can see this project." aria-label="Repositories for ${esc(p.name)}" spellcheck="false">`}${clashHtml(p,'name')}${clashHtml(p,'color')}</div>`}).join('')}
     <div class="prow"><input id="pnew" maxlength="80" placeholder="New project" aria-label="New project name">${ib('plus','Add project',{attrs:'data-ti="padd"'})}</div>
     ${sugg.length?`<div class="cd-lab">From your mind maps ${hint('Entity and area names from your charts. Click one to add it as a project.','From your mind maps')}</div><div class="sugg">${sugg.map(s=>`<button type="button" class="tag ghost" data-padd="${esc(s)}" data-tip="Add as a project" aria-label="Add ${esc(s)} as a project">${icon('plus',10)}${esc(s)}</button>`).join('')}</div>`:''}</div>`;
 }
@@ -482,7 +482,7 @@ It will be removed from ${n} item${n===1?'':'s'}. You can undo this.`,{ok:'Delet
 export function inspectorInput(e){
   const t=e.target;
   if(t.id==='ti-proj'){if(e.inputType==='insertReplacementText'||!e.inputType)addTag(t);return}
-  if(t.id==='pnew'||t.dataset.punder||t.id==='ti-release')return;
+  if(t.id==='pnew'||t.dataset.punder||t.dataset.prepos||t.id==='ti-release')return;
   if(t.dataset.pname||t.dataset.pcolor){
     const p=project(t.dataset.pname||t.dataset.pcolor),form=$('#pedit');if(!p||locked(p))return;
     if(t.dataset.pname&&!t.value.trim())return;
@@ -504,12 +504,14 @@ export function inspectorChange(e){
   if(t.id==='ti-proj'&&!linkOf(item(selected)))addTag(t);
   if(t.id==='ti-release'){const i=item(selected);if(i&&!locked(i))change(()=>i.release=t.value)}
   if(t.dataset.punder){const p=project(t.dataset.punder);if(p&&!linkOf(p))change(()=>p.entity=t.value)}
+  if(t.dataset.prepos){const p=project(t.dataset.prepos),r=cleanRepos(t.value.split(/[,\s]+/));if(p&&!linkOf(p)&&r.join()!==(p.repos||[]).join())change(()=>{if(r.length)p.repos=r;else delete p.repos})}
 }
 export function inspectorKey(e){
   // The item panel keeps its keys to itself, so its shortcut is handled here. Letters still type in its fields.
   if(!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&matches(e,'timeline.complete')&&item(selected)){e.preventDefault();toggleDone(selected);return}
   if(e.key!=='Enter')return;
   if(e.target.id==='ti-proj'){e.preventDefault();addTag(e.target)}
+  if(e.target.dataset.prepos){e.preventDefault();e.target.blur();return}
   if(e.target.id==='pnew'){e.preventDefault();const v=e.target.value.trim();if(v){change(()=>projectByName(v));$('#pnew')?.focus()}}
 }
 // Mark done, or reopen a done item as planned.

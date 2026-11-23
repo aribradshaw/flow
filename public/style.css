@@ -305,6 +305,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--flygon-g
 .chk small{margin-left:auto;padding-left:8px;font-size:10.5px;color:var(--faint)}
 .prow{flex-wrap:wrap}
 .ibody .prow select.under{flex-basis:100%;height:24px;margin:-2px 0 4px 28px;width:calc(100% - 28px);font-size:11.5px;color:var(--muted)}
+.ibody .prow input.repos{flex-basis:100%;height:24px;margin:-2px 0 4px 28px;width:calc(100% - 28px);font-size:11.5px}
 .pr{display:inline-flex;vertical-align:-2px;margin-right:4px}
 .pr.high{color:var(--danger)}.pr.medium{color:var(--warn)}.pr.low{color:var(--faint)}
 .board{display:flex;align-items:flex-start;gap:8px;min-width:min-content;height:100%;padding:10px 12px}

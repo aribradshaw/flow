@@ -1,5 +1,7 @@
 import {icon,makerIcon} from './icons.js';
-import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed} from './ui.js';
+import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed,sessionPhoto} from './ui.js';
+import {currentEnv} from './sync.js';
+import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {ask,detailModal} from './modal.js';
@@ -103,6 +105,7 @@ function toolbar(){
     <input id="af-q" type="search" placeholder="Search agents and workflows" value="${esc(ui.q)}" aria-label="Search agents and workflows">
     ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
+    <button type="button" class="txt af-office" data-af="office" data-tip="3D office" aria-label="3D office">${icon('cube3d',14)}3D</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
 // A person's photo: their own, or the signed-in account's when the card is theirs (ui.js personPhoto).
@@ -536,8 +539,20 @@ function action(name,b){
     goAgent(){const id=b.dataset.id;if(agent(id)){if(b.closest('.af-jpop'))jobPop=null;centerOn=id;select('agent',id)}},
     addAgent:()=>addAgent(),
     addWorkflow:()=>addWorkflow(),
+    office:()=>openOffice(),
     starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
   })[name]?.();
+}
+// The 3D office (office.js, loaded on first use with Three.js): this environment's, or the office of an
+// environment whose share is placed here.
+async function openOffice(){
+  if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
+  let m;try{m=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
+  const env=currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
+  const offices=[{id:env,name:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
+  const u=sessionUser();
+  m.openOffice({env,current:env,offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
+    focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
 function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){

@@ -1,0 +1,68 @@
+/* The 3D office (public/office.js): a full-screen layer over the app. */
+.of{position:fixed;inset:0;z-index:900;display:flex;flex-direction:column;background:#eef2ef;outline:none}
+.of-top{display:flex;align-items:center;gap:8px;height:44px;padding:0 10px;background:#fff;border-bottom:1px solid var(--line);flex:none}
+.of-title{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}
+.of-title b{color:var(--ink)}
+.of-env{font-weight:600;color:var(--muted)}
+.of-switch{height:28px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;padding:0 6px;font-weight:600}
+.of-status{font-size:12px;color:var(--muted)}
+.of-keys{font-size:11px;color:var(--faint);margin-right:6px}
+@media (max-width:760px){.of-keys{display:none}}
+.of-stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none}
+.of-canvas{display:block;width:100%;height:100%}
+.of-fail{position:absolute;inset:0;display:grid;place-items:center;margin:0;color:var(--muted)}
+.of-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.of-label{position:absolute;left:0;top:0;will-change:transform;white-space:nowrap}
+.of-label.click button{pointer-events:auto;cursor:pointer;border:0;font:inherit}
+.of-label.click .of-tag{font-size:10.5px}
+.of-room{display:inline-block;padding:3px 9px;border-radius:12px;background:#fff;border:2px solid var(--c);font-weight:700;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.of-name{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 2px;border-radius:12px;background:rgba(255,255,255,.92);font-size:11.5px;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.of-name.me{outline:2px solid var(--accent-line)}
+.of-name i{position:relative;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--bg);color:var(--fg);font-style:normal;font-size:9px;font-weight:700;overflow:hidden}
+.of-name img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.of-tag{display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;padding:1px 7px;border-radius:9px;background:rgba(29,39,37,.78);color:#fff;font-size:10.5px}
+.of-tag.priv{background:rgba(102,114,110,.75);font-style:italic}
+.of-tag.af{background:rgba(61,143,102,.86)}
+.of-empty{font-size:11px;color:var(--faint)}
+.of-bang{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#ffb020;color:#1d2421;font-weight:800;font-size:14px;box-shadow:0 0 0 3px rgba(255,176,32,.35);animation:of-pulse 1.2s ease-in-out infinite}
+@keyframes of-pulse{50%{box-shadow:0 0 0 7px rgba(255,176,32,.12)}}
+.of-bubble{display:inline-block;max-width:240px;white-space:normal;padding:6px 10px;border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.14);font-size:12px;line-height:1.35;position:relative}
+.of-bubble::after{content:'';position:absolute;left:50%;bottom:-6px;margin-left:-6px;border:6px solid transparent;border-bottom:0;border-top-color:#fff}
+.of-emote{display:inline-block;font-size:26px;animation:of-rise 2.4s ease-out forwards}
+@keyframes of-rise{0%{transform:translateY(8px) scale(.6);opacity:0}15%{transform:translateY(0) scale(1.15);opacity:1}80%{opacity:1}100%{transform:translateY(-34px);opacity:0}}
+@media (prefers-reduced-motion:reduce){.of-emote,.of-bang{animation:none}}
+.of-dock{position:absolute;left:12px;bottom:12px;width:min(360px,calc(100% - 24px));display:flex;flex-direction:column;gap:6px;z-index:2}
+.of-log{max-height:150px;overflow:hidden;border-radius:8px;background:rgba(255,255,255,.86);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.of-lines{max-height:150px;overflow-y:auto;padding:6px 9px;font-size:12px}
+.of-lines:empty{display:none}
+.of-line{padding:1px 0;overflow-wrap:anywhere}
+.of-line.mine b{color:var(--accent)}
+.of-say{display:flex;gap:4px;padding:4px;border-radius:8px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.of-input{flex:1;min-width:0;height:30px;border:0;padding:0 8px;background:transparent}
+.of-input:focus{outline:none}
+.of-emotes{display:flex;gap:4px}
+.of-emotes button{width:38px;height:34px;border:0;border-radius:8px;background:#fff;font-size:18px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.of-emotes button:hover{background:var(--accent-2)}
+.of-panel{position:absolute;top:56px;right:12px;width:min(330px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;border-radius:10px;background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.14);z-index:3}
+.of-ph{display:flex;align-items:center;gap:8px;padding:10px 10px 8px 12px;border-bottom:1px solid var(--line)}
+.of-ph b{overflow:hidden;text-overflow:ellipsis}
+.of-dot{width:12px;height:12px;border-radius:50%;flex:none}
+.of-pb{padding:8px 12px 12px}
+.of-row{display:flex;gap:10px;padding:3px 0;font-size:12px}
+.of-row span{flex:0 0 78px;color:var(--muted)}
+.of-row b{font-weight:600;overflow-wrap:anywhere}
+.of-note{margin:8px 0 4px;font-size:12px;color:var(--muted)}
+.of-prompt{margin-top:10px;padding:8px;border-radius:8px;background:#fff6e5;border:1px solid #f2d39a}
+.of-pk{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#8a5a00}
+.of-prompt pre{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.4 ui-monospace,Consolas,monospace;max-height:160px;overflow:auto}
+.of-btns{display:flex;gap:6px}
+.of-btns .txt{display:inline-flex;align-items:center;gap:4px;height:30px}
+.of-btns .txt.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.of-res{margin:8px 0 0;font-size:12px;color:var(--muted)}
+.of-res.ok{color:var(--accent)}
+.of-res.bad{color:var(--danger)}
+.of-pb>.txt{display:inline-flex;align-items:center;gap:4px;margin-top:6px}
+.of-menu{position:absolute;z-index:4;min-width:160px;padding:4px;border-radius:8px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.16)}
+.of-mh{padding:4px 8px 6px;font-size:11px;font-weight:700;color:var(--muted)}
+.of-menu button{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 8px;border:0;border-radius:5px;background:transparent;text-align:left}
+.of-menu button:hover,.of-menu button:focus-visible{background:var(--hover)}

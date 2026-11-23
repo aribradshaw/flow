@@ -20,6 +20,7 @@ const P={
   laptop:'<rect x="4" y="5" width="16" height="11" rx="1"/><path d="M2 19h20"/>',
   board:'<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/>',
   box:'<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>',
+  cube3d:'<rect x="3" y="8" width="13" height="13" rx="1"/><path d="M3 8l5-5h13v13l-5 5M16 8l5-5"/>',
   pHigh:'<path d="m6 13 6-6 6 6M6 19l6-6 6 6"/>',
   pMed:'<path d="M6 9h12M6 15h12"/>',
   pLow:'<path d="m6 11 6 6 6-6"/>',
