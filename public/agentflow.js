@@ -1,6 +1,6 @@
 import {icon,makerIcon} from './icons.js';
 import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed,sessionPhoto} from './ui.js';
-import {currentEnv,isOpenedEnv} from './sync.js';
+import {currentEnv,isOpenedEnv,listEnvironments} from './sync.js';
 import {linkOf,canEdit} from './share.js';
 import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
@@ -556,16 +556,24 @@ export const officeOpen=()=>officeModule?.officeOpen();
 async function openOffice(link={}){
   if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
   let m;try{m=officeModule=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
-  const env=currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
-  const offices=[{id:env,name:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
+  // An environment shared with you (docs/sharing.md): its office is the owner environment's office, the one
+  // everyone it is shared with meets in. Its agents there carry the owner's ids; here they are linked (sh.<share>.<id>).
+  const o=db().opened,L=id=>o&&id?`sh.${o.shareId}.${id}`:id,unL=id=>o&&typeof id==='string'&&id.startsWith(`sh.${o.shareId}.`)?id.slice(`sh.${o.shareId}.`.length):id;
+  const env=o?.ownerEnv||currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
+  const offices=[{id:env,name:o?`${o.ownerName||o.ownerEmail}'s office`:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
+  // Connecting your agents makes a key for one of your own environments, also from a shared one.
+  const mine=o?(await listEnvironments())[0]:null;
   // The office you last picked opens; otherwise this environment's own office, unless it has no AgentFlow
   // agents and a shared office is placed here (a share recipient most likely means the team's office).
   const KEY='flygon-flow-office:'+env;let pick='';try{pick=localStorage.getItem(KEY)||''}catch{}
   const first=offices.some(o=>o.id===pick)?pick:af().agents.length?env:offices[1]?.id||env;
   const u=sessionUser();
-  m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,agentflow:()=>af().agents,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
-    openProjects,overlays:officeOverlays,cardId:link.cardId,
-    focusAgent:id=>{if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()},
+  m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
+    agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
+    ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
+    // Cards in the owner's office carry the owner's ids; in a shared environment they open as its linked copies.
+    openProjects,overlays:o?{card:(id,opts)=>officeOverlays?.card?.(L(id),opts)}:officeOverlays,cardId:link.cardId&&o?unL(link.cardId):link.cardId,
+    focusAgent:id=>{id=L(id);if(!agent(id))return;ui.view='org';keepUi();selected={type:'agent',id};centerOn=id;rerender()},
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).

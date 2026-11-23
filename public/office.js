@@ -19,6 +19,7 @@ import {openBridgeDialog} from './office-connect.js';
 import {createSteer} from './office-steer.js';
 import {makeHuman,animateHuman,lookFor,orgField,orgLayout,disposeFigures} from './office-figures.js';
 import {createMascot,mascotKind,pulseMascots,disposeMascots,VENDOR_COLOR} from './office-mascots.js';
+import {doorSpots,buildDoors as doorMeshes,doorAt} from './office-portals.js';
 import {createActivity,hudHtml,bindHud,shownKind} from './office-activity.js';
 import {seatsByAgent,isSeated,seatTag,deskPanel} from './office-seats.js';
 import {notifyOn,toggleNotify} from './office-alerts.js';
@@ -163,6 +164,8 @@ function connect(){
     try{f(JSON.parse(e.data));S.stream.received(e.lastEventId)}catch(err){console.error('office',type,err)}
   });
   on('snapshot',d=>{snapshot(d);S.stream.connected();watch()});
+  // Access ended (the share was revoked): say so and stay disconnected.
+  on('gone',()=>{S.gone=true;S.es?.close();S.es=null;clearTimeout(S.retry);showGone()});
   on('restart',()=>disconnect(true));
   on('yourSources',updateSources);
   on('hb',()=>{});
@@ -180,6 +183,7 @@ function connect(){
 }
 function watch(){
   if(!S)return;
+  if(S.gone){status('No longer shared with you');return}
   const now=Date.now();
   if(S.es&&now-S.heard>40000){disconnect();return}
   if(!S.stream.stale){
@@ -207,9 +211,9 @@ function updateRooms(members,agentflow){
 function snapshot(d){
   const previous=S.live;
   if(S.meKey&&S.meKey!==d.me.key)removePerson(S.meKey);
-  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));
+  S.meKey=d.me.key;S.me=d.me;S.live=new Map(Object.entries(d.live||{}));S.portalList=d.portals||[];
   updateSources(d.yourSources||[]);
-  updateRooms(d.members,d.agentflow);
+  updateRooms(d.members,d.agentflow);if(S.world)buildDoors();
   for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else S.answers.set(a.agentId,{...a,state:a.result?'done':'sent'});
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
@@ -247,7 +251,8 @@ function updateSources(sources){
 function connectAgents(opener){
   const office=S;
   // The current workspace owns the key even when visiting another workspace's office.
-  const env=office.opts.current,name=office.opts.offices.find(o=>o.id===env)?.name;
+  // In an environment shared with you (opts.keyEnv), the key is for your own environment.
+  const env=office.opts.keyEnv||office.opts.current,name=office.opts.keyEnvName||office.opts.offices.find(o=>o.id===env)?.name;
   clearKeys();
   const bridge=openBridgeDialog({env,envName:name,sources:office.sources,openProjects:()=>{
     closeOffice();office.opts.openProjects?.();
@@ -371,6 +376,7 @@ function buildRooms(){
   }
   for(const [key,r] of previous)if(!S.rooms.has(key)&&r.desks)clear(r.desks);
   buildMainWall();
+  buildDoors();
   updateColliders();
   const anchors=S.worldLayout.boardAnchors();
   S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
@@ -657,7 +663,34 @@ function pick(e){
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
   if(hit.kind==='person'){openMenu(hit.obj.userData.key,e);return}
+  if(hit.kind==='portal'){goDoor(hit.obj.userData.portal);return}
   S.follow=null;S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);
+}
+// ---------- doors to other offices (office-portals.js; docs/concepts/12-office.md) ----------
+function buildDoors(){
+  if(!S?.world)return;if(S.doorGroup)clear(S.doorGroup);
+  const rooms=[...S.rooms.values()],ring=rooms.length?Math.hypot(rooms[0].center.x,rooms[0].center.z):(S.commonR||10)+7;
+  const d=buildDoors3d(doorSpots(S.portalList,{rooms,ringRadius:ring}));S.doorGroup=d.group;S.doorSpots=d.spots;S.world.add(d.group);
+  for(const sp of d.spots){S.clickables.push(sp.hit);label(sp.anchor,`<button type="button" class="of-tag of-portal" data-door="${esc(sp.portal.env)}"><b>${esc(sp.portal.label)}</b>${sp.portal.sub?`<small>${esc(sp.portal.sub)}</small>`:''}</button>`,{y:3.25,cls:'portal click'})}
+}
+const buildDoors3d=spots=>doorMeshes(THREE,spots,{box:M.box,mat});
+// Walking into a door (once you have been away from every door) or clicking it opens that office.
+function checkDoor(){
+  if(!S.doorSpots?.length||S.leaving||!S.placed)return;
+  const d=doorAt(S.doorSpots,S.pos.x,S.pos.z);
+  if(!d){S.doorArmed=true;return}
+  if(S.doorArmed)goDoor(d.portal);
+}
+function goDoor(p){
+  if(!S||S.leaving||!p?.env)return;S.leaving=true;
+  if(!S.opts.offices.some(o=>o.id===p.env))S.opts={...S.opts,offices:[...S.opts.offices,{id:p.env,name:p.label}]};
+  S.opts.toast?.(`Going to ${p.label}${p.sub?` · ${p.sub}`:''}`);switchTo(p.env);
+}
+function showGone(){
+  S.panelFor=null;S.panel.hidden=false;
+  S.panel.innerHTML=`<div class="of-ph">${icon('ban',16)}<b>No longer shared with you</b></div><div class="of-pb"><p class="of-note">${esc(S.opts.offices.find(o=>o.id===S.env)?.name||'This office')} is no longer shared with you, so you have left it.</p>
+    <button type="button" class="txt primary" data-of="close">Close the office</button></div>`;
+  watch();
 }
 function openMenu(key,e){
   const r=S.root.getBoundingClientRect();S.menu.hidden=false;S.menu.dataset.key=key;
@@ -672,6 +705,7 @@ function onClick(e){
   const em=e.target.closest('[data-emote]');if(em){emote(em.dataset.emote);return}
   const ag=e.target.closest('.of-labels [data-agent]');if(ag){showAgent(ag.dataset.member,ag.dataset.agent);return}
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
+  const dr=e.target.closest('.of-labels [data-door]');if(dr){goDoor(S.doorSpots?.find(x=>x.portal.env===dr.dataset.door)?.portal);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
   ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},
@@ -820,7 +854,7 @@ function frame(dt,t){
     }
   }
   const player=controller.advance(dt,{...input,x,z},S.colliders);
-  S.pos.set(player.x,player.y,player.z);
+  S.pos.set(player.x,player.y,player.z);checkDoor();
   if(S.meKey)sendPresence(false);
   for(const p of S.people.values()){
     // The figure animation can use the same motion fields for local and remote avatars.

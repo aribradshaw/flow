@@ -350,6 +350,9 @@ To link straight to it, add `#office` to Flow's address (`https://your-flow.exam
 - **Press E.** Walk up to an agent, a person or a board and a prompt says what **E** does there ("E Talk to Chief of Staff", "E Wave at Joe"); on a gamepad it is X / Square, and on a touch screen you tap the prompt. E again, Esc or walking away closes what it opened. The camera turns with **Z** and **C**.
 - **Chat and emotes.** Type in the box at the bottom left (or press **T**). A message shows as a speech bubble over you for anyone standing nearby, and in everyone's chat log. Wave, thumbs up, clap and heart are the buttons beside it, or keys **1** to **4**. Click someone's avatar to wave, follow them (until you move yourself) or start a message to them.
 - **Several offices.** If shares from other people's environments are placed in yours, the office's title becomes a menu: pick a shared environment to enter its office as a member. The shared office opens first, until you pick another.
+- **One office for a shared environment.** When you open an environment shared with you as a whole (see [Sharing](#sharing)), its 3D office is the owner environment's office: the same rooms, the same chat and the same people, so the owner and everyone it is shared with see each other live. Your own coding agents show in your room there, as in every office you are a member of.
+- **Doors.** Each office has a glowing door, in a gap between the rooms, for every other office sharing connects you to and that you can enter, labelled with whose office it is ("Avery's office") and its environment's name: the offices of environments shared with you, the offices of your own environments that you share (where the people you share them with meet you), and, while you visit someone else's office, a door back to your own (**Your office**). Walk through a door, or click it or its label, to go there. You only ever see doors to offices you can enter.
+- **No longer shared.** If the share is revoked while you are in its office, the office says it is no longer shared with you, you leave it at once (everyone else sees you go), and it does not reconnect.
 - **Local mode.** Without sign-in, the office opens with just you and your AgentFlow agents, and your own reported agents.
 
 ### Office controls
@@ -485,6 +488,12 @@ A source that has not reported for 90 seconds is gone, and its agents leave the 
 It is optional and backward compatible. When it is missing or not one of these, Flow works it out from `activity`: first a tool name at the start (`Edit lib/auth.mjs` is `edit`, `Read`, `Grep` and `Glob`, `Bash` and `WebFetch` likewise, and `Bash: npm test` is `test`), then words in it (`Running tests` is `test`, `Reading the docs` is `read`, `Searching for callers` is `search`). Anything else is `think`. An agent whose `status` is `idle` is always `idle`. A subagent's kind is worked out from its `activity` or else its `title`.
 
 Send `activityKind` when your reporter knows the tool an agent is using: it is more accurate than the guess from text. It is shown to everyone who can see the agent, including people who see it only as **Private project**: the kind of work says nothing about the work itself.
+
+### Sharing
+
+An office's members are its environment's owner and the recipient of every active share of that environment (any scope; a whole-environment share also shows all its projects and AgentFlow agents). Opening an environment shared with you as a whole (docs/sharing.md, `share-<shareId>`) opens the owner environment's office: `/api/office/share-<shareId>/…` resolves to it for the share's recipient and is 404 for anyone else, like any office you are not a member of. What each viewer sees there follows [Who sees what](#who-sees-what), per viewer, unchanged.
+
+The snapshot carries `portals: [{env, label, sub, own}]`, the doors for this viewer (computed on the server from their shares). Access is checked again on every heartbeat, and at once when a share is revoked (from the app, the API or MCP): a stream that lost access gets a `gone` event and is closed, and its person leaves the office for everyone else.
 
 ### How it runs
 
