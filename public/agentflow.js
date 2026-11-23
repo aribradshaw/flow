@@ -1,6 +1,6 @@
 import {icon,makerIcon} from './icons.js';
 import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed,sessionPhoto} from './ui.js';
-import {currentEnv,isOpenedEnv,listEnvironments} from './sync.js';
+import {currentEnv,isOpenedEnv,listEnvironments,listSharedEnvironments,switchEnvironment} from './sync.js';
 import {linkOf,canEdit} from './share.js';
 import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
@@ -571,10 +571,21 @@ async function openOffice(link={}){
   m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
     agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
     ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
-    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,
+    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,openEnv:openSharedBoard,
     // The office's world (Office or Yacht) is this environment's to choose; a shared one shows its owner's choice.
     ...(o?{}:{world:()=>af().office?.world,setWorld:world=>change(()=>{if(world==='classic')delete af().office;else af().office={world}})}),
     ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
+}
+// The office's main board is the DevOps board of the environment you have open (office-devops.js). Visiting a
+// shared office, its own board is that environment opened as shared with you (share-<id>, docs/sharing.md):
+// the app switches to it as the environment menu does, and the office opens again there.
+async function openSharedBoard(ownerEnv){
+  const shares=(db().shares||[]).filter(s=>s.ownerEnv===ownerEnv),opened=(await listSharedEnvironments()).find(x=>shares.some(s=>s.id===x.shareId));
+  if(!opened){toast('That environment is not shared with you as a whole, so its board opens only for its people. Its cards shared with you are on your board.',true);return}
+  officeModule?.closeOffice();
+  try{await switchEnvironment(opened.id)}catch(e){toast(e.message,true);return}
+  toast('Opened '+(db().environment?.name||opened.name||'that environment'));
+  openOffice();
 }
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
 const NO_ADD='Agents and workflows in a shared environment are added by its owner.';

@@ -1,10 +1,10 @@
-// DevOps whiteboards in the 3D office (docs/concepts/12-office.md). The world says where they hang
-// (boardAnchors() in office-layout.js): one on each room's back wall with that member's cards, and the main
-// board on the common area's feature wall with the whole board of the environment the office is open in.
-// Each board is a canvas texture sized to the board (about 1.7 px per cm, mipmapped) and is redrawn only
+// The room whiteboards in the 3D office (docs/concepts/12-office.md). The world says where they hang
+// (boardAnchors() in office-layout.js): one on each room's back wall with that member's cards. The main board,
+// on the common area's feature wall, is the real DevOps board (office-devops.js), not drawn here.
+// Each room board is a canvas texture sized to the board (about 1.7 px per cm, mipmapped) and is redrawn only
 // when what it shows changes: its cards, or near/far, since from far away a board shows its title and counts.
 import * as THREE from './vendor/three/three.module.min.js';
-import {boardLanes,cardsInOffice,officeMemberRefs,planOfficeDrop,workingCards,ROOM_COLUMNS,MAIN_COLUMNS} from './office-boards-core.js';
+import {boardLanes,cardsInOffice,officeMemberRefs,planOfficeDrop,workingCards,ROOM_COLUMNS} from './office-boards-core.js';
 import {nextWake,initials,memberColor,moveCard} from './devops-core.js';
 import {nodeById,peopleFor} from './devops.js';
 import {delegate} from './agentflow-core.js';
@@ -14,7 +14,6 @@ import {change,latestUndo,store,subscribeWorkspace} from './store.js';
 const PX_PER_CM=1.7,MAX_PX=2048,LIMIT=6;
 const INK='#0f1c24',SUB='#4a5d6a',FAINT='#7d8c96',LANE='#e9eef2',LINE='#c6d0d7',SURFACE='#fbfcfd';
 const ACCENT={requests:'#475569',doing:'#2563eb',blocked:'#dc2626',uat:'#7c3aed',done:'#15803d'};
-const LANE_NAMES={done:'Done · recent'};
 const projected=new THREE.Vector3();
 
 function fit(ctx,text,max){
@@ -47,6 +46,16 @@ export function officeCardTile(card,projects,{names=new Map(),agents=[]}={}){
 }
 
 // ---------- the physical board ----------
+// An aluminium frame round a width × height face, a marker tray along the bottom and three markers, in the
+// office's flat style; the face is at z = 0. The main board (office-devops.js) hangs in one of these too.
+export function boardFrame(width,height,{rim=0.11}={}){
+  const frameMat=new THREE.MeshLambertMaterial({color:'#3d4c56',flatShading:true});
+  const parts=new THREE.Group(),box=(w,h,d,x,y,z,m=frameMat)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parts.add(o);return o};
+  box(width+rim*2,height+rim*2,0.05,0,0,-0.035);
+  box(Math.min(3,width*0.4),0.04,0.13,width*0.22,-height/2-rim-0.01,0.05);
+  ['#dc2626','#2563eb','#15803d'].forEach((c,i)=>box(0.16,0.035,0.035,width*0.22-0.4+i*0.3,-height/2-rim+0.03,0.06,new THREE.MeshLambertMaterial({color:c,flatShading:true})));
+  return parts;
+}
 function makeBoard(world,mount,{key,member}){
   const anchor=new THREE.Object3D();
   anchor.position.set(mount.x,mount.y,mount.z);anchor.rotation.y=Math.atan2(mount.nx,mount.nz);world.add(anchor);
@@ -55,24 +64,15 @@ function makeBoard(world,mount,{key,member}){
   const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=8;
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(mount.width,mount.height),
     new THREE.MeshBasicMaterial({map:texture,toneMapped:false,fog:false}));
-  // An aluminium frame, a marker tray along the bottom and three markers, in the office's flat style.
-  const frameMat=new THREE.MeshLambertMaterial({color:'#3d4c56',flatShading:true});
-  const parts=new THREE.Group(),box=(w,h,d,x,y,z,m=frameMat)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parts.add(o);return o};
-  const rim=member?0.07:0.11;
-  box(mount.width+rim*2,mount.height+rim*2,0.05,0,0,-0.035);
-  box(Math.min(3,mount.width*0.4),0.04,0.13,mount.width*0.22,-mount.height/2-rim-0.01,0.05);
-  const markers=['#dc2626','#2563eb','#15803d'].map((c,i)=>{
-    const m=new THREE.MeshLambertMaterial({color:c,flatShading:true});
-    box(0.16,0.035,0.035,mount.width*0.22-0.4+i*0.3,-mount.height/2-rim+0.03,0.06,m);return m;
-  });
+  const parts=boardFrame(mount.width,mount.height,{rim:0.07});
   anchor.add(parts,mesh);
   const far=Math.max(16,mount.width*2.1);
-  return {key,member,anchor,mesh,parts,mats:[frameMat,...markers],ctx:canvas.getContext('2d'),W,H,scale,
+  return {key,member,anchor,mesh,parts,ctx:canvas.getContext('2d'),W,H,scale,
     near:Math.max(9,mount.width*0.95),farAt:far,far:false,view:null,signature:'',columns:[],hits:[]};
 }
 function disposeBoard(board){
   board.anchor.removeFromParent();
-  board.parts.traverse(o=>o.geometry?.dispose());for(const m of board.mats)m.dispose();
+  board.parts.traverse(o=>{o.geometry?.dispose();o.material?.dispose()});
   board.mesh.material.map.dispose();board.mesh.material.dispose();board.mesh.geometry.dispose();
 }
 
@@ -101,12 +101,10 @@ function drawFar({ctx,W,H,view}){
   });
 }
 function drawNear(board){
-  const {ctx,W,H,view}=board,u=view.main?Math.max(1,Math.min(1.3,W/1080)):1.1;
+  const {ctx,W,H,view}=board,u=1.1;
   const pad=10*u,gap=6*u,laneTop=36*u,headH=27*u,tileH=47*u,moreH=21*u;
-  // The main board's title is centred: it reads as the room's headline, and clears corner UI on screen.
-  if(view.main)paintText(ctx,view.title,W/2,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.5,'center');
-  else paintText(ctx,view.title,pad+2*u,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.62);
-  paintText(ctx,view.subtitle,W-pad-2*u,pad+16*u,`600 ${12*u}px system-ui`,SUB,view.main?W*0.22:W*0.34,'right');
+  paintText(ctx,view.title,pad+2*u,pad+17*u,`bold ${18*u}px system-ui`,INK,W*0.62);
+  paintText(ctx,view.subtitle,W-pad-2*u,pad+16*u,`600 ${12*u}px system-ui`,SUB,W*0.34,'right');
   const capacity=Math.max(1,Math.floor((H-laneTop-pad-headH-6*u+gap)/(tileH+gap)));
   const weights=view.lanes.map(l=>l.total?1:0.5),sum=weights.reduce((a,b)=>a+b,0)||1;
   const span=W-2*pad-gap*(view.lanes.length-1);
@@ -148,21 +146,19 @@ function drawNear(board){
 }
 
 // ---------- the boards ----------
-// opts: {env, envName, world (the group boards hang in), camera, position() (the viewer's feet),
-//        envName() (the main board's title: the office's environment), agents() (AgentFlow agents with their
-//        card queues), openCard(id), seatCard(label) (the card a seated
+// opts: {env, world (the group boards hang in), camera, position() (the viewer's feet),
+//        agents() (AgentFlow agents with their card queues), openCard(id), seatCard(label) (the card a seated
 //        session works on, for its name tag)}
-export function createOfficeBoards({env,envName=()=>'',world,camera,position,agents,openCard,seatCard}){
+export function createOfficeBoards({env,world,camera,position,agents,openCard,seatCard}){
   let dirty=true,wake=null,carrying=new Map(),visibleNumbers=new Set();
   const boards=new Map(),badges=new Map();
   let showing=true;
   const unsubscribe=subscribeWorkspace(()=>{dirty=true});
-  // anchors: {rooms:[{key, member, ...mount}], main: mount}, from the world's boardAnchors().
+  // anchors: {rooms:[{key, member, ...mount}]}, from the world's boardAnchors().
   function rebuild(anchors){
     for(const board of boards.values())disposeBoard(board);
     boards.clear();
     for(const a of anchors.rooms||[])boards.set(a.key,makeBoard(world,a,{key:a.key,member:a.member}));
-    if(anchors.main)boards.set(null,makeBoard(world,anchors.main,{key:null,member:null}));
     for(const b of boards.values())b.anchor.visible=showing;
     dirty=true;
   }
@@ -173,20 +169,18 @@ export function createOfficeBoards({env,envName=()=>'',world,camera,position,age
     const db=store.db,visible=cardsInOffice(db,env,canEdit),roster=agents();
     const names=new Map(db.devops.columns.map(c=>[c.id,c.name])),projects=new Map(db.projects.map(p=>[p.id,p]));
     const people=new Map(),refs=new Map();
-    for(const board of boards.values())if(board.member){
+    for(const board of boards.values()){
       const ids=officeMemberRefs(db,board.member);refs.set(board,ids);for(const id of ids)people.set(id,board.member.name);
     }
     const queued=new Map();
     for(const a of roster)if(a.status!=='retired')for(const id of a.cards||a.boardCards||[]){if(!queued.has(id))queued.set(id,[]);queued.get(id).push(a)}
     const tile=card=>officeCardTile(card,projects,{names:people,agents:queued.get(card.id)||[]});
     for(const board of boards.values()){
-      const member=board.member&&{...board.member,personIds:refs.get(board)};
-      const lanes=boardLanes(visible,{columns:member?ROOM_COLUMNS:MAIN_COLUMNS,member,limit:LIMIT,now});
-      const open=lanes.filter(l=>l.id!=='done').reduce((n,l)=>n+l.total,0),done=lanes.find(l=>l.id==='done')?.total||0;
-      board.view={main:!member,
-        title:member?member.name:`${envName()||'This office'} · DevOps`,
-        subtitle:member?`${open} open ${open===1?'card':'cards'}`:`${open} open · ${done} done lately`,
-        lanes:lanes.map(l=>({id:l.id,column:names.get(l.id)||l.id,name:LANE_NAMES[l.id]||names.get(l.id)||l.id,total:l.total,tiles:l.cards.map(tile)}))};
+      const member={...board.member,personIds:refs.get(board)};
+      const lanes=boardLanes(visible,{columns:ROOM_COLUMNS,member,limit:LIMIT,now});
+      const open=lanes.reduce((n,l)=>n+l.total,0);
+      board.view={title:member.name,subtitle:`${open} open ${open===1?'card':'cards'}`,
+        lanes:lanes.map(l=>({id:l.id,column:names.get(l.id)||l.id,name:names.get(l.id)||l.id,total:l.total,tiles:l.cards.map(tile)}))};
     }
     carrying=workingCards(visible,roster,{now});
     visibleNumbers=new Set(visible.map(card=>card.number));
@@ -242,7 +236,7 @@ export function createOfficeBoards({env,envName=()=>'',world,camera,position,age
     return best;
   }
   // Where someone stands to look at a board (office-npc.js): in front of it, in the world group's frame, and
-  // which way the board faces. key: a member's key for their room's board, null for the common area's.
+  // which way the board faces. key: a member's key for their room's board (the main board's is office-devops.js').
   function spot(key){
     const board=boards.get(key??null);if(!board)return null;
     board.anchor.updateWorldMatrix(true,false);

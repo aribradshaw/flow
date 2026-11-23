@@ -75,18 +75,18 @@ test('view-only recipients cannot drop linked cards and cleaning retains linked 
   assert.deepEqual(cleaned.agents[0].cards,[c.id]);
 });
 
-test('board lanes count every card, keep the first ones in board order, and show only recent Done',async()=>{
-  const {boardLanes,MAIN_COLUMNS}=await import('../public/office-boards-core.js');
+test('board lanes count every card and keep the first ones in board order, without snoozed cards',async()=>{
+  const {boardLanes,ROOM_COLUMNS}=await import('../public/office-boards-core.js');
   const now=Date.parse('2026-11-20T12:00:00Z'),day=864e5,iso=t=>new Date(t).toISOString();
   const db=fixture([
-    ...Array.from({length:7},(_,i)=>card('r'+i,'requests')),
+    ...Array.from({length:7},(_,i)=>card('u'+i,'uat')),
     card('d1','doing',['person']),card('d2','doing',['someone']),card('z','doing',['person'],{snoozedUntil:iso(now+day)}),
-    card('old','done',[],{moved:iso(now-30*day)}),card('done1','done',[],{moved:iso(now-3*day)}),card('done2','done',[],{moved:iso(now-day)}),
+    card('done1','done',['person']),
   ]);
   const cards=cardsInOffice(db,'home');
-  const lanes=boardLanes(cards,{columns:MAIN_COLUMNS,limit:4,now});
+  const lanes=boardLanes(cards,{columns:ROOM_COLUMNS,limit:4,now});
   assert.deepEqual(lanes.map(l=>[l.id,l.total,l.cards.map(c=>c.id)]),[
-    ['requests',7,['r0','r1','r2','r3']],['doing',2,['d1','d2']],['blocked',0,[]],['uat',0,[]],['done',2,['done2','done1']],
+    ['doing',2,['d1','d2']],['uat',7,['u0','u1','u2','u3']],['blocked',0,[]],
   ]);
   const mine=boardLanes(cards,{columns:['doing'],member:{personIds:['person']},now});
   assert.deepEqual(mine.map(l=>[l.total,l.cards.map(c=>c.id)]),[[1,['d1']]]);

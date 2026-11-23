@@ -10,9 +10,9 @@
 .of-keys{font-size:11px;color:var(--faint);margin-right:6px}
 @media (max-width:760px){.of-keys{display:none}}
 .of-stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none}
-.of-canvas{display:block;width:100%;height:100%}
+.of-canvas{position:relative;z-index:1;display:block;width:100%;height:100%}
 .of-fail{position:absolute;inset:0;display:grid;place-items:center;margin:0;color:var(--muted)}
-.of-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.of-labels{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .of-label{position:absolute;left:0;top:0;will-change:transform;white-space:nowrap}
 .of-label.click button{pointer-events:auto;cursor:pointer;border:0;font:inherit}
 .of-label.click .of-tag{font-size:10.5px}
@@ -292,3 +292,29 @@
   .of-look-hint{display:none}
   .of-look-moves{bottom:8px}
 }
+/* The main whiteboard is the real DevOps board (office-devops.js): the DevOps tab's own #devopsView in a CSS3D
+   layer under the canvas, seen through the canvas where the board hangs. Focused, it comes above the canvas. */
+.of-css3d{position:absolute;left:0;top:0;z-index:0;pointer-events:none}
+/* Focused and settled: the same pixels as the 3D placement, as a flat 2D one (office-devops.js). */
+.of-css3d.flat>div>div{transform:none!important}
+.of-css3d.flat .of-board-host{transform:translate(var(--x),var(--y)) scale(var(--k))!important;transform-origin:0 0!important}
+.of-board-host{display:flex;flex-direction:column;box-sizing:border-box;background:#fff;border-radius:3px;overflow:hidden;outline:none;pointer-events:none;font-size:13px}
+.of-board-host>#devopsView{display:flex;flex-direction:column;flex:1;min-height:0}
+.of-board-head{display:flex;align-items:center;gap:8px;flex:none;height:32px;padding:0 6px 0 12px;border-bottom:1px solid var(--line);background:#f4f7f5}
+.of-board-title{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px}
+.of-board-back{display:none;align-items:center;gap:6px;height:24px}
+.of-board-back kbd{padding:0 4px;border:1px solid var(--line2);border-radius:3px;font:600 10.5px/16px ui-monospace,Consolas,monospace;color:var(--muted)}
+.of-board-gate{position:absolute;inset:32px 0 0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;background:rgba(255,255,255,.95);text-align:center;font-size:15px}
+.of-board-gate[hidden]{display:none}
+.of-board-gate p{max-width:560px;margin:0;line-height:1.5}
+.of-board-gate-b{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+.of-board-veil{position:absolute;inset:0;z-index:2;background:rgba(229,236,232,.7);opacity:0;pointer-events:none;transition:opacity .35s ease}
+.of-board-focus .of-board-veil{opacity:1;pointer-events:auto}
+.of-board-focus .of-css3d{z-index:3}
+.of-board-focus .of-board-host{pointer-events:auto;box-shadow:0 10px 40px #152c3c33}
+.of-board-focus .of-board-back{display:inline-flex}
+.of-board-focus .ofv{z-index:4} /* the voice bar stays usable over a focused board */
+.of-board-focus .of-labels,.of-board-focus .of-prompt-e,.of-board-focus .of-dock,.of-board-focus .of-connect-callout,.of-board-focus .of-panel,.of-board-focus .of-controls{visibility:hidden}
+@media (prefers-reduced-motion:reduce){.of-board-veil{transition:none}}
+/* The app's floating UI (menus, pickers, tooltips, a lifted card, toasts) stays above the office. */
+body.office-open .cm,body.office-open .picker,body.office-open .tip,body.office-open .drag-clone,body.office-open #toast{z-index:1000}

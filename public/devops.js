@@ -12,6 +12,7 @@ import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard
 import {currentEnv,refresh} from './sync.js';
 import {linkOf,canEdit,locked,lockedMsg,ownerMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
 import {isForeign,envOf} from './combined-core.js';
+import {createLoan} from './view-loan.js';
 import {combinedLegend,combinedMeta,envName} from './combined.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
@@ -227,7 +228,28 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
 }
 // Leaving closes the card quietly: focus is not handed back to the board (it may sit in the other split pane).
 export function leave(){selected=null;pop=null;pending=null;if(modal&&!modal.closing){modal.quiet=true;modal.close()}}
-function select(id){selected=id;rerender()}
+// While the 3D office holds the board (lend), a card opens in the office's own overlay instead of this tab's modal.
+function select(id){if(id&&lender){lender.openCard(id);return}selected=id;rerender()}
+
+// ---------- the board lent to the 3D office (view-loan.js; docs/concepts/12-office.md) ----------
+// The office's main whiteboard is this very #devopsView, moved into the office while it is open and put back
+// when it closes: one board, the same handlers and state. lender: {openCard(id)}.
+let loan=null,lender=null;
+const boardLoan=()=>loan??=createLoan($('#devopsView'),{scrollers:'.dv-scroll,.dcol-b'});
+export function lendBoard(host,opts){
+  if(modal&&!modal.closing){modal.quiet=true;modal.close()}
+  selected=null;lender=opts;boardLoan().lend(host);render();
+}
+export function returnBoard(){
+  lender=null;if(!boardLoan().giveBack())return;
+  if(sortable?.active())deferred=true;
+  rerender();
+}
+export const boardLent=()=>!!lender;
+// What a layout moving #devopsView (app.js split panes) should move while the office holds it.
+export const boardStandIn=el=>loan?loan.standIn(el):el;
+// Esc for the board's own transient UI (the developer picker); true when it handled it.
+export function escape(){if(pop?.type==='pick'){finishPick('');return true}return false}
 
 // ---------- moves and gates ----------
 // Same-column moves just reorder. Moving into Done asks first (Approve on UAT is the normal path),
@@ -415,9 +437,10 @@ function action(name,b){
 function addCard(column){
   // New cards go to this environment: filters on another (combined) environment's records are not inherited.
   const proj=ui.projects.find(p=>p!=='none'&&!isForeign(p))||(ui.entity&&entityProjects(db(),ui.entity).find(p=>!isForeign(p.id))?.id)||'';
-  ui.q='';keepUi();
-  change(()=>{const c=newCard(dv(),{column,project:proj,labels:ui.labels.filter(l=>!isForeign(l)),assignees:ui.assignees.filter(n=>!isForeign(n)).map(node=>({node,role:'requester'}))});selected=c.id;
+  ui.q='';keepUi();let made=null;
+  change(()=>{const c=newCard(dv(),{column,project:proj,labels:ui.labels.filter(l=>!isForeign(l)),assignees:ui.assignees.filter(n=>!isForeign(n)).map(node=>({node,role:'requester'}))});made=c.id;if(!lender)selected=c.id;
     if(ui.agents.length&&delegate(db().agentflow,c.id,ui.agents)){ui.agents=[];keepUi()}});
+  if(lender){lender.openCard(made);return}
   const t=$('#dc-title');t?.focus();t?.select();
 }
 function rename(colId){
@@ -477,7 +500,7 @@ function cardMenu(e,id){
     // Delegating is one's own data (AgentFlow), so it works on shared cards too, as in the card.
     ac&&{label:'Delegate to agent',icon:'bot',items:[...ac.shown.map(a=>({label:a.name,checked:on.has(a.id),run(){const x=card(id);if(x)setAgents(x,on.has(a.id)?[...on].filter(v=>v!==a.id):[...on,a.id])}})),...(ac.more?more('More agents in the card…'):[])]},
     '-',
-    chat.on()&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)},
+    chat.on()&&!lender&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)},
     {label:'Copy link',icon:'link',run:()=>copyText(location.href.split('#')[0]+cardHash(c),`Link to #${c.number} copied`)},
     {label:'Copy card number',icon:'copy',run:()=>copyText(`#${c.number}`,`#${c.number} copied`)},
     '-',

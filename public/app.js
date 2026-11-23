@@ -110,10 +110,12 @@ function setTab(t){
 const mainEl=$('main'),inspectorEl=$('#inspector'),SCROLLERS='.tl-scroll,.dv-scroll,.af-scroll,.dcol-b';
 let panes=null;
 function leaveTab(t){if(t==='chart'){selected=null;connecting=false;source=null}else ({timeline:tl,devops:dv,agentflow:af})[t].leave()}
-// Moving a section keeps its scroll positions.
+// Moving a section keeps its scroll positions. While the 3D office holds the DevOps board, its place
+// (a placeholder) moves instead, so it comes back to the right pane.
 function moveView(sec,parent,before=null){
+  sec=dv.boardStandIn(sec);
   if(sec.parentNode===parent&&(before?sec.nextSibling===before:true))return;
-  const keep=[...sec.querySelectorAll(SCROLLERS)].map(el=>[el,el.scrollLeft,el.scrollTop]);
+  const keep=sec.querySelectorAll?[...sec.querySelectorAll(SCROLLERS)].map(el=>[el,el.scrollLeft,el.scrollTop]):[];
   parent.insertBefore(sec,before);
   for(const [el,l,t] of keep){el.scrollLeft=l;el.scrollTop=t}
 }
@@ -718,6 +720,8 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
+  // The 3D office's main whiteboard is the DevOps board itself (devops.js lendBoard): it stays live there.
+  if(dv.boardLent()&&!openTabs().includes('devops'))dv.render();
   renderInspector();dv.renderHostedCards();tl.renderHostedEditors();photosMaybe();chatRendered();
   // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
   const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}

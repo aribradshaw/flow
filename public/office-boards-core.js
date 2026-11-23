@@ -5,9 +5,7 @@ import {agentsForCard,LIMITS} from './agentflow-core.js';
 
 export const ROOM_COLUMNS=['doing','uat','blocked'];
 export const COMMON_COLUMNS=['requests','doing'];
-export const MAIN_COLUMNS=['requests','doing','blocked','uat','done'];
 export const BOARD_LIMIT=3;
-export const RECENT_DONE_DAYS=14;
 
 function sourceOf(db,card){
   const foreign=parseForeign(card.id),id=foreign?.id||card.id;
@@ -85,21 +83,18 @@ export function planOfficeDrop(db,card,target,{editable,personIds=[],local=false
   return {type:'delegate',agents:replace?[agent.id]:[...before,agent.id]};
 }
 
-// The lanes a whiteboard draws: for a room (member), that person's cards; for the main board, the whole
-// board. Each lane keeps its full count and its first `limit` cards in board order. Done counts only cards
-// that moved there in the last RECENT_DONE_DAYS days, newest first. Snoozed cards stay off the boards.
+// The lanes a room's whiteboard draws: that person's (member) cards, or every card without one. Each lane keeps
+// its full count and its first `limit` cards in board order. Snoozed cards stay off the boards. (The main board
+// is the real DevOps board: office-devops.js.)
 export function boardLanes(cards,{columns,member=null,limit=BOARD_LIMIT,now=Date.now()}){
-  const refs=member&&new Set(member.personIds||[]),since=now-RECENT_DONE_DAYS*864e5;
+  const refs=member&&new Set(member.personIds||[]);
   const lanes=new Map(columns.map(id=>[id,{id,total:0,cards:[]}]));
   for(const card of cards){
     const lane=lanes.get(card.column);
     if(!lane||isSnoozed(card,now))continue;
     if(refs&&!card.assignees.some(a=>refs.has(a.node)))continue;
-    if(card.column==='done'&&!(Date.parse(card.moved||card.updated)>=since))continue;
     lane.total++;lane.cards.push(card);
   }
-  const at=c=>Date.parse(c.moved||c.updated)||0;
-  lanes.get('done')?.cards.sort((a,b)=>at(b)-at(a));
   for(const lane of lanes.values())lane.cards=lane.cards.slice(0,limit);
   return [...lanes.values()];
 }

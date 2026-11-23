@@ -11,8 +11,9 @@ import {detailModal} from './modal.js';
 import {officeOverlayActions} from './office-overlays-core.js';
 import {memberColor,initials} from './devops-core.js';
 import {angleDelta,bindOfficePointer,createOfficeCamera,createOfficeCharacter,createOfficeInput,officeBox,WALK_SPEED,RUN_SPEED} from './office-controls.js';
-import {createOfficeBoards,createOfficeCardDrag} from './office-boards.js';
-import {toWorld,ROOM_W,ROOM_D,WALL_T,WALL_H,BACK_WALL_H,DOOR_W} from './office-layout.js';
+import {createOfficeBoards,createOfficeCardDrag,boardFrame} from './office-boards.js';
+import {createOfficeDevops} from './office-devops.js';
+import {toWorld,officeMeterMount,ROOM_W,ROOM_D,WALL_T,WALL_H,BACK_WALL_H,DOOR_W} from './office-layout.js';
 import {officeMemberRefs} from './office-boards-core.js';
 import {store} from './store.js';
 import {officeStream,officeDiff,mergeOfficeChat} from './office-stream.js';
@@ -84,7 +85,8 @@ export function openOffice(opts){
         <dt>Recenter</dt><dd>Middle-click or F</dd>
         <dt>Overview</dt><dd>O or the overview button</dd>
         <dt>Gamepad</dt><dd>Left stick to move, right stick to orbit, A to jump, B to sprint, X to interact</dd>
-        <dt>DevOps cards</dt><dd>Walk up to a whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
+        <dt>DevOps board</dt><dd>The main board is your DevOps board. Press E at it, or click it, to work on it as in the DevOps tab; Esc returns.</dd>
+        <dt>Room boards</dt><dd>Walk up to a room's whiteboard and click a card. Left-drag to a person, room, agent or column. Hold Shift to replace agent delegates.</dd>
         <dt>Meters</dt><dd>Walk up to a room or office meter and press E</dd>
         <dt>Chat &amp; emotes</dt><dd>T to chat, 1–4 to react</dd>
         <dt>Status</dt><dd>Available, Focus, Do not disturb or Away, from the header</dd>
@@ -95,7 +97,7 @@ export function openOffice(opts){
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
     <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
-  root.tabIndex=-1;document.body.append(root);
+  root.tabIndex=-1;document.body.append(root);document.body.classList.add('office-open');
   S={opts,root,overlays:[],overlaySession:uid(),lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),looks:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
     steer:createSteer({post:body=>api('steer',body),toast:(m,bad)=>opts.toast?.(m,bad)}),me:null,meKey:'',pos:new THREE.Vector3(0,0,6),target:null,follow:null,sentAt:0,lastSent:'',chat:[],stream:officeStream(),absent:new Map(),opener:document.activeElement};
@@ -124,15 +126,18 @@ export const officeOpen=()=>!!S;
 export const officePeek=()=>S; // the open office's state, for tests and the screenshot harness
 export function closeOffice(){
   if(!S)return;S.replay?.destroy();const s=S;S=null;
+  s.devops?.dispose(); // first: the DevOps tab gets its board back whatever else happens
   s.presence?.destroy();s.lookEditor?.close();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
   removeEventListener('keydown',onKey,true);removeEventListener('keyup',onKeyUp,true);removeEventListener('blur',clearKeys);
-  s.voice?.dispose(); // every call ends; the mic and a shared screen are released
-  s.decor?.dispose();
-  s.meters?.dispose();s.pointer?.cancelGrab();s.cardDrag?.dispose();s.boards?.dispose();s.interact?.dispose();s.reactions?.dispose();s.npc?.dispose();clearInterval(s.answerTick);
+  // Each part closes on its own (voice first: every call ends, the mic and a shared screen are released), so one
+  // that fails cannot leave the office on screen.
+  for(const close of [()=>s.voice?.dispose(),()=>s.decor?.dispose(),()=>s.meters?.dispose(),()=>s.pointer?.cancelGrab(),()=>s.cardDrag?.dispose(),()=>s.boards?.dispose(),()=>s.interact?.dispose(),()=>s.reactions?.dispose(),()=>s.npc?.dispose()])
+    try{close()}catch(e){console.error('office close',e)}
+  clearInterval(s.answerTick);
   try{s.place?.dispose();s.org?.dispose();const all=[];s.scene?.traverse(o=>all.push(o));for(const o of all)o.userData.dispose?.();disposeFigures();disposeMascots();s.renderer?.dispose();for(const o of all){o.geometry?.dispose?.();for(const m of [].concat(o.material||[]))m.dispose?.()}}catch{}
   for(const {modal} of s.overlays.reverse())modal.close();
-  s.bridge?.dialog.close();s.root.remove();s.opener?.focus?.({preventScroll:true});
+  s.bridge?.dialog.close();s.root.remove();document.body.classList.remove('office-open');s.opener?.focus?.({preventScroll:true});
   if(!s.switching)try{s.opts.onClose?.()}catch{}
 }
 // Each overlay owns a same-URL history entry, so Back returns to the office or its parent overlay.
@@ -315,7 +320,7 @@ function clearReplayScene(){
   for(const key of S.people.keys())removePerson(key);
   for(const key of S.rooms.keys())buildDesks(key,false);
   updateColliders();presenceChanged();
-  S.boards?.setVisible(!S.replay?.active);
+  S.boards?.setVisible(!S.replay?.active);S.devops?.setVisible(!S.replay?.active);
 }
 
 function replayScene({roster,poses},seek){
@@ -458,7 +463,8 @@ function sendPresence(force){
 const M={};
 const mat=(c,o={})=>new THREE.MeshLambertMaterial({color:c,flatShading:true,...o});
 function initScene(){
-  const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'low-power'});
+  // alpha: the main board's DOM shows through where the canvas is clear (office-devops.js).
+  const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'low-power',alpha:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
   S.stage.prepend(renderer.domElement);renderer.domElement.className='of-canvas';
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(45,1,0.08,1400);
@@ -473,26 +479,35 @@ function initScene(){
   S.npcLayer=new THREE.Group();S.world.add(S.npcLayer);
   S.npc=createNpcs({THREE,layer:S.npcLayer,world:S.world,
     navWorld,person:key=>S.people.get(key),isQuiet:key=>presenceStatus.isQuiet(key),
-    room:roomSpots,boardSpot:key=>S.boards?.spot(key)||null,
+    room:roomSpots,boardSpot:key=>(key==null?S.devops?.spot():S.boards?.spot(key))||null,
     entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,player:()=>S.pos,
     label,unlabel:l=>{l.el.remove();S.labelList=S.labelList.filter(x=>x!==l)},
     // A figure that outlived its desk or its place in the org (walking out): nothing to click or press E on.
     retire:obj=>{const u=obj.userData;S.clickables=S.clickables.filter(c=>c!==obj);if(u?.kind==='agent')S.interact?.unregister(`agent:${u.member}:${u.id}`);else if(u?.kind==='af')S.interact?.unregister('af:'+u.id)}});
   S.activity=createActivity({THREE,part,M,roomW:ROOM_W,roomD:ROOM_D,npc:S.npc});
+  const office=S,openCard=id=>openOverlay('card',id);
+  // The main board's title: the office's environment, and "This office ▸" when doors lead to others.
+  const boardName=()=>{const name=office.opts.offices.find(o=>o.id===office.env)?.name||'This office';return office.portalList?.length?`This office ▸ ${name}`:name};
+  // The main whiteboard is the DevOps tab's own board (office-devops.js).
+  S.devops=createOfficeDevops({stage:S.stage,root:S.root,world:S.world,camera,position:()=>office.pos,frameParts:(w,h)=>boardFrame(w,h),envName:boardName,
+    local:()=>office.env===office.opts.current,here:()=>office.opts.offices.find(o=>o.id===office.opts.current)?.name||'',
+    openHere:S.opts.openEnv?()=>office.opts.openEnv(office.env):null,openCard,
+    onFocus(){clearKeys();office.pointer?.cancelOrbit();office.target=null;office.follow=null;closeMenu();closePanel()},
+    // Its width follows the screen's shape: the office meter beside it moves along.
+    onResize:()=>office.meters?.rebuild(office.rooms,{commonRadius:office.commonR||10,roomD:ROOM_D})});
   usePlace(wantedWorld());
-  const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()};
+  const fit=()=>{const w=S.stage.clientWidth||innerWidth,h=S.stage.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();S.devops.resize(w,h)};
   S.resize=new ResizeObserver(fit);S.resize.observe(S.stage);fit();
   const cv=renderer.domElement;
   S.rig=createOfficeCamera(camera);S.rig.reset(S.pos,S.controller.state.heading);
   cv.addEventListener('pointerdown',()=>S.root.focus({preventScroll:true}));
-  const office=S;
   // E: talk to, open or look at whatever you are near (office-interact.js; other modules register their own things).
   S.reactions=createReactions(THREE);
   S.interact=createInteractions({scene,camera,stage:S.stage,player:()=>({x:S.pos.x,z:S.pos.z,heading:S.controller?.state.heading}),facing:()=>S.rig?S.rig.yaw+Math.PI:NaN,
     toast:m=>S?.opts.toast?.(m,true),stale:id=>{if(!S?.world)return;if(id.startsWith('af:'))buildAgentflow();else for(const k of S.rooms.keys())buildDesks(k,false)}});
   S.meters=createOfficeMeters({world:S.world,root:S.root,env:()=>S.env,position:()=>office.pos,members:()=>S.members,live:()=>S.live,sparks:()=>S.sparks||{},meKey:()=>S.meKey,
-    label:(obj,html,opts)=>label(obj,html,opts),unlabel:hint=>{if(!hint)return;hint.el.remove();S.labelList=S.labelList.filter(l=>l!==hint)},
-    anchor:key=>meterMount(key),interact:()=>S.interact});
+    label:(obj,html,opts)=>label(obj,html,opts),unlabel:hint=>{if(!hint)return;hint.el.remove();office.labelList=office.labelList.filter(l=>l!==hint)},
+    anchor:key=>meterMount(key),interact:()=>office.interact}); // office, not S: these also run while it closes
   // Voice (office-voice.js): the meeting room's call, proximity voice and screen sharing.
   S.voice=createVoice({scene,world:S.world,stage:S.stage,root:S.root,interact:S.interact,label,clear,env:()=>office.env,me:()=>office.pos,
     facing:()=>office.rig?office.rig.yaw+Math.PI:office.controller.state.heading,people:()=>office.people,meKey:()=>office.meKey,nameOf,
@@ -500,8 +515,7 @@ function initScene(){
     layout:()=>({world:office.worldLayout,rooms:[...office.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:office.commonR||10,roomW:ROOM_W,roomD:ROOM_D}),
     walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,
     toast:(m,bad)=>office.opts.toast?.(m,bad)});
-  const openCard=id=>openOverlay('card',id);
-  S.boards=createOfficeBoards({env:S.env,envName:()=>{const name=office.opts.offices.find(o=>o.id===office.env)?.name||'This office';return office.portalList?.length?`This office ▸ ${name}`:name},world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
+  S.boards=createOfficeBoards({env:S.env,world:S.world,camera,position:()=>office.pos,agents:afAgents,openCard,
     seatCard:entry=>{
       const {kind,member,id}=entry.obj.userData;
       if(kind!=='agent'||!entry.cls?.includes('agent'))return null;
@@ -511,10 +525,11 @@ function initScene(){
   S.cardDrag=createOfficeCardDrag({root:S.root,env:S.env,local:()=>S.env===S.opts.current,hitAt,targetAt:cardTargetAt,openCard});
   S.pointer=bindOfficePointer(cv,S.rig,{pick,recenter:recenterCamera,grab:e=>S.replay?.active?null:S.cardDrag.grab(e),
     hover:e=>{S.decor?.hover(e);if(S.decor?.editing()){cv.style.cursor='crosshair';return}if(e.pointerType==='touch')return;const hit=hitAt(e);cv.style.cursor=hit?.kind||hit?.board?.near&&hit.board.tile?'pointer':'default';S.hover=hit?.kind==='af'?hit.id:hit?.kind==='agent'?hit.obj.userData.id:null}});
+  // office, not S: the decor also runs while the office closes (S is null by then).
   S.decor=createDecor({
-    root:()=>S.root,me:()=>S.meKey,pos:()=>S.pos,rooms:()=>S.rooms,liveCount:key=>(S.live.get(key)||[]).length,
-    anchor(key){const layout=S.worldLayout,list=layout?.decorAnchors?.()||[];return list.find(a=>a.key===key)||layout?.decorAnchor?.(key)||null},
-    api:(path,body)=>api(path,body),toast:(m,bad)=>S?.opts.toast?.(m,bad),camera:()=>S.camera,canvas:()=>S.renderer?.domElement,
+    root:()=>office.root,me:()=>office.meKey,pos:()=>office.pos,rooms:()=>office.rooms,liveCount:key=>(office.live.get(key)||[]).length,
+    anchor(key){const layout=office.worldLayout,list=layout?.decorAnchors?.()||[];return list.find(a=>a.key===key)||layout?.decorAnchor?.(key)||null},
+    api:(path,body)=>api(path,body),toast:(m,bad)=>S?.opts.toast?.(m,bad),camera:()=>office.camera,canvas:()=>office.renderer?.domElement,
     refresh:()=>updateColliders(),repaint:key=>roomLook(key),
   });
   if(navigator.webdriver&&globalThis.__flowOffice)Object.assign(globalThis.__flowOffice,{project:(x,z)=>S.decor.project(x,z),decor:()=>S.decor.debug()});
@@ -537,7 +552,8 @@ function toggleControls(){
 }
 const part=(geo,m,[x,y,z],[sx,sy,sz]=[1,1,1])=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);return o};
 const shadow=r=>{const s=part(M.disc,M.shadow,[0,0.02,0],[r,r,r]);s.rotation.x=-Math.PI/2;return s};
-function clear(group){group.removeFromParent();const g=new Set();group.traverse(o=>g.add(o));for(const o of g){if(o.material&&o.userData.own)o.material.dispose();o.userData.dispose?.()}S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
+// Also called while the office closes (S is null by then: office-voice.js disposing its room), with nothing left to unlist.
+function clear(group){group.removeFromParent();const g=new Set();group.traverse(o=>g.add(o));for(const o of g){if(o.material&&o.userData.own)o.material.dispose();o.userData.dispose?.()}if(!S)return;S.clickables=S.clickables.filter(c=>!g.has(c));S.labelList=S.labelList.filter(l=>{if(g.has(l.obj)){l.el.remove();return false}return true})}
 // top: the label hangs below its point (a plate on a wall) instead of standing on it.
 function label(obj,html,{y=1.6,cls='',near=0,show=null,top=false}={}){const el=document.createElement('div');el.className='of-label '+cls;el.innerHTML=html;S.labels.append(el);const l={obj,el,y,cls,near,show,top};S.labelList.push(l);return l}
 
@@ -634,21 +650,26 @@ function buildRooms(){
   updateColliders();
   S.decor?.mount();
   const anchors=S.worldLayout.boardAnchors();
-  S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member})),main:anchors.main});
-  // E at a board opens the first card in the lane in front of you.
+  S.boards?.rebuild({rooms:anchors.rooms.map(a=>({...a,member:S.rooms.get(a.key).member}))});
+  S.devops?.rebuild(anchors.main);
+  // E at a room's board opens the first card in the lane in front of you; at the main board, it takes you to it.
   S.interact?.unregisterWhere(id=>id.startsWith('board:'));
-  for(const a of [...anchors.rooms,{key:null,...anchors.main}]){
+  for(const a of anchors.rooms){
     const key=a.key,spot={x:a.x+a.nx*1.8,y:0,z:a.z+a.nz*1.8},tile=()=>S.boards?.tileNear(key,S.pos);
-    S.interact?.register({id:'board:'+(key??'main'),position:()=>spot,radius:a.width/2+0.6,height:a.y-a.height/2-0.2,
+    S.interact?.register({id:'board:'+key,position:()=>spot,radius:a.width/2+0.6,height:a.y-a.height/2-0.2,
       enabled:()=>!!tile(),label:()=>{const t=tile();return t?`Open #${t.number} ${t.title.length>28?t.title.slice(0,27)+'…':t.title}`:''},
       onInteract:()=>{const t=tile();if(t)S.boards.pick({near:true,tile:t})}});
   }
+  const main=anchors.main,spot={x:main.x+main.nx*1.8,y:0,z:main.z+main.nz*1.8};
+  S.interact?.register({id:'board:main',position:()=>spot,radius:Math.max(3,(S.devops?.width()||main.width)/2+0.6),height:main.y-main.height/2-0.2,
+    enabled:()=>!S.replay?.active,label:'Work on the DevOps board',onInteract:()=>S.devops?.focus()||false});
   S.meters?.rebuild(S.rooms,{commonRadius:S.commonR||10,roomD:ROOM_D});
 }
 // key null is the office meter. A world's meterAnchors() wins; the meter module has a local fallback.
 function meterMount(key){
   const all=S?.worldLayout?.meterAnchors?.();if(!all)return null;
-  if(key==null||key==='office')return all.main||all.office||null;
+  // The office meter stands beside the DevOps board, whose width follows the screen (office-devops.js).
+  if(key==null||key==='office')return S.worldLayout.mainWall&&S.devops?.width()?officeMeterMount(S.worldLayout.mainWall,S.devops.width()):all.main||all.office||null;
   return all.rooms?.find(r=>r.key===key)||all[key]||null;
 }
 // The main board's feature wall: a freestanding wall on a plinth, with a planter at each end.
@@ -937,14 +958,16 @@ function showEmote(key,k){
 function hitAt(e){
   if(!S.camera)return null;const r=S.renderer.domElement.getBoundingClientRect();
   S.ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),S.camera);
-  const board=S.replay?.active?null:S.boards?.hit(S.ray),meter=S.replay?.active?null:S.meters?.hit(S.ray);
+  const board=S.replay?.active?null:S.boards?.hit(S.ray),meter=S.replay?.active?null:S.meters?.hit(S.ray),wall=S.replay?.active?null:S.devops?.hit(S.ray);
   for(const h of S.ray.intersectObjects(S.clickables,true)){
-    if((board&&board.distance<h.distance)||(meter&&meter.distance<h.distance))break;
+    if((board&&board.distance<h.distance)||(meter&&meter.distance<h.distance)||(wall&&wall.distance<h.distance))break;
     if(h.object.isInstancedMesh){const id=S.org?.pick(h.object,h.instanceId);if(id)return {kind:'af',id,obj:h.object,point:h.point};continue}
     let o=h.object;while(o&&!o.userData?.kind)o=o.parent;if(o)return {kind:o.userData.kind,id:o.userData.id,obj:o,point:h.point}}
   const g=S.ray.intersectObjects(S.place.floors)[0];
   let out=board&&(!g||board.distance<g.distance)?{kind:'',board,point:g?.point||board.point,distance:board.distance}:g?{kind:'',point:g.point,distance:g.distance}:null;
   if(meter&&(out?.distance==null||meter.distance<out.distance))out={kind:'meter',meter,point:meter.point,distance:meter.distance};
+  // The main board (the real DevOps board): a click takes you to it.
+  if(wall&&(out?.distance==null||wall.distance<out.distance))out={kind:'devops',point:wall.point,distance:wall.distance};
   return out;
 }
 function cardTargetAt(e){
@@ -968,6 +991,7 @@ function cardTargetAt(e){
   }
   if(el!==S.renderer.domElement&&!el?.closest('.of-labels'))return null;
   const hit=hitAt(e);
+  if(hit?.kind==='devops')return null;
   if(hit?.board?.column&&hit.board.near)return {type:'column',id:hit.board.column.id,name:hit.board.column.name};
   if(hit?.kind==='af')return agent(hit.id);
   if(hit?.kind==='person')return person(hit.obj.userData.key);
@@ -989,6 +1013,7 @@ function pick(e){
   if(S.replay?.active){if(hit.point)S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
   if(S.voice?.pick(S.ray))return;
   if(hit.kind==='meter'){if(S.meters?.pick(hit.meter))return;S.follow=null;S.target=new THREE.Vector3(hit.point.x,0,hit.point.z);return}
+  if(hit.kind==='devops'){S.devops.focus();return}
   if(S.boards?.pick(hit.board))return;
   if(hit.kind==='agent'){showAgent(hit.obj.userData.member,hit.obj.userData.id);return}
   if(hit.kind==='af'){showAf(hit.id);return}
@@ -1162,6 +1187,8 @@ function onKey(e){
   if(!S)return;
   if(e.target.closest?.('dialog[open]'))return;
   if(overlayOpen()){e.stopPropagation();return}
+  // At the DevOps board: its keys are its own (office-devops.js); Esc comes back.
+  if(S.devops?.focused()){if(e.key==='Escape'&&S.presence?.closeOverlays()){e.preventDefault();e.stopPropagation();return}S.devops.windowKey(e);return}
   if(e.key==='Escape'){
     e.preventDefault();e.stopPropagation();
     if(S.decor?.escape())return;
@@ -1235,7 +1262,7 @@ function frame(dt,t,delta){
   const controller=S.controller,state=controller.state,now=performance.now(),yaw=S.rig.yaw;
   const paused=overlayOpen(),replay=S.replay?.active;
   const animation=replay?S.replay.tick(Math.min(.25,delta)):{dt,t};
-  const editing=paused||S.pointer.grabbing||isTyping(document.activeElement);
+  const editing=paused||S.pointer.grabbing||isTyping(document.activeElement)||!!S.devops?.focused();
   const pads=editing?[]:navigator.getGamepads?.()||[];
   const gamepad=Array.prototype.find.call(pads,pad=>pad?.connected&&pad.mapping==='standard');
   const input=S.input.sample(gamepad,controller.jump);if(!paused&&!replay)S.interact?.gamepad(gamepad);
@@ -1309,10 +1336,11 @@ function frame(dt,t,delta){
     S.camera.position.x+=S.place.center.x*S.ov;S.camera.position.y+=S.floor*(1-S.ov);S.camera.position.z+=S.place.center.z*S.ov;
   }
   S.place.update(t,dt,{camera:S.camera,motion:S.motion});
+  S.devops?.frame(dt,!paused);
   if(!replay)S.boards?.frame(S.labelList);
   S.meters?.frame();
   // The look editor covers the office: nothing to draw under it.
-  if(!S.lookEditor){S.renderer.render(S.scene,S.camera);if(!document.hidden)paceFigures(delta)}
+  if(!S.lookEditor){S.renderer.render(S.scene,S.camera);S.devops?.render();if(!document.hidden)paceFigures(delta)}
   if(!replay)S.interact?.update();
   S.voice?.frame(dt);
   placeLabels();
