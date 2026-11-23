@@ -36,6 +36,22 @@ struct FlowAPI {
         try await all("/api/v1/envs/\(seg(env))/labels")
     }
 
+    func charts(env: String) async throws -> [ChartInfo] {
+        try await all("/api/v1/envs/\(seg(env))/charts")
+    }
+
+    func nodes(env: String, chart: String) async throws -> [FlowNode] {
+        try await all("/api/v1/envs/\(seg(env))/charts/\(seg(chart))/nodes")
+    }
+
+    func edges(env: String, chart: String) async throws -> [FlowEdge] {
+        try await all("/api/v1/envs/\(seg(env))/charts/\(seg(chart))/edges")
+    }
+
+    func items(env: String) async throws -> [TimelineItem] {
+        try await all("/api/v1/envs/\(seg(env))/items")
+    }
+
     // Everyone on any chart (person cards), with photos.
     func people(env: String) async throws -> [FlowPerson] {
         let charts: [FlowChart] = try await all("/api/v1/envs/\(seg(env))/charts")

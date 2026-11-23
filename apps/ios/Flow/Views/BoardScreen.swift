@@ -17,7 +17,7 @@ struct BoardScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             content
-                .background(Color(.systemGroupedBackground))
+                .background(Theme.bg)
                 .navigationTitle(model.env?.name ?? "Board")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarTitleMenu {
@@ -85,10 +85,10 @@ struct BoardScreen: View {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(BoardColumn.allCases) { col in
                         ColumnView(board: board, meta: meta, column: col, onMove: requestMove, onAdd: { newCardColumn = col })
-                            .frame(width: 320)
+                            .frame(width: 280)
                     }
                 }
-                .padding()
+                .padding(12)
             }
         } else {
             VStack(spacing: 0) {
@@ -120,7 +120,7 @@ struct BoardScreen: View {
                     .background { NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) { EmptyView() }.opacity(0) }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if let next = col.nextStep {
                         Button { requestMove(card, next.to) } label: { Label(next.title, systemImage: next.systemImage) }
@@ -211,30 +211,35 @@ private struct ColumnStrip: View {
                             withAnimation(.snappy) { column = col }
                         } label: {
                             HStack(spacing: 5) {
+                                Circle().fill(Theme.columnColor(col.rawValue)).frame(width: 6, height: 6)
                                 Text(col.shortTitle)
                                 Text("\(board.cards(in: col).count)")
-                                    .font(.caption.weight(.bold).monospacedDigit())
-                                    .foregroundStyle(selected ? Theme.columnColor(col.rawValue) : .secondary)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(Theme.faint)
                             }
-                            .font(.subheadline.weight(selected ? .semibold : .medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 32)
                             .background {
                                 if selected {
-                                    Capsule().fill(Color(.secondarySystemGroupedBackground))
-                                        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                                    RoundedRectangle(cornerRadius: 3).fill(Theme.surface)
+                                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.line2))
                                         .matchedGeometryEffect(id: "pill", in: ns)
                                 }
                             }
-                            .foregroundStyle(selected ? .primary : .secondary)
+                            .foregroundStyle(selected ? Theme.ink : Theme.muted)
                         }
                         .buttonStyle(.plain)
                         .id(col)
                     }
                 }
+                .padding(2)
+                .background(Theme.bg, in: .rect(cornerRadius: Theme.corner))
+                .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
             .onChange(of: column) { withAnimation(.snappy) { proxy.scrollTo(column, anchor: .center) } }
         }
         .sensoryFeedback(.selection, trigger: column)
@@ -254,18 +259,20 @@ private struct ColumnView: View {
     var body: some View {
         let cards = board.cards(in: column)
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Circle().fill(Theme.columnColor(column.rawValue)).frame(width: 9, height: 9)
-                Text(column.shortTitle).font(.headline)
-                Text("\(cards.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Circle().fill(Theme.columnColor(column.rawValue)).frame(width: 7, height: 7)
+                Text(column.shortTitle).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Text("\(cards.count)").font(.caption.monospacedDigit()).foregroundStyle(Theme.faint)
                 Spacer()
-                Button(action: onAdd) { Image(systemName: "plus") }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Add a card to \(column.title)")
+                Button(action: onAdd) {
+                    Image(systemName: "plus").font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted).frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add a card to \(column.title)")
             }
-            .padding(.horizontal, 6)
+            .padding(.leading, 6)
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 5) {
                     ForEach(cards) { card in
                         NavigationLink(value: CardRef(env: model.envID ?? "", id: card.id)) {
                             CardTile(card: card, meta: meta)
@@ -275,16 +282,16 @@ private struct ColumnView: View {
                         .draggable(card.id)
                     }
                     if cards.isEmpty {
-                        Text("Drop cards here").font(.footnote).foregroundStyle(.tertiary).frame(maxWidth: .infinity).padding(.vertical, 24)
+                        Text("No cards").font(.footnote).foregroundStyle(Theme.faint).frame(maxWidth: .infinity).padding(.vertical, 20)
                     }
                 }
                 .padding(.bottom, 12)
             }
         }
-        .padding(10)
+        .padding(6)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(targeted ? Theme.columnColor(column.rawValue).opacity(0.10) : Color(.tertiarySystemFill).opacity(0.5),
-                    in: .rect(cornerRadius: 18, style: .continuous))
+        .background(targeted ? Theme.accentWash : Theme.bg, in: .rect(cornerRadius: Theme.panelCorner))
+        .overlay(RoundedRectangle(cornerRadius: Theme.panelCorner).strokeBorder(targeted ? Theme.green : Theme.line))
         .dropDestination(for: String.self) { ids, _ in
             guard let id = ids.first, let card = board.cards.first(where: { $0.id == id }), card.column != column.rawValue else { return false }
             onMove(card, column)
@@ -302,15 +309,15 @@ struct CardTile: View {
         let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
         let people = meta.assignees(card)
         let items = card.checklist ?? []
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(card.title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(card.column == "done" ? Theme.muted : Theme.ink)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 4)
-                Text(card.numberText).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                Text(card.numberText).font(.caption2.monospacedDigit()).foregroundStyle(Theme.faint)
             }
             if !labels.isEmpty {
                 HStack(spacing: 4) {
@@ -318,7 +325,7 @@ struct CardTile: View {
                     if labels.count > 3 { Text("+\(labels.count - 3)").font(.caption2).foregroundStyle(.secondary) }
                 }
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 ProjectTag(project: card.project.flatMap { meta.projects[$0] })
                 if let due = card.due, !due.isEmpty { DueLabel(due: due, done: card.column == "done") }
                 if !items.isEmpty { ChecklistProgress(done: items.filter(\.done).count, total: items.count) }
@@ -326,7 +333,7 @@ struct CardTile: View {
                 if !people.isEmpty { AvatarStack(people: people) }
             }
         }
-        .cardSurface(padding: 13)
+        .cardSurface(padding: 10)
         .contentShape(.rect(cornerRadius: Theme.corner))
     }
 }

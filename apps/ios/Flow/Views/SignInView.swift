@@ -17,12 +17,13 @@ struct SignInView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 14) {
-                FlowMark(size: 96)
-                Text("Flow")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                FlowMark(size: 76)
+                Text("Flygon Flow")
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
                 Text("Your board, your agents and everything\nwaiting on you, in your pocket.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
             }
             Spacer()
@@ -30,7 +31,7 @@ struct SignInView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.bottom, 4)
@@ -41,25 +42,24 @@ struct SignInView: View {
                     Button {
                         showEmail = true
                     } label: {
-                        Text("Sign in with email").font(.body.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 6)
+                        Text("Sign in with email")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .buttonStyle(.flow(.secondary, large: true))
                     .disabled(busy)
                 }
                 Button {
                     showServer = true
                 } label: {
                     HStack(spacing: 4) {
-                        Text(serverLabel).foregroundStyle(.secondary)
-                        Text("Change").fontWeight(.medium)
+                        Text(serverLabel).foregroundStyle(Theme.muted)
+                        Text("Change").fontWeight(.semibold).foregroundStyle(Theme.accent)
                     }
                     .font(.footnote)
                 }
                 .padding(.top, 6)
                 Text("Signing in gives this device its own key. You can revoke it on the web under Settings › Connect.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.faint)
                     .multilineTextAlignment(.center)
                     .padding(.top, 2)
             }
@@ -69,8 +69,18 @@ struct SignInView: View {
         }
         .frame(maxWidth: .infinity)
         .background {
-            LinearGradient(colors: [Theme.green.opacity(0.16), Color(.systemBackground)], startPoint: .top, endPoint: .center)
-                .ignoresSafeArea()
+            ZStack {
+                Theme.bg
+                // The mind map's dot grid, faintly, behind the welcome.
+                Canvas { ctx, size in
+                    var p = Path()
+                    for x in stride(from: 8.0, to: size.width, by: 16) {
+                        for y in stride(from: 8.0, to: size.height, by: 16) { p.addEllipse(in: CGRect(x: x - 0.8, y: y - 0.8, width: 1.6, height: 1.6)) }
+                    }
+                    ctx.fill(p, with: .color(Theme.dots.opacity(0.7)))
+                }
+            }
+            .ignoresSafeArea()
         }
         .sheet(isPresented: $showEmail) {
             if let auth { EmailSignIn(auth: auth) { user in await finish(user) } }
@@ -104,14 +114,11 @@ struct SignInView: View {
             }
         } label: {
             ZStack {
-                Text(label).font(.headline).opacity(busy || checking ? 0 : 1)
+                Text(label).opacity(busy || checking ? 0 : 1)
                 if busy || checking { ProgressView().tint(.white) }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(.flow(.primary, large: true))
         .disabled(busy || checking || session == nil)
     }
 

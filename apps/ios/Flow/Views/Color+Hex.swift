@@ -46,9 +46,10 @@ struct LabelChip: View {
         let tone = LabelTone.of(label.color)
         Text(label.name)
             .font(.caption2.weight(.semibold))
+            .lineLimit(1)
             .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .frame(height: 18)
             .foregroundStyle(Color(hex: tone.text) ?? .primary)
-            .background(Color(hex: label.color) ?? Color(hex: tone.background) ?? .gray.opacity(0.2), in: .capsule)
+            .background(Color(hex: label.color) ?? Color(hex: tone.background) ?? .gray.opacity(0.2), in: .rect(cornerRadius: 3))
     }
 }

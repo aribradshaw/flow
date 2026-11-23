@@ -278,3 +278,106 @@ struct CardPatch: Encodable {
         title == nil && description == nil && project == nil && labels == nil && points == nil && due == nil && checklist == nil && links == nil
     }
 }
+
+// MARK: Mind map and timeline
+
+struct FlowNode: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let type: String
+    let x: Double
+    let y: Double
+    let w: Double?
+    let h: Double?
+    let notes: String?
+    let image: String?
+
+    // Default sizes from the web app (public/app.js KINDS).
+    var size: CGSize {
+        let d: (Double, Double) = switch type {
+        case "entity": (176, 48)
+        case "person": (160, 48)
+        case "area": (192, 48)
+        default: (160, 64)
+        }
+        return CGSize(width: w ?? d.0, height: h ?? d.1)
+    }
+
+    var rect: CGRect { CGRect(origin: CGPoint(x: x, y: y), size: size) }
+
+    var kindTitle: String {
+        switch type {
+        case "entity": "Entity"
+        case "person": "Person"
+        case "area": "Project area"
+        default: "Note"
+        }
+    }
+
+    var symbol: String {
+        switch type {
+        case "entity": "building.2"
+        case "person": "person"
+        case "area": "square.dashed"
+        default: "note.text"
+        }
+    }
+}
+
+struct FlowEdge: Decodable, Identifiable, Hashable {
+    let id: String
+    let from: String
+    let to: String
+    let type: String
+    let percent: String?
+
+    var isGroup: Bool { type == "group" }
+}
+
+struct ChartInfo: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let active: Bool?
+    let nodes: Int?
+}
+
+struct TimelineItem: Decodable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let kind: String
+    let status: String
+    let start: String
+    let end: String
+    let priority: String?
+    let projects: [String]
+    let owner: String?
+    let link: String?
+    let notes: String?
+
+    var startDate: Date? { DueLabel.parser.date(from: start) }
+    var endDate: Date? { DueLabel.parser.date(from: end.isEmpty ? start : end) ?? startDate }
+    var isPoint: Bool { ["milestone", "release", "deadline", "event"].contains(kind) && (end.isEmpty || end == start) }
+
+    var symbol: String {
+        switch kind {
+        case "milestone": "flag.fill"
+        case "release": "shippingbox.fill"
+        case "deadline": "exclamationmark.triangle.fill"
+        case "project": "folder.fill"
+        case "phase": "square.stack.fill"
+        case "event": "calendar"
+        default: "sparkles"
+        }
+    }
+
+    var statusTitle: String {
+        switch status {
+        case "active": "In progress"
+        case "risk": "At risk"
+        case "blocked": "Blocked"
+        case "done": "Done"
+        case "cancelled": "Cancelled"
+        default: "Planned"
+        }
+    }
+}

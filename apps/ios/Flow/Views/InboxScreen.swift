@@ -18,57 +18,48 @@ struct InboxScreen: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                summary
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
-                }
-                if !inbox.loaded && inbox.loading {
-                    Section {
-                        ForEach(0..<3, id: \.self) { _ in
-                            placeholderRow.redacted(reason: .placeholder)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    summary.padding(.horizontal, 4)
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Theme.danger)
+                    }
+                    if !inbox.loaded && inbox.loading {
+                        group("Loading", color: Theme.faint) {
+                            ForEach(0..<3, id: \.self) { _ in placeholderRow.redacted(reason: .placeholder).padding(12) }
+                        }
+                    }
+                    if !inbox.agents.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            header("Agents waiting on you", systemImage: "", color: Theme.warn)
+                            ForEach(inbox.agents) { agent in agentCard(agent).cardSurface(padding: 12) }
+                        }
+                    }
+                    if !inbox.proposals.isEmpty {
+                        group("Additions to approve", color: Theme.columnColor("must")) {
+                            ForEach(inbox.proposals) { p in proposalRow(p).padding(12) }
+                        }
+                    }
+                    if !inbox.shareRequests.isEmpty {
+                        group("Share requests", color: Theme.columnColor("doing")) {
+                            ForEach(inbox.shareRequests) { r in shareRow(r).padding(12) }
+                        }
+                    }
+                    let groups = Dictionary(grouping: inbox.cards, by: \.column)
+                    ForEach(["uat", "blocked", "doing", "requests", "must", "nice"], id: \.self) { col in
+                        if let cards = groups[col], !cards.isEmpty {
+                            group(col == "uat" ? "Ready for you to test" : BoardColumn(rawValue: col)?.shortTitle ?? col, color: Theme.columnColor(col)) {
+                                ForEach(cards) { card in cardRow(card) }
+                            }
                         }
                     }
                 }
-                if !inbox.agents.isEmpty {
-                    Section {
-                        ForEach(inbox.agents) { agent in agentCard(agent) }
-                    } header: {
-                        header("Agents waiting on you", systemImage: "sparkles", color: .orange)
-                    }
-                }
-                if !inbox.proposals.isEmpty {
-                    Section {
-                        ForEach(inbox.proposals) { p in proposalRow(p) }
-                    } header: {
-                        header("Additions to approve", systemImage: "plus.square.on.square", color: .purple)
-                    }
-                }
-                if !inbox.shareRequests.isEmpty {
-                    Section {
-                        ForEach(inbox.shareRequests) { r in shareRow(r) }
-                    } header: {
-                        header("Share requests", systemImage: "person.2", color: .blue)
-                    }
-                }
-                let groups = Dictionary(grouping: inbox.cards, by: \.column)
-                ForEach(["uat", "blocked", "doing", "requests", "must", "nice"], id: \.self) { col in
-                    if let cards = groups[col], !cards.isEmpty {
-                        Section {
-                            ForEach(cards) { card in cardRow(card) }
-                        } header: {
-                            header(col == "uat" ? "Ready for you to test" : BoardColumn(rawValue: col)?.shortTitle ?? col,
-                                   systemImage: BoardColumn(rawValue: col)?.systemImage ?? "circle", color: Theme.columnColor(col))
-                        }
-                    }
-                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
             }
-            .listStyle(.insetGrouped)
-            .frame(maxWidth: 760)
-            .frame(maxWidth: .infinity)
-            .background(Color(.systemGroupedBackground))
+            .background(Theme.bg)
             .overlay {
                 if inbox.loaded && inbox.agents.isEmpty && inbox.proposals.isEmpty && inbox.shareRequests.isEmpty && inbox.cards.isEmpty {
                     ContentUnavailableView {
@@ -102,24 +93,41 @@ struct InboxScreen: View {
         if inbox.loaded {
             VStack(alignment: .leading, spacing: 2) {
                 Text(waitingCount == 0 ? "Nothing needs you right now" : waitingCount == 1 ? "1 thing needs you" : "\(waitingCount) things need you")
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
+                    .foregroundStyle(Theme.ink)
                 let doing = inbox.cards.filter { $0.column == "doing" }.count
                 if doing > 0 || !inbox.cards.isEmpty {
                     Text("\(inbox.cards.count) cards assigned to you · \(doing) in progress")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                 }
             }
         }
     }
 
+    // A titled group of rows on one Flow surface, divided by hairlines.
+    private func group<C: View>(_ title: String, color: Color, @ViewBuilder rows: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header(title, systemImage: "", color: color)
+            VStack(spacing: 0) {
+                Group(subviews: rows()) { subviews in
+                    ForEach(Array(subviews.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1) }
+                        row
+                    }
+                }
+            }
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.corner))
+            .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line))
+        }
+    }
+
     private func header(_ title: String, systemImage: String, color: Color) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: systemImage).foregroundStyle(color)
+            Circle().fill(color).frame(width: 7, height: 7)
             Text(title)
         }
-        .font(.subheadline.weight(.semibold))
-        .textCase(nil)
+        .flowSectionTitle()
     }
 
     private var placeholderRow: some View {
@@ -133,44 +141,44 @@ struct InboxScreen: View {
     private func agentCard(_ agent: WaitingAgent) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Image(systemName: agent.isQuestion ? "questionmark.bubble.fill" : "hand.raised.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                Image(systemName: agent.isQuestion ? "questionmark.bubble" : "hand.raised")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.warn)
                     .frame(width: 32, height: 32)
-                    .background(Color.orange.gradient, in: .rect(cornerRadius: 8, style: .continuous))
+                    .background(Theme.warn.opacity(0.12), in: .rect(cornerRadius: Theme.corner))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(agent.name).font(.headline).lineLimit(1)
+                    Text(agent.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     Text([agent.isQuestion ? "Has a question" : "Wants approval", agent.vendor?.capitalized, agent.host].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
                 }
             }
             if let summary = agent.pending?.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(.callout.monospaced())
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(6)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10, style: .continuous))
+                    .background(Theme.bg, in: .rect(cornerRadius: Theme.corner))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line))
             }
             HStack(spacing: 10) {
                 if agent.isQuestion {
                     Button { reply = ""; replyTo = agent } label: {
-                        Label("Reply", systemImage: "arrowshape.turn.up.left.fill").frame(maxWidth: .infinity)
+                        Label("Reply", systemImage: "arrowshape.turn.up.left").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.flow(.primary))
                 } else {
                     Button { Task { await send(agent, decision: "deny") } } label: {
                         Text("Deny").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
+                    .buttonStyle(.flow(.danger))
                     Button { Task { await send(agent, decision: "allow") } } label: {
-                        Text("Allow").fontWeight(.semibold).frame(maxWidth: .infinity)
+                        Text("Allow").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.flow(.primary))
                 }
             }
-            .controlSize(.large)
             .disabled(busy.contains(agent.source + agent.id))
         }
         .padding(.vertical, 6)
@@ -187,9 +195,9 @@ struct InboxScreen: View {
             }
             HStack(spacing: 10) {
                 Button { Task { await decide(p, approve: false) } } label: { Text("Deny").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered).tint(.red)
-                Button { Task { await decide(p, approve: true) } } label: { Text("Approve").fontWeight(.semibold).frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.flow(.danger))
+                Button { Task { await decide(p, approve: true) } } label: { Text("Approve").frame(maxWidth: .infinity) }
+                    .buttonStyle(.flow(.primary))
             }
             .disabled(busy.contains(p.id))
         }
@@ -213,9 +221,9 @@ struct InboxScreen: View {
             }
             HStack(spacing: 10) {
                 Button { Task { await decide(r, approve: false) } } label: { Text("Deny").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered).tint(.red)
-                Button { Task { await decide(r, approve: true) } } label: { Text("Approve").fontWeight(.semibold).frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.flow(.danger))
+                Button { Task { await decide(r, approve: true) } } label: { Text("Approve").frame(maxWidth: .infinity) }
+                    .buttonStyle(.flow(.primary))
             }
             .disabled(busy.contains(r.id))
         }
@@ -224,27 +232,31 @@ struct InboxScreen: View {
 
     private func cardRow(_ card: InboxCard) -> some View {
         NavigationLink(value: CardRef(env: card.env, id: card.id)) {
+          HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(card.title).font(.body.weight(.medium)).lineLimit(2)
+                Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(2)
                 HStack(spacing: 10) {
                     if let p = card.project {
                         ProjectTag(project: FlowProject(id: p.id, name: p.name, color: p.color))
                     }
                     if let due = card.due, !due.isEmpty { DueLabel(due: due) }
-                    Text(card.roles.map(\.capitalized).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                    Text(card.roles.map(\.capitalized).joined(separator: ", ")).font(.caption).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)
-                    Text(card.numberText).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                    Text(card.numberText).font(.caption2.monospacedDigit()).foregroundStyle(Theme.faint)
                 }
                 if model.envs.count > 1, let env = card.envName {
-                    Text(env).font(.caption2).foregroundStyle(.tertiary)
+                    Text(env).font(.caption2).foregroundStyle(Theme.faint)
                 }
             }
-            .padding(.vertical, 3)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
+          }
+          .padding(12)
+          .contentShape(.rect)
         }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+        .buttonStyle(.plain)
+        .contextMenu {
             if let col = BoardColumn(rawValue: card.column), let next = col.nextStep {
                 Button { Task { await advance(card, to: next.to) } } label: { Label(next.title, systemImage: next.systemImage) }
-                    .tint(Theme.columnColor(next.to.rawValue))
             }
         }
     }

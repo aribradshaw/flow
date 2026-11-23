@@ -30,7 +30,7 @@ struct CardDetailView: View {
                 details(.placeholder).redacted(reason: .placeholder).disabled(true)
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.bg)
         .navigationTitle(card?.numberText ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -54,19 +54,16 @@ struct CardDetailView: View {
                     move(card, next.to)
                 } label: {
                     Label(next.title, systemImage: next.systemImage)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.columnColor(next.to.rawValue))
-                .controlSize(.large)
+                .buttonStyle(.flow(.primary, large: true))
                 .disabled(moving)
                 .padding(.horizontal)
                 .padding(.top, 10)
                 .padding(.bottom, 8)
+                .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
-                .background(.bar)
+                .background(Theme.bg.opacity(0.97))
+                .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
             }
         }
         .sheet(isPresented: $editing) {
@@ -85,7 +82,7 @@ struct CardDetailView: View {
                 if let message = error ?? mover.error {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.danger)
                         .cardSurface()
                 }
                 header(card)
@@ -94,8 +91,9 @@ struct CardDetailView: View {
                     section("Description") {
                         Text(markdown(text))
                             .font(.callout)
+                            .foregroundStyle(Theme.ink)
                             .textSelection(.enabled)
-                            .tint(Theme.green)
+                            .tint(Theme.accent)
                     }
                 }
                 if let items = card.checklist, !items.isEmpty { checklist(items) }
@@ -103,6 +101,8 @@ struct CardDetailView: View {
             }
             .padding()
             .padding(.bottom, 12)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -111,20 +111,21 @@ struct CardDetailView: View {
             HStack(spacing: 8) {
                 ColumnPill(column: card.column)
                 if let snoozed = card.snoozedUntil, let d = ISO8601DateFormatter().date(from: snoozed), d > .now {
-                    Label("Snoozed", systemImage: "moon.zzz").labelStyle(TightLabel()).font(.caption).foregroundStyle(.secondary)
+                    Tag(text: "Snoozed", color: Theme.muted, icon: "moon.zzz")
                 }
                 Spacer()
             }
             Text(card.title)
-                .font(.title2.weight(.bold))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
             let labels = (card.labels ?? []).compactMap { meta.labels[$0] }
             if card.project != nil || !labels.isEmpty {
                 FlowLayout(spacing: 6) {
                     if let p = card.project.flatMap({ meta.projects[$0] }) {
                         ProjectTag(project: p, font: .caption.weight(.medium))
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Color(.tertiarySystemFill), in: .capsule)
+                            .padding(.horizontal, 6).frame(height: 18)
+                            .background(Theme.hover, in: .rect(cornerRadius: 3))
                     }
                     ForEach(labels) { LabelChip(label: $0) }
                 }
@@ -141,68 +142,67 @@ struct CardDetailView: View {
                     factRow {
                         Avatar(name: person.name, image: person.image, size: 28)
                     } label: {
-                        Text(person.name).font(.body)
+                        Text(person.name).foregroundStyle(Theme.ink)
                     } value: {
-                        Text((roles[person.id] ?? "developer").capitalized).foregroundStyle(.secondary)
+                        Text((roles[person.id] ?? "developer").capitalized).foregroundStyle(Theme.muted)
                     }
-                    Divider().padding(.leading, 52)
+                    Divider().overlay(Theme.line).padding(.leading, 40)
                 }
             }
             if let due = card.due, !due.isEmpty {
-                factRow { icon("calendar", .red) } label: { Text("Due") } value: {
+                factRow { icon("calendar") } label: { Text("Due").foregroundStyle(Theme.ink) } value: {
                     HStack(spacing: 6) {
                         // "Tomorrow · Dec 1": the relative words only when they say more than the date.
                         if let info = DueLabel.describe(due), (-1...6).contains(info.days) || info.days < -1 {
                             DueLabel(due: due, done: card.column == "done")
-                            Text("·").foregroundStyle(.tertiary)
+                            Text("·").foregroundStyle(Theme.faint)
                         }
-                        if let d = DueLabel.parser.date(from: due) { Text(d.formatted(.dateTime.month(.abbreviated).day().year())).foregroundStyle(.secondary) }
+                        if let d = DueLabel.parser.date(from: due) { Text(d.formatted(.dateTime.month(.abbreviated).day().year())).foregroundStyle(Theme.muted) }
                     }
                 }
-                Divider().padding(.leading, 52)
+                Divider().overlay(Theme.line).padding(.leading, 40)
             }
             if let points = card.points {
-                factRow { icon("gauge.with.needle", .indigo) } label: { Text("Points") } value: { Text(points.formatted()).foregroundStyle(.secondary) }
-                Divider().padding(.leading, 52)
+                factRow { icon("gauge.with.needle") } label: { Text("Points").foregroundStyle(Theme.ink) } value: { Text(points.formatted()).foregroundStyle(Theme.muted) }
+                Divider().overlay(Theme.line).padding(.leading, 40)
             }
-            factRow { icon("clock", .gray) } label: { Text("Updated") } value: {
+            factRow { icon("clock") } label: { Text("Updated").foregroundStyle(Theme.ink) } value: {
                 if let u = card.updated, let d = ISO8601DateFormatter.withFraction.date(from: u) ?? ISO8601DateFormatter().date(from: u) {
-                    Text(d, format: .relative(presentation: .named)).foregroundStyle(.secondary)
+                    Text(d, format: .relative(presentation: .named)).foregroundStyle(Theme.muted)
                 } else {
-                    Text("—").foregroundStyle(.secondary)
+                    Text("—").foregroundStyle(Theme.muted)
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: Theme.corner, style: .continuous))
+        .padding(.horizontal, 12)
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.corner))
+        .overlay(RoundedRectangle(cornerRadius: Theme.corner).strokeBorder(Theme.line))
     }
 
     private func factRow<I: View, L: View, V: View>(@ViewBuilder icon: () -> I, @ViewBuilder label: () -> L, @ViewBuilder value: () -> V) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             icon().frame(width: 28)
-            label()
+            label().font(.subheadline)
             Spacer()
             value().font(.subheadline)
         }
-        .padding(.vertical, 11)
+        .padding(.vertical, 9)
     }
 
-    private func icon(_ name: String, _ color: Color) -> some View {
+    private func icon(_ name: String, _ color: Color = Theme.muted) -> some View {
         Image(systemName: name)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 28, height: 28)
-            .background(color.gradient, in: .rect(cornerRadius: 7, style: .continuous))
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(color)
     }
 
     private func section<C: View>(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                Text(title).flowSectionTitle()
                 Spacer()
-                if let trailing { Text(trailing).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
+                if let trailing { Text(trailing).font(.footnote.monospacedDigit()).foregroundStyle(Theme.faint) }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
             content().cardSurface()
         }
     }
@@ -212,19 +212,20 @@ struct CardDetailView: View {
         return section("Checklist", trailing: "\(done) of \(items.count)") {
             VStack(alignment: .leading, spacing: 12) {
                 ProgressView(value: Double(done), total: Double(max(items.count, 1)))
-                    .tint(done == items.count ? .green : Theme.green)
+                    .tint(Theme.green)
                 ForEach(items) { item in
                     Button {
                         Task { await toggle(item) }
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(item.done ? Color.green : Color.secondary)
+                            Image(systemName: item.done ? "checkmark.square.fill" : "square")
+                                .foregroundStyle(item.done ? Theme.accent : Theme.faint)
                                 .font(.body)
                                 .contentTransition(.symbolEffect(.replace))
                             Text(item.text)
-                                .strikethrough(item.done, color: .secondary)
-                                .foregroundStyle(item.done ? .secondary : .primary)
+                                .font(.subheadline)
+                                .strikethrough(item.done, color: Theme.faint)
+                                .foregroundStyle(item.done ? Theme.muted : Theme.ink)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }
@@ -243,14 +244,13 @@ struct CardDetailView: View {
                     if let url = URL(string: link.url) {
                         Link(destination: url) {
                             HStack(spacing: 12) {
-                                icon(link.kind == "pr" ? "arrow.triangle.pull" : link.kind == "commit" ? "smallcircle.filled.circle" : "link",
-                                     link.kind == "pr" ? .purple : link.kind == "commit" ? .gray : .blue)
+                                icon(link.kind == "pr" ? "arrow.triangle.pull" : link.kind == "commit" ? "smallcircle.filled.circle" : "link", Theme.accent)
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(LinkInfo(url).title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
-                                    Text(LinkInfo(url).subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(LinkInfo(url).title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                                    Text(LinkInfo(url).subtitle).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.faint)
                             }
                         }
                     }
