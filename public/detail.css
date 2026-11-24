@@ -87,3 +87,6 @@ dialog.card-modal,dialog.item-modal{overflow:hidden}
 .pp-prop .pp-acts .ib{width:26px;height:26px}
 #edit .pct{flex:1}
 #edit .pct input{width:100%;height:26px}
+.ibody .privacy-toggle{display:flex;align-items:center;gap:6px}
+.ibody .privacy-toggle input[type=checkbox]{flex:none;width:auto;height:auto}
+.projects-editor .privacy-toggle{flex-basis:100%;margin:0 0 4px 28px}

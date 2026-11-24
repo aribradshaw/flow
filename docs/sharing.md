@@ -7,6 +7,12 @@ Code:
 - `lib/shares.mjs`: storage for shares, re-share requests, placements, field history and proposed additions. It uses Postgres when `DATABASE_URL` is set, otherwise JSON files in `BACKUP_DIR`.
 - `test/sharing.test.mjs`: run with `node --test test/sharing.test.mjs`. It covers the core, the JSON-file store and an embedded Postgres store with the migrations run twice.
 
+## Only me
+
+In Timeline → **Projects**, or in a mind-map card’s inspector, check **Only me** to hide that record from everyone else, including recipients of whole-workspace shares. Projects placed under an owner-only mind-map card also stay private. Mark a project and its mind-map card separately if they are separate records you want to hide.
+
+A private project’s linked timeline items, DevOps cards, AgentFlow agents, and workflows stay private. An item linked to both private and shared projects stays private. The 3D office hides private AgentFlow bots. A live coding session can still appear as a generic **Private project** mascot. The setting applies to what Flow serves after the change. Previously downloaded copies remain with their recipients. Saved snapshots and deleted-card history are available to the workspace owner.
+
 ## Model
 
 ```

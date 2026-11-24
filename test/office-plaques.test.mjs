@@ -12,7 +12,7 @@ test('plaque copy: online available room with agents', () => {
 });
 
 test('plaque copy: offline leads with last seen, then agent note', () => {
-  const c = plaqueCopy({name: 'Joseph Basrawi', online: false, seen: '11 min ago', extra: '2 agents'});
+  const c = plaqueCopy({name: 'Joseph Example', online: false, seen: '11 min ago', extra: '2 agents'});
   assert.equal(c.subtitle, '');
   assert.deepEqual(c.lines, ['Offline · last seen 11 min ago', '2 agents']);
   assert.equal(c.status.id, 'offline');

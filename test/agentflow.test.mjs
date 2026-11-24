@@ -375,19 +375,19 @@ test('model makers: the icon follows who made the model, not the harness that ru
 });
 
 test('a share member is shown under the viewer\'s own person card with the same email',()=>{
-  const member={id:'@joe@example.test',email:'Joe@Example.test',name:'Joseph Basrawi',image:'https://cdn.example.test/owner.png',opidLinked:true,owner:true};
-  const joe={id:'joe',type:'person',name:'Joe Basrawi',email:'joe@example.test',image:'data:image/png;base64,QQ'};
-  const shared={id:'sh.s1.joe',type:'person',name:'Joseph Basrawi',email:'joe@example.test'};
+  const member={id:'@joe@example.test',email:'Joe@Example.test',name:'Joseph Example',image:'https://cdn.example.test/owner.png',opidLinked:true,owner:true};
+  const joe={id:'joe',type:'person',name:'Joe Example',email:'joe@example.test',image:'data:image/png;base64,QQ'};
+  const shared={id:'sh.s1.joe',type:'person',name:'Joseph Example',email:'joe@example.test'};
   const other={id:'cx.env.p',type:'person',name:'Joseph',email:'joe@example.test'};
   const shown=shownMember(member,[shared,other,{id:'ann',type:'person',name:'Ann',email:'ann@example.test'},joe]);
   assert.equal(shown.id,'@joe@example.test','the assignee stays the member');
-  assert.equal(shown.name,'Joe Basrawi');
+  assert.equal(shown.name,'Joe Example');
   assert.equal(shown.image,member.image,'the photo is chosen separately');
   assert.equal(shown.opidLinked,true);
-  assert.equal(shownMember(member,[shared,other]).name,'Joseph Basrawi','a shared or combined card is not the viewer\'s own');
+  assert.equal(shownMember(member,[shared,other]).name,'Joseph Example','a shared or combined card is not the viewer\'s own');
   assert.equal(shownMember({id:'@ann@example.test',email:'ann@example.test',name:'ann@example.test'},[]).name,'ann@example.test');
   assert.equal(shownMember(null,[]),null);
-  const people=[{id:'joe',type:'person',name:'Joe Basrawi',email:'joe@example.test'},{id:'sh.s1.x',type:'person',email:'joe@example.test'}];
+  const people=[{id:'joe',type:'person',name:'Joe Example',email:'joe@example.test'},{id:'sh.s1.x',type:'person',email:'joe@example.test'}];
   assert.deepEqual(memberAliasIds(['joe'],people,['@joe@example.test']),['@joe@example.test']);
   assert.deepEqual(memberAliasIds(['sh.s1.x','missing'],people,['@joe@example.test']),[],'a shared card is not the filter');
   assert.deepEqual(memberAliasIds(['joe'],people,[]),[]);

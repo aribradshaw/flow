@@ -104,15 +104,15 @@ test('summaries: what a card bubble shows, from data the viewer has',()=>{
   assert.deepEqual(s.labels,[{name:'Urgent',color:['#fdd5d2','#8e1f17']},{name:'Odd',color:['#e8e9eb','#3f4247']}]);
   assert.deepEqual(s.project,{name:'Lantern',color:'#3b7dd8'});
   assert.deepEqual(s.assignees.map(a=>[a.name,!!a.image]),[['Ana Example',true],['Bo',false]]);
-  {const d=db();d.charts[0].nodes.push({id:'joe',type:'person',name:'Joe Basrawi',email:'joe@example.test'});
-    d.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Basrawi',opidLinked:true}];
+  {const d=db();d.charts[0].nodes.push({id:'joe',type:'person',name:'Joe Example',email:'joe@example.test'});
+    d.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Example',opidLinked:true}];
     d.devops.cards[0].assignees=[{node:'@joe@example.test',role:'developer'}];
     const card=core.summarize(d,{kind:'card',id:'card-1'});
-    assert.deepEqual(card.assignees.map(a=>[a.id,a.name]),[['@joe@example.test','Joe Basrawi']]);
-    const sharedOnly=db();sharedOnly.charts[0].nodes=[{id:'sh.s1.joe',type:'person',name:'Joseph Basrawi',email:'joe@example.test'}];
-    sharedOnly.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Basrawi'}];
+    assert.deepEqual(card.assignees.map(a=>[a.id,a.name]),[['@joe@example.test','Joe Example']]);
+    const sharedOnly=db();sharedOnly.charts[0].nodes=[{id:'sh.s1.joe',type:'person',name:'Joseph Example',email:'joe@example.test'}];
+    sharedOnly.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Example'}];
     sharedOnly.devops.cards[0].assignees=[{node:'@joe@example.test',role:'developer'}];
-    assert.equal(core.summarize(sharedOnly,{kind:'card',id:'card-1'}).assignees[0].name,'Joseph Basrawi','a shared card with the same email is not the viewer\'s own');
+    assert.equal(core.summarize(sharedOnly,{kind:'card',id:'card-1'}).assignees[0].name,'Joseph Example','a shared card with the same email is not the viewer\'s own');
   }
   assert.equal(s.due,'2026-12-01');assert.equal(s.points,3);assert.equal(s.actual,null);
   {const d=db();d.devops.cards[0].actual=5;assert.deepEqual([core.summarize(d,CARD).points,core.summarize(d,CARD).actual],[3,5])}

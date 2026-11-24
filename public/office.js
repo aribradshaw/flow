@@ -1000,7 +1000,9 @@ function updateDesk(d,a,key,x,z,name,tagY,lounge){
 function afAgents(){
   const local=S.env===S.opts.current&&S.opts.agentflow?S.opts.agentflow():null,server=S.snapAgentflow||[];
   if(!local)return server;
-  const link=new Map(server.map(a=>[a.id,a.member]));return local.map(a=>({...a,member:link.get(a.id)||''}));
+  const link=new Map(server.map(a=>[a.id,a.member]));
+  const owner=S.members.some(m=>m.me&&m.owner);
+  return local.filter(a=>owner||link.has(a.id)).map(a=>({...a,member:link.get(a.id)||''}));
 }
 const afOf=id=>afAgents().find(a=>a.id===id);
 const afFor=key=>afAgents().find(a=>a.member&&a.member===key);

@@ -1,3 +1,4 @@
+import {privateRecords,withoutPrivateRecords} from './lib/workspace-privacy.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import http from 'node:http';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync,copyFileSync,readdirSync,unlinkSync,statSync} from 'node:fs';
@@ -149,9 +150,8 @@ async function saves(req,res){
   const user=await requireUser(req,res);if(!user)return true;
   try{
     if(req.method==='GET'&&url==='/api/saves'){
-      // Listed: environments the user owns or is a member of. Public ones of others open by id only;
-      // they are never listed or discoverable here.
-      const listable=e=>canRead(e,user)&&(sameEmail(e.ownerEmail,user.email)||e.members?.some(m=>sameEmail(m,user.email)));
+      // Historical snapshots can predate a record's privacy setting. Only the owner can access them.
+      const listable=e=>sameEmail(e?.ownerEmail,user.email);
       const local=localList().filter(s=>listable(s.env)),byId=new Map(local.map(s=>[s.id,{...s,env:envInfo(s.env),local:true,cloud:false}]));
       let status='off';
       try{const db=await cloud();if(db){status='ok';
@@ -187,9 +187,9 @@ async function saves(req,res){
     const m=/^\/api\/saves\/([0-9a-f-]{36})$/.exec(url);
     if(req.method==='GET'&&m){
       const f=existsSync(savesRoot)&&readdirSync(savesRoot).find(f=>f.endsWith(`_${m[1]}.json`));
-      if(f){const data=JSON.parse(readFileSync(savesRoot+'/'+f,'utf8')).data;if(!canRead(envs.of(data),user)){json(res,404,{error:'Save not found'});return true}json(res,200,{data});return true}
+      if(f){const data=JSON.parse(readFileSync(savesRoot+'/'+f,'utf8')).data;if(!sameEmail(envs.of(data)?.ownerEmail,user.email)){json(res,404,{error:'Save not found'});return true}json(res,200,{data});return true}
       const db=await cloud(),r=db&&(await db.query('select data,env_id,env_owner,env_visibility from org_chart_studio_saves where id=$1',[m[1]])).rows[0];
-      if(r&&canRead(rowEnv(r),user))json(res,200,{data:r.data});else json(res,404,{error:'Save not found'});
+      if(r&&sameEmail(rowEnv(r).ownerEmail,user.email))json(res,200,{data:r.data});else json(res,404,{error:'Save not found'});
       return true;
     }
     res.writeHead(404);res.end();return true;
@@ -239,7 +239,11 @@ async function inbox(req,res){
 // server; the local file copy is the offline fallback.
 let officeHistory,appPush;
 const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null),
-  onSaved:(env,before,after,meta)=>{officeHistory?.cards(env,before,after);appPush?.saved(env,before,after,meta)}});
+  onSaved:(env,before,after,meta)=>{
+    try{if(!isDeepStrictEqual(privateRecords(before),privateRecords(after)))shareRevoked()}
+    catch(e){console.error('Workspace privacy refresh failed:',cloudError(e))}
+    officeHistory?.cards(env,before,after);appPush?.saved(env,before,after,meta);
+  }});
 const CAPS=auth.CAPS,isOwnerEmail=e=>sameEmail(e,auth.OWNER_EMAIL),limitsOf=email=>limitsMod.limitsFor(CAPS,{owner:isOwnerEmail(email)});
 const users=userStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Someone with no row yet who already owns data used Flow before people were recorded: not new.
@@ -751,8 +755,8 @@ async function workspace(req,res){
     const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[],unregistered:!w}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
     if(!canRead(e,user)&&!(e.unregistered&&!w)){json(res,404,{error:'Not found'});return true}
     const since=parseInt(u.searchParams.get('since')),mine=sameEmail(ownerOf(w,envId),user.email);
-    // Linked copies are added for the environment's owner only; anyone else gets the stored data as is.
-    let v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
+    // The owner also receives linked copies. Other readers get only the visible home records.
+    let v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(withoutPrivateRecords(stripLinked(w.data))):null),shared:''};
     // Other environments of this user combined into this one's board and timeline (?combine=a,b).
     if(mine&&u.searchParams.get('combine'))v=await withCombined(envId,user,v,u.searchParams.get('combine'));
     // Only the owner sees whose account a card is linked to; other readers see their own link only.
@@ -888,7 +892,7 @@ async function opidApi(req,res){
         const w=await workspaces.get(envId);
         if(w?.data&&!w.archivedAt){
           const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
-          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await sharesForPhotos(envId,user):[]}));
+          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:mine?stripLinked(w.data):withoutPrivateRecords(stripLinked(w.data)),shared:mine?await sharesForPhotos(envId,user):[]}));
         }
       }
     }catch(err){console.error('opid photos failed',err?.message);photos={}}
@@ -967,7 +971,8 @@ async function resolveCards(req,user,refs){
       if(!w?.data||w.archivedAt){out.push({access:false});continue}
       const e={...(envs.get(ref.env)||{id:ref.env,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
       if(sameEmail(w.owner,user.email)||canRead(e,user)){
-        const card=chatCore.summarize(stripLinked(w.data),ref);
+        const data=stripLinked(w.data);
+        const card=chatCore.summarize(sameEmail(w.owner,user.email)?data:withoutPrivateRecords(data),ref);
         out.push(card?{access:true,card,open:{env:ref.env,id:ref.id}}:{access:false});continue;
       }
       let found=null;
@@ -1339,17 +1344,23 @@ async function sharedRefusal(envId,user,seen,data,base){
   }
   return null;
 }
-const apiStore=(key,user)=>{
+const apiStore=(key,user,{includeLinked=true}={})=>{
   // What get() served for each environment that holds linked copies, cleaned the way every operation cleans
   // what it reads, so a write sends only the fields the caller changed (fieldBase), and a copy that is
   // merely out of date never overwrites the owner.
-  const served=new Map(),withLinked=w=>!!user?.email&&!user.token&&sameEmail(w.owner,user.email);
+  const served=new Map(),withLinked=w=>includeLinked&&!!user?.email&&!user.token&&sameEmail(w.owner,user.email);
   return {...workspaces,
     async get(id){const w=await workspaces.get(id);if(!w?.data)return w;
       if(withLinked(w)){const {data}=await withShares(id,user,w.data);if(core.linkedShareIds(data).length||data.shareMembers?.length){served.set(id,normalizeDb(structuredClone(data)));return {...w,data}}}
       served.delete(id);
-      const data=dropDangling(structuredClone(stripLinked(w.data)));
+      const raw=stripLinked(w.data);
+      const data=dropDangling(structuredClone(sameEmail(w.owner,user?.email)?raw:withoutPrivateRecords(raw)));
       if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
+    async deletedCards(id,options){
+      // Historical deletions can predate the Only me flag or the removal of its project.
+      const w=await workspaces.get(id);
+      return w&&sameEmail(w.owner,user?.email)?workspaces.deletedCards(id,options):[];
+    },
     async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
     async put(id,opts){
       const seen=served.get(id);if(!seen)return workspaces.put(id,opts);
@@ -1425,8 +1436,10 @@ async function officeAccessNow(envId,user){
   if(sameEmail(e.ownerEmail,user.email))return {ok:true,all:true,projectIds:new Set()};
   const active=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt);
   const mine=active.filter(s=>sameEmail(s.recipientEmail,user.email));
-  if(!mine.length||!w?.data)return {ok:full,all:full,projectIds:new Set()};
-  const d=normalizeDb(structuredClone(stripLinked(w.data))),projectIds=new Set(),cardIds=new Set(),scopes=[];
+  if(!w?.data)return {ok:full,all:full,projectIds:new Set()};
+  const d=normalizeDb(structuredClone(stripLinked(w.data))),hidden=privateRecords(d);
+  if(!mine.length)return {ok:full,all:full,projectIds:new Set(),hidden};
+  const projectIds=new Set(),cardIds=new Set(),scopes=[];
   let all=full;
   for(const s of mine){
     const scope=core.resolveScope(d,s);
@@ -1435,7 +1448,7 @@ async function officeAccessNow(envId,user){
     for(const id of scope.cardIds)cardIds.add(id);
     scopes.push({id:s.id,nodeIds:new Set(scope.nodeIds),cardIds:new Set(scope.cardIds)});
   }
-  return {ok:true,all,projectIds,cardIds,scopes};
+  return {ok:true,all,projectIds,cardIds,scopes,hidden};
 }
 const officeSeen=new Map();
 async function officeAccess(envId,user){
@@ -1518,7 +1531,7 @@ async function officeApi(req,res){
   // An opened shared environment's office (share-<shareId>) is its owner environment's office: one office for everyone.
   const virtual=core.parseOpenedEnv(envId)?envId:null;
   if(virtual){const o=keyed?null:await openedShare(virtual,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
-  const access=await (what==='history'?officeAccessNow:officeAccess)(envId,user);
+  const access=await (what==='history'||what==='events'?officeAccessNow:officeAccess)(envId,user);
   if(!access.ok){json(res,404,{error:'Not found'});return true}
   if(what==='history'){
     if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
@@ -1629,10 +1642,7 @@ const appApi=appDeviceMod.appRoutes({authenticate:r=>authenticateApiKey(r,apiKey
 
 async function apiV1Route(req,res){
   if(!req.url.startsWith('/api/v1'))return false;
-  // One authentication per request (it also counts towards the key's rate limit).
-  let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
-  if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals,sharing:u=>shareSvc.forUser(u,keyAllows)});
+  return apiV1(req,res,{authenticate:apiAuth,userFor:r=>trusted(r)?auth.userFor(r):null,storeFor:user=>apiStore(user.key,user,{includeLinked:!!user.key}),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals,sharing:u=>shareSvc.forUser(u,keyAllows)});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;

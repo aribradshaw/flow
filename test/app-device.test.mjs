@@ -52,6 +52,16 @@ test('card events: newly assigned, and moves of cards already mine; never for wh
   assert.deepEqual(cardEvents(null,after,{}),[],'a first save pushes nothing');
 });
 
+test('card notifications omit assignments on Only me projects',()=>{
+  const nodes=[person('ann',{email:'ann@example.test'})];
+  const before={...chart(nodes),projects:[{id:'private',onlyMe:true}],devops:{cards:[]}};
+  const after={...before,devops:{cards:[
+    card('k1','doing',[{node:'ann'}],{project:'private'}),
+    card('k2','doing',[{node:'ann'}]),
+  ]}};
+  assert.deepEqual(cardEvents(before,after).map(e=>e.card.id),['k2']);
+});
+
 test('device store (files): upsert, per owner, replace, remove only your own',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'ff-push-devices-'));
   try{

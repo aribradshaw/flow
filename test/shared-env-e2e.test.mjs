@@ -215,3 +215,47 @@ test('one office: the opened environment’s office is the owner’s; doors lead
   assert.ok((await own.next('portals')).some(p=>p.env==='default-workspace'),'a door again');
   own.close();os.close();
 });
+
+test('Only me updates an open whole-workspace share and its yacht roster',async t=>{
+  const sharedEnv=opened(viewShare);
+  const guest=kim.sse('/api/office/'+sharedEnv+'/events');
+  t.after(()=>guest.close());
+  await guest.ready;
+  assert.ok((await guest.next('snapshot')).agentflow.some(a=>a.id==='bot'));
+
+  const {data,rev}=(await owner('GET','/api/workspace?env=default-workspace')).data;
+  const saved=await owner('POST','/api/saves',data);
+  assert.equal(saved.status,200);
+  data.projects.find(p=>p.id==='p1').onlyMe=true;
+  data.charts[0].nodes.find(n=>n.id==='studio').onlyMe=true;
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:rev,data})).status,200);
+
+  const {agentflow}=await guest.next('members');
+  assert.deepEqual(agentflow.map(a=>a.id),['lead']);
+  const r=await kim('GET','/api/workspace?env='+sharedEnv);
+  assert.equal(r.status,200);
+  const projected=r.data.data;
+  assert.ok(!projected.charts.some(c=>c.nodes.some(n=>n.id===L(viewShare,'studio'))));
+  assert.deepEqual(projected.projects,[]);
+  assert.deepEqual(projected.timeline,[]);
+  assert.deepEqual(projected.devops.cards,[]);
+  assert.deepEqual(projected.agentflow.agents.map(a=>a.id),[L(viewShare,'lead')]);
+  const mine=await ownerData();
+  assert.ok(mine.projects.find(p=>p.id==='p1').onlyMe);
+  assert.ok(mine.agentflow.agents.some(a=>a.id==='bot'));
+
+  mine.environment.visibility='public';
+  mine.devops.cards.pop();
+  const current=(await owner('GET','/api/workspace?env=default-workspace')).data;
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:current.rev,data:mine})).status,200);
+  const publicRead=await eve('GET','/api/workspace?env=default-workspace');
+  assert.equal(publicRead.status,200);
+  assert.deepEqual(publicRead.data.data.projects,[]);
+  assert.ok(!publicRead.data.data.charts[0].nodes.some(n=>n.id==='studio'));
+  const api='/api/v1/envs/default-workspace';
+  assert.deepEqual((await eve('GET',api+'/projects')).data.items,[]);
+  assert.deepEqual((await eve('GET',api+'/deleted-cards')).data.items,[]);
+  assert.ok((await owner('GET',api+'/deleted-cards')).data.items.length);
+  assert.equal((await eve('GET','/api/saves/'+saved.data.id)).status,404);
+  assert.equal((await owner('GET','/api/saves/'+saved.data.id)).status,200);
+});

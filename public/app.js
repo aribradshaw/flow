@@ -656,11 +656,12 @@ function renderInspector(strip=true){
   if(n){
     const k=KINDS[n.type],links=chart().edges.filter(x=>x.from===n.id||x.to===n.id),l=linkOf(n),ro=!canEdit(n)?' disabled':'';
     pane.innerHTML=`<div class="ihead"><span class="k ${n.type}">${icon(k.icon)}</span><strong>${k.label}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(sharedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''}<span class="sp"></span>
-      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${chatAvailable()&&!l?.stub?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'id="i-chat" data-i="chat"'}):''}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
+      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l||n.onlyMe?'':ib('link','Share…',{attrs:'data-i="share"'})}${chatAvailable()&&!l?.stub?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'id="i-chat" data-i="chat"'}):''}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
       ${l?'':ib('trash','Delete card',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label>${clashHtml(n,'name')}<input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
       ${l?'':prop('Kind',choice('kind',Object.entries(KINDS).map(([t,x])=>({value:t,label:x.label,icon:x.icon})),n.type,{label:'Kind',idp:'kind'}),{cls:'kind-prop'})}
       ${l?.stub?'':`<label for="notes">Notes</label>${clashHtml(n,'notes')}<textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
+      ${l?'':`<label class="privacy-toggle"><input type="checkbox" id="node-only-me"${n.onlyMe?' checked':''}${ro}> Only me</label>`}
       ${n.type==='person'?photoHtml(n,!!l):''}
       ${l?historyHtml(n,'node'):''}
       ${n.type==='note'||l?'':(c=>`<label>DevOps</label><button type="button" class="txt dv-open" data-i="devops" data-tip="${n.type==='person'?'Open cards assigned to this person':'Open cards in the projects under this card'}">${icon('branch',13)}<span>${c} open card${c===1?'':'s'}</span>${icon('arrowR',13)}</button>`)(openCardsFor(store.db,n.type==='person'?{person:n.id}:{entity:n.id}).length)}
@@ -742,7 +743,7 @@ pane.addEventListener('input',e=>{
   if(tab==='timeline')return tl.inspectorInput(e);
   if(tab==='agentflow')return af.inspectorInput(e);
   const form=$('#edit'),n=node(selected),ed=edge(selected);
-  if(!form||e.target.type==='file'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
+  if(!form||e.target.type==='file'||e.target.id==='node-only-me'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
   if(n&&!$('#name').value.trim())return;
   if(ed&&$('#fromNode').value===$('#toNode').value)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
@@ -754,7 +755,7 @@ pane.addEventListener('input',e=>{
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='node-only-me'){const n=node(selected);if(n&&!linkOf(n)&&canEdit(n))change(()=>{if(e.target.checked)n.onlyMe=true;else delete n.onlyMe});return}if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
 pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------
