@@ -26,8 +26,12 @@ export function agentflowOf(title) {
   return match ? {agent: match[1].trim().slice(0, 200), card: Number(match[2])} : null;
 }
 
-function modelInfo(value, provider) {
+function modelInfo(value, provider, providerDriver) {
   const raw = short(value);
+  const isCursor = providerDriver ? providerDriver === 'cursor' : /^cursor(?:[._-]|$)/i.test(provider || '');
+  if (isCursor && /^(?:auto|default)$/i.test(raw)) {
+    return {vendor: 'cursor', model: 'Cursor Auto'};
+  }
   const model = raw.split('/').at(-1).replace(/-(?:\d{8}|\d{4}-\d{2}-\d{2})$/, '');
   const claude = /(?:^|-)(opus|sonnet|haiku|fable)(?=-|\[|$)/i.exec(model);
   if (claude) {
@@ -90,7 +94,7 @@ export function createRepoResolver() {
 
 function describe(agent) {
   return {
-    id: agent.id, title: short(agent.title) || 'Coding agent', ...modelInfo(agent.model, agent.provider),
+    id: agent.id, title: short(agent.title) || 'Coding agent', ...modelInfo(agent.model, agent.provider, agent.driver),
     status: ['running', 'waiting', 'idle'].includes(agent.status) ? agent.status : 'running',
   };
 }
@@ -120,6 +124,7 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
     agents.push({...describe(conductor), role: 'conductor', activity: short(conductor.activity), activityKind: conductor.activityKind,
       host, hostLabel: short(host + ' · T3', 120), repo: null, children: [], pending: null,
       ...(conductor.modelId ? {modelId: String(conductor.modelId).slice(0, 200)} : {}),
+      ...(conductor.modelProviders ? {modelProviders: conductor.modelProviders} : {}),
       can: (conductor.can ?? ['message']).filter(k => k === 'message' || k === 'stop' || k === 'model' || k === 'history'),
       ...(conductor.live && conductor.status !== 'idle' ? {live: conductor.live} : {}),
       ...(transcript.length ? {transcript} : {}),
@@ -135,7 +140,7 @@ export async function makePayload({source, host, now, t3, claude, codex = [], re
         if (!validId(id) || children.has(id) || t3.has(child.childThreadId)) continue;
         const provider = child.driver || child.providerInstanceId || agent.provider;
         const model = child.model ?? child.modelSelection?.model ?? (provider === agent.provider ? agent.model : undefined);
-        children.set(id, describe({id, title: short(child.title) || 'Subagent', provider, model, status: 'running'}));
+        children.set(id, describe({id, title: short(child.title) || 'Subagent', provider, driver: child.driver || (provider === agent.provider ? agent.driver : undefined), model, status: 'running'}));
       }
       const pending = validId(agent.pending?.requestId, 300) ? {
         requestId: agent.pending.requestId, kind: agent.pending.kind,
@@ -530,11 +535,18 @@ export async function officeBridge(cfg, argv) {
   const reportWake = createReportWake();
   // The Chief of Staff conductor: on when T3 is set up here (its database and a running server), unless --no-conductor.
   const wantConductor = !values['no-conductor'] && !values['dry-run'] && (values.conductor || existsSync(join(dirname(path), 'server-runtime.json')));
+  let modelCatalog, lastCatalogAt = 0;
+  function refreshModelCatalog(now) {
+    if (now - lastCatalogAt < 30_000) return;
+    lastCatalogAt = now;
+    session.models().then(models => { if (models) modelCatalog = models; }).catch(() => {});
+  }
   const conductor = wantConductor ? createConductor({
     DatabaseSync, path, stateFile: join(configDir(), 'office-conductor.json'),
     project: values['conductor-project'] ? resolve(values['conductor-project']) : conductorProject(DatabaseSync, path, join(configDir(), 'office-conductor.json')),
     fetchBrief: () => fetchBrief(cfg, values['conductor-env']),
     dispatch: (command, valid, signal) => session.dispatch(command, valid, signal),
+    modelCatalog: () => modelCatalog,
     log: message => console.error(message),
   }) : null;
   // Your T3 thread index (owner only in Flow), from the same database.
@@ -597,7 +609,8 @@ export async function officeBridge(cfg, argv) {
         }
         let chief = null;
         if (conductor) {
-          try { await conductor.ensure(controller.signal); chief = conductor.entry(host); }
+          refreshModelCatalog(now);
+          try { await conductor.ensure(controller.signal); chief = conductor.entry(host, {catalog: true}); }
           catch { chief = null; }
         }
         return makePayload({source, host, now, t3: data.agents, claude: scanClaude(data.nativeIds, now),

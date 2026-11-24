@@ -15,10 +15,10 @@
 import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
-import {dirname} from 'node:path';
+import {dirname, join} from 'node:path';
 
 import {transcriptText} from '../lib/office-mask.mjs';
-import {parseModel} from '../lib/office.mjs';
+import {CHIEF_ACCOUNT_MODEL_LIMIT, CHIEF_MODEL_LIMIT, parseModel} from '../lib/office-model.mjs';
 import {parseJson, short, t3Env, transcriptEntry} from './office-bridge-t3.mjs';
 import {readLive} from './office-bridge-threads.mjs';
 
@@ -93,6 +93,51 @@ function readState(file) {
   try { return parseJson(readFileSync(file, 'utf8')); }
   catch { return {}; }
 }
+
+const DRIVER_NAMES = {claudeAgent: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', opencode: 'OpenCode', antigravity: 'Antigravity'};
+
+// Read only presentation fields from T3's local settings. The project comes from the actual thread row.
+export function conductorProviders(settings, projectId, manifest, catalog = []) {
+  const instances = {claudeAgent: {driver: 'claudeAgent'}, codex: {driver: 'codex'}, ...settings.providerInstances};
+  const overrides = settings.projectSettingsOverrides?.[projectId]?.providerInstances ?? {};
+  const live = new Map(catalog.map(p => [p.id, p]));
+  const providers = [];
+  let remaining = CHIEF_MODEL_LIMIT;
+  for (const id of new Set([...Object.keys(instances), ...live.keys(), ...Object.keys(overrides)])) {
+    if (!parseModel(`${id}:default`)) continue;
+    const instance = instances[id], provider = live.get(id);
+    const driver = provider?.driver || instance?.driver;
+    const enabled = instance?.enabled === false || instance?.config?.enabled === false
+      ? false : instance?.enabled ?? instance?.config?.enabled ?? provider?.enabled ?? true;
+    if (!(overrides[id]?.enabled ?? enabled) || !driver) continue;
+    const label = short(provider?.label || instance?.displayName, 80) || DRIVER_NAMES[driver] || id;
+    const models = new Map();
+    const available = provider?.models?.length ? provider.models : (manifest?.providers?.[driver]?.models ?? []).filter(m => m.status === 'current');
+    for (const m of available) {
+      if (typeof m.slug === 'string' && parseModel(`${id}:${m.slug}`)) {
+        models.set(m.slug, short(m.name, 100) || m.slug);
+      }
+    }
+    if (driver === 'cursor') {
+      if (models.has('auto')) models.set('auto', 'Auto');
+      if (models.has('default') || !models.has('auto')) models.set('default', models.has('auto') ? 'Auto (default)' : 'Auto');
+    }
+    const availableModels = [...models].slice(0, Math.min(remaining, CHIEF_ACCOUNT_MODEL_LIMIT));
+    remaining -= availableModels.length;
+    providers.push({id, label, models: availableModels.map(([slug, label]) => ({id: `${id}:${slug}`, label}))});
+  }
+  return providers;
+}
+
+function localProviders(path, projectId, catalog) {
+  const dir = dirname(path);
+  try {
+    const settings = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
+    if (!settings || typeof settings !== 'object' || !projectId) return undefined;
+    const manifest = readState(join(dir, 'model-manifest.json')).manifest;
+    return conductorProviders(settings, projectId, manifest, catalog);
+  } catch { return undefined; }
+}
 function writeState(file, data) {
   mkdirSync(dirname(file), {recursive: true});
   const tmp = file + '.' + process.pid + '.tmp';
@@ -128,7 +173,7 @@ export function startThread({bin = 't3', path, project, title, message, signal, 
 }
 
 export function createConductor({DatabaseSync, path, stateFile, project, fetchBrief = async () => ({}), runT3 = startThread,
-  dispatch, now = () => Date.now(), log = () => {}, bin = 't3'}) {
+  dispatch, modelCatalog = () => undefined, now = () => Date.now(), log = () => {}, bin = 't3'}) {
   let state = readState(stateFile), creating = null, triedAt = 0;
   const threadRow = (db, id) => optional(db, `SELECT * FROM ${threads} WHERE thread_id=?`, id)[0];
   const alive = row => row && !row.deleted_at && !row.archived_at;
@@ -180,7 +225,7 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
     },
     // The conductor as an office agent: idle, running or waiting; its transcript (without the [[office]] lines)
     // and its latest finished reply.
-    entry(host) {
+    entry(host, {catalog = false} = {}) {
       const id = state.threadId;
       if (!id || !existsSync(path)) return null;
       const db = open(DatabaseSync, path);
@@ -214,9 +259,12 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
         const chosen = parseModel(instance && slug ? `${instance}:${slug}` : '');
         const model = chosen?.model || slug;
         const provider = chosen?.instanceId || instance;
+        const models = catalog ? modelCatalog() : undefined;
         const status = pending ? 'waiting' : live ? 'running' : 'idle';
         return {
-          id, title: 'Chief of Staff', role: 'conductor', model, provider, ...(chosen ? {modelId: chosen.id} : {}),
+          id, title: 'Chief of Staff', role: 'conductor', model, provider, driver: models?.find(p => p.id === provider)?.driver,
+          ...(chosen ? {modelId: chosen.id} : {}),
+          ...(catalog ? {modelProviders: localProviders(path, row.project_id, models)} : {}),
           status, activity: status === 'running' ? 'Working on your message' : status === 'waiting' ? 'Waiting for you in T3 Code' : 'Listening',
           activityKind: status === 'running' ? 'think' : 'idle', host, cwd: null,
           can: live ? ['message', 'stop', 'model', 'history'] : ['message', 'model', 'history'], runId: live?.run_id, transcript, ...(reply ? {reply} : {}),
@@ -247,11 +295,19 @@ export function createConductor({DatabaseSync, path, stateFile, project, fetchBr
       const threadId = state.threadId;
       if (!threadId) return {ok: false, message: 'The Chief of Staff thread is not ready yet.'};
       try {
+        const db = open(DatabaseSync, path);
+        let providers;
+        try { providers = localProviders(path, threadRow(db, threadId)?.project_id, modelCatalog()); }
+        finally { db.close(); }
+        if (providers && !providers.some(p => p.id === parsed.instanceId)) {
+          return {ok: false, message: 'Enable this provider for the Chief of Staff project in T3 Code first.'};
+        }
         const commandId = randomUUID();
         await dispatch({type: 'thread.model-selection.set', commandId, threadId,
           modelSelection: {instanceId: parsed.instanceId, model: parsed.model}}, () => current() === threadId, signal);
         state = {...state, model: {instanceId: parsed.instanceId, model: parsed.model}};
-        writeState(stateFile, state);
+        try { writeState(stateFile, state); }
+        catch { log('office bridge: could not save the conductor model for a replacement thread'); }
         return {ok: true, message: `Next turn uses ${parsed.model}.`};
       } catch {
         return {ok: false, message: 'Could not switch its model. Check T3 Code.'};

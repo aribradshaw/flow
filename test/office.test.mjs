@@ -300,6 +300,7 @@ test('a long reporter request id comes back unchanged in the queued answer',asyn
 test('a conductor: role is kept for everyone, its reply only for its owner, masked and capped; it is private to others whatever its repo',()=>{
   const r=cleanReport({source:'s',agents:[
     {id:'cos',title:'[Flow] Chief of Staff · conductor',status:'idle',role:'Conductor',can:['message'],repo:{name:'flow',remote:'https://github.com/acme/flow'},
+      modelId:'cursor_personal:default',modelProviders:[{id:'cursor_personal',label:'Cursor Personal',models:[{id:'cursor_personal:default',label:'Auto'},{id:'wrong:default'}]}],
       reply:{text:'Routed to Builder as #461 · token=ghp_abcdefghijklmnopqrstuvwxyz0123 '+'x'.repeat(900),at:'2026-11-22T10:00:00Z',cards:[461,'#12',461,-1,1.5,'x',...Array.from({length:20},(_,i)=>100+i)]},
       transcript:[{role:'assistant',text:'hi'}]},
     {id:'plain',status:'running',role:'boss',reply:{text:''}},
@@ -315,11 +316,12 @@ test('a conductor: role is kept for everyone, its reply only for its owner, mask
   const a={...cos,source:'s'};
   const own=viewAgent(a,{owner:true});
   assert.equal(own.role,'conductor');assert.equal(own.reply.text,cos.reply.text);assert.ok(own.transcript);assert.deepEqual(own.can,['message']);
+  assert.deepEqual(own.modelProviders,[{id:'cursor_personal',label:'Cursor Personal',models:[{id:'cursor_personal:default',label:'Auto'}]}]);
   for(const full of [true,false]){
     const other=viewAgent(a,{full,key:()=>'opaque'});
     assert.equal(other.role,'conductor','others know it is a conductor (it walks with its person)');
     assert.equal(other.private,true,'a conductor is private to others even when its repo is visible');
-    for(const k of ['reply','transcript','title','activity','repo','can'])assert.ok(!(k in other),k+' never reaches someone else');
+    for(const k of ['reply','transcript','title','activity','repo','can','modelId','modelProviders'])assert.ok(!(k in other),k+' never reaches someone else');
     assert.equal(other.status,'idle');assert.equal(other.id,'opaque');
   }
   // An ordinary agent is unchanged: no role, no reply.

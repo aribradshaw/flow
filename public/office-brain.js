@@ -28,7 +28,7 @@
 export const DWELL_MIN=10,DWELL_MAX=40,CHAT_SLOT=25,TAKE=1.2,CHEER=1.6,WAVE=1.4,STAND=0.4,FADE=0.8;
 const DONE=new Set(['uat','done']);
 // What a follower drops to keep up with its person: its everyday states, not leaving, entering or a card in hand.
-const FOLLOWS=new Set(['work','idle','chat','waitDesk']);
+const FOLLOWS=new Set(['work','idle','chat','waitDesk','summon']);
 
 // FNV-1a, then a final mix so ids that differ only at the end land far apart.
 export function hashOf(s){let h=2166136261;s=String(s);for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),16777619);
@@ -79,8 +79,8 @@ export function createBrain(id,{now=0,entering=false}={}){
   }
   // What it does when nothing special is going on.
   function settle(inp,t){
-    if(inp.status==='waiting'){set(inp.ownerHere?'summon':'waitDesk',t);return}
     if(inp.follow&&!inp.still){pending.length=0;set('follow',t);return}
+    if(inp.status==='waiting'){set(inp.ownerHere?'summon':'waitDesk',t);return}
     if(pending.length&&!inp.still){const e=pending.shift();set(e,t);carried=e==='deliver';return}
     if(inp.status==='idle'&&!inp.still){if(state!=='idle'&&state!=='chat'){set('idle',t);act='desk';until=Infinity}return}
     set('work',t);
@@ -88,13 +88,13 @@ export function createBrain(id,{now=0,entering=false}={}){
 
   function update(t,inp){
     remode(inp);cardEvents(inp);far=!!inp.far;
-    if(inp.follow&&!inp.still&&inp.status!=='waiting')pending.length=0; // board trips while it follows are old news
+    if(inp.follow&&!inp.still)pending.length=0; // board trips while it follows are old news
     const leaving=state==='leave'||state==='exit'||state==='fade'||state==='gone';
     if(inp.gone&&!leaving)set('leave',t);
     else if(!inp.gone&&leaving&&state!=='gone')set('enter',t);
     if(!state)set(entering?'enter':'',t);
     if(!state)settle(inp,t);
-    if(inp.follow&&!inp.still&&FOLLOWS.has(state)&&!(state==='waitDesk'&&inp.status==='waiting'))settle(inp,t);
+    if(inp.follow&&!inp.still&&FOLLOWS.has(state))settle(inp,t);
     const el=t-since;
     switch(state){
       case 'leave':if(el>=STAND+WAVE)set('exit',t);break;
@@ -114,7 +114,7 @@ export function createBrain(id,{now=0,entering=false}={}){
       case 'waitDesk':
         if(inp.status!=='waiting'||inp.ownerHere)settle(inp,t);break;
       case 'follow':
-        if(!inp.follow||inp.still||inp.status==='waiting')settle(inp,t);break;
+        if(!inp.follow||inp.still)settle(inp,t);break;
       case 'chat':
         if(inp.status!=='idle'||!inp.partner||inp.partner!==partner){partner='';set('idle',t);nextAct(inp,t)}break;
       case 'idle':

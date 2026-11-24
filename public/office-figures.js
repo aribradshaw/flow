@@ -5,6 +5,7 @@
 import * as THREE from './vendor/three/three.module.min.js';
 import {createAvatar,animateAvatar,disposeAvatars,paceAvatars} from './office-avatar.js';
 import {defaultLook,hashOf} from './office-look-core.js';
+import {mascotGeometry} from './office-mascots.js';
 
 const ROBOT=['#5fa8d3','#7cb980','#e9a23b','#c86b5c','#8f7cc3','#4fb3a5','#d97fa0','#9aa63a'];
 export {hashOf};
@@ -52,7 +53,9 @@ export function orgField(items){
     parts.push({im,offs,index:new Map(list.map((it,i)=>[it.id,i]))});
   };
   const white=new THREE.MeshLambertMaterial({color:'#ffffff',flatShading:true});
-  const robots=items.filter(i=>i.kind==='agent'),teams=items.filter(i=>i.kind==='team'),autos=items.filter(i=>i.kind==='automation');
+  const robots=items.filter(i=>i.kind==='agent'&&!i.chief),chiefs=items.filter(i=>i.kind==='agent'&&i.chief);
+  const teams=items.filter(i=>i.kind==='team'),autos=items.filter(i=>i.kind==='automation');
+  const chiefMat=chiefs.length?new THREE.MeshLambertMaterial({vertexColors:true}):null;
   const tint=it=>ROBOT[hashOf(it.id)%ROBOT.length];
   // Robots: a rounded body in their colour, a white head with a dark visor and glowing eyes, an antenna.
   part(robots,g.ball,white,()=>[0,0.5,0,0.27,0.3,0.24],tint);
@@ -65,6 +68,7 @@ export function orgField(items){
   part(robots,g.box,matOf('#4a5652'),()=>[0,0.12,0,0.34,0.14,0.26]);
   part(robots,g.box,white,()=>[-0.31,0.6,0,0.08,0.3,0.1],tint);
   part(robots,g.box,white,()=>[0.31,0.6,0,0.08,0.3,0.1],tint);
+  if(chiefMat)part(chiefs,mascotGeometry('chief'),chiefMat,()=>[0,.65,0,.92,.92,.92]);
   // Teams: a round table with stools.
   part(teams,g.cyl,matOf('#c79a6b'),()=>[0,0.7,0,0.8,0.08,0.8],null);
   part(teams,g.cyl,matOf('#8b6a48'),()=>[0,0.35,0,0.1,0.7,0.1],null);
@@ -92,7 +96,7 @@ export function orgField(items){
     const k=shadowAt.get(id);
     if(k!==undefined){q.position.set(x,0.02,z);q.rotation.set(-Math.PI/2,0,0);const r=0.45*scale;q.scale.set(r,r,r);q.updateMatrix();sh.setMatrixAt(k,q.matrix);sh.instanceMatrix.needsUpdate=true}
   }
-  return {group,meshes,move,pick:(obj,i)=>ids.get(obj)?.[i]??null,dispose(){white.dispose();for(const m of meshes)m.dispose();sh.dispose()}};
+  return {group,meshes,move,pick:(obj,i)=>ids.get(obj)?.[i]??null,dispose(){white.dispose();chiefMat?.dispose();for(const m of meshes)m.dispose();sh.dispose()}};
 }
 
 // Org chart positions: managers above their reports; reports that have none of their own are packed in a

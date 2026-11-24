@@ -248,7 +248,7 @@ export function openPicker(trigger,o){
   const list=el.querySelector('.pk-list'),input=el.querySelector('.pk-q');if(!search)input.hidden=true;
   const focusEl=search?input:list;let typed='',typedAt=0;
   let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value)||ex.has(i.value))),q='';
-  const vis=()=>o.items.filter(i=>!q||i.label.toLowerCase().includes(q)||String(i.sub||'').toLowerCase().includes(q));
+  const vis=()=>o.items.filter(i=>!q||[i.label,i.sub,o.searchGroups&&i.group].some(s=>String(s||'').toLowerCase().includes(q)));
   function draw(){
     const v=vis();active=Math.max(0,Math.min(active,v.length-1));let g;
     list.innerHTML=v.length?v.map((it,k)=>{

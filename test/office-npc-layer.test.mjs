@@ -38,6 +38,26 @@ const where=(m)=>{const v=new THREE.Vector3();m.getWorldPosition(v);return v};
 const spin=ms=>{const end=performance.now()+ms;while(performance.now()<end);};
 function run(npcs,seconds,{dt=1/60,t0=0,each}={}){let t=t0;for(let i=0;i<Math.round(seconds/dt);i++){t+=dt;npcs.tick(dt,t);each?.(t)}return t}
 
+test('a seated Chief follows its person, then waits outside a meeting',()=>{
+  const obj=new THREE.Group(),people=new Map([['ann',{obj}]]);
+  const {office,world}=fakeOffice({people});
+  office.meetingAt=(x,z)=>z>3;
+  office.inMeeting=()=>office.meetingAt(obj.position.x,obj.position.z);
+  const npcs=createNpcs(office),anchor=new THREE.Group();
+  world.add(anchor);
+  npcs.org({move(){}},[{id:'chief',chief:true,x:-2,z:-1,anchor,still:true}],[]);
+  npcs.setFollow('af:chief','ann');
+  let t=run(npcs,2);
+  assert.equal(npcs.following('af:chief'),true);
+  const settled=anchor.position.clone();
+  t=run(npcs,3,{t0:t,each:()=>assert.ok(anchor.position.distanceTo(settled)<.15,'the Chief stays beside a stationary owner')});
+  obj.position.z=2.5;t=run(npcs,2,{t0:t});
+  assert.ok(Math.abs(anchor.position.z-2.5)<1.2,'the Chief settles beside its owner');
+  obj.position.z=7;run(npcs,3,{t0:t});
+  assert.ok(anchor.position.z<=3&&anchor.position.z>1,'the Chief holds outside the meeting');
+  npcs.dispose();
+});
+
 test('a new session walks in through its room door to its desk, never faster than a jog',()=>{
   const {office,room}=fakeOffice(),npcs=createNpcs(office);
   // An agent already there when the office opens is simply at its desk.

@@ -163,6 +163,9 @@ export function readT3(DatabaseSync, path, readUsage, now = Date.now()) {
     const identity = file && `${path}:${file.dev}:${file.ino}`;
     const projects = new Map(optional(db, 'SELECT * FROM projection_projects')
       .map(row => [row.project_id, row.workspace_root]));
+    const drivers = new Map(optional(db, `SELECT DISTINCT provider_instance_id, driver
+      FROM orchestration_v2_projection_provider_threads WHERE driver IS NOT NULL`)
+      .map(row => [row.provider_instance_id, row.driver]));
     const live = new Map();
     for (const row of db.prepare(`SELECT * FROM ${runs} WHERE status IN ('running','queued','starting') ORDER BY ordinal`).all()) {
       if (row.status !== 'queued' || !parseJson(row.payload_json).queueHeld) live.set(row.thread_id, row);
@@ -187,7 +190,7 @@ export function readT3(DatabaseSync, path, readUsage, now = Date.now()) {
         .map(row => parseJson(row.payload_json)) : [];
       const delegated = typeof state.lineage?.parentThreadId === 'string' && state.lineage.parentThreadId !== '';
       agents.set(id, {
-        id, title: thread.title, provider, model: selection?.model, pending, runId: run?.run_id,
+        id, title: thread.title, provider, driver: drivers.get(selection?.instanceId || provider), model: selection?.model, pending, runId: run?.run_id,
         // Top-level threads take a message (a new user turn) and a stop from the office, and send their history;
         // delegated ones are steered by the thread that delegated them.
         can: delegated ? [] : ['message', 'stop', 'history'],
@@ -261,34 +264,36 @@ function openSocket(url, signal) {
   });
 }
 
-function sendCommand(ws, id, command, stillValid, signal) {
+function sendRpc(ws, id, tag, payload, stillValid, signal, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
     if (!stillValid()) throw new Error('This request is no longer current in T3.');
     if (ws.readyState !== WebSocket.OPEN) throw new Error('T3 closed the connection.');
-    const onAbort = () => finish(signal.reason, true);
+    const command = tag === 'orchestration.dispatchCommand';
+    const onAbort = () => finish(signal.reason, command);
     const onClose = () => finish(new Error('T3 closed the connection before confirming the response.'));
-    const timer = setTimeout(() => finish(new Error('T3 did not answer in time.'), true), 20000);
-    function finish(error, close = false) {
+    const timer = setTimeout(() => finish(new Error('T3 did not answer in time.'), command), timeoutMs);
+    function finish(error, close = false, value) {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
       ws.removeEventListener('close', onClose);
       ws.removeEventListener('message', onMessage);
       if (close) ws.close();
       if (error) reject(error);
-      else resolve();
+      else resolve(value);
     }
     function onMessage(event) {
       const data = parseJson(event.data);
       const messages = Array.isArray(data) ? data : [data];
       const reply = messages.find(message => message?._tag === 'Exit' && message.requestId === id);
-      if (reply) finish(reply.exit?._tag === 'Success' ? null : new Error('T3 rejected the command.'));
+      if (reply?.exit?._tag === 'Success') finish(null, false, reply.exit.value);
+      else if (reply) finish(new Error(command ? 'T3 rejected the command.' : 'T3 rejected the request.'));
     }
     signal.addEventListener('abort', onAbort, {once: true});
     ws.addEventListener('close', onClose, {once: true});
     ws.addEventListener('message', onMessage);
     try {
-      ws.send(JSON.stringify({_tag: 'Request', id, tag: 'orchestration.dispatchCommand', payload: command, headers: []}));
+      ws.send(JSON.stringify({_tag: 'Request', id, tag, payload, headers: []}));
     } catch (error) {
       finish(error, true);
     }
@@ -387,10 +392,17 @@ export function createT3Session(path, signal, {now = () => Date.now(), issue = i
 
   return {
     async warm() { await getSocket(); },
+    async models() {
+      const ws = await getSocket();
+      const config = await sendRpc(ws, String(++sequence), 'server.getConfig', {}, () => true, signal, 5000);
+      if (!Array.isArray(config?.providers)) return undefined;
+      return config.providers.map(p => ({id: p.instanceId, driver: p.driver, label: p.displayName, enabled: p.enabled,
+        models: (Array.isArray(p.models) ? p.models : []).filter(m => !m.isLegacy).map(m => ({slug: m.slug, name: m.name}))}));
+    },
     async dispatch(command, stillValid, actionSignal = signal) {
       const ws = await getSocket();
       // Once sent, the outcome may be ambiguous after a disconnect. Reconnect for the next command.
-      await sendCommand(ws, String(++sequence), command, stillValid, actionSignal);
+      await sendRpc(ws, String(++sequence), 'orchestration.dispatchCommand', command, stillValid, actionSignal);
     },
   };
 }

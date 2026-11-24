@@ -188,6 +188,39 @@ test('T3 session reuses the bearer and socket, reconnects and renews the token',
   assert.equal(sockets.at(-1).readyState, WebSocket.CLOSED);
 });
 
+test('T3 session reads the model catalog and keeps its socket open after a catalog timeout', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  class Socket extends EventTarget {
+    readyState = WebSocket.OPEN;
+    respond = true;
+    send(frame) {
+      const {id, tag, payload} = JSON.parse(frame);
+      assert.equal(tag, 'server.getConfig');
+      assert.deepEqual(payload, {});
+      if (!this.respond) return;
+      const value = {providers: [{instanceId: 'work', driver: 'cursor', displayName: 'Work', enabled: true,
+        models: [{slug: 'default', name: 'Auto'}, {slug: 'old', name: 'Old', isLegacy: true}]}]};
+      this.dispatchEvent(new MessageEvent('message', {data: JSON.stringify({_tag: 'Exit',
+        requestId: id, exit: {_tag: 'Success', value}})}));
+    }
+    close() { this.readyState = WebSocket.CLOSED; }
+  }
+  const controller = new AbortController(), socket = new Socket();
+  const session = createT3Session('fixture', controller.signal, {
+    portOf: () => 1234, issue: async () => 'fixture-token', connect: async () => socket,
+  });
+  try {
+    assert.deepEqual(await session.models(), [{id: 'work', driver: 'cursor', label: 'Work', enabled: true,
+      models: [{slug: 'default', name: 'Auto'}]}]);
+    socket.respond = false;
+    const timeout = assert.rejects(session.models(), /did not answer in time/);
+    await Promise.resolve();
+    t.mock.timers.tick(5000);
+    await timeout;
+    assert.equal(socket.readyState, WebSocket.OPEN);
+  } finally { controller.abort(); }
+});
+
 test('payload limits keep waiting agents, bound body size, and resolve safe Git remotes', async t => {
   const dir = scratch(t);
   const resolveRepo = createRepoResolver();

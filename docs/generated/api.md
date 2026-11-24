@@ -4651,7 +4651,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents` | object[] | yes |  |
 | `agents[].id` | string | yes | Stable and unique within the source, e.g. "laptop:t3:thread-abc". |
 | `agents[].title` | string |  | What it is working on (up to 200 characters). |
-| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok, meta or other (other: picked from the model when it names one). |
+| `agents[].vendor` | string |  | Which mascot it gets: claude, codex, gemini, deepseek, grok, meta, cursor or other (other: picked from the model when it names one). |
 | `agents[].model` | string |  | Display name, e.g. "Opus 5.5". |
 | `agents[].status` | string |  | running (working), waiting (on its person: a permission prompt or a question) or idle. |
 | `agents[].activity` | string |  | What it is doing right now, e.g. "Running tests" or "Edit lib/auth.mjs". |
@@ -4663,6 +4663,7 @@ Your live agents as Flow holds them (every source that reported in the last 90 s
 | `agents[].pending` | object | null |  | What it waits on (only kept while status is waiting). |
 | `agents[].agentflow` | object | null |  | The AgentFlow agent and card it works on, when the reporter knows: it then sits at that agent's desk in the office's common area. Resolved in each environment against its own agents and cards (elsewhere it keeps its own desk). Without it, Flow reads the title: "[Flow] <Agent>: #<n> …" (the agent runner's threads), or "#<n>" for a card delegated to exactly one agent. |
 | `agents[].modelId` | string |  | The model its next turn uses, provider:model (cursor_personal:grok-4.7). The Chief of Staff reports it so the office picker can show the current choice. Its owner only. |
+| `agents[].modelProviders` | object[] |  | Provider accounts enabled in the Chief of Staff project, with their locally known models. Owner only. An empty list means no providers are enabled. |
 | `agents[].can` | string[] |  | What its owner may do from the office besides Allow / Deny: "message" (send it a message as a new user turn), "stop" (interrupt its running turn), "model" (switch its next turn to another model) and "history" (send back a page of its conversation, office.actions.wait kind history). Only list what this reporter can carry out; [] or none when it can only be steered where it runs. |
 | `agents[].live` | object | null |  | What it is doing this moment, for its owner only (never anyone else, whatever they can see; dropped while idle): its latest reasoning snippet, tool call or partial reply, and its last steps. Masked again on the server. Send it with each report, and in between with office.live.report as it changes. |
 | `agents[].transcript` | object[] |  | The latest lines of its conversation (the last 12 are kept, each cut to 400 characters), shown only to its owner: never to anyone else, whatever they can see. Mask secrets before sending; Flow masks tokens, keys, Authorization headers and .env-looking lines again. |

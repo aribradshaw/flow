@@ -25,6 +25,24 @@ export function chiefAgent(af){
 }
 export const conductorOf=agents=>(agents||[]).find(a=>a&&a.role==='conductor')||null;
 
+export function chiefModelItems(providers,runners=[]){
+  const scoped=Array.isArray(providers),accounts=new Map((providers||[]).map(p=>[p.id,p]));
+  const items=new Map();
+  const add=(m,account)=>{
+    if(!m?.id||items.has(m.id))return;
+    const group=account?.label||m.provider||m.id.split(':')[0];
+    const prefix=group+' · ',name=m.label||m.id.split(':').slice(1).join(':');
+    items.set(m.id,{value:m.id,label:name.startsWith(prefix)?name.slice(prefix.length):name,group,
+      sub:m.billing==='metered'?'Metered':m.billing==='included'?'Included':''});
+  };
+  for(const r of runners)for(const m of r.models||[]){
+    const account=accounts.get(m?.id?.split(':')[0]);
+    if(!scoped||account)add(m,account);
+  }
+  for(const p of accounts.values())for(const m of p.models||[])add(m,p);
+  return [...items.values()].sort((a,b)=>a.group.localeCompare(b.group)||a.label.localeCompare(b.label));
+}
+
 export function chiefFigures({members=[],live=new Map(),af=[],deskKey=(m,a)=>JSON.stringify([m,a.source,a.id])}){
   const out=new Map(),robot=chiefAgent(af);
   const withOne=members.filter(m=>conductorOf(live.get(m.key)));

@@ -6,7 +6,7 @@
 // arrives here is already what this person may see. Loaded on demand from the AgentFlow toolbar.
 import * as THREE from './vendor/three/three.module.min.js';
 import {icon} from './icons.js';
-import {esc,ib,uid} from './ui.js';
+import {closePicker,esc,ib,openPicker,pickerOpen,uid} from './ui.js';
 import {detailModal} from './modal.js';
 import {officeOverlayActions} from './office-overlays-core.js';
 import {memberColor,initials} from './devops-core.js';
@@ -41,6 +41,7 @@ import {batch} from './office-batch.js';
 import {createVoice} from './office-voice.js';
 import {createDecor} from './office-decor.js';
 import {createChief} from './office-chief.js';
+import {chiefAgent} from './office-chief-core.js';
 import {createThreads} from './office-threads.js';
 import {cutaway,aimCutaway} from './office-cutaway.js';
 import {createTravel} from './office-travel.js';
@@ -48,7 +49,7 @@ import {planRoute} from './office-travel-core.js';
 import {buildNav} from './office-nav.js';
 import {meetingAnchors} from './office-voice-core.js';
 
-const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},meta:{name:'Meta',color:'#0866ff'},other:{name:'Agent',color:'#5f9e6e'}};
+const VENDOR={claude:{name:'Claude',color:'#d97857'},codex:{name:'Codex',color:'#2e80ed'},gemini:{name:'Gemini',color:'#5b7cf5'},deepseek:{name:'DeepSeek',color:'#4d6bff'},grok:{name:'Grok',color:'#17171a'},meta:{name:'Meta',color:'#0866ff'},cursor:{name:'Cursor',color:'#343b45'},other:{name:'Agent',color:'#5f9e6e'}};
 const STATUS={running:'Running',waiting:'Waiting on its person',idle:'Idle'};
 const EMOTES=[['wave','👋','Wave'],['thumbs','👍','Thumbs up'],['clap','👏','Clap'],['heart','❤️','Heart']];
 const SEND_MS=100;
@@ -76,10 +77,11 @@ export function openOffice(opts){
       <span class="sp"></span>
       <div class="of-session">
         <button type="button" class="txt of-connect-link" data-of="connect" hidden>Connect your agents</button>
-        <button type="button" class="txt" data-of-replay disabled>Replay</button>
-        <button type="button" class="txt of-decor-btn" data-of="decorate" hidden aria-pressed="false">Decorate</button>
+        <button type="button" class="txt" data-of-replay aria-label="Replay" data-tip="Replay" disabled>${icon('clock',14)}<span>Replay</span></button>
+        <button type="button" class="txt of-decor-btn" data-of="decorate" aria-label="Decorate" data-tip="Decorate" hidden aria-pressed="false">${icon('sparkle',14)}<span>Decorate</span></button>
         <span class="of-presence-slot"></span>
       </div>
+      <button type="button" class="txt of-chief-launch" data-of="chief" aria-label="Chief of Staff" aria-controls="of-side-panel" aria-expanded="false" data-tip="Chief of Staff">${icon('bot',15)}<span>Chief</span></button>
       <div class="of-tools">
         <button type="button" class="ib" data-of="look" aria-label="Edit your look" data-tip="Edit your look (L)">${icon('shirt')}</button>
         ${hudHtml(icon,{notify:true})}
@@ -132,7 +134,7 @@ export function openOffice(opts){
       <label><input type="checkbox" class="of-auto-camera" checked> Recenter while moving</label>
       <label class="of-motion-row" hidden><input type="checkbox" class="of-motion"> Sea motion (the deck sways gently)</label>
     </aside>
-    <aside class="of-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
+    <aside class="of-panel" id="of-side-panel" hidden></aside><div class="of-menu" hidden role="menu"></div>`;
   root.tabIndex=-1;document.body.append(root);document.body.classList.add('office-open');
   S={opts,root,overlays:[],overlaySession:uid(),lines:root.querySelector('.of-lines'),env:opts.env,stage:root.querySelector('.of-stage'),labels:root.querySelector('.of-labels'),panel:root.querySelector('.of-panel'),menu:root.querySelector('.of-menu'),
     input:createOfficeInput(),controller:createOfficeCharacter(),walls:[],colliders:[],overviewRadius:12,place:null,floor:0,ov:0,motion:seaMotion(),people:new Map(),members:[],rooms:new Map(),live:new Map(),looks:new Map(),afFigures:[],clickables:[],labelList:[],answers:new Map(),
@@ -142,6 +144,7 @@ export function openOffice(opts){
   // Browser automation only (navigator.webdriver): end-to-end checks can place the avatar and read the office.
   if(navigator.webdriver)globalThis.__flowOffice={state:()=>S,place:(x,z,heading=0)=>{S.pos.set(x,0,z);S.controller.reset(S.pos,heading);S.rig?.reset(S.pos,heading)}};
   try{initScene()}catch(e){S.stage.insertAdjacentHTML('afterbegin','<p class="of-fail">3D graphics are unavailable in this browser.</p>');status('3D is not available')}
+  initChief();
   root.addEventListener('click',onClick);
   bindHud(root,{icon,notify:{on:notifyOn,toggle:toggleNotify},toast:opts.toast});
   root.addEventListener('focusin',e=>{if(isTyping(e.target))clearKeys()});
@@ -170,6 +173,7 @@ export const officeOpen=()=>!!S;
 export const officePeek=()=>S; // the open office's state, for tests and the screenshot harness
 export function closeOffice(){
   if(!S)return;S.replay?.destroy();const s=S;S=null;
+  if(pickerOpen('cos-model'))closePicker();
   s.devops?.dispose(); // first: the DevOps tab gets its board back whatever else happens
   s.presence?.destroy();s.composer?.dispose();s.lookEditor?.close();
   s.es?.close();clearTimeout(s.retry);clearInterval(s.watch);cancelAnimationFrame(s.raf);s.resize?.disconnect();
@@ -313,8 +317,9 @@ function connect(){
   on('members',({members,agentflow,world})=>{if(world)S.serverWorld=world;if(S.world)usePlace(wantedWorld());updateRooms(members,agentflow);refreshPanel()});
   on('decor',row=>{if(S.world)S.decor?.remote(row)});
   // Messages and stops (office-steer.js) are tracked apart from Allow / Deny answers.
-  on('action',a=>{if(a.kind==='history')return;if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
+  on('action',a=>{if(a.kind==='history'||a.kind==='model')return;if(S.steer.isSteer(a))S.steer.track(a,'sent');else answerSent(a)});
   on('result',a=>{
+    if(a.kind==='model'){if(!S.chief?.modelResult(a))S.opts.toast?.(a.result?.message||'Model switch finished',!a.result?.ok);return}
     if(a.kind==='history'){S.threads?.result(a);return} // a page of a thread (office-threads.js), never an answer
     S.threads?.result(a);
     const isSteer=S.steer.isSteer(a);
@@ -337,6 +342,7 @@ function liveDuringReplay(type,data){
       S.portalList=data.portals||[];S.serverWorld=data.env?.world;
       if(S.world){usePlace(wantedWorld());buildDoors()}
       for(const a of data.actions||[]){
+        if(a.kind==='model'){if(a.result)S.chief?.modelResult(a);continue}
         if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');
         else if(a.result)answerResult(a);
         else if(!S.answers.has(a.agentId))answerSent(a);
@@ -461,7 +467,11 @@ function snapshot(d){
   updateSources(d.yourSources||[]);
   S.threads?.snapshot(d.threads||[]);
   updateRooms(d.members,d.agentflow);if(S.world)buildDoors();S.boards?.invalidate();S.meters?.invalidate();
-  for(const a of d.actions||[])if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
+  for(const a of d.actions||[]){
+    if(a.kind==='model'){if(a.result)S.chief?.modelResult(a);continue}
+    if(S.steer.isSteer(a))S.steer.track(a,a.result?'done':'sent');
+    else if(!S.answers.has(a.agentId))S.answers.set(a.agentId,{...a,state:a.result?(a.result.ok?'done':'failed'):'sent',at:Date.parse(a.at)||Date.now()});
+  }
   for(const line of mergeOfficeChat(S.chat,d.chat||[]))addLine(line,{quiet:true});
   if(S.world){
     const changed=officeDiff([...previous],[...S.live],([key])=>key);
@@ -530,6 +540,20 @@ function sendPresence(force){
 // ---------- the scene ----------
 const M={};
 const mat=(c,o={})=>new THREE.MeshLambertMaterial({color:c,flatShading:true,...o});
+function initChief(){
+  const office=S;
+  S.chief=createChief({root:S.root,meKey:()=>office.meKey,members:()=>office.members,live:()=>office.live,af:()=>afAgents().filter(a=>office.afPlaced?.has(a.id)),deskKey,npc:S.npc,
+    figureChanged:member=>buildDesks(member),
+    label,unlabel:l=>{if(!l)return;l.el.remove();office.labelList=office.labelList.filter(x=>x!==l)},labelAlive:l=>office.labelList.includes(l),
+    interact:S.interact,openPanel:()=>openChief(),post:body=>api('steer',body),toast:(m,bad)=>office.opts.toast?.(m,bad),isQuiet:key=>presenceStatus.isQuiet(key),
+    cardId:n=>office.env===office.opts.current&&office.opts.overlays?.card?store.db?.devops?.cards?.find(c=>c.number===n)?.id||null:null,
+    openCard:id=>openOverlay('card',id),
+    cards:()=>office.env===office.opts.current?store.db?.devops?.cards||[]:[],refs:()=>{const m=office.members.find(x=>x.me);return m?officeMemberRefs(store.db,m):[]},
+    myName:()=>office.opts.me?.name||office.me?.name||'',afName:id=>afOf(id)?.name||'',lines:()=>office.lines,
+    showAgent,models:()=>store.db?.agentflow?.runners||[],openPicker,modelPickerOpen:()=>pickerOpen('cos-model'),
+    history:c=>{closePanel();office.threads?.openThread(c.id,c.source)},
+    repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
+}
 function initScene(){
   // alpha: the main board's DOM shows through where the canvas is clear (office-devops.js).
   const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'low-power',alpha:true});
@@ -548,6 +572,7 @@ function initScene(){
   S.npc=createNpcs({THREE,layer:S.npcLayer,world:S.world,
     navWorld,person:key=>S.people.get(key),isQuiet:key=>presenceStatus.isQuiet(key),
     inMeeting:key=>{const p=S?.people.get(key)?.obj.position;return !!p&&!!S.voice?.inMeeting?.(p.x,p.z)},
+    meetingAt:(x,z)=>!!S.voice?.inMeeting?.(x,z),
     room:roomSpots,boardSpot:key=>(key==null?S.devops?.spot():S.boards?.spot(key))||null,
     entrance:()=>S.npcEntrance||S.place?.spawn||{x:0,z:(S.commonR||10)+1.5},commonRadius:()=>S.commonR||10,lounge:()=>S.worldLayout?.lounge||null,player:()=>S.pos,
     label,unlabel:l=>{l.el.remove();S.labelList=S.labelList.filter(x=>x!==l)},
@@ -584,15 +609,6 @@ function initScene(){
     layout:()=>({world:office.worldLayout,rooms:[...office.rooms.values()].map(r=>({x:r.center.x,z:r.center.z})),commonR:office.commonR||10,roomW:ROOM_W,roomD:ROOM_D}),
     walkTo:(x,z)=>{office.follow=null;office.target=x==null?null:new THREE.Vector3(x,0,z)},walking:()=>!!office.target,goTo:(x,z)=>goTo(x,z,{fast:true}),
     toast:(m,bad)=>office.opts.toast?.(m,bad)});
-  // Your Chief of Staff (office-chief.js): your conductor as a companion that walks with you and takes /cos.
-  S.chief=createChief({root:S.root,meKey:()=>office.meKey,members:()=>office.members,live:()=>office.live,af:afAgents,deskKey,npc:S.npc,
-    label,unlabel:l=>{if(!l)return;l.el.remove();office.labelList=office.labelList.filter(x=>x!==l)},labelAlive:l=>office.labelList.includes(l),
-    interact:S.interact,openPanel,post:body=>api('steer',body),toast:(m,bad)=>office.opts.toast?.(m,bad),isQuiet:key=>presenceStatus.isQuiet(key),
-    cardId:n=>office.env===office.opts.current&&office.opts.overlays?.card?store.db?.devops?.cards?.find(c=>c.number===n)?.id||null:null,openCard,
-    cards:()=>office.env===office.opts.current?store.db?.devops?.cards||[]:[],refs:()=>{const m=office.members.find(x=>x.me);return m?officeMemberRefs(store.db,m):[]},
-    myName:()=>office.opts.me?.name||office.me?.name||'',afName:id=>afOf(id)?.name||'',lines:()=>office.lines,
-    showAgent:(member,id)=>showAgent(member,id),models:()=>store.db?.agentflow?.runners||[],
-    repaint:()=>{if(office.panelFor?.type==='chief'&&!office.panel.hidden)refreshPanel()}});
   // "Go to…" and the minimap (office-travel.js): the same in every world.
   S.travel=createTravel({root:S.root,stage:S.stage,places:travelPlaces,plan:travelPlan,dots:travelDots,
     me:()=>({x:office.pos.x,z:office.pos.z,heading:office.controller.state.heading}),route:()=>office.route&&office.route.target===office.target?office.route.pts.slice(office.route.i):null,
@@ -912,7 +928,9 @@ function buildDesks(key,refresh=true){
   const cos=Math.cos(room.facing),sin=Math.sin(room.facing);
   for(const b of g.userData.lounge)room.boxes.push(officeBox(room.center.x+b.x*cos+b.z*sin,room.center.z-b.x*sin+b.z*cos,room.facing,b.w,b.d,b.h+room.center.y));
   // Sessions seated at an AgentFlow agent's desk sit in the common area instead (buildSeats).
-  const all=S.live.get(key)||[],agents=all.filter(a=>!isSeated(a,S.afPlaced)),away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
+  const all=(S.live.get(key)||[]).filter(a=>a.role!=='conductor'||!S.chief?.figureFor(key)?.startsWith('af:'));
+  const agents=all.filter(a=>!isSeated(a,S.afPlaced)).sort((a,b)=>Number(b.role==='conductor')-Number(a.role==='conductor'));
+  const away=all.length-agents.length,cols=agents.length>8?4:3,sx=agents.length>8?2.6:3.2;
   room.note=agents.length?`${agents.length} ${agents.length===1?'agent':'agents'}`:away?`${away} at AgentFlow ${away===1?'desk':'desks'}`:'no agents running';
   roomLook(key);
   const visible=new Set();
@@ -928,6 +946,7 @@ function buildDesks(key,refresh=true){
 // One live session at a desk (in its owner's room, or beside an AgentFlow agent): the desk and its screen,
 // the mascot with its subagents, and its clickable name tag.
 const deskKey=(key,a)=>JSON.stringify([key,a.source,a.id]);
+const deskLook=a=>a.role==='conductor'?'chief':mascotKind(a.vendor,a.model);
 function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}={},existing){
   if(existing){updateDesk(existing,a,key,x,z,name,tagY,lounge);return existing}
   const d=new THREE.Group();d.position.set(x,0,z);d.scale.setScalar(scale);parent.add(d);
@@ -935,7 +954,7 @@ function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}=
   const scr=new THREE.MeshLambertMaterial({color:'#3b4542',emissive:'#000000',flatShading:true});
   const screen=part(M.box,scr,[0,1.08,-0.25],[0.8,0.5,0.06]);screen.userData.own=true;d.add(screen);
   // The mascot faces the room's back wall (its desk) and so the camera, which looks in from outside.
-  const m=createMascot(mascotKind(a.vendor,a.model),{color:VENDOR_COLOR[a.vendor],scale:.52}),mascot=new THREE.Group();
+  const m=createMascot(deskLook(a),{color:VENDOR_COLOR[a.vendor],scale:.52}),mascot=new THREE.Group();
   m.group.position.y=0.62;mascot.add(m.group);mascot.position.set(0,0,0.85);mascot.rotation.y=Math.PI;d.add(mascot);
   mascot.userData={kind:'agent',member:key,id:a.id,screen:scr,status:a.status,mascot:m,children:(a.children||[]).length,phase};
   mascot.add(shadow(0.45));
@@ -944,14 +963,14 @@ function makeDesk(parent,a,key,x,z,name,{tagY=1.75,phase=0,scale=1,lounge=true}=
   // E: the same panel as clicking it (the entry drops out when the desk leaves the scene).
   const id=a.id;S.interact?.register({id:'desk:'+d.uuid,object3D:mascot,radius:2.6,height:2.5*scale,priority:a.mine&&a.status==='waiting'?2:a.mine?1:0,
     label:()=>{const x=agentOf(key,id)||a,n=x.private?'this agent':x.title||'this agent';return x.mine&&x.pending?.can?.length?`Answer ${n}`:x.mine?`Check on ${n}`:`Look at ${n}`},
-    onInteract:()=>agentOf(key,id)?openPanel({type:'agent',member:key,id}):false});
+    onInteract:()=>agentOf(key,id)?showAgent(key,id):false});
   updateDesk(d,a,key,x,z,name,tagY,lounge);
   return d;
 }
 function updateDesk(d,a,key,x,z,name,tagY,lounge){
   d.position.set(x,0,z);
   const mascot=d.userData.mascot,u=mascot.userData;
-  const look=mascotKind(a.vendor,a.model);
+  const look=deskLook(a);
   if(u.mascot.kind!==look){
     u.mascot.group.removeFromParent();
     u.mascot=createMascot(look,{color:VENDOR_COLOR[a.vendor],scale:.52});
@@ -961,7 +980,8 @@ function updateDesk(d,a,key,x,z,name,tagY,lounge){
   u.screen.emissive.set(a.status==='running'?'#5fd38a':a.status==='waiting'?'#ffb020':'#000000');
   S.activity?.attach(mascot,a,{member:key,desk:d,root:d.parent,lounge,seated:!lounge});
   const at=`data-agent="${esc(a.id)}" data-member="${esc(key)}"`,kind=shownKind(a);
-  const tag=`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${esc(name)}</button>`;
+  const auto=a.vendor==='cursor'&&!a.private;
+  const tag=`<button type="button" class="of-tag${a.private?' priv':''}${a.seat?.agent?' seat':''}${auto?' cursor-auto':''}" ${at}><i class="of-kind" title="${kind[1]}">${kind[0]}</i>${auto?`<span>${esc(name)}</span><small class="of-auto-tag">Cursor Auto</small>`:esc(name)}</button>`;
   if(!u.tag)u.tag=label(mascot,tag,{y:tagY,cls:'agent click',near:16});
   else if(u.tagHTML!==tag)u.tag.el.innerHTML=tag;
   u.tagHTML=tag;u.tag.y=tagY;
@@ -1000,13 +1020,15 @@ function buildAgentflow(){
   const sig=lay.sig??radius;
   if(S.orgSig!==sig){S.orgSig=sig;S.commonR=radius;S.place.common(radius);if(S.rooms.size)queueMicrotask(()=>S&&buildRooms())}
   const items=[],people=[];
+  const chiefId=chiefAgent(list)?.id;
   for(const a of list){
     const p=pos.get(a.id);if(!p)continue;const dim=a.status==='retired'||a.status==='paused';
     if(a.kind==='human'){if(a.member&&(a.member===S.meKey||S.people.has(a.member)))continue;people.push({a,p,offline:!!a.member,dim})}
     // At a table, a team is the table itself; everyone sits, and the ones nobody is working with sit smaller.
     else if(seating&&a.kind==='team')continue;
     else{const kind=a.kind==='team'?'team':a.kind==='automation'?'automation':'agent',free=kind==='agent'&&!seats.has(a.id);
-      items.push({id:a.id,kind,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||free&&!seating,pale:free&&!!seating,size:seating&&free?0.7:1,still:dim||!!seating})}
+      const chief=a.id===chiefId;
+      items.push({id:a.id,kind,chief,x:p.x,z:p.z,yaw:p.yaw||0,dim:dim||free&&!seating,pale:free&&!!seating,size:seating&&free&&!chief?0.7:1,still:dim||!!seating})}
   }
   // Robots that just left the org are still drawn while they walk out (office-npc.js).
   const robots=items.filter(it=>it.kind==='agent');
@@ -1016,7 +1038,7 @@ function buildAgentflow(){
   // At tables everyone is close together: a name shows for the few nearest, and for what is hovered or open.
   const reach=seating?3.4:7;
   for(const it of items){if(it.ghost)continue;const o=new THREE.Object3D();o.position.set(it.x,0,it.z);g.add(o);anchors.set(it.id,o);const a=afOf(it.id);
-    S.interact?.register({id:'af:'+it.id,object3D:o,radius:seating?1.5:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?openPanel({type:'af',id:it.id}):false});
+    S.interact?.register({id:'af:'+it.id,object3D:o,radius:seating?1.5:it.kind==='team'?2.8:2.2,height:it.kind==='team'?1.6:1.9,label:()=>S.chief?.figureFor(S.meKey)==='af:'+it.id?'Talk to Chief of Staff':`${it.kind==='team'?'Visit':'Check on'} ${a.name}`,onInteract:()=>afOf(it.id)?showAf(it.id):false});
     label(o,`<button type="button" class="of-tag af" data-af-id="${esc(it.id)}">${esc(a.name)}</button>`,{y:it.kind==='team'?1.1:1.65*it.size,cls:'af click',show:()=>S.hover===it.id||S.panelFor?.id===it.id||!S.rig?.overview&&o.position.distanceTo(S.pos)<reach})}
   // Each table carries its team's name, and how many at it are being worked with or are waiting on someone.
   // E at a table, or a click on its name, opens its roster.
@@ -1040,7 +1062,7 @@ function buildAgentflow(){
       const left=a.member&&S.leftAt?.get(a.member),from=left&&Date.now()-left.at<20000?left:null;if(from)S.leftAt.delete(a.member);
       return {id:a.id,obj:S.afPeople[i],x:p.x,z:p.z,yaw:p.yaw||0,member:a.member||'',still:dim||!!seating,from};
     });
-    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,yaw:it.yaw,size:it.size,busy:seats.has(it.id),still:it.still,anchor:anchors.get(it.id)})),humans);
+    S.npc.org(S.org,robots.map(it=>({id:it.id,x:it.x,z:it.z,yaw:it.yaw,size:it.size,busy:seats.has(it.id),still:it.still,chief:it.chief,anchor:anchors.get(it.id)})),humans);
   }
   buildSeats(seats);
   S.chief?.update();
@@ -1298,7 +1320,7 @@ function goDoor(p){
   S.opts.toast?.(`Going to ${p.label}${p.sub?` · ${p.sub}`:''}`);switchTo(p.env);
 }
 function showGone(){
-  S.panelFor=null;S.panel.hidden=false;
+  closePanel();S.panel.hidden=false;
   S.panel.innerHTML=`<div class="of-ph">${icon('ban',16)}<b>No longer shared with you</b></div><div class="of-pb"><p class="of-note">${esc(S.opts.offices.find(o=>o.id===S.env)?.name||'This office')} is no longer shared with you, so you have left it.</p>
     <button type="button" class="txt primary" data-of="close">Close the office</button></div>`;
   watch();
@@ -1311,20 +1333,44 @@ function openMenu(key,e){
   S.menu.style.left=Math.min(e.clientX-r.left,r.width-180)+'px';S.menu.style.top=Math.min(e.clientY-r.top,r.height-150)+'px';
   S.menu.querySelector('button').focus({preventScroll:true});
 }
-const closePanel=()=>{if(S){S.panel.hidden=true;S.panelFor=null}};
+function closePanel(){
+  if(!S)return;
+  const chief=S.panelFor?.type==='chief',focus=chief&&S.panel.contains(document.activeElement);
+  if(chief&&pickerOpen('cos-model'))closePicker();
+  S.panel.hidden=true;S.panelFor=null;
+  if(chief){
+    const launch=S.root.querySelector('[data-of="chief"]');
+    launch.setAttribute('aria-expanded','false');
+    if(focus)launch.focus({preventScroll:true});
+  }
+}
+function openChief(focus=false){
+  if(S.gone)return false;
+  if(S.replay?.active){S.opts.toast?.('Return to the live office to open the Chief of Staff.');return false}
+  if(S.devops?.focused())S.devops.unfocus();
+  S.threads?.closeThread();
+  const panel=openPanel({type:'chief',id:'chief'});
+  if(focus)S.panel.querySelector('textarea,[data-of="connect"]')?.focus({preventScroll:true});
+  return panel;
+}
 // Opens a side panel for an interaction, which then knows whether it is still open (E again closes it).
-function openPanel(p){S.panelFor=p;refreshPanel();return {close:closePanel,isOpen:()=>!S.panel.hidden&&S.panelFor?.type===p.type&&S.panelFor?.id===p.id}}
+function openPanel(p){
+  if(S.panelFor?.type==='chief'&&p.type!=='chief')closePanel();
+  S.panelFor=p;refreshPanel();
+  return {close:closePanel,isOpen:()=>!S.panel.hidden&&S.panelFor?.type===p.type&&S.panelFor?.id===p.id};
+}
 function closeMenu(){if(S&&!S.menu.hidden){S.menu.hidden=true;return true}return false}
 function onClick(e){
   const em=e.target.closest('[data-emote]');if(em){emote(em.dataset.emote);return}
   if(S.replay?.active&&e.target.closest('.of-labels'))return;
   const ag=e.target.closest('.of-labels [data-agent]');if(ag){showAgent(ag.dataset.member,ag.dataset.agent);return}
   const fa=e.target.closest('.of-labels [data-af-id]');if(fa){showAf(fa.dataset.afId);return}
-  const tb=e.target.closest('.of-labels [data-table]');if(tb){S.panelFor={type:'table',id:+tb.dataset.table};refreshPanel();return}
+  const tb=e.target.closest('.of-labels [data-table]');if(tb){openPanel({type:'table',id:+tb.dataset.table});return}
   const dr=e.target.closest('.of-labels [data-door]');if(dr){goDoor(S.doorSpots?.find(x=>x.portal.env===dr.dataset.door)?.portal);return}
   const b=e.target.closest('[data-of]');if(!b)return;
   const key=S.menu.dataset.key;
-  ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel:()=>{S.panel.hidden=true;S.panelFor=null},closeMeter:()=>S.meters?.close(),
+  ({close:closeOffice,connect:()=>connectAgents(b),zoomIn:()=>S.rig?.zoomBy(1/1.2),zoomOut:()=>S.rig?.zoomBy(1.2),overview:toggleOverview,controls:toggleControls,closePanel,closeMeter:()=>S.meters?.close(),
+    chief:()=>S.panelFor?.type==='chief'?closePanel():openChief(true),
     look:openLook,goto:()=>S.travel?.toggle(),map:()=>S.travel?.toggleMap(),
     wave(){emote('wave');closeMenu()},
     follow(){S.follow=S.follow===key?null:key;S.target=null;closeMenu()},
@@ -1349,15 +1395,21 @@ function showMine(id){
   S.threadHl=id;S.threads?.closeThread();showAgent(S.meKey,id);
   setTimeout(()=>{if(S?.threadHl===id)S.threadHl=null},4000);
 }
-function showAgent(member,id){S.panelFor={type:'agent',member,id};refreshPanel()}
-function showAf(id){S.panelFor={type:'af',id};refreshPanel()}
+function showAgent(member,id){return member===S.meKey&&agentOf(member,id)?.role==='conductor'?openChief():openPanel({type:'agent',member,id})}
+function showAf(id){return S.chief?.figureFor(S.meKey)==='af:'+id?openChief():openPanel({type:'af',id})}
 // The AgentFlow agent whose desk a session sits at, by name.
 const deskOf=a=>a.seat?.agent&&S.afPlaced?.has(a.seat.agent)?afOf(a.seat.agent)?.name||'':'';
 const row=(k,v)=>v?`<div class="of-row"><span>${k}</span><b>${esc(v)}</b></div>`:'';
 function refreshPanel(){
   const p=S?.panelFor;if(!p)return;
   let html='';
-  if(p.type==='chief'){S.chief.before(S.panel);S.panel.innerHTML=S.chief.panelHtml();S.panel.hidden=false;S.chief.attach(S.panel);return}
+  if(p.type==='chief'){
+    const html=S.chief.panelHtml();
+    if(S.panel.hidden||S.chiefHtml!==html){S.chief.before(S.panel);S.panel.innerHTML=html;S.panel.hidden=false;S.chief.attach(S.panel);S.chiefHtml=html}
+    S.root.querySelector('[data-of="chief"]').setAttribute('aria-expanded','true');
+    return;
+  }
+  S.chiefHtml=null;
   if(p.type==='table'){
     // A table's roster: who sits at it, what each is doing now. A row opens that agent, or the session working with it.
     const t=S.seating?.tables[p.id];if(!t){S.panel.hidden=true;S.panelFor=null;return}
@@ -1461,6 +1513,7 @@ function answerHtml(ans,a){
 const isTyping=el=>el?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable=false])');
 function onKey(e){
   if(!S)return;
+  if(pickerOpen('cos-model')&&e.target.closest?.('.picker'))return;
   if(e.target.closest?.('dialog[open]'))return;
   if(overlayOpen()){e.stopPropagation();return}
   // At the DevOps board: its keys are its own (office-devops.js); Esc comes back.
@@ -1478,7 +1531,7 @@ function onKey(e){
     if(S.presence?.closeOverlays())return;
     if(S.meters?.isOpen()&&S.meters.close())return;
     if(S.replay?.active){S.replay.finish();return}
-    if(!S.panel.hidden){S.panel.hidden=true;S.panelFor=null;return}
+    if(!S.panel.hidden){closePanel();return}
     closeOffice();return;
   }
   if(isTyping(e.target))return;

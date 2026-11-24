@@ -1,7 +1,7 @@
 // Coding-agent mascots for the 3D office: chunky low-poly figures built from boxes, ellipsoids and one
 // extrusion, with their colours baked into the vertices. Each is about 1.6 units across, centred on its
 // origin, facing +z.
-//   mascotKind(text)       'claude' | 'openai' | 'deepseek' | 'grok' | 'gemini' | 'meta' | 'orb'  (vendor, model, … any text)
+//   mascotKind(vendor, model)   the model family, the Cursor Auto rover, or the fallback orb
 //   createMascot(kind, {color, scale}) -> {group, kind, update(t, state)}
 //       state: {status:'running'|'waiting'|'idle', children: n subagents, phase}
 //       It turns slowly and bobs out of phase with its neighbours; a waiting one hops and glows; an idle one
@@ -11,7 +11,11 @@
 import * as THREE from './vendor/three/three.module.min.js';
 
 const KINDS=[[/claude|opus|sonnet|haiku|fable|anthropic/,'claude'],[/gpt|codex|openai|\bo3\b|\bo4/,'openai'],[/deepseek/,'deepseek'],[/grok|xai/,'grok'],[/gemini/,'gemini'],[/\bmeta\b|llama|\bmuse\b/,'meta']];
-export function mascotKind(...text){const t=text.filter(Boolean).join(' ').toLowerCase();for(const [re,k] of KINDS)if(re.test(t))return k;return 'orb'}
+export function mascotKind(vendor,model){
+  const t=[vendor,model].filter(Boolean).join(' ').toLowerCase();
+  for(const [re,k] of KINDS)if(re.test(t))return k;
+  return vendor==='cursor'||model==='Cursor Auto'?'cursor':'orb';
+}
 // Vendor colours, also the orb's colour for anything else.
 export const VENDOR_COLOR={claude:'#d97857',openai:'#2e80ed',deepseek:'#4d6bff',grok:'#17171a',gemini:'#5b7cf5',orb:'#5f9e6e',
   qwen:'#694ff0',mistral:'#fa520f',meta:'#1a73e6',moonshot:'#e0e0ea',nvidia:'#76ba00',minimax:'#e83561'};
@@ -80,8 +84,35 @@ function infinity(){const b=builder(),N=96,M=10,r=.15;
   return b.geometry()}
 function orb(){const b=builder();b.ell(0,0,0,.75,.75,.75,[1,1,1],10,16);return b.geometry()}
 
+function rover(){
+  const b=builder(),white=[.93,.95,.96],black=[.09,.12,.16],lens=[.68,.87,1];
+  b.box(0,-.18,0,.60,.21,.52,white);
+  b.box(0,.21,.06,.44,.22,.34,black);
+  b.box(0,.47,.06,.39,.06,.31,white);
+  for(const x of [-.54,.54])for(const z of [-.34,.34])b.ell(x,-.37,z,.19,.29,.29,black,6,10);
+  for(const x of [-.17,.17])b.box(x,.22,.41,.075,.07,.028,lens);
+  b.box(-.28,.60,-.12,.025,.10,.025,black);
+  b.box(-.28,.72,-.12,.055,.04,.055,white);
+  return b.geometry();
+}
+
+function chief(){
+  const b=builder(),white=[.94,.94,.91],dark=[.13,.16,.18],gold=[.93,.66,.18],paper=[1,.97,.85];
+  b.box(0,.36,0,.33,.23,.25,white);
+  b.box(0,.36,.25,.28,.13,.035,dark);
+  for(const x of [-.12,.12])b.box(x,.38,.29,.05,.055,.026,paper);
+  b.box(0,-.15,0,.26,.27,.20,white);
+  b.box(-.32,.05,0,.09,.10,.14,gold);
+  b.box(.33,-.12,.17,.08,.22,.14,dark);
+  b.box(.33,-.12,.32,.068,.165,.023,paper);
+  b.box(.33,.05,.34,.042,.035,.022,gold);
+  b.box(-.32,-.15,0,.08,.14,.10,white);
+  for(const x of [-.14,.14])b.box(x,-.55,.05,.09,.15,.14,dark);
+  return b.geometry();
+}
+
 const GEO={},MAT={};
-const BUILD={claude:clawd,openai:cloud,deepseek:whale,grok,gemini:sparkle,meta:infinity,orb};
+const BUILD={claude:clawd,openai:cloud,deepseek:whale,grok,gemini:sparkle,meta:infinity,cursor:rover,chief,orb};
 export const mascotGeometry=kind=>GEO[kind]||(GEO[kind]=(BUILD[kind]||orb)());
 // One material per kind of look; a waiting one's glow pulses together (one shared material per colour).
 function material(look,color='#ffffff'){
@@ -100,7 +131,7 @@ export function createMascot(kind,{color,scale=1}={}){
   group.userData.body=body;group.userData.kids=kids;let status='',nKids=-1;
   return {group,kind:k,body,
     update(t,{status:st='running',children=0,phase=0}={}){
-      if(st!==status){status=st;body.material=material(st==='waiting'?'wait':st==='idle'?'idle':'run',tint);for(const c of kids.children)c.material=body.material}
+      if(st!==status){status=st;body.material=material(st==='waiting'?'wait':st==='idle'&&k!=='chief'?'idle':'run',tint);for(const c of kids.children)c.material=body.material}
       const n=Math.min(children,3);
       if(n!==nKids){nKids=n;kids.clear();for(let i=0;i<n;i++){const c=new THREE.Mesh(body.geometry,body.material);c.scale.setScalar(.28);kids.add(c)}}
       const wait=st==='waiting',idle=st==='idle',hop=wait?.35*Math.abs(Math.sin(t*4.5)):0;

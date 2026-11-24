@@ -22,7 +22,7 @@
 //     group every room is in), navWorld() -> {boxes, bounds?, ground?}, person(memberKey) -> {obj}|undefined,
 //     isQuiet(memberKey), room(memberKey) -> {door, lounge}|undefined, boardSpot(memberKey|null) -> {x, z, yaw}|null,
 //     entrance() -> {x, z}, commonRadius(), lounge() -> [{x, z, fx, fz}]|null (where idle ones stand about), player() -> {x, z}, label(obj, html, opts) -> l, unlabel(l),
-//     inMeeting(memberKey) -> true while they are in the meeting room (a follower waits at its desk),
+//     inMeeting(memberKey), meetingAt(x,z) -> keep a follower outside the meeting room,
 //     retire(obj): a figure now only walking out (no clicks, no E)}
 import {buildNav,navBounds,follow,separation,sidestep} from './office-nav.js';
 import {createBrain,pairUp,unit,CHAT_SLOT} from './office-brain.js';
@@ -131,6 +131,7 @@ export function createNpcs(office){
       if(!n){const entering=settled();n=make(key,'robot',{home:{x:r.x,z:r.z,yaw:r.yaw||0},entering,door:entering?office.entrance():null})}
       else{retarget(n,r.x,r.z);n.home.yaw=r.yaw||0}
       n.size=r.size||1;
+      n.chief=!!r.chief;
       if(n.anchor!==r.anchor){n.bubble=null;n.emote=null;n.emoteState=''} // the old anchor took its labels along
       n.anchor=r.anchor;n.status=r.busy?'running':'idle';n.still=!!r.still;n.wander=true;n.area='common';n.boardKey=null;n.removed=false;n.ghost=false;n.input.gone=false;
     }
@@ -162,7 +163,7 @@ export function createNpcs(office){
       if(n.type!=='robot')continue;
       const id=n.key.slice(3);if(ids.has(id))continue;
       if(!n.input.gone)gone(n);
-      if(n.brain.state!=='gone')out.push({id,kind:'agent',x:n.x,z:n.z,dim:true,ghost:true});
+      if(n.brain.state!=='gone')out.push({id,kind:'agent',x:n.x,z:n.z,dim:true,ghost:true,chief:n.chief});
     }
     return out;
   }
@@ -228,10 +229,14 @@ export function createNpcs(office){
       }
       case 'wander':{const a=s*Math.PI*2,d=1.4+s*1.8;n.gx=n.home.x+Math.sin(a)*d;n.gz=n.home.z+Math.cos(a)*d;return true}
       case 'follow':{
-        const who=office.person(follows.get(n.key));const p=who?.obj.position;if(!p){n.gx=n.home.x;n.gz=n.home.z;return true}
-        // Their heading from how they last moved (the same for your own avatar and someone else's).
-        const h=n.lead??=(n.leadAt={x:p.x,z:p.z},Math.atan2(n.x-p.x,n.z-p.z)+Math.PI);
-        const at=behind(p.x,p.z,h);n.gx=at.x;n.gz=at.z;n.faceX=p.x;n.faceZ=p.z;return true;
+        const lead=follows.get(n.key),p=n.leadAt;
+        if(!p){n.gx=n.home.x;n.gz=n.home.z;return true}
+        const h=n.lead??=office.person(lead)?.obj.rotation.y??0;
+        const inMeeting=office.inMeeting?.(lead);
+        const moving=!inMeeting&&clock-n.leadMovedAt<0.65;
+        let at=behind(p.x,p.z,h,moving?FOLLOW_BACK:.2,moving?FOLLOW_SIDE:1.35);
+        if(office.meetingAt?.(at.x,at.z))at=p;
+        n.gx=at.x;n.gz=at.z;n.faceX=p.x;n.faceZ=p.z;return true;
       }
       case 'partner':{
         const p=npcs.get(n.input.partner);if(!p){n.gx=n.x;n.gz=n.z;return false}
@@ -299,13 +304,19 @@ export function createNpcs(office){
     const inp=n.input;
     inp.status=n.status;inp.kind=n.kind;inp.card=n.card;inp.still=n.still;inp.wander=n.wander;inp.board=!!spotOf(n.boardKey??null);
     inp.ownerHere=n.type==='mascot'&&!!office.person(n.member)&&!office.isQuiet?.(n.member);
-    // A Chief of Staff keeps up with its person while they are here and not in a meeting.
+    // Remember the last position outside the meeting so the Chief can wait there.
     const lead=follows.get(n.key),lp=lead&&office.person(lead)?.obj.position;
-    inp.follow=!!lp&&!office.inMeeting?.(lead);
-    if(lp){
-      const m=n.leadAt;if(!m||Math.hypot(lp.x-m.x,lp.z-m.z)>0.25){if(m)n.lead=Math.atan2(lp.x-m.x,lp.z-m.z);n.leadAt={x:lp.x,z:lp.z}}
-      inp.far=Math.hypot(lp.x-n.x,lp.z-n.z)>FOLLOW_FAR;
-    }else{inp.far=false;n.lead=undefined;n.leadAt=null}
+    if(lead!==n.leadMember||!lp){n.leadMember=lead;n.lead=undefined;n.leadAt=null;n.leadMovedAt=-Infinity}
+    if(lp&&!office.inMeeting?.(lead)){
+      const m=n.leadAt;
+      if(!m||Math.hypot(lp.x-m.x,lp.z-m.z)>0.25){
+        if(m){n.lead=Math.atan2(lp.x-m.x,lp.z-m.z);n.leadMovedAt=clock}
+        n.leadAt={x:lp.x,z:lp.z};
+      }
+    }
+    inp.follow=!!lp&&!!n.leadAt;
+    if(inp.follow)inp.still=false;
+    inp.far=inp.follow&&Math.hypot(n.leadAt.x-n.x,n.leadAt.z-n.z)>FOLLOW_FAR;
     inp.partner=pairs.get(n.key)||'';inp.arrived=n.arrived&&n.pathRev===n.intent.rev;
     const it=n.brain.update(t,inp);
     if(it.goal!=='owner')n.side=null;

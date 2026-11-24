@@ -2,6 +2,7 @@
 // fake `t3` CLI, then reused, found again by its title, and made again once deleted; its [[office]] reply line is
 // parsed; it is reported as role "conductor" and its messages go over the T3 session. Scratch under ~/scratch only.
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -32,7 +33,7 @@ function fixture(t) {
   db.close();
   // The fake t3: `thread start --json --title <title> <project> -` records its arguments and stdin, adds the thread to
   // the database and prints {threadId}.
-  const bin = join(dir, 't3');
+  const bin = join(dir, process.platform === 'win32' ? 't3.cjs' : 't3');
   writeFileSync(bin, `#!${process.execPath}
 const {DatabaseSync} = require('node:sqlite'), fs = require('node:fs');
 const args = process.argv.slice(2), log = ${JSON.stringify(join(dir, 'calls.jsonl'))};
@@ -47,7 +48,12 @@ console.log(JSON.stringify({threadId: id, projectId: 'proj', runId: 'run-' + id}
   const calls = () => existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
   const exec = sql => { const d = new DatabaseSync(path); try { d.exec(sql); } finally { d.close(); } };
   const insert = (table, ...values) => { const d = new DatabaseSync(path); try { d.prepare(`INSERT INTO ${table} VALUES (${values.map(() => '?').join(',')})`).run(...values); } finally { d.close(); } };
-  return {dir, path, bin, calls, exec, insert, stateFile: join(dir, 'config', 'office-conductor.json')};
+  const launcher = process.platform === 'win32' ? {runT3: ({project, title, message, provider, model}) => {
+    const args = ['thread', 'start', '--json', '--title', title];
+    if (provider && model) args.push('--provider', provider, '--model', model);
+    return JSON.parse(execFileSync(process.execPath, [bin, ...args, project, '-'], {input: message, encoding: 'utf8'}));
+  }} : {bin};
+  return {dir, path, launcher, calls, exec, insert, stateFile: join(dir, 'config', 'office-conductor.json')};
 }
 
 test('the [[office]] line: its say and cards; plain prose shows its start; the tag never reaches the prose', () => {
@@ -74,7 +80,7 @@ test('the brief: the agent\'s rules when the environment has them, sensible defa
 test('the conductor thread is made once with the brief, reused, found by its title, and made again when deleted', async t => {
   const f = fixture(t);
   let clock = 1e6;
-  const make = () => createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, bin: f.bin, now: () => clock,
+  const make = () => createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, ...f.launcher, now: () => clock,
     fetchBrief: async () => ({env: 'team', agent: 'Chief of Staff', rules: '- Only small, reversible work alone.'})});
   const c = make();
   const id = await c.ensure();
@@ -101,7 +107,7 @@ test('the conductor thread is made once with the brief, reused, found by its tit
 
 test('its office entry: idle, the latest finished reply (never a running turn\'s chatter), a transcript without the tag', async t => {
   const f = fixture(t);
-  const c = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, bin: f.bin});
+  const c = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, ...f.launcher});
   const id = await c.ensure();
   const item = (run, type, ordinal, text, at) => f.insert(prefix + 'turn_items', id, run, type, 'completed', ordinal, at, JSON.stringify({text, startedAt: at, completedAt: at}));
   item('r1', 'user_message', 1, 'What is in UAT?', '2026-11-22T10:00:00Z');
@@ -125,7 +131,7 @@ test('its office entry: idle, the latest finished reply (never a running turn\'s
 test('the report carries the conductor once, as role conductor with no repo; its messages go to T3 over the session', async t => {
   const f = fixture(t);
   const sent = [];
-  const c = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, bin: f.bin,
+  const c = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, ...f.launcher,
     dispatch: async (command, valid) => { assert.equal(valid(), true); sent.push(command); }});
   const id = await c.ensure();
   const conductor = c.entry('box');
@@ -151,10 +157,43 @@ test('the report carries the conductor once, as role conductor with no repo; its
   assert.equal((await respond({kind: 'model', agentId: id, text: 'not a model'})).ok, false);
   // A replacement thread starts on the model the office picked.
   f.exec(`UPDATE ${prefix}threads SET deleted_at='2026-11-22T00:00:00Z' WHERE thread_id='${id}'`);
-  const again = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, bin: f.bin, now: () => Date.now() + 120_000});
+  const again = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, ...f.launcher, now: () => Date.now() + 120_000});
   assert.equal(await again.ensure(), 'thread-cos-2');
   const started = f.calls().at(-1).args;
   assert.deepEqual(started.slice(started.indexOf('--provider'), started.indexOf('--provider') + 4), ['--provider', 'cursor_personal', '--model', 'grok-4.7']);
+});
+
+test('the model catalog uses the actual conductor project and the bridge rejects disabled accounts', async t => {
+  const f = fixture(t);
+  writeFileSync(join(f.dir, 'settings.json'), JSON.stringify({
+    providerInstances: {cursor_personal: {driver: 'cursor', displayName: 'Personal Cursor', config: {unused: 'fixture-only'}},
+      cursor_work: {driver: 'cursor', displayName: 'Work Cursor'}},
+    projectSettingsOverrides: {proj: {providerInstances: {cursor_work: {enabled: false}, codex: {enabled: false}}}},
+  }));
+  writeFileSync(join(f.dir, 'model-manifest.json'), JSON.stringify({manifest: {providers: {
+    claudeAgent: {models: [{slug: 'sonnet', name: 'Sonnet', status: 'current'}, {slug: 'old', status: 'retired'}]},
+  }}}));
+  const commands = [];
+  const c = createConductor({DatabaseSync, path: f.path, stateFile: f.stateFile, project: f.dir, ...f.launcher,
+    modelCatalog: () => [{id: 'cursor_personal', driver: 'cursor', enabled: true, models: [{slug: 'composer', name: 'Composer'}]}],
+    dispatch: async command => commands.push(command)});
+  const id = await c.ensure();
+  const payload = await makePayload({source: 'bridge:box', host: 'box', now: Date.now(), t3: new Map([
+    ['auto', {id: 'auto', provider: 'work', driver: 'cursor', model: 'default'}],
+    ['pinned', {id: 'pinned', provider: 'cursor_personal', model: 'claude-sonnet-5-5'}],
+  ]), claude: [], resolveRepo: async () => null, conductor: c.entry('box', {catalog: true})});
+  assert.deepEqual(payload.agents[0].modelProviders, [
+    {id: 'claudeAgent', label: 'Claude', models: [{id: 'claudeAgent:sonnet', label: 'Sonnet'}]},
+    {id: 'cursor_personal', label: 'Personal Cursor', models: [
+      {id: 'cursor_personal:composer', label: 'Composer'}, {id: 'cursor_personal:default', label: 'Auto'},
+    ]},
+  ]);
+  assert.deepEqual(payload.agents.slice(1).map(({vendor, model}) => [vendor, model]), [['cursor', 'Cursor Auto'], ['claude', 'Sonnet 5.5']]);
+  assert.equal((await c.setModel('cursor_work:default')).ok, false);
+  assert.equal(commands.length, 0);
+  assert.equal((await c.setModel('cursor_personal:default')).ok, true);
+  assert.deepEqual(commands[0].modelSelection, {instanceId: 'cursor_personal', model: 'default'});
+  assert.equal(commands[0].threadId, id);
 });
 
 test('the brief comes from the first environment with a Chief of Staff agent', async () => {

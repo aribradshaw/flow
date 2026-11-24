@@ -18,7 +18,7 @@
 //   chief.dispose()
 import {icon} from './icons.js';
 import {officeChat} from './office-chat.js';
-import {CHIEF_NAME,chiefChannel,chiefFigures,conductorOf,createMentions,esc,replyHtml,replySig,waitingOnYou} from './office-chief-core.js';
+import {CHIEF_NAME,chiefChannel,chiefFigures,chiefModelItems,conductorOf,createMentions,esc,replyHtml,replySig,waitingOnYou} from './office-chief-core.js';
 import {chiefBubble} from './office-threads-core.js';
 
 const ON_IT='Chief is on it…',PENDING_MS=5*60e3,BUBBLE_MS=12000,MENTION_MS=8000;
@@ -37,9 +37,13 @@ export function createChief(o){
   // ---------- who walks with whom ----------
   function update(){
     const next=chiefFigures({members:o.members(),live:o.live(),af:o.af(),deskKey:o.deskKey});
-    for(const [member,key] of figures)if(next.get(member)!==key)o.npc?.setFollow(key,null);
+    const previous=figures;figures=next;
+    for(const [member,key] of previous)if(next.get(member)!==key)o.npc?.setFollow(key,null);
     for(const [member,key] of next)o.npc?.setFollow(key,member);
-    figures=next;checkAt=0;
+    for(const member of new Set([...previous.keys(),...next.keys()])){
+      if(!!previous.get(member)?.startsWith('af:')!==!!next.get(member)?.startsWith('af:'))o.figureChanged?.(member);
+    }
+    checkAt=0;
   }
 
   // ---------- bubbles ----------
@@ -91,38 +95,64 @@ export function createChief(o){
     const c=mine();
     if(!c)throw Error('No Chief of Staff is reporting for you yet: run flow office bridge on a computer with T3 Code.');
     if(!c.can?.includes('message'))throw Error('Your Chief of Staff cannot take messages from here right now.');
+    if(switching)throw Error('Wait for T3 Code to finish switching models.');
     pending={at:Date.now(),sig:replySig(c.reply)};
     say(esc(ON_IT),{ms:0,kind:'pending'});log('You',t);paint();
     try{await o.post({kind:'message',source:c.source,agentId:c.id,text:t})}
     catch(e){pending=null;dropBubble();paint();throw Error(e.message||'Could not reach your Chief of Staff')}
   }
-  // The model its next turn uses (provider:model). A pick sticks until the next report says the same.
-  let picked='';
-  function modelItems(){
-    const seen=new Set(),out=[];
-    for(const r of o.models?.()||[])for(const m of r.models||[]){
-      if(!m?.id||seen.has(m.id))continue;seen.add(m.id);
-      out.push({value:m.id,label:m.label||m.id,group:m.provider||m.id.split(':')[0],sub:m.billing==='metered'?'Metered':m.billing==='included'?'Included':''});
-    }
-    out.sort((a,b)=>a.group.localeCompare(b.group)||a.label.localeCompare(b.label));
-    return out;
-  }
+  // Keep the confirmed choice visible until the bridge reports it. Reconcile by action id even when SSE wins the race.
+  let switching=null,timedOut=null,confirmed=null,modelNotice='',modelError=false,switchTimer;
+  const modelItems=()=>chiefModelItems(mine()?.modelProviders,o.models?.());
   function currentModel(){
-    const c=mine(),reported=c?.modelId||'';
-    if(picked&&picked!==reported)return picked;
-    picked='';return reported;
+    const c=mine(),id=c?.modelId||'';
+    if(confirmed?.agentId===c?.id&&confirmed?.source===c?.source&&confirmed?.previous===id&&Date.now()<confirmed.until)return confirmed.choice;
+    confirmed=null;return id;
+  }
+  function finishSwitch(message,error=false){
+    clearTimeout(switchTimer);
+    switching=null;modelNotice=message;modelError=error;paint();
+    o.toast?.(message,error);
+  }
+  function modelResult(a){
+    const change=switching||timedOut;
+    if(!change||a.kind!=='model'||a.agentId!==change.agentId||a.source!==change.source||a.text!==change.choice||!a.result)return false;
+    if(!change.actionId){change.early.set(a.id,a);return true}
+    if(a.id!==change.actionId)return false;
+    timedOut=null;
+    if(a.result.ok){
+      const reported=mine()?.modelId||'';
+      confirmed=reported===change.choice?null:{agentId:change.agentId,source:change.source,choice:change.choice,previous:reported,until:Date.now()+90000};
+    }
+    finishSwitch(a.result.ok?'Model updated for the next message.':a.result.message||'Could not switch models.',!a.result.ok);
+    return true;
   }
   async function choose(id){
     const c=mine();
     if(!c?.can?.includes('model')){o.toast?.('Your Chief of Staff cannot change models from here yet.',true);return}
-    if(!id||id===currentModel())return;
-    picked=id;paint();
-    try{await o.post({kind:'model',source:c.source,agentId:c.id,text:id});o.toast?.('Next message uses that model.')}
-    catch(e){if(picked===id)picked='';paint();o.toast?.(e.message||'Could not change the model',true)}
+    if(switching||!id||id===currentModel())return;
+    timedOut=null;
+    const change=switching={source:c.source,agentId:c.id,choice:id,early:new Map()};
+    modelNotice='Waiting for T3 Code to confirm…';modelError=false;paint();
+    switchTimer=setTimeout(()=>{
+      if(switching!==change)return;
+      timedOut=change;
+      finishSwitch('T3 Code hasn’t confirmed the switch yet. Check the selected model before sending.',true);
+    },45000);
+    try{
+      const action=await o.post({kind:'model',source:c.source,agentId:c.id,text:id});
+      if(switching!==change&&timedOut!==change)return;
+      if(!action?.id)throw Error('Could not queue the model change.');
+      change.actionId=action.id;
+      if(action.result||change.early.has(action.id))modelResult(action.result?action:change.early.get(action.id));
+    }catch(e){if(switching===change)finishSwitch(e.message||'Could not change the model',true)}
   }
   function agents(member,list){
     if(member!==o.meKey())return;
     const c=conductorOf(list),sig=replySig(c?.reply);
+    if(switching&&(c?.id!==switching.agentId||c?.source!==switching.source)){
+      finishSwitch('The Chief of Staff disconnected before confirming the model switch.',true);
+    }
     if(lastSig===null){lastSig=sig}
     else if(c?.reply&&sig!==lastSig){
       lastSig=sig;pending=null;
@@ -155,68 +185,108 @@ export function createChief(o){
       onInteract:()=>o.openPanel({type:'chief',id:'chief'})});
     registered={key,obj};
   }
-  let form=null,focus=null;
+  let form=null,focus=null,scroll=null;
   function box(){
     if(form)return form;
     form=document.createElement('form');form.className='of-cos-ask';
-    form.innerHTML=`<label class="of-pk" for="of-cos-q">Ask</label><div class="of-cos-row"><input id="of-cos-q" maxlength="2000" autocomplete="off" placeholder="What's in UAT? Make a card for…"><button type="submit" class="txt primary">Ask</button></div>`;
-    form.addEventListener('submit',e=>{e.preventDefault();const i=form.querySelector('input'),t=i.value;i.value='';send(t).catch(err=>{if(!i.value)i.value=t;o.toast(err.message,true)})});
+    form.innerHTML=`<div class="of-cos-row"><textarea id="of-cos-q" rows="2" maxlength="2000" aria-label="Message Chief of Staff" placeholder="Ask a question or hand off work…"></textarea><button type="submit" class="txt primary" aria-label="Send message">${icon('send',14)} Send</button></div>`;
+    const input=form.querySelector('textarea');
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();form.requestSubmit()}
+    });
+    form.addEventListener('submit',e=>{
+      e.preventDefault();
+      const text=input.value;if(!text.trim())return;
+      input.value='';
+      send(text).catch(err=>{if(!input.value)input.value=text;o.toast(err.message,true)});
+    });
     return form;
   }
   function panelHtml(){
     const c=mine(),me=o.meKey();
-    const head=`<div class="of-ph"><span class="of-dot" style="background:#d4a017"></span><b>${esc(CHIEF_NAME)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close">${icon('x')}</button></div>`;
-    if(!c)return head+`<div class="of-pb"><p class="of-note">No Chief of Staff is reporting for you. Run <code>flow office bridge</code> on a computer with T3 Code: it keeps one Chief of Staff thread there for you.</p></div>`;
-    const state=c.status==='running'&&c.live?chiefBubble(c.live):pending?ON_IT:c.status==='running'?'Working…':c.status==='waiting'?'Waiting for you in T3 Code':'Listening';
+    const head=`<div class="of-ph of-cos-head"><span class="of-cos-icon" aria-hidden="true">${icon('bot',17)}</span><b>${esc(CHIEF_NAME)}</b><span class="sp"></span><button type="button" class="ib" data-of="closePanel" aria-label="Close Chief of Staff">${icon('x')}</button></div>`;
+    if(!c)return head+`<div class="of-pb of-cos-offline"><b>Chief of Staff is offline</b><p>Connect Flow to T3 Code to ask about your board, hand off work, and see what needs you.</p>
+      <button type="button" class="txt primary" data-of="connect">Connect your agents</button><p class="of-note">Already connected? Start <code>flow office bridge --conductor</code> on the computer running T3 Code.</p></div>`;
+    const state=c.status==='running'&&c.live?chiefBubble(c.live):pending?ON_IT:c.status==='running'?'Working…':c.status==='waiting'?'Waiting for you in T3 Code':'Ready';
     const waits=waitingOnYou({agents:o.live().get(me)||[],cards:o.cards(),refs:o.refs(),name:o.myName(),nameOf:o.afName});
     const waitHtml=waits.length?`<ul class="of-cos-wait">${waits.slice(0,8).map(w=>w.kind==='agent'
       ?`<li><button type="button" class="txt" data-cos-agent="${esc(w.id)}">${esc(w.title)}</button><span>${esc(w.detail)}</span></li>`
       :`<li>${o.cardId(w.number)?`<button type="button" class="txt" data-cos-card="${esc(w.id)}">#${w.number}</button>`:`#${w.number}`}<span>${esc(w.title)}</span></li>`).join('')}</ul>`
-      :'<p class="of-note">Nothing is waiting on you.</p>';
+      :'';
     const said=(c.transcript||[]).filter(l=>l.role==='user'||l.role==='assistant').slice(-6);
-    const recent=said.length?`<ol class="of-cos-log">${said.map(l=>`<li class="${l.role}"><span class="of-tx-who">${l.role==='user'?'You':'Chief'}${l.at?` · ${esc(time(l.at))}`:''}</span><div>${linked(l.text)}</div></li>`).join('')}</ol>`:'<p class="of-note">Nothing asked yet.</p>';
-    const items=c.can?.includes('model')?modelItems():[],id=currentModel();
-    if(id&&!items.some(i=>i.value===id))items.unshift({value:id,label:c.model||id,group:'Current'});
-    const named=items.find(i=>i.value===id);
-    const modelLabel=named?.label||c.model||'Choose a model';
-    const modelRow=c.can?.includes('model')?`<div class="of-row of-model"><span>Model</span><button type="button" class="pk-btn on" data-picker="cos-model" aria-haspopup="listbox" aria-expanded="false"><span class="pk-t">${esc(modelLabel)}</span></button></div>`:'';
-    return head+`<div class="of-pb"><div class="of-row"><span>Status</span><b>${esc(state)}</b></div>${c.hostLabel?`<div class="of-row"><span>Where</span><b>${esc(c.hostLabel)}</b></div>`:''}${modelRow}
-      <div class="of-cos-ask-slot"></div><div class="of-pk">Waiting on you</div>${waitHtml}<div class="of-pk">Recent</div>${recent}</div>`;
+    const history=c.can?.includes('history')?`<button type="button" class="txt of-cos-history" data-cos-history>Full thread ${icon('arrowR',12)}</button>`:'';
+    const recent=said.length?`<ol class="of-cos-log">${said.map(l=>`<li class="${l.role}"><span class="of-tx-who">${l.role==='user'?'You':'Chief'}${l.at?` · ${esc(time(l.at))}`:''}</span><div>${linked(l.text)}</div></li>`).join('')}</ol>`:
+      `<div class="of-cos-starters"><p>Ask about your board or hand off a task.</p><button type="button" class="txt" data-cos-starter="What’s waiting on me in UAT?">What’s in UAT?</button><button type="button" class="txt" data-cos-starter="What’s blocked right now?">What’s blocked?</button></div>`;
+    const items=modelItems(),id=currentModel(),named=items.find(i=>i.value===id);
+    const provider=named?.group||c.modelProviders?.find(p=>id.startsWith(p.id+':'))?.label||id.split(':')[0];
+    const modelLabel=named?.label||(id&&id!==c.modelId?id.split(':').slice(1).join(':'):c.model)||'Project default';
+    const modelValue=[provider,modelLabel].filter(Boolean).join(' · ');
+    const modelRow=`<div class="of-cos-model"><span class="of-cos-k">Model for next message</span>${c.can?.includes('model')?
+      `<button type="button" class="pk-btn on" data-picker="cos-model" aria-label="Change model for next message: ${esc(modelValue)}" aria-haspopup="listbox" aria-expanded="${!!o.modelPickerOpen?.()}" aria-disabled="${!!switching}"><span class="pk-t">${esc(modelValue)}</span>${icon('chevD',12)}</button>`:`<b>${esc(modelValue)}</b>`}
+      ${modelNotice?`<small class="of-cos-model-note${modelError?' bad':''}" role="status">${esc(modelNotice)}</small>`:''}</div>`;
+    return head+`<div class="of-cos-meta">${modelRow}<div class="of-cos-state" title="${esc(c.hostLabel||'')}" data-state="${c.status}"><i></i><span>${esc(state)}</span></div></div>
+      <div class="of-cos-body">${waitHtml?`<section><h3>Waiting on you <span>${waits.length}</span></h3>${waitHtml}</section>`:''}
+      <section><div class="of-cos-section"><h3>Conversation</h3>${history}</div>${recent}</section></div>
+      <div class="of-cos-ask-slot"></div>`;
   }
-  let panelEl=null;
-  function before(panel){const el=document.activeElement;focus=form&&form.contains(el)?{start:el.selectionStart,end:el.selectionEnd}:null;panelEl=panel}
+  const focusable='[data-picker="cos-model"],[data-cos-history],[data-cos-starter],[data-cos-card],[data-cos-agent],[data-of="closePanel"],[data-of="connect"]';
+  function before(panel){
+    const el=document.activeElement,body=panel.querySelector('.of-cos-body');
+    scroll=body?{top:body.scrollTop,end:body.scrollHeight-body.scrollTop-body.clientHeight<24}:null;
+    focus=panel.contains(el)?el:null;
+  }
   function attach(panel){
-    panelEl=panel;const slot=panel.querySelector('.of-cos-ask-slot');if(!slot)return;
-    const f=box();slot.replaceWith(f);
-    if(focus){const i=f.querySelector('input');i.focus({preventScroll:true});i.setSelectionRange(focus.start,focus.end)}
+    const slot=panel.querySelector('.of-cos-ask-slot'),body=panel.querySelector('.of-cos-body');
+    if(slot){
+      const f=box();slot.replaceWith(f);
+      f.querySelector('[type="submit"]').disabled=!!switching||!mine()?.can?.includes('message');
+      body.scrollTop=!scroll||scroll.end?body.scrollHeight:scroll.top;
+    }
+    if(form?.contains(focus)&&focus.isConnected){focus.focus({preventScroll:true})}
+    else if(focus?.matches(focusable)){
+      const restored=[...panel.querySelectorAll(focusable)].find(el=>el.outerHTML===focus.outerHTML||
+        el.matches('[data-picker="cos-model"]')&&focus.matches('[data-picker="cos-model"]'));
+      (restored||panel.querySelector('[data-of="closePanel"]'))?.focus({preventScroll:true});
+    }
     focus=null;
   }
   // The open panel is redrawn by office.js (refreshPanel); paint asks for that when something here changed.
-  const paint=()=>o.repaint?.();
+  const launch=o.root?.querySelector('[data-of="chief"]');
+  function paint(){
+    if(launch){
+      const c=mine(),state=c?.status==='running'?'Working':c?.status==='waiting'?'Waiting':c?'Ready':'Offline';
+      const label=`Chief of Staff · ${state}`;
+      if(launch.getAttribute('aria-label')!==label){launch.setAttribute('aria-label',label);launch.dataset.tip=label;launch.dataset.state=state.toLowerCase()}
+    }
+    o.repaint?.();
+  }
 
   // Card links in bubbles, the log and the panel; your waiting agents in the panel.
-  const onClick=async e=>{
+  const onClick=e=>{
     const card=e.target.closest?.('[data-cos-card]');if(card){e.preventDefault();e.stopPropagation();o.openCard(card.dataset.cosCard);return}
     const agent=e.target.closest?.('[data-cos-agent]');if(agent){e.preventDefault();e.stopPropagation();o.showAgent(o.meKey(),agent.dataset.cosAgent);return}
+    const starter=e.target.closest?.('[data-cos-starter]');if(starter){const input=box().querySelector('textarea');if(!input.value.trim())input.value=starter.dataset.cosStarter;input.focus();return}
+    if(e.target.closest?.('[data-cos-history]')){const c=mine();if(c)o.history?.(c);return}
     const model=e.target.closest?.('[data-picker="cos-model"]');if(!model)return;
     e.preventDefault();e.stopPropagation();
+    if(switching)return;
     const id=currentModel(),items=modelItems();
     if(id&&!items.some(i=>i.value===id))items.unshift({value:id,label:mine()?.model||id,group:'Current'});
-    const {openPicker}=await import('./ui.js');
-    openPicker(model,{multi:false,items,selected:id?[id]:[],label:'Model',placeholder:'Search models',empty:items.length?'No matches':'No models reported yet',
+    o.openPicker?.(model,{multi:false,items,selected:id?[id]:[],label:'Model',searchGroups:true,placeholder:'Search models or providers',empty:items.length?'No matches':'No models reported yet',
       onChange:([next])=>choose(next)});
   };
   o.root?.addEventListener('click',onClick,true);
   try{unregister=officeChat.registerChannel(chiefChannel(text=>send(text)))}catch(e){console.error('office chief: /cos channel',e)}
+  paint();
 
   return {
-    update,agents,send,panelHtml,before,attach,
+    update,agents,send,panelHtml,before,attach,modelResult,figureFor:member=>figures.get(member),
     frame(){
       if(disposed)return;
       const t=performance.now();if(t<checkAt)return;checkAt=t+400;
       register();keepBubble();keepDots();
     },
     debug:()=>({figures:Object.fromEntries(figures),pending:!!pending,bubble:bubble?{kind:bubble.kind,html:bubble.html}:null,dots:[...dots.keys()]}),
-    dispose(){disposed=true;dropBubble();for(const d of dots.values())o.unlabel(d.l);dots.clear();o.interact?.unregister('chief');for(const key of figures.values())o.npc?.setFollow(key,null);o.root?.removeEventListener('click',onClick,true);unregister?.();unregister=null},
+    dispose(){disposed=true;clearTimeout(switchTimer);switching=timedOut=null;dropBubble();for(const d of dots.values())o.unlabel(d.l);dots.clear();o.interact?.unregister('chief');for(const key of figures.values())o.npc?.setFollow(key,null);o.root?.removeEventListener('click',onClick,true);unregister?.();unregister=null},
   };
 }

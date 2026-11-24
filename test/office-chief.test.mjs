@@ -5,14 +5,15 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createBrain} from '../public/office-brain.js';
 import {behind,FOLLOW_BACK,FOLLOW_SIDE} from '../public/office-npc.js';
-import {chiefAgent,chiefFigures,chiefChannel,conductorOf,createMentions,esc,replyHtml,replySig,waitingOnYou,CHIEF_COLOR} from '../public/office-chief-core.js';
+import {chiefAgent,chiefFigures,chiefChannel,chiefModelItems,conductorOf,createMentions,esc,replyHtml,replySig,waitingOnYou,CHIEF_COLOR} from '../public/office-chief-core.js';
+import {mascotGeometry,mascotKind} from '../public/office-mascots.js';
 import {chatPrefix,chatChannel} from '../public/office-chat.js';
 import {createChief} from '../public/office-chief.js';
 
 const base={status:'idle',kind:'',card:null,ownerHere:false,gone:false,arrived:true,partner:'',wander:true,board:true,still:false};
 const step=(b,t,over={})=>b.update(t,{...base,...over});
 
-test('follow: an idle or working Chief walks after its person, jogs when they are far, and goes home when they leave or meet',()=>{
+test('follow: an idle or working Chief walks after its person, jogs when they are far, and goes home when they leave',()=>{
   const b=createBrain('af:chief',{now:0});
   let it=step(b,0);assert.equal(it.state,'idle');
   it=step(b,0.1,{follow:true});
@@ -20,7 +21,7 @@ test('follow: an idle or working Chief walks after its person, jogs when they ar
   const rev=it.rev;
   it=step(b,0.2,{follow:true,far:true});assert.equal(it.pace,'jog','far ahead: it jogs');assert.equal(it.rev,rev,'the same goal: no new path');
   it=step(b,0.3,{follow:true});assert.equal(it.pace,'walk');
-  // They left the office (or walked into the meeting room): follow is false and it goes back to its desk.
+  // They left the office: follow is false and it goes back to its desk.
   it=step(b,0.4,{follow:false});assert.equal(it.state,'idle');assert.equal(it.goal,'home');
   // A working one follows too, and sits down at its desk again afterwards.
   const w=createBrain('af:chief2',{now:0});
@@ -29,14 +30,64 @@ test('follow: an idle or working Chief walks after its person, jogs when they ar
   const back=step(w,2,{status:'running',follow:false});assert.deepEqual([back.state,back.goal,back.pose],['work','home','sit']);
 });
 
-test('follow: waiting on its person beats following (it hops beside them); a paused one never moves; leaving still wins',()=>{
+test('follow: a Chief keeps following while waiting on its person; leaving still wins',()=>{
   const b=createBrain('cos',{now:0});
   step(b,0,{follow:true});
-  let it=step(b,1,{follow:true,status:'waiting',ownerHere:true});assert.deepEqual([it.state,it.goal],['summon','owner']);
+  let it=step(b,1,{follow:true,status:'waiting',ownerHere:true});assert.deepEqual([it.state,it.goal],['follow','follow']);
   it=step(b,2,{follow:true,status:'idle'});assert.equal(it.state,'follow','answered: back to following');
   const still=createBrain('still',{now:0});
   assert.notEqual(step(still,0,{follow:true,still:true}).state,'follow');
   it=step(b,3,{follow:true,gone:true});assert.equal(it.state,'leave','a conductor that stopped reporting walks out');
+});
+
+test('Cursor Auto gets a rover and a named model keeps its own mascot',()=>{
+  assert.equal(mascotKind('cursor','Cursor Auto'),'cursor');
+  assert.equal(mascotKind('cursor','Sonnet 5.5'),'claude');
+  assert.notEqual(mascotGeometry('cursor'),mascotGeometry('orb'));
+  assert.notEqual(mascotGeometry('chief'),mascotGeometry('cursor'));
+});
+
+test('the Chief model picker uses the project provider accounts and keeps older bridges compatible',()=>{
+  const providers=[{id:'cursor_personal',label:'Cursor Personal',models:[{id:'cursor_personal:default',label:'Auto'}]}];
+  const runners=[{models:[
+    {id:'cursor_personal:grok',label:'Cursor Personal · Grok',billing:'included'},
+    {id:'cursor_work:grok',label:'Grok'},
+  ]}];
+  assert.deepEqual(chiefModelItems(providers,runners),[
+    {value:'cursor_personal:default',label:'Auto',group:'Cursor Personal',sub:''},
+    {value:'cursor_personal:grok',label:'Grok',group:'Cursor Personal',sub:'Included'},
+  ]);
+  assert.deepEqual(chiefModelItems([],runners),[]);
+  assert.equal(chiefModelItems(undefined,runners).length,2);
+});
+
+test('a Chief model switch reconciles its T3 result after a UI timeout and before the request returns',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const entry={id:'chief',role:'conductor',source:'desk',status:'idle',can:['message','model'],modelId:'codex:one'};
+  const live=new Map([['me',[entry]]]);
+  let click,select,resolvePost;
+  const toast=[];
+  const chief=createChief({root:{querySelector:()=>null,addEventListener:(_,fn)=>{click=fn},removeEventListener(){}},
+    meKey:()=>'me',live:()=>live,models:()=>[{models:[{id:'codex:one',label:'One'},{id:'codex:two',label:'Two'}]}],
+    cards:()=>[],refs:()=>[],myName:()=>'',openPicker:(_,options)=>{select=options.onChange},
+    post:()=>new Promise(resolve=>{resolvePost=resolve}),toast:(...args)=>toast.push(args)});
+  try{
+    click({target:{closest:s=>s==='[data-picker="cos-model"]'?{}:null},preventDefault(){},stopPropagation(){}});
+    const choosing=select(['codex:two']);
+    assert.match(chief.panelHtml(),/Waiting for T3 Code to confirm/);
+    assert.match(chief.panelHtml(),/codex · One/);
+    await assert.rejects(chief.send('hello'),/finish switching models/);
+    t.mock.timers.tick(45000);
+    assert.match(chief.panelHtml(),/hasn’t confirmed the switch/);
+    const event={kind:'model',agentId:'chief',source:'desk',text:'codex:two',id:'action',result:{ok:true}};
+    assert.equal(chief.modelResult({...event,id:'previous',result:{ok:false}}),true);
+    assert.equal(chief.modelResult(event),true);
+    resolvePost({id:'action'});
+    await choosing;
+    assert.match(chief.panelHtml(),/codex · Two/);
+    assert.equal(toast[0][1],true);
+    assert.deepEqual(toast[1],['Model updated for the next message.',false]);
+  }finally{chief.dispose()}
 });
 
 test('follow: a card picked up while following is not fetched afterwards (old news)',()=>{
