@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveScope,openedProjection,applyRecipientEdit} from '../lib/sharing-core.mjs';
-import {privateRecords,withoutPrivateRecords} from '../lib/workspace-privacy.mjs';
+import {privateRecords,withoutPrivateRecords,keepPrivateFlags} from '../lib/workspace-privacy.mjs';
 import {canSeeAgent,canSeeCard} from '../lib/office-seats.mjs';
 
 test('Only me overrides whole and scoped shares and hides related records',()=>{
@@ -33,4 +33,13 @@ test('Only me overrides whole and scoped shares and hides related records',()=>{
   assert.equal(canSeeAgent(access,db.agentflow.agents[0]),true);
   assert.equal(withoutPrivateRecords(db).projects.length,1);
   assert.equal(db.projects.length,3);
+});
+
+test('legacy workspace saves preserve privacy unless they explicitly clear it',()=>{
+  const before={projects:[{id:'private',onlyMe:true},{id:'clear',onlyMe:true}],
+    charts:[{nodes:[{id:'card',onlyMe:true}]}]};
+  const after={projects:[{id:'private'},{id:'clear',onlyMe:false}],charts:[{nodes:[{id:'card'}]}]};
+  keepPrivateFlags(before,after);
+  assert.deepEqual(after.projects,[{id:'private',onlyMe:true},{id:'clear',onlyMe:false}]);
+  assert.equal(after.charts[0].nodes[0].onlyMe,true);
 });

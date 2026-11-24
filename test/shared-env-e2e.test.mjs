@@ -244,10 +244,16 @@ test('Only me updates an open whole-workspace share and its yacht roster',async 
   assert.ok(mine.projects.find(p=>p.id==='p1').onlyMe);
   assert.ok(mine.agentflow.agents.some(a=>a.id==='bot'));
 
+  // Simulate an older client saving a project and node without the privacy field.
+  delete mine.projects.find(p=>p.id==='p1').onlyMe;
+  delete mine.charts[0].nodes.find(n=>n.id==='studio').onlyMe;
   mine.environment.visibility='public';
   mine.devops.cards.pop();
   const current=(await owner('GET','/api/workspace?env=default-workspace')).data;
   assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:current.rev,data:mine})).status,200);
+  const updated=await ownerData();
+  assert.equal(updated.projects.find(p=>p.id==='p1').onlyMe,true);
+  assert.equal(updated.charts[0].nodes.find(n=>n.id==='studio').onlyMe,true);
   const publicRead=await eve('GET','/api/workspace?env=default-workspace');
   assert.equal(publicRead.status,200);
   assert.deepEqual(publicRead.data.data.projects,[]);

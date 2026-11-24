@@ -755,7 +755,7 @@ pane.addEventListener('input',e=>{
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='node-only-me'){const n=node(selected);if(n&&!linkOf(n)&&canEdit(n))change(()=>{if(e.target.checked)n.onlyMe=true;else delete n.onlyMe});return}if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='node-only-me'){const n=node(selected);if(n&&!linkOf(n)&&canEdit(n)){n.onlyMe??=false;change(()=>{n.onlyMe=e.target.checked})}return}if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
 pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------

@@ -533,7 +533,7 @@ function createEditorHandlers({root,query,id,select,refresh,openCard,openLink,du
     const t=e.target;
     if(detailFieldId(t)==='ti-proj')addTag(t);
     if(detailFieldId(t)==='ti-release'){const i=item(id());if(i&&!locked(i))change(()=>i.release=t.value)}
-    if(t.dataset.pprivate){const p=project(t.dataset.pprivate);if(p&&!linkOf(p)&&canEdit(p))change(()=>{if(t.checked)p.onlyMe=true;else delete p.onlyMe})}
+    if(t.dataset.pprivate){const p=project(t.dataset.pprivate);if(p&&!linkOf(p)&&canEdit(p)){p.onlyMe??=false;change(()=>{p.onlyMe=t.checked})}}
     if(t.dataset.punder){const p=project(t.dataset.punder);if(p&&!linkOf(p))change(()=>p.entity=t.value)}
     if(t.dataset.prepos){const p=project(t.dataset.prepos),r=cleanRepos(t.value.split(/[,\s]+/));if(p&&!linkOf(p)&&r.join()!==(p.repos||[]).join())change(()=>{if(r.length)p.repos=r;else delete p.repos})}
   }

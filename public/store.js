@@ -41,14 +41,14 @@ export function cleanNode(n){
   if(email)n.email=email;else delete n.email;
   if(person&&validOpidUser(n.opidUser))n.opidUser=n.opidUser;else delete n.opidUser;
   if(person&&n.opidLinked===true)n.opidLinked=true;else delete n.opidLinked;
-  if(n.onlyMe!==true)delete n.onlyMe;
+  if(typeof n.onlyMe!=='boolean')delete n.onlyMe;
   return n;
 }
 // A project may sit under a chart card (entity or area) via its node id.
 // repos: the code repositories that belong to a project (names, owner/name or git remotes; the 3D office).
 export const REPOS_MAX=20,REPO_MAX=300;
 export const cleanRepos=r=>Array.isArray(r)?[...new Set(r.filter(x=>typeof x==='string').map(x=>x.trim().slice(0,REPO_MAX)).filter(Boolean))].slice(0,REPOS_MAX):[];
-export function cleanProject(p,i=0){if(!p||typeof p.id!=='string'||typeof p.name!=='string')return null;const repos=cleanRepos(p.repos);return {id:p.id,name:p.name.slice(0,80),color:COLOR.test(p.color)?p.color:PALETTE[i%PALETTE.length],entity:typeof p.entity==='string'?p.entity:'',...(repos.length?{repos}:{}),...(p.onlyMe===true?{onlyMe:true}:{})}}
+export function cleanProject(p,i=0){if(!p||typeof p.id!=='string'||typeof p.name!=='string')return null;const repos=cleanRepos(p.repos);return {id:p.id,name:p.name.slice(0,80),color:COLOR.test(p.color)?p.color:PALETTE[i%PALETTE.length],entity:typeof p.entity==='string'?p.entity:'',...(repos.length?{repos}:{}),...(typeof p.onlyMe==='boolean'?{onlyMe:p.onlyMe}:{})}}
 export function cleanItem(i,projects){
   // start may be empty: an unscheduled (backlog) item that only shows on the Board and List.
   if(!i||typeof i.id!=='string'||typeof i.title!=='string'||!(DATE.test(i.start)||i.start===''))return null;
