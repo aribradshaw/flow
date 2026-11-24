@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import * as core from '../public/chat-core.js';
-import {chatRoutes,cleanThread,cleanConversations} from '../lib/chat.mjs';
+import {chatRoutes,cleanThread,cleanConversations,friendHandles} from '../lib/chat.mjs';
 
 const ORIGIN='https://flow.example.test';
 const CARD={env:'env-1',kind:'card',id:'card-1'},NODE={env:'env-1',kind:'node',id:'n-1'};
@@ -104,6 +104,16 @@ test('summaries: what a card bubble shows, from data the viewer has',()=>{
   assert.deepEqual(s.labels,[{name:'Urgent',color:['#fdd5d2','#8e1f17']},{name:'Odd',color:['#e8e9eb','#3f4247']}]);
   assert.deepEqual(s.project,{name:'Lantern',color:'#3b7dd8'});
   assert.deepEqual(s.assignees.map(a=>[a.name,!!a.image]),[['Ana Example',true],['Bo',false]]);
+  {const d=db();d.charts[0].nodes.push({id:'joe',type:'person',name:'Joe Example',email:'joe@example.test'});
+    d.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Example',opidLinked:true}];
+    d.devops.cards[0].assignees=[{node:'@joe@example.test',role:'developer'}];
+    const card=core.summarize(d,{kind:'card',id:'card-1'});
+    assert.deepEqual(card.assignees.map(a=>[a.id,a.name]),[['@joe@example.test','Joe Example']]);
+    const sharedOnly=db();sharedOnly.charts[0].nodes=[{id:'sh.s1.joe',type:'person',name:'Joseph Example',email:'joe@example.test'}];
+    sharedOnly.shares[0].members=[{id:'@joe@example.test',email:'joe@example.test',name:'Joseph Example'}];
+    sharedOnly.devops.cards[0].assignees=[{node:'@joe@example.test',role:'developer'}];
+    assert.equal(core.summarize(sharedOnly,{kind:'card',id:'card-1'}).assignees[0].name,'Joseph Example','a shared card with the same email is not the viewer\'s own');
+  }
   assert.equal(s.due,'2026-12-01');assert.equal(s.points,3);assert.equal(s.actual,null);
   {const d=db();d.devops.cards[0].actual=5;assert.deepEqual([core.summarize(d,CARD).points,core.summarize(d,CARD).actual],[3,5])}
   // Default column names when the board has none of its own; a project colour that is not a colour is dropped.
@@ -140,9 +150,9 @@ test('OneProfileID answers are reduced to known fields',()=>{
 
 // ---------- routes, with a fake OneProfileID ----------
 const ID1='0b9e7c4e-2f7a-4c1e-9a33-5b1d2c3e4f50',ID2='1c8d6b3a-1e69-4b0d-8a22-4a0c1b2d3e4f';
-function harness({mode='opid',user={id:'u-ana',email:'ana@example.test',name:'Ana'},answer}={}){
+function harness({mode='opid',user={id:'u-ana',email:'ana@example.test',name:'Ana'},answer,officeDirect,chat={}}={}){
   const calls=[];
-  const routes=chatRoutes({mode,userFor:async(req,{touch})=>{calls.push(['userFor',touch]);return typeof user==='function'?user(req):user},
+  const routes=chatRoutes({mode,officeDirect,...chat,userFor:async(req,{touch})=>{calls.push(['userFor',touch]);return typeof user==='function'?user(req):user},
     call:async(req,method,args)=>{calls.push([method,args,req.headers.cookie||'']);return answer?answer(method,args):{ok:true,status:200,payload:{},cookies:[]}},
     out:l=>l,trusted:req=>req.headers.origin!=='https://evil.example.test',
     readJson:(req,res,done)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{let v;try{v=JSON.parse(b)}catch{res.writeHead(400);res.end('{}');return}done(v)})},
@@ -251,4 +261,86 @@ test('routes: not friends, rate limits and outages come back as clean errors',as
     r=await h.go('POST','/api/chat/read',{username:'bo-example'});assert.equal(r.status,503);assert.match(r.data.error,/Can't reach/);
     r=await h.go('GET','/api/chat/friends');assert.equal(r.status,200);assert.deepEqual(r.data,{friends:[]});
   }finally{h.close()}
+});
+
+test('office Direct maps the recipient by stored OneProfileID account ID to a friend handle, then sends',async()=>{
+  const office={env:'office-one',target:'mabcdefghijkl'},body='Message for a friend';
+  const ANA='aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',BO='bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',CY='cccccccc-3333-4333-8333-cccccccccccc';
+  const stored={'bo@example.test':BO,'cy@example.test':CY};
+  let clock=1_000_000,recipient={id:'session-id-ignored',email:'bo@example.test',name:'Bo'},sendAnswer={ok:true,status:201,cookies:['oneprofileid.session_token=fresh-send'],payload:{}};
+  let friends={friends:[{username:'bo-example',name:'Bo',photo:null,userId:BO},{username:'dee-example',name:'Dee',photo:null}]};
+  const h=harness({user:{id:ANA,email:'ana@example.test',name:'Ana'},
+    answer:method=>method==='listFriends'?{ok:true,status:200,cookies:['oneprofileid.session_token=fresh-list'],payload:friends}:sendAnswer,
+    officeDirect:async (user,dest,text,deliver)=>{assert.equal(user.id,ANA);assert.deepEqual(dest,office);return {ok:true,saved:await deliver(recipient,text)}},
+    chat:{opidIdFor:async u=>stored[u.email]||'',now:()=>clock}});
+  const sends=()=>h.calls.filter(c=>c[0]==='sendMessage'),lists=()=>h.calls.filter(c=>c[0]==='listFriends');
+  try{
+    // Bo is a friend and a Flow member: the message is sent by handle, with Ana's own cookie.
+    const first=await h.go('POST','/api/chat/send',{office,body});
+    assert.deepEqual(first.data,{ok:true,saved:true});
+    assert.deepEqual(sends().at(-1),['sendMessage',['bo-example',body],'oneprofileid.session_token=t-ana']);
+    assert.deepEqual(lists().at(-1),['listFriends',[],'oneprofileid.session_token=t-ana']);
+    assert.deepEqual(first.cookies,['oneprofileid.session_token=fresh-list','oneprofileid.session_token=fresh-send']);
+    // The friends list is cached: a second send asks OneProfileID only to send.
+    clock+=30_000;
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:true});
+    assert.equal(lists().length,1);assert.equal(sends().length,2);
+    // After the cache expires it asks again.
+    clock+=31_000;
+    await h.go('POST','/api/chat/send',{office,body});
+    assert.equal(lists().length,2);
+    // Cy is a Flow member but not a friend: no send at all, an unsaved office DM.
+    recipient={email:'cy@example.test',name:'Cy'};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    assert.equal(sends().length,3);
+    // A miss within FRIENDS_RETRY_MS uses the cache; after it, the list is fetched again (a new friendship).
+    await h.go('POST','/api/chat/send',{office,body});assert.equal(lists().length,2);
+    clock+=11_000;friends={friends:[...friends.friends,{username:'cy-example',name:'Cy',photo:null,userId:CY}]};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:true});
+    assert.equal(lists().length,3);assert.deepEqual(sends().at(-1)[1],['cy-example',body]);
+    // Unknown account ID (never signed in through OneProfileID): no lookup, no send.
+    recipient={email:'new@example.test',name:'New'};
+    const before=h.calls.length;
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    assert.equal(h.calls.slice(before).some(c=>c[0]==='sendMessage'||c[0]==='listFriends'),false);
+    // OneProfileID says not friends after all: unsaved, and the cached list is dropped.
+    recipient={email:'bo@example.test',name:'Bo'};sendAnswer={ok:false,status:403,payload:{code:'not_friends'}};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    sendAnswer={ok:true,status:201,cookies:[],payload:{}};
+    await h.go('POST','/api/chat/send',{office,body});assert.equal(lists().length,4);
+    // An outage while sending is an error, not a silent fallback.
+    sendAnswer={ok:false,status:503};
+    assert.equal((await h.go('POST','/api/chat/send',{office,body})).status,503);
+    assert.equal((await h.go('POST','/api/chat/send',{office,body,username:'somebody-else'})).status,400);
+    // The browser never sees account IDs or emails from any of this.
+    const leak=new RegExp([ANA,BO,CY,'@example\\.test'].join('|'),'i');
+    for(const r of [first,await h.go('GET','/api/chat/friends')])assert.doesNotMatch(JSON.stringify(r.data),leak);
+  }finally{h.close()}
+});
+
+test('office Direct falls back when OneProfileID friends cannot be read, and for the sender themself',async()=>{
+  const office={env:'office-one',target:'mabcdefghijkl'},body='hi';
+  const ANA='aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+  let list={ok:false,status:403,payload:{error:'Messages are not enabled for this application'}},recipient={email:'bo@example.test'};
+  const h=harness({user:{id:ANA,email:'ana@example.test'},answer:m=>m==='listFriends'?list:{ok:true,status:201,payload:{}},
+    officeDirect:async (u,d,text,deliver)=>({ok:true,saved:await deliver(recipient,text)}),
+    chat:{opidIdFor:async u=>u.email==='ana@example.test'?ANA:'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'}});
+  try{
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    recipient={email:'ana@example.test'};
+    assert.deepEqual((await h.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    assert.equal(h.calls.some(c=>c[0]==='sendMessage'),false);
+  }finally{h.close()}
+  // Local mode never asks OneProfileID.
+  const local=harness({mode:'local',user:{id:'local',email:'owner@example.test',local:true},officeDirect:async (u,d,text,deliver)=>({ok:true,saved:await deliver({email:'bo@example.test'},text)})});
+  try{
+    assert.deepEqual((await local.go('POST','/api/chat/send',{office,body})).data,{ok:true,saved:false});
+    assert.equal(local.calls.some(c=>c[0]==='listFriends'||c[0]==='sendMessage'),false);
+  }finally{local.close()}
+});
+
+test('friendHandles keeps only account ID + handle pairs that look right',()=>{
+  const m=friendHandles({friends:[{username:'bo-example',userId:'BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB'},{username:'Bad Name',userId:'cccccccc-3333-4333-8333-cccccccccccc'},{username:'dee-example',userId:'dee@example.test'},{username:'eve-example'},null]});
+  assert.deepEqual([...m],[['bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb','bo-example']]);
+  assert.equal(friendHandles(null).size,0);
 });

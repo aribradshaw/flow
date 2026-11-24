@@ -36,6 +36,7 @@
 // projects, cards and items point at Flow projects, DevOps cards and timeline items (deadlines).
 // Flow records the design. Running agents is left to outside runners (T3, a home server, cron),
 // which read it through the API or MCP; agentBrief() and workflowBrief() give them a briefing.
+import {isSnoozed} from './devops-core.js';
 
 export const AGENT_KINDS={agent:'AI agent',human:'Human',team:'Team',automation:'Automation'};
 export const AGENT_STATUS={draft:'Draft',active:'Active',paused:'Paused',retired:'Retired'};
@@ -83,6 +84,36 @@ export function personNamed(people,name){
   for(const p of people||[])if(normName(p?.name)===k){if(hit&&hit.id!==p.id)return null;hit=p}
   return hit;
 }
+// How a share member (@email) is shown in this workspace. When one of the viewer's own person cards
+// has that email, the member is shown under that card's name. The id stays @email, so the assignment
+// is unchanged, and matching the email never links either card to an account. Shared (sh.) and
+// combined (cx.) cards are not the viewer's own. people: person cards the viewer can see.
+export function shownMember(member,people){
+  if(!member||typeof member!=='object')return member;
+  const email=normEmail(member.email||(typeof member.id==='string'&&member.id.startsWith('@')?member.id.slice(1):''));
+  let card=null;
+  if(email)for(const p of people||[]){
+    if(p?.type!=='person'||typeof p.id!=='string'||p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    if(normEmail(p.email)===email){card=p;break}
+  }
+  const out={...member,type:'person'};
+  if(card?.name)out.name=card.name;
+  return out;
+}
+// @email ids to add when a filter selects the viewer's own person card, so that card and the share
+// member with the same email count as one person. memberIds: the @ ids that exist. Shared and
+// combined cards are not the viewer's own, and this never changes who is stored on a card.
+export function memberAliasIds(ids,people,memberIds){
+  const have=new Set(memberIds||[]);if(!have.size||!ids?.length)return [];
+  const emailOf=new Map();
+  for(const p of people||[]){
+    if(p?.type!=='person'||typeof p.id!=='string'||p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    const email=normEmail(p.email);if(email)emailOf.set(p.id,email);
+  }
+  const extra=[];
+  for(const id of ids){const email=emailOf.get(id);if(!email)continue;const mid='@'+email;if(have.has(mid))extra.push(mid)}
+  return extra;
+}
 // Is person card `n` the signed-in user `me` ({email, name})? By email when the card has one;
 // otherwise when it is the only person in `people` with their name and no card carries their email.
 export function isSessionPerson(n,people,me){
@@ -128,8 +159,12 @@ export function cleanAgentflow(d,db={}){
       }),
       ...links(w),created:iso(w.created,now),updated:iso(w.updated,now)};
   });
-  return {agents,workflows,runners:cleanRunners(d.runners)};
+  return {agents,workflows,runners:cleanRunners(d.runners),...cleanOffice(d.office)};
 }
+// The 3D office's settings: {world} is the world everyone in this environment's office stands in
+// (docs/concepts/12-office.md). Stored only when it is not the default, so older saves read the same.
+export const OFFICE_WORLDS={classic:'Office',yacht:'Yacht'};
+export function cleanOffice(o){const world=typeof o?.world==='string'?pick(o.world,OFFICE_WORLDS,'classic'):'classic';return world==='classic'?{}:{office:{world}}}
 // models wins over model; older saves with only model get models=[model]. model mirrors models[0].
 function cleanModels(a){
   const models=strs(Array.isArray(a.models)&&a.models.length?a.models:typeof a.model==='string'?[a.model]:[],LIMITS.agentModels,120);
@@ -249,7 +284,7 @@ const MAKERS=[
   ['openai','OpenAI',/openai|chatgpt|\bgpt|codex|(^|[^a-z0-9])o\d($|[^a-z0-9])/],
   ['google','Google Gemini',/google|gemini|gemma/],
   ['xai','xAI',/\bx-?ai\b|grok/],
-  ['meta','Meta',/meta-llama|llama|(^|\/)meta\//],
+  ['meta','Meta',/meta-llama|llama|(^|\/)meta\/|\bmuse\b/],
   ['qwen','Qwen',/qwen|qwq|alibaba/],
   ['deepseek','DeepSeek',/deepseek/],
   ['mistral','Mistral',/mistral|mixtral|[cd]evstral|codestral|magistral/],
@@ -357,10 +392,12 @@ export function delegate(af,cardId,agentIds){
 // An agent's work queue: open cards delegated to it. Work in progress first, then new requests,
 // then cards waiting on others (Blocked, UAT), then the backlogs; within each, soonest due, then #number.
 export const QUEUE_ORDER=['doing','requests','blocked','uat','must','nice'];
-export function workQueue(db,agentId){
+// A snoozed card (devops-core.js isSnoozed) stays delegated but sits out of the queue until its snooze
+// ends; includeSnoozed keeps it in.
+export function workQueue(db,agentId,{includeSnoozed=false,now=Date.now()}={}){
   const a=agentOf(db.agentflow,agentId);if(!a)return [];
   const ids=new Set(a.cards),rank=c=>{const i=QUEUE_ORDER.indexOf(c.column);return i<0?QUEUE_ORDER.length:i};
-  return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done').sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
+  return (db.devops?.cards||[]).filter(c=>ids.has(c.id)&&c.column!=='done'&&(includeSnoozed||!isSnoozed(c,now))).sort((x,y)=>rank(x)-rank(y)||(x.due||'9999').localeCompare(y.due||'9999')||x.number-y.number);
 }
 
 // ---------- scheduled jobs ----------
@@ -596,7 +633,7 @@ export function filterWorkflows(af,f={}){
 // who it answers to and what Flow work it owns right now.
 const bullets=(xs,empty='None')=>xs.length?xs.map(x=>`- ${x}`).join('\n'):`- ${empty}`;
 const colName=(db,c)=>db.devops?.columns?.find(x=>x.id===c.column)?.name||c.column;
-const cardLine=(db,c)=>`#${c.number} ${c.title} (${colName(db,c)}${c.due?`, due ${c.due}`:''})`;
+const cardLine=(db,c)=>`#${c.number} ${c.title} (${colName(db,c)}${c.due?`, due ${c.due}`:''}${isSnoozed(c)?`, snoozed until ${c.snoozedUntil}`:''})`;
 const itemLine=i=>`${i.title} (${i.kind}${i.start?`, ${i.start}${i.end?` to ${i.end}`:''}`:', unscheduled'}, ${i.status})`;
 function workSection(db,x){
   const w=workFor(db,x);

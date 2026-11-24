@@ -1,0 +1,66 @@
+/* The Chief of Staff in the 3D office (public/office-chief.js): its gold bubble, card links, and its panel. */
+.of-cos-say{display:inline-block;max-width:260px;white-space:normal;padding:6px 10px;border-radius:12px;background:#f6d77a;color:#2a2410;box-shadow:0 2px 8px rgba(0,0,0,.16);font-size:12px;line-height:1.35;position:relative;overflow-wrap:anywhere}
+.of-cos-say::after{content:'';position:absolute;left:50%;bottom:-6px;margin-left:-6px;border:6px solid transparent;border-bottom:0;border-top-color:#f6d77a}
+.of-cos-say.dots{padding:1px 8px 3px;line-height:1;animation:of-cos-dots 1.6s ease-in-out infinite}
+@keyframes of-cos-dots{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.of-cos-say.dots{animation:none}}
+.of-label.cos-bubble button,.of-cos-card{pointer-events:auto}
+.of-cos-card{display:inline;padding:0 3px;border:0;border-radius:4px;background:rgba(122,90,0,.14);color:#6b4d00;font:inherit;font-weight:650;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.of-cos-card:hover,.of-cos-card:focus-visible{background:rgba(122,90,0,.26)}
+.of-line .of-cos-card{color:inherit}
+.of-top .of-chief-launch{display:inline-flex;align-items:center;gap:6px;padding:0 9px;background:#fff5d8;border-color:#efddab;color:#664708;font-weight:700}
+.of-top .of-chief-launch:hover,.of-top .of-chief-launch[aria-expanded=true]{background:#f9e6af;border-color:#e4c87e;color:#4c3404}
+.of-chief-launch[data-state=offline]{filter:saturate(.55)}
+.of-session :is([data-of-replay],.of-decor-btn)>svg{display:none}
+@container (max-width:620px){.of-chief-launch>span{display:none}}
+@media (max-width:480px){
+  .of-top{gap:4px;padding-inline:6px}
+  .of-top .sep{display:none}
+  .of-id,.of-env,.of-top .sel-btn[data-for="of-office"]{min-width:0}
+  .of-env,.of-top .sel-btn[data-for="of-office"]{max-width:25vw}
+  .of-tools{min-width:26px}
+  .of-top .of-connect-link{max-width:28px;padding-inline:5px;text-overflow:clip}
+  .of-top .of-chief-launch,.of-session :is([data-of-replay],.of-decor-btn){padding-inline:6px}
+  .of-session :is([data-of-replay],.of-decor-btn)>span{display:none}
+  .of-session :is([data-of-replay],.of-decor-btn)>svg{display:block}
+}
+
+.of-panel:has(.of-cos-head):not([hidden]){display:flex;flex-direction:column;width:min(400px,calc(100% - 24px));max-height:calc(100% - 70px);overflow:auto;border:1px solid var(--line);border-radius:12px}
+.of-cos-head{flex:none;gap:9px}
+.of-cos-icon{width:30px;height:30px;display:grid;place-items:center;background:#f9edc6;color:#705008;border-radius:8px}
+.of-cos-meta{flex:none;display:grid;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:#fcfaf5}
+.of-cos-k{font-size:11px;font-weight:700;color:var(--muted,#5b6670)}
+.of-cos-model{display:grid;gap:4px;min-width:0}
+.of-cos-model .pk-btn{justify-content:space-between;min-width:0;max-width:none;background:white;text-align:left}
+.of-cos-model .pk-btn[aria-disabled=true]{cursor:progress}
+.of-cos-model .pk-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.of-cos-model-note{font-size:12px;color:var(--muted,#5b6670)}
+.of-cos-model-note.bad{color:#a23829}
+.of-cos-state{display:flex;gap:6px;align-items:baseline;font-size:12px;color:var(--muted,#5b6670);overflow-wrap:anywhere}
+.of-cos-state i{width:7px;height:7px;flex:none;border-radius:50%;background:#668e73}
+.of-cos-state[data-state=running] i{background:#bf8b24}
+.of-cos-state[data-state=waiting] i{background:#bc5a34}
+.of-cos-body{min-height:70px;overflow:auto;overscroll-behavior:contain;padding:12px 14px;display:grid;gap:14px}
+.of-cos-section{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.of-cos-body h3{margin:0;font-size:13px;font-weight:700}
+.of-cos-body h3 span{font-size:11px;color:#705008;background:#f9edc6;padding:2px 6px;border-radius:10px}
+.of-cos-history{display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap}
+.of-cos-starters{display:flex;flex-wrap:wrap;gap:6px}
+.of-cos-starters p{width:100%;margin:3px 0 2px;font-size:13px;color:var(--muted,#5b6670)}
+.of-cos-starters button{font-size:12px}
+.of-cos-ask{padding:10px 14px 12px;border-top:1px solid var(--line);background:white;flex:none}
+.of-cos-row{display:flex;align-items:flex-end;gap:6px}
+.of-cos-row textarea{flex:1;min-width:0;padding:7px 8px;min-height:40px;max-height:125px;resize:vertical;border:1px solid var(--line2,#d8dde3);border-radius:7px;font:inherit;font-size:13px}
+.of-cos-row button{display:inline-flex;align-items:center;gap:5px;min-height:32px}
+.of-cos-wait,.of-cos-log{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:6px;font-size:12.5px}
+.of-cos-wait li{display:flex;gap:6px;align-items:baseline;min-width:0}
+.of-cos-wait li span{color:var(--muted,#5b6670);overflow-wrap:anywhere}
+.of-cos-wait .txt{padding:1px 6px;font-size:12px}
+.of-cos-log li{justify-self:end;max-width:93%;padding:6px 9px;border-radius:8px;background:var(--panel2,#f3f5f6)}
+.of-cos-log li.assistant{justify-self:start;background:#fbf1d3}
+.of-cos-log li div{white-space:pre-wrap;overflow-wrap:anywhere}
+.of-cos-offline p{margin:6px 0 10px;font-size:13px}
+.of-cos-offline .of-note{margin:10px 0 0}
+.of-tag.cursor-auto{display:inline-flex;align-items:center;gap:3px}
+.of-tag.cursor-auto span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.of-auto-tag{flex:none;font-size:10px;font-weight:650;color:#19232f;background:#e5ecf3;border-radius:4px;padding:0 4px}

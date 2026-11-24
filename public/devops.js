@@ -5,29 +5,36 @@ import {createSortable,settle,bump} from './drag.js';
 import {matches,keyLabel} from './shortcuts.js';
 import {openMenu} from './menu.js';
 import {getPref,setPref} from './prefs.js';
-import {detailModal,ask} from './modal.js';
+import {detailModal,paintDetail,detailFieldId,ask,askTime} from './modal.js';
 import {store,change,checkpoint,commit,save,step} from './store.js';
-import {agentsForCard,delegate} from './agentflow-core.js';
-import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList} from './devops-core.js';
+import {agentsForCard,delegate,shownMember,memberAliasIds} from './agentflow-core.js';
+import {NEW_COLUMN,BACKLOG,COLUMN_INFO,ROLES,LINK_KINDS,SECTIONS,colorOf,newCard,moveCard,gateFor,filterCards,entityProjects,dueTone,isOpen,initials,memberColor,SORTS,sortKey,ptsText,sortCards,priorityLabels,withPriority,moveTargets,capList,isSnoozed,nextWake,snoozePresets,wakeText} from './devops-core.js';
 import {currentEnv,refresh} from './sync.js';
-import {linkOf,canEdit,locked,lockedMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {linkOf,canEdit,locked,lockedMsg,ownerMsg,sharedBadge,sharedChip,sharedNote,sameSource,members,historyHtml,loadHistory,postComment,clashHtml,clashClick} from './share.js';
+import {isForeign,envOf} from './combined-core.js';
+import {createLoan} from './view-loan.js';
+import {combinedLegend,combinedMeta,envName} from './combined.js';
 
 // DevOps tab: a card board. Data rules live in devops-core.js; this module draws the
 // board, its filters and the card panel (in the shared #inspector), and handles drag and gates.
 const UIKEY='flygon-flow-devops-ui',MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ITEM_KINDS={feature:'Feature',milestone:'Milestone',release:'Release',deadline:'Deadline',project:'Project',phase:'Phase',event:'Event'};
 const LINK_ICONS={pr:'pr',commit:'commit',url:'link'},ROLE_ICONS={developer:'terminal',tester:'checkSq',requester:'inbox'};
-const FILTERS=()=>({projects:[],entity:'',assignees:[],agents:[],labels:[],q:'',hideDone:false});
+const FILTER_LISTS=['projects','notProjects','entities','notEntities','assignees','notAssignees','agents','notAgents','labels','notLabels'];
+const FILTERS=()=>({projects:[],notProjects:[],entities:[],notEntities:[],assignees:[],notAssignees:[],agents:[],notAgents:[],labels:[],notLabels:[],q:'',hideDone:false});
 let ui=FILTERS();
 try{const saved=JSON.parse(localStorage.getItem(UIKEY))||{};
-  // Earlier versions stored a single assignee / label.
-  if(saved.assignee&&!saved.assignees)saved.assignees=[saved.assignee];if(saved.label&&!saved.labels)saved.labels=[saved.label];delete saved.assignee;delete saved.label;
+  // Earlier versions stored a single assignee / label, and one included entity.
+  if(saved.assignee&&!saved.assignees)saved.assignees=[saved.assignee];if(saved.label&&!saved.labels)saved.labels=[saved.label];
+  if(saved.entity&&!saved.entities?.length)saved.entities=[saved.entity];
+  delete saved.assignee;delete saved.label;delete saved.entity;
   Object.assign(ui,saved)}catch{}
-for(const k of ['projects','assignees','agents','labels'])if(!Array.isArray(ui[k]))ui[k]=[];
+for(const k of FILTER_LISTS)if(!Array.isArray(ui[k]))ui[k]=[];
 // Paging: each column renders its first 20 cards, "Load more" adds 20. Reset whenever filters change.
 const PAGE=20,shown=new Map();
 const keepUi=()=>{shown.clear();try{localStorage.setItem(UIKEY,JSON.stringify(ui))}catch{}};
 let selected=null,sortable=null,pop=null,pending=null,reveal=false,painted=false,rerender=()=>{},openItem=()=>{},openAgent=()=>{},toast=()=>{};
+let paintLinkPrompt=()=>{};
 // Chat (chat.js): chat.on() while it is available; chat.send(card id) attaches a card to a message.
 let chat={on:()=>false,send:()=>{}};
 const edited=new WeakSet();
@@ -36,26 +43,48 @@ const db=()=>store.db,dv=()=>store.db.devops,card=id=>dv().cards.find(c=>c.id===
 const project=id=>db().projects.find(p=>p.id===id),label=id=>dv().labels.find(l=>l.id===id);
 const colName=id=>dv().columns.find(c=>c.id===id)?.name||id;
 const touch=c=>c.updated=new Date().toISOString();
-// Assignees are the org chart's person cards, across every chart.
-function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n of c.nodes)if(types.includes(n.type)&&!m.has(n.id))m.set(n.id,n);return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))}
+// Assignees are the org chart's person cards, across every chart, and the person cards of environments
+// combined with this one (combined.js: they come with the server's db.combined, never as mind map cards).
+const combinedPeople=()=>combinedMeta().flatMap(m=>m.people||[]);
+function nodesOf(types){const m=new Map();for(const c of db().charts)for(const n of c.nodes)if(types.includes(n.type)&&!m.has(n.id))m.set(n.id,n);
+  if(types.includes('person'))for(const n of combinedPeople())if(!m.has(n.id))m.set(n.id,n);
+  return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name))}
 const people=()=>nodesOf(['person']);
 // Members of shares (docs/sharing.md) are assigned as '@<email>': on a linked card, the share's members;
 // on one's own shared card, the recipients it is shared with (db.shareMembers, from the server).
-const memberList=()=>{const m=new Map();for(const x of [...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,{...x,type:'person'});return m};
-const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
+function workspaceMembers(){
+  const env=db().environment;
+  const seen=new Set(people().filter(p=>!linkOf(p)&&p.email).map(p=>p.email.toLowerCase()));
+  const emails=[env?.ownerEmail,...(env?.members||[])].filter(Boolean).map(e=>e.toLowerCase());
+  return [...new Set(emails)].filter(email=>!seen.has(email)).map(email=>({id:'@'+email,name:email,type:'person'}));
+}
+const memberList=()=>{const m=new Map(),own=people();for(const x of [...workspaceMembers(),...(db().shares||[]).flatMap(s=>s.members||[]),...(db().shareMembers||[]),...combinedMeta().flatMap(e=>[...(e.shares||[]).flatMap(s=>s.members||[]),...(e.shareMembers||[])])])if(x?.id?.startsWith('@')&&!m.has(x.id))m.set(x.id,shownMember(x,own));return m};
+export const nodeById=id=>{for(const c of db().charts){const n=c.nodes.find(x=>x.id===id);if(n)return n}if(isForeign(id))return combinedPeople().find(x=>x.id===id)||null;return typeof id==='string'&&id.startsWith('@')?memberList().get(id)||null:null};
 // Who can be assigned to a card. A linked card: the person cards of its share and the share's members,
 // never anyone else of the owner's. One's own card: one's person cards, plus recipients it is shared with.
-function peopleFor(c){
-  if(!c)return [...people(),...memberList().values()];
-  if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>({...m,type:'person'}))];
-  return [...people(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id)).map(m=>({...m,type:'person'}))];
+export function peopleFor(c){
+  // The board-wide assignee filter. A member renamed to the viewer's own person card is that card:
+  // listing both would show the same name twice, and choosing one would hide the other's cards.
+  if(!c){const own=people(),members=memberList(),hidden=new Set(memberAliasIds(own.map(p=>p.id),own,[...members.keys()]));return [...own,...[...members.values()].filter(m=>!hidden.has(m.id))]}
+  if(linkOf(c))return [...people().filter(p=>sameSource(p,c)&&!linkOf(p).stub),...members(c).filter(m=>m.id.startsWith('@')).map(m=>shownMember(m,people()))];
+  return [...people().filter(p=>!isForeign(p.id)),...new Map([...workspaceMembers(),...(db().shareMembers||[]).filter(m=>m.cards?.includes(c.id))].map(m=>[m.id,shownMember(m,people())])).values()];
 }
+// Another environment's records never go on this environment's own cards (and the reverse): a card's
+// project, timeline item, labels and people come from where the card lives.
+const sameEnv=(x,c)=>envOf(x)===envOf(c);
+const fromEnv=x=>envOf(x)?` · ${envName(envOf(x))||'another environment'}`:'';
 const today=()=>{const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`};
 const fmt=s=>`${MONTHS[+s.slice(5,7)-1]} ${+s.slice(8)}${s.slice(0,4)!==today().slice(0,4)?`, ${s.slice(0,4)}`:''}`;
 const when=iso=>new Date(iso).toLocaleString([],{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
 const day=iso=>{const d=new Date(iso);return d.toLocaleDateString([],{month:'short',day:'numeric',...(d.getFullYear()!==new Date().getFullYear()?{year:'numeric'}:{})})};
 const pill=l=>{const [bg,fg]=colorOf(l.color);return `<span class="pill" style="background:${bg};color:${fg}"${l.name.length>12?` data-tip="${esc(l.name)}"`:''}>${esc(l.name)}</span>`};
 const bubble=(id,roles)=>{const n=nodeById(id);return n?personAvatar(n,{tip:`${n.name} · ${roles.join(', ')}`}):''};
+// Filtering by the viewer's own person card also matches the share member with that email.
+function viewFilter(){
+  const members=[...memberList().keys()],own=people();
+  const widen=ids=>[...new Set([...(ids||[]),...memberAliasIds(ids,own,members)])];
+  return {...ui,assignees:widen(ui.assignees),notAssignees:widen(ui.notAssignees)};
+}
 // Column sorts (devops-core.js SORTS): per column, kept in the user's prefs, never in the workspace.
 const sortOf=col=>sortKey(getPref('devopsSort')?.[col]);
 const sortName=k=>SORTS.find(([s])=>s===k)?.[1]||'Manual';
@@ -64,6 +93,70 @@ function ordered(col,list){
   const k=sortOf(col);
   if(k==='manual')return col==='done'?[...list].sort((a,b)=>b.moved.localeCompare(a.moved)):list;
   return sortCards(list,k,dv().labels);
+}
+// Snoozed cards (devops-core.js isSnoozed): hidden from their column unless its header toggle shows them,
+// dimmed with their wake time. The choice is per column, per user (prefs); the snooze itself is the card's.
+const showSnoozed=col=>!!getPref('devopsSnoozed')?.[col];
+function toggleSnoozed(col){
+  const all={...(getPref('devopsSnoozed')||{})};
+  if(all[col])delete all[col];else all[col]=true;
+  setPref('devopsSnoozed',all);render();
+  $('#devopsView').querySelector(`[data-dcol="${col}"] .dcol-snz`)?.focus({preventScroll:true});
+}
+// The toolbar's clock: shows (or hides) snoozed cards in every column that has some, through the same
+// per-column prefs. Pressed when all of those columns already show them.
+const allSnoozedShown=cols=>cols.length>0&&cols.every(showSnoozed);
+function toggleAllSnoozed(cols){
+  const all={...(getPref('devopsSnoozed')||{})},on=allSnoozedShown(cols);
+  for(const col of cols)if(on)delete all[col];else all[col]=true;
+  setPref('devopsSnoozed',all);render();
+  $('#devopsView').querySelector('.dv-snz')?.focus({preventScroll:true});
+}
+// A column's cards as shown, from the filtered cards: {all (in the column), snoozed, list (shown, in order)}.
+function colCards(col,cards){
+  const all=cards.filter(c=>c.column===col),now=Date.now(),snoozed=all.filter(c=>isSnoozed(c,now));
+  return {all,snoozed,list:ordered(col,showSnoozed(col)||!snoozed.length?all:all.filter(c=>!isSnoozed(c,now)))};
+}
+// Re-render when the next snooze ends, so the card comes back on its own (no server job needed).
+let wakeTimer=0;
+function scheduleWake(){
+  clearTimeout(wakeTimer);const t=nextWake(dv().cards);if(t===null)return;
+  wakeTimer=setTimeout(()=>{if(nextWake(dv().cards)!==t||t<=Date.now())rerender();else scheduleWake()},Math.min(Math.max(0,t-Date.now())+50,36e5));
+}
+const snoozeTip=c=>`Snoozed until ${when(c.snoozedUntil)}`;
+// The snooze menu, on a card's clock button and in its right-click menu: Unsnooze (when snoozed), the presets
+// with the time each one lands on, and Custom… (a date and time).
+function snoozeItems(id){
+  const c=card(id),now=new Date(),on=isSnoozed(c);
+  return [
+    ...(on?[{label:'Unsnooze',icon:'x',note:`until ${wakeText(c.snoozedUntil,now)}`,run:()=>setSnooze(id,null)},'-']:[]),
+    ...snoozePresets(now).map(([k,label,at])=>({label,icon:'clock',note:wakeText(at,now),run:()=>setSnooze(id,at)})),
+    {label:'Custom…',icon:'calendar',run:()=>customSnooze(id)},
+  ];
+}
+function snoozeMenu(b,id){
+  if(Date.now()-(+b.dataset.closed||0)<400)return;
+  const c=card(id);if(!c)return;
+  b.setAttribute('aria-expanded','true');
+  openMenu(b,snoozeItems(id),{label:`Snooze #${c.number}`,align:'end',onClose(){b.setAttribute('aria-expanded','false');b.dataset.closed=Date.now()}});
+}
+async function customSnooze(id){
+  const c=card(id);if(!c)return;
+  const start=isSnoozed(c)?new Date(c.snoozedUntil):snoozePresets()[2][2];
+  const at=await askTime(`Snooze #${c.number} until`,{value:start,ok:'Snooze',future:true});
+  if(at)setSnooze(id,at);
+}
+// Snooze a card until `at` (a Date), or wake it (null). One undo step. A card that leaves the board hands
+// focus to its neighbour in the column.
+function setSnooze(id,at){
+  const c=card(id);if(!c)return;
+  if(locked(c)){toast(lockedMsg(c),true);return}
+  const el=cardEl(id),next=el&&(el.nextElementSibling?.matches('[data-card]')?el.nextElementSibling:el.previousElementSibling?.matches('[data-card]')?el.previousElementSibling:null),
+    hadFocus=el?.contains(document.activeElement)||document.activeElement===document.body;
+  change(()=>{if(at)c.snoozedUntil=at.toISOString();else delete c.snoozedUntil;touch(c)});
+  const hidden=at&&!showSnoozed(c.column);
+  toast(at?`#${c.number} snoozed until ${wakeText(at)}${hidden?'. The clock in its column header shows snoozed cards.':''}`:`#${c.number} is awake`);
+  if(hadFocus&&!modal){const here=cardEl(id);(here?here.querySelector('.dc-snz-btn')||here:next&&cardEl(next.dataset.card))?.focus({preventScroll:true})}
 }
 function setSort(col,k){
   const all={...(getPref('devopsSort')||{})};
@@ -87,12 +180,14 @@ function sortItems(col){
 const byPerson=c=>[...c.assignees.reduce((m,a)=>{if(nodeById(a.node))m.set(a.node,[...(m.get(a.node)||[]),a.role]);return m},new Map())];
 
 export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openItem;openAgent=opts.openAgent||openAgent;toast=opts.toast||toast;chat=opts.chat||chat;
+  paintLinkPrompt=opts.paintLinkPrompt||paintLinkPrompt;
   const el=$('#devopsView');
   el.addEventListener('click',e=>{
     const pick=e.target.closest('[data-pick]');if(pick){finishPick(pick.dataset.pick);return}
     if(e.target.classList.contains('dv-modal')){finishPick('');return}
     const pk=e.target.closest('[data-picker]');if(pk){openFilter(pk);return}
     const so=e.target.closest('.dcol-sort');if(so){sortMenu(so);return}
+    const sz=e.target.closest('.dc-snz-btn');if(sz){snoozeMenu(sz,sz.dataset.id);return}
     const b=e.target.closest('[data-dv]');if(b)action(b.dataset.dv,b);
   });
   el.addEventListener('change',e=>{
@@ -106,9 +201,10 @@ export function mount(opts){rerender=opts.rerender;openItem=opts.openItem||openI
   el.addEventListener('contextmenu',contextMenu);
   el.addEventListener('dblclick',e=>{const h=e.target.closest('.dcol-h .nm');if(h)rename(h.closest('[data-dcol]').dataset.dcol)});
   // Enter opens a card; Space picks it up (drag.js).
-  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'){e.preventDefault();select(c.dataset.card)}
+  el.addEventListener('keydown',e=>{const c=e.target.closest('[data-card]');if(c&&e.key==='Enter'&&!e.target.closest('button')){e.preventDefault();select(c.dataset.card)}
     // A menu button: ↓ / ↑ open the sort menu too.
-    const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}});
+    const so=e.target.closest('.dcol-sort');if(so&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();sortMenu(so)}
+    const sz=e.target.closest('.dc-snz-btn');if(sz&&(e.key==='ArrowDown'||e.key==='ArrowUp')){e.preventDefault();snoozeMenu(sz,sz.dataset.id)}});
   sortable=createSortable(el,{
     item:'[data-card]',list:'.dcol-b',kind:'devops-card',listOf:x=>x.closest('[data-dcol]'),keyOf:z=>z.dataset.dcol,idOf:x=>x.dataset.card,
     ignore:'button,a,input,select,.dv-more',scroller:()=>el.querySelector('.dv-scroll'),
@@ -132,7 +228,7 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
   // its own slot is quiet), and a card moved into it goes to the end of the board order.
   if(sortOf(to)!=='manual'){
     if(from===to){
-      const vis=ordered(to,filterCards(db(),ui).filter(x=>x.column===to)).slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
+      const vis=colCards(to,filterCards(db(),viewFilter())).list.slice(0,shown.get(to)||PAGE),i=vis.findIndex(x=>x.id===id);
       if((vis[i-1]?.id??null)!==(afterId??null)||(vis[i+1]?.id??null)!==(beforeId??null))toast(`${colName(to)} is sorted by ${sortName(sortOf(to)).toLowerCase()}. Switch to Manual to reorder.`);
       return false;
     }
@@ -145,16 +241,37 @@ async function dropCard({id,from,to,beforeId,afterId},ctx){
 }
 // Leaving closes the card quietly: focus is not handed back to the board (it may sit in the other split pane).
 export function leave(){selected=null;pop=null;pending=null;if(modal&&!modal.closing){modal.quiet=true;modal.close()}}
-function select(id){selected=id;rerender()}
+// While the 3D office holds the board (lend), a card opens in the office's own overlay instead of this tab's modal.
+function select(id){if(id&&lender){lender.openCard(id);return}selected=id;rerender()}
+
+// ---------- the board lent to the 3D office (view-loan.js; docs/concepts/12-office.md) ----------
+// The office's main whiteboard is this very #devopsView, moved into the office while it is open and put back
+// when it closes: one board, the same handlers and state. lender: {openCard(id)}.
+let loan=null,lender=null;
+const boardLoan=()=>loan??=createLoan($('#devopsView'),{scrollers:'.dv-scroll,.dcol-b'});
+export function lendBoard(host,opts){
+  if(modal&&!modal.closing){modal.quiet=true;modal.close()}
+  selected=null;lender=opts;boardLoan().lend(host);render();
+}
+export function returnBoard(){
+  lender=null;if(!boardLoan().giveBack())return;
+  if(sortable?.active())deferred=true;
+  rerender();
+}
+export const boardLent=()=>!!lender;
+// What a layout moving #devopsView (app.js split panes) should move while the office holds it.
+export const boardStandIn=el=>loan?loan.standIn(el):el;
+// Esc for the board's own transient UI (the developer picker); true when it handled it.
+export function escape(){if(pop?.type==='pick'){finishPick('');return true}return false}
 
 // ---------- moves and gates ----------
 // Same-column moves just reorder. Moving into Done asks first (Approve on UAT is the normal path),
 // leaving Done asks first, and an unassigned card moving into Doing asks who is developing it.
 // Returns (a promise of) whether the move happened. From a drag (ctx), a declined gate leaves the
 // DOM to drag.js, which flies the card home; from the panel's column select it re-renders.
-async function requestMove(id,col,index=Infinity,ctx=null){
+async function requestMove(id,col,index=Infinity,ctx=null,editor=null){
   const c=card(id);if(!c)return false;
-  const no=()=>{if(!ctx)rerender();return false};
+  const no=()=>{if(!ctx)(editor?.host?editor.paint:rerender)();return false};
   if(locked(c)){toast(lockedMsg(c),true);return no()}
   if(c.column===col){
     const all=dv().cards.filter(x=>x.column===col);
@@ -165,17 +282,37 @@ async function requestMove(id,col,index=Infinity,ctx=null){
   if(g==='confirm-done'&&!await ask(`Move #${c.number} straight to Done?\nDone means completed. Cards normally go through UAT first, where they are tested and then approved.`,{ok:'Move to Done'}))return no();
   if(g==='confirm-reopen'&&!await ask(`Move #${c.number} out of Done and back to ${colName(col)}?\nDone means completed; moving it reopens the work.`,{ok:'Reopen'}))return no();
   if(g==='pick-dev'&&peopleFor(c).length){
+    if(editor?.host){
+      const nodeId=await pickDeveloper(c,editor.host);
+      if(!editor.m.el.isConnected||editor.m.closing)return false;
+      return moveWithDeveloper(id,col,index,nodeId);
+    }
     ctx?.hideClone();
     return new Promise(done=>{pending={id,col,index,done};pop={type:'pick'};rerender()});
   }
   change(()=>moveCard(dv(),id,col,index));return true;
 }
+function pickDeveloper(c,host){
+  return new Promise(resolve=>{
+    let chosen='';
+    const m=detailModal({host,cls:'developer-modal',label:'Pick a developer',onClose:()=>resolve(chosen),events:{click(e){
+      const b=e.target.closest('[data-pick]');if(!b)return;chosen=b.dataset.pick;m.close();
+    }}});
+    m.body.innerHTML=developerPickerHtml(c);
+    m.body.querySelector('[data-pick]')?.focus();
+  });
+}
 // Picking nobody (or cancelling) still moves the card, just unassigned.
+function moveWithDeveloper(id,col,index,nodeId){
+  const c=card(id);if(!c||locked(c))return false;
+  change(()=>{moveCard(dv(),id,col,index);if(nodeId)c.assignees.push({node:nodeId,role:'developer'})});
+  return true;
+}
 function finishPick(nodeId){
   const p=pending;pending=null;pop=null;
-  if(!p||!card(p.id)){render();p?.done?.(false);return}
-  change(()=>{moveCard(dv(),p.id,p.col,p.index);if(nodeId)card(p.id).assignees.push({node:nodeId,role:'developer'})});
-  p.done?.(true);
+  if(!p)return render();
+  const moved=moveWithDeveloper(p.id,p.col,p.index,nodeId);if(!moved)render();
+  p.done?.(moved);
 }
 function approve(id){const c=card(id);if(c?.column==='uat'&&!locked(c))change(()=>moveCard(dv(),id,'done'))}
 
@@ -185,49 +322,57 @@ export function headerHtml(){
   return `<span class="meta" data-tip="${all} card${all===1?'':'s'} · ${open} open">${open} open · ${all}</span>`;
 }
 function sanitize(){
-  ui.projects=ui.projects.filter(p=>p==='none'||project(p));
-  if(ui.entity&&!nodeById(ui.entity))ui.entity='';
-  ui.assignees=ui.assignees.filter(nodeById);ui.labels=ui.labels.filter(label);
-  ui.agents=ui.agents.filter(id=>db().agentflow?.agents.some(a=>a.id===id));
+  const known=id=>!!nodeById(id),agent=id=>!!db().agentflow?.agents.some(a=>a.id===id);
+  ui.projects=ui.projects.filter(p=>p==='none'||project(p));ui.notProjects=ui.notProjects.filter(p=>p==='none'||project(p));
+  ui.entities=ui.entities.filter(known);ui.notEntities=ui.notEntities.filter(known);
+  ui.assignees=ui.assignees.filter(id=>id==='none'||known(id));ui.notAssignees=ui.notAssignees.filter(id=>id==='none'||known(id));
+  ui.labels=ui.labels.filter(label);ui.notLabels=ui.notLabels.filter(label);
+  ui.agents=ui.agents.filter(agent);ui.notAgents=ui.notAgents.filter(agent);
 }
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l)}</option>`;
 // Picker items shared by the filters and the card panel.
-const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
-const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
+const projectItems=()=>[...db().projects.map(p=>({value:p.id,label:p.name,color:p.color,sub:isForeign(p.id)?envName(envOf(p)):p.entity&&nodeById(p.entity)?.name!==p.name?nodeById(p.entity)?.name:''})),{value:'none',label:'No project',color:'#c4cbc8'}];
+const personItems=c=>peopleFor(c).map(p=>{const [bg,fg]=memberColor(p.id);return {value:p.id,label:p.name,...(!c&&isForeign(p.id)?{sub:envName(envOf(p))}:{}),avatar:{text:initials(p.name),bg,fg,img:personPhoto(p)}}});
+// Filter picker only: people plus Unassigned (cards with nobody), matching Projects → No project.
+const assigneeFilterItems=()=>[...personItems(),{value:'none',label:'Unassigned',color:'#c4cbc8'}];
 // A linked card takes its owner's labels (the ones of its share); they are read-only everywhere.
-const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||!linkOf(c)||sameSource(l,c))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name,group:name,pill:{bg,fg}}}));
-const FILTER_PICKERS={'dv-projects':['projects',projectItems,'Projects'],'dv-assignees':['assignees',personItems,'Assignees'],'dv-agents':['agents',()=>agentItems(),'Agents'],'dv-labels':['labels',labelItems,'Labels']};
+const labelItems=c=>SECTIONS.flatMap(([s,name])=>dv().labels.filter(l=>l.section===s&&(!c||(isForeign(l.id)||isForeign(c.id)?sameSource(l,c):!linkOf(c)||sameSource(l,c)))).map(l=>{const [bg,fg]=colorOf(l.color);return {value:l.id,label:l.name+(c?'':fromEnv(l)),group:name,pill:{bg,fg}}}));
+const entityItems=()=>nodesOf(['entity','area']).filter(e=>ui.entities.includes(e.id)||ui.notEntities.includes(e.id)||entityProjects(db(),e.id).length).map(e=>({value:e.id,label:e.name,...(isForeign(e.id)?{sub:envName(envOf(e))}:{})}));
+// [include key, exclude key, items, menu name]. A value is include, exclude, or off.
+const FILTER_PICKERS={'dv-projects':['projects','notProjects',projectItems,'Projects'],'dv-entities':['entities','notEntities',entityItems,'Entities'],'dv-assignees':['assignees','notAssignees',assigneeFilterItems,'Assignees'],'dv-agents':['agents','notAgents',()=>agentItems(),'Agents'],'dv-labels':['labels','notLabels',labelItems,'Labels']};
 function openFilter(b){
-  const [k,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!k)return;
-  openPicker(b,{items:items(),selected:ui[k],label,placeholder:`Search ${label.toLowerCase()}`,onChange(v){ui[k]=v;keepUi();render()}});
+  const [inc,exc,items,label]=FILTER_PICKERS[b.dataset.picker]||[];if(!inc)return;
+  openPicker(b,{items:items(),selected:ui[inc],excluded:ui[exc],cycle:true,label,placeholder:`Search ${label.toLowerCase()}`,onChange(v,x){ui[inc]=v;ui[exc]=x||[];keepUi();render()}});
 }
-const filtersOn=()=>!!(ui.projects.length||ui.entity||ui.assignees.length||ui.agents.length||ui.labels.length||ui.q||ui.hideDone);
-function toolbar(n){
-  const active=filtersOn();
-  const ents=nodesOf(['entity','area']).filter(e=>e.id===ui.entity||entityProjects(db(),e.id).length);
+const filtersOn=()=>FILTER_LISTS.some(k=>ui[k].length)||!!ui.q||ui.hideDone;
+const filterBtn=(key,label,items,tip)=>pickerButton(key,label,items(),ui[FILTER_PICKERS[key][0]],{excluded:ui[FILTER_PICKERS[key][1]],tip});
+// cards: the filtered cards. The count is the awake ones; snoozed ones get their own clock beside it.
+function toolbar(cards){
+  const active=filtersOn(),now=Date.now(),zz=cards.filter(c=>isSnoozed(c,now)),n=cards.length-zz.length;
   return `<div class="tl-bar dv-bar">
-    ${pickerButton('dv-projects','Projects',projectItems(),ui.projects,{tip:'Filter by project'})}
-    <select data-dsel="entity" data-tip="Entity · cards in the projects under it" aria-label="Filter by entity">${opt('','All entities',ui.entity)}${ents.map(e=>opt(e.id,e.name,ui.entity)).join('')}</select>
-    ${pickerButton('dv-assignees','Assignees',personItems(),ui.assignees,{tip:'Filter by assignee'})}
-    ${db().agentflow?.agents.length?pickerButton('dv-agents','Agents',agentItems(),ui.agents,{tip:'Filter by AgentFlow agent: cards delegated to it'}):''}
-    ${pickerButton('dv-labels','Labels',labelItems(),ui.labels,{tip:'Filter by label'})}
+    ${filterBtn('dv-projects','Projects',projectItems,'Filter by project. Click a choice again to exclude it.')}
+    ${filterBtn('dv-entities','Entities',entityItems,'Filter by entity: cards in the projects under it. Click a choice again to exclude it.')}
+    ${filterBtn('dv-assignees','Assignees',assigneeFilterItems,'Filter by assignee or Unassigned. Click a choice again to exclude it.')}
+    ${db().agentflow?.agents.length?filterBtn('dv-agents','Agents',()=>agentItems(),'Filter by AgentFlow agent: cards delegated to it. Click a choice again to exclude it.'):''}
+    ${filterBtn('dv-labels','Labels',labelItems,'Filter by label. Click a choice again to exclude it.')}
     <input id="dv-q" type="search" placeholder="Search # or title" value="${esc(ui.q)}" aria-label="Search cards by number or title">
     ${ib('check',ui.hideDone?'Show Done':'Hide Done',{cls:ui.hideDone?'on':'',attrs:'data-dv="hideDone"'})}
-    <span class="dv-count">${n} card${n===1?'':'s'}</span>
+    <span class="dv-count">${n} card${n===1?'':'s'}</span>${boardSnoozeToggle(zz)}
     ${active?`<button type="button" class="txt" data-dv="clear">Clear</button>`:''}<span class="sp"></span>
     ${ib('undo','Recently deleted · restore a card',{attrs:'data-dv="deleted"'})}
-    ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>`;
+    ${ib('plus','Add a card to Requests / Sprinted',{key:keyLabel('devops.add'),cls:'primary',attrs:'data-dv="add"'})}</div>${combinedLegend()}`;
 }
 // Agents a card is delegated to, built once per board render (cardAgents).
 let cardAgents=new Map();
 const agentBub=a=>{const [bg,fg]=memberColor(a.id);return `<span class="bub agent" style="background:${bg};color:${fg}" data-tip="Agent: ${esc(a.name)}${a.title?` · ${esc(a.title)}`:''}">${icon('bot',11)}</span>`};
 function cardHtml(c){
   const ags=cardAgents.get(c.id)||[],ls=c.labels.map(label).filter(Boolean),p=project(c.project),tone=dueTone(c,today()),done=c.checklist.filter(x=>x.done).length,ppl=byPerson(c);
-  const l=linkOf(c);
-  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${locked(c)?' ro':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
+  const l=linkOf(c),zz=isSnoozed(c),ro=locked(c);
+  return `<div class="dcard${selected===c.id?' sel':''}${c.column==='done'?' is-done':''}${l?' linked':''}${ro?' ro':''}${zz?' snoozed':''}" data-card="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(`#${c.number} ${c.title}${zz?`, snoozed until ${wakeText(c.snoozedUntil)}`:''}${l?`, shared with you${l.ownerEmail?' by '+l.ownerEmail:''}`:''}`)}"${p?` style="--pc:${p.color}"`:''}>${sharedBadge(c)}
+    ${ro?'':`<button type="button" class="dc-snz-btn" data-id="${esc(c.id)}" aria-haspopup="menu" aria-expanded="false" aria-label="${zz?`${esc(snoozeTip(c))}. Change or unsnooze`:`Snooze #${c.number}`}" data-tip="${zz?`${esc(snoozeTip(c))}\nChange or unsnooze`:'Snooze\nHide this card until a later time'}">${icon('clock',13)}</button>`}
     ${ls.length?`<div class="dc-labels">${ls.slice(0,3).map(pill).join('')}${ls.length>3?`<span class="dc-more" data-tip="${esc(ls.slice(3).map(l=>l.name).join(', '))}">+${ls.length-3}</span>`:''}</div>`:''}
     <div class="dc-title" data-tip="${c.title.length>90?esc(c.title):''}" data-tip-delay="700">${esc(c.title)}</div>
-    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${ptsText(c)?`<span class="dc-pts">${ptsText(c)}</span>`:''}
+    <div class="dc-foot"><span class="dc-l"><span class="dc-num">#${c.number}</span>${zz?`<span class="dc-snz" data-tip="${esc(snoozeTip(c))}">${icon('clock',12)}${esc(wakeText(c.snoozedUntil))}</span>`:''}${ptsText(c)?`<span class="dc-pts">${ptsText(c)}</span>`:''}
       ${c.due?`<span class="dc-due ${tone}" data-tip="${tone==='overdue'?'Overdue':tone==='soon'?'Due soon':'Due'} · ${esc(fmt(c.due))}">${icon('calendar',12)}${esc(fmt(c.due))}</span>`:''}
       ${c.checklist.length?`<span class="dc-chk${done===c.checklist.length?' all':''}" data-tip="Checklist">${icon('checkSq',12)}${done}/${c.checklist.length}</span>`:''}
       ${c.links.length?`<span class="dc-ico" data-tip="${esc(c.links.map(l=>`${LINK_KINDS[l.kind]}: ${l.url}`).join('\n'))}">${icon('link',12)}</span>`:''}
@@ -237,13 +382,25 @@ function cardHtml(c){
 // Six slots: four working columns, Done, then the two backlogs stacked in one slot.
 // Done lists the most recently moved cards first so paging hides the old ones.
 function colHtml(col,cards){
-  const list=ordered(col.id,cards.filter(c=>c.column===col.id)),sk=sortOf(col.id);
+  const {all,snoozed,list}=colCards(col.id,cards),sk=sortOf(col.id);
   let n=shown.get(col.id)||PAGE;
   const at=list.findIndex(c=>c.id===selected);
   if(reveal&&at>=n){n=Math.ceil((at+1)/PAGE)*PAGE;shown.set(col.id,n)}
   const left=list.length-n;
-  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em>${list.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}${sortButton(col,sk)}</div>
+  return `<section class="dcol${BACKLOG.includes(col.id)?' backlog':''}" data-dcol="${col.id}"><div class="dcol-h"><span class="nm" data-tip="${esc(COLUMN_INFO[col.id]||'')}\nDouble-click to rename" data-tip-delay="400">${esc(col.name)}</span><em${snoozed.length?` data-tip="${all.length} card${all.length===1?'':'s'} · ${snoozed.length} snoozed"`:''}>${all.length}</em><span class="sp"></span>${ib('plus',`Add a card to ${col.name}`,{attrs:`data-dv="colAdd" data-col="${col.id}"`})}${snoozeToggle(col,snoozed.length)}${sortButton(col,sk)}</div>
     <div class="dcol-b">${list.slice(0,n).map(cardHtml).join('')}${left>0?`<button type="button" class="txt dv-more" data-dv="more" data-col="${col.id}">Load more (${left} left)</button>`:''}</div></section>`;
+}
+// Next to the sort: how many cards here are snoozed, and whether they are shown (pressed) or hidden.
+function snoozeToggle(col,n){
+  if(!n)return '';
+  const on=showSnoozed(col.id),what=`${n} snoozed card${n===1?'':'s'}`;
+  return `<button type="button" class="dcol-snz${on?' on':''}" data-dv="snzCol" data-col="${col.id}" aria-pressed="${on}" aria-label="${on?'Hide':'Show'} ${what} in ${esc(col.name)}" data-tip="${on?`Showing ${what}\nClick to hide them until they wake`:`${what} hidden\nClick to show them, dimmed`}">${icon('clock',13)}<span>${n}</span></button>`;
+}
+// In the toolbar, after the count: how many filtered cards are snoozed; toggles them in every column.
+function boardSnoozeToggle(zz){
+  if(!zz.length)return '';
+  const cols=[...new Set(zz.map(c=>c.column))],on=allSnoozedShown(cols),n=zz.length,what=`${n} snoozed card${n===1?'':'s'}`;
+  return `<button type="button" class="dcol-snz dv-snz${on?' on':''}" data-dv="snzAll" data-cols="${esc(cols.join(','))}" aria-pressed="${on}" aria-label="${what}. ${on?'Hide':'Show'} them in every column" data-tip="${what}\n${on?'Click to hide them in every column':'Click to show them in every column, dimmed'}">${icon('clock',13)}<span>${n}</span></button>`;
 }
 // Top right of each column header. Sorted: it shows the sort's short name, in the accent colour.
 function sortButton(col,k){
@@ -257,32 +414,44 @@ function boardHtml(cards){
 function popHtml(){
   if(pop.type==='pick'){
     const c=card(pending?.id);if(!c)return '';
-    return `<div class="dv-modal"><div class="pop dv-pick" role="dialog" aria-label="Pick a developer"><strong>Who is developing #${c.number}?</strong><p>Cards in Doing usually have a developer.</p>
-      <div class="dv-people">${peopleFor(c).map(p=>`<button type="button" data-pick="${esc(p.id)}">${bubble(p.id,['developer'])}<span>${esc(p.name)}</span></button>`).join('')}</div>
-      <button type="button" class="txt" data-pick="">Leave unassigned</button></div></div>`;
+    return `<div class="dv-modal">${developerPickerHtml(c)}</div>`;
   }
   return '';
+}
+function developerPickerHtml(c){
+  return `<div class="pop dv-pick" role="group" aria-label="Pick a developer"><strong>Who is developing #${c.number}?</strong><p>Cards in Doing usually have a developer.</p>
+    <div class="dv-people">${peopleFor(c).map(p=>`<button type="button" data-pick="${esc(p.id)}">${bubble(p.id,['developer'])}<span>${esc(p.name)}</span></button>`).join('')}</div>
+    <button type="button" class="txt" data-pick="">Leave unassigned</button></div>`;
 }
 export function render(){
   // Never rebuild the board under a lifted card; render once it lands.
   if(sortable?.active()){deferred=true;return}
   sanitize();
   const el=$('#devopsView'),old=el.querySelector('.dv-scroll'),keep=old&&[old.scrollLeft,old.scrollTop,new Map([...el.querySelectorAll('[data-dcol]')].map(c=>[c.dataset.dcol,c.querySelector('.dcol-b')?.scrollTop||0]))];
-  const cards=filterCards(db(),ui);
+  const cards=filterCards(db(),viewFilter());
   cardAgents=new Map();for(const a of db().agentflow?.agents||[])for(const id of a.cards)cardAgents.set(id,[...(cardAgents.get(id)||[]),a]);
   // Cards that stay glide to their new place; added ones fade in, removed ones fade out.
-  flipList(el,'.dcard',c=>c.dataset.card,()=>{el.innerHTML=toolbar(cards.length)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'')});
+  const prompt=el.querySelector('.opid-prompt')||document.createElement('aside');
+  prompt.className='opid-prompt';
+  flipList(el,'.dcard',c=>c.dataset.card,()=>{
+    el.innerHTML=toolbar(cards)+`<div class="dv-scroll">${boardHtml(cards)}</div>`+(pop?popHtml():'');
+    el.querySelector('.dv-scroll').before(prompt);
+    paintLinkPrompt(prompt);
+  });
   const sc=el.querySelector('.dv-scroll');
   if(keep){[sc.scrollLeft,sc.scrollTop]=keep;for(const c of el.querySelectorAll('[data-dcol]'))c.querySelector('.dcol-b').scrollTop=keep[2].get(c.dataset.dcol)||0}
   if(reveal){reveal=false;el.querySelector('.dcard.sel')?.scrollIntoView({block:'nearest',inline:'center'})}
   if(pop?.type==='pick')el.querySelector('[data-pick]')?.focus();
   // First paint this session: a brief skeleton fitted to the real board, then the board.
   if(!painted&&sc.clientWidth){painted=true;requestAnimationFrame(()=>{if(sc.isConnected)busy(sc,160)})}
+  scheduleWake();
 }
 function action(name,b){
   ({
     add:()=>addCard(NEW_COLUMN),
     colAdd:()=>addCard(b.dataset.col),
+    snzCol:()=>toggleSnoozed(b.dataset.col),
+    snzAll:()=>toggleAllSnoozed(b.dataset.cols.split(',')),
     hideDone:toggleDone,
     more(){const col=b.dataset.col,list=b.closest('.dcol-b');b.disabled=true;skeletonAppend(list,3);setTimeout(()=>{shown.set(col,(shown.get(col)||PAGE)+PAGE);render()},180)},
     clear(){ui=FILTERS();keepUi();render()},
@@ -291,10 +460,12 @@ function action(name,b){
 }
 // A new card inherits the active filters so it stays visible.
 function addCard(column){
-  const proj=ui.projects.find(p=>p!=='none')||(ui.entity&&entityProjects(db(),ui.entity)[0]?.id)||'';
-  ui.q='';keepUi();
-  change(()=>{const c=newCard(dv(),{column,project:proj,labels:[...ui.labels],assignees:ui.assignees.map(node=>({node,role:'requester'}))});selected=c.id;
+  // New cards go to this environment: filters on another (combined) environment's records are not inherited.
+  const proj=ui.projects.find(p=>p!=='none'&&!isForeign(p))||ui.entities.map(id=>entityProjects(db(),id).find(p=>!isForeign(p.id))?.id).find(Boolean)||'';
+  ui.q='';keepUi();let made=null;
+  change(()=>{const c=newCard(dv(),{column,project:proj,labels:ui.labels.filter(l=>!isForeign(l)),assignees:ui.assignees.filter(n=>!isForeign(n)).map(node=>({node,role:'requester'}))});made=c.id;if(!lender)selected=c.id;
     if(ui.agents.length&&delegate(db().agentflow,c.id,ui.agents)){ui.agents=[];keepUi()}});
+  if(lender){lender.openCard(made);return}
   const t=$('#dc-title');t?.focus();t?.select();
 }
 function rename(colId){
@@ -302,8 +473,8 @@ function rename(colId){
   if(v&&v!==colName(colId))change(()=>{dv().columns.find(c=>c.id===colId).name=v.slice(0,80);dv().namesCustomized=true});
 }
 function remove(id){
-  if(linkOf(card(id))){toast('Shared cards belong to their owner. Remove the share in Settings › Sharing.',true);return}
-  change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);selected=null},{deletedCards:[id]});
+  if(linkOf(card(id))){toast(ownerMsg(card(id),'This card'),true);return}
+  change(()=>{dv().cards=dv().cards.filter(c=>c.id!==id);if(selected===id)selected=null},{deletedCards:[id]});
 }
 
 // ---------- right-click menus ----------
@@ -334,13 +505,14 @@ function cardMenu(e,id){
   const pc=capList(ppl,p=>devs.has(p.id),MENU_CAP);
   const allowed=new Set(labelItems(c).map(x=>x.value)),lc=capList(dv().labels.filter(x=>allowed.has(x.id)),x=>c.labels.includes(x.id),MENU_CAP);
   const pri=priorityLabels(dv().labels).filter(x=>allowed.has(x.id)),prc=capList(db().projects,p=>p.id===c.project,MENU_CAP);
-  const on=A?.agents.length?new Set(agentsForCard(A,id).map(a=>a.id)):null;
+  const on=A?.agents.length&&!isForeign(id)?new Set(agentsForCard(A,id).map(a=>a.id)):null;
   const ac=on&&capList([...A.agents].sort((a,b)=>a.name.localeCompare(b.name)),a=>on.has(a.id),MENU_CAP);
   const more=label=>['-',{label,run:()=>select(id)}];
   openMenu(e,[
     {label:'Open',icon:'pencil',key:'Enter',run:()=>select(id)},
     c.column==='uat'&&!ro&&{label:'Approve (move to Done)',icon:'check',run:()=>approve(id)},
     '-',
+    {label:isSnoozed(c)?`Snoozed until ${wakeText(c.snoozedUntil)}`:'Snooze',icon:'clock',disabled:ro,items:snoozeItems(id)},
     {label:'Move to',icon:'board',disabled:ro,items:moveTargets(dv().columns,c).map(t=>({label:t.name,checked:t.current,run:()=>{if(!t.current)requestMove(id,t.id)}}))},
     {label:'Assign developer',icon:'terminal',disabled:ro||!ppl.length,items:[...pc.shown.map(p=>({label:p.name,checked:devs.has(p.id),run:edit(id,x=>{
       const has=x.assignees.some(a=>a.node===p.id&&a.role==='developer');
@@ -353,7 +525,7 @@ function cardMenu(e,id){
     // Delegating is one's own data (AgentFlow), so it works on shared cards too, as in the card.
     ac&&{label:'Delegate to agent',icon:'bot',items:[...ac.shown.map(a=>({label:a.name,checked:on.has(a.id),run(){const x=card(id);if(x)setAgents(x,on.has(a.id)?[...on].filter(v=>v!==a.id):[...on,a.id])}})),...(ac.more?more('More agents in the card…'):[])]},
     '-',
-    chat.on()&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)},
+    chat.on()&&!lender&&{label:'Send in chat',icon:'send',run:()=>chat.send(id)},
     {label:'Copy link',icon:'link',run:()=>copyText(location.href.split('#')[0]+cardHash(c),`Link to #${c.number} copied`)},
     {label:'Copy card number',icon:'copy',run:()=>copyText(`#${c.number}`,`#${c.number} copied`)},
     '-',
@@ -367,6 +539,7 @@ function colMenu(e,col){
     '-',
     {label:'Sort',icon:'sort',items:sortItems(col)},
     {label:'Rename column…',icon:'pencil',run:()=>rename(col)},
+    {label:'Show snoozed cards',icon:'clock',checked:showSnoozed(col),note:String(colCards(col,filterCards(db(),viewFilter())).snoozed.length),run:()=>toggleSnoozed(col)},
     col==='done'&&{label:'Hide Done',icon:'check',checked:ui.hideDone,run:toggleDone},
   ].filter(Boolean),{label:`Column: ${name}`});
 }
@@ -415,61 +588,63 @@ function openDeleted(from){
 // Opened from the chart (a person or entity) or the timeline (a linked card).
 // agent: that agent's work queue (open cards delegated to it), from AgentFlow.
 export function focus({person,entity,agent,cardId}={}){
-  if(person||entity){ui={...FILTERS(),entity:entity||'',assignees:person?[person]:[],hideDone:true};keepUi()}
+  if(person||entity){ui={...FILTERS(),entities:entity?[entity]:[],assignees:person?[person]:[],hideDone:true};keepUi()}
   else if(agent){ui={...FILTERS(),agents:[agent],hideDone:true};keepUi()}
   if(cardId&&card(cardId)){
     selected=cardId;reveal=true;
-    if(!filterCards(db(),ui).some(c=>c.id===cardId)){ui=FILTERS();keepUi()}
+    if(!filterCards(db(),viewFilter()).some(c=>c.id===cardId)){ui=FILTERS();keepUi()}
   }
 }
 
 // ---------- card panel (shared #inspector) ----------
 // The card detail opens as a modal that grows out of the card (modal.js); the shared side panel
 // stays empty on this tab. #devops/card/<number> deep-links to it; Back closes it.
-let modal=null,modalFor=null,pushed=false,labelForm=false;
+let modal=null,pushed=false;
+const hostedCards=new Set();
 const cardEl=id=>document.querySelector(`#devopsView [data-card="${CSS.escape(id)}"]`);
-const cardHash=c=>`#devops/card/${c.number}`;
+// A combined environment's card: #devops/card/<env>/<number> (its numbers may repeat this environment's).
+const cardHash=c=>`#devops/card/${envOf(c)?envOf(c)+'/':''}${c.number}`;
+const HASH=/^#devops\/card\/(?:([A-Za-z0-9-]{1,64})\/)?(\d+)$/;
+const byHash=h=>{const m=HASH.exec(h);return m?dv().cards.find(x=>x.number===+m[2]&&envOf(x)===(m[1]||'')):null};
+export const officeCardId=number=>byHash(`#devops/card/${number}`)?.id;
+export function openCardModal(id,{host,from,onClose,openItem,openAgent,openLink}){
+  if(!card(id))return;
+  const editor=createCardEditor(id,{host,from,openItem,openAgent,openLink,onClose:()=>{hostedCards.delete(editor);onClose?.()}});
+  hostedCards.add(editor);editor.paint();return editor.m;
+}
+export function renderHostedCards(){for(const editor of hostedCards)editor.paint()}
 export function renderInspector(pane){
   panel(pane,false);
   const c=card(selected);
   if(!c){if(modal&&!modal.closing)modal.close();return}
   if(!modal||modal.closing){
-    const m=detailModal({cls:'card-modal',label:`Card #${c.number}`,from:cardEl(c.id),
-      events:{click:inspectorClick,input:inspectorInput,change:inspectorChange,keydown:modalKey},
-      onClose(){
-        // This modal's own card (modalFor may already point at a newer modal's card).
-        const id=m.forId,current=modal===m;if(current)modal=null;
-        // Only the current modal owns the URL; an older one closing behind a newer one leaves it alone.
-        if(current&&location.hash.startsWith('#devops/card/')){if(pushed){pushed=false;history.back()}else history.replaceState(null,'','#devops')}
-        if(selected===id){selected=null;rerender()}
-        if(!m.quiet)requestAnimationFrame(()=>cardEl(id)?.focus({preventScroll:true}));
-      }});
-    modal=m;labelForm=false;
+    const editor=createCardEditor(c.id,{from:cardEl(c.id),openItem,openAgent,onClose(){
+      const m=editor.m,id=editor.id,current=modal===m;if(current)modal=null;
+      // Only the current modal owns the URL; an older one closing behind a newer one leaves it alone.
+      if(current&&location.hash.startsWith('#devops/card/')){if(pushed){pushed=false;history.back()}else history.replaceState(null,'','#devops')}
+      if(selected===id){selected=null;rerender()}
+      if(!m.quiet)requestAnimationFrame(()=>cardEl(id)?.focus({preventScroll:true}));
+    }});
+    modal=editor.m;modal.editor=editor;
   }
-  if(modalFor!==c.id)labelForm=false;
-  modalFor=modal.forId=c.id;modal.from(cardEl(c.id));
+  const editor=modal.editor;
+  if(editor.id!==c.id)editor.labelForm=false;
+  editor.id=c.id;modal.from(cardEl(c.id));
   if(location.hash!==cardHash(c)){if(location.hash.startsWith('#devops/card/'))history.replaceState(null,'',cardHash(c));else{history.pushState(null,'',cardHash(c));pushed=true}}
-  // Keep focus and caret in place when the body is re-rendered after an edit.
-  const a=document.activeElement,keep=modal.el.contains(a)&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;
-  modal.body.innerHTML=cardDetailHtml(c);
-  if(linkOf(c))loadHistory(modal.body);
-  const f=keep&&document.getElementById(keep.id);
-  if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
-  else if(!modal.el.contains(document.activeElement))modal.el.querySelector('#dc-title')?.focus({preventScroll:true});
+  editor.paint();
 }
 // Hash changes (Back/Forward, a pasted link): open or close the card it names.
 export function syncHash(){
-  const m=/^#devops\/card\/(\d+)$/.exec(location.hash),c=m&&dv().cards.find(x=>x.number===+m[1]);
+  const c=byHash(location.hash);
   if(c&&selected!==c.id){pushed=false;focus({cardId:c.id});rerender()}
   else if(!c&&selected){pushed=false;selected=null;rerender()}
 }
 // Previous / next card in the same column (as shown), while the modal is open.
 function modalKey(e){
-  inspectorKey(e);
   if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable)return;
   const dir=matches(e,'devops.prevCard')?-1:matches(e,'devops.nextCard')?1:0;if(!dir)return;
   const c=card(selected);if(!c)return;
-  const list=ordered(c.column,filterCards(db(),ui).filter(x=>x.column===c.column));
+  const list=colCards(c.column,filterCards(db(),viewFilter())).list;
   const next=list[list.findIndex(x=>x.id===c.id)+dir];if(!next)return;
   e.preventDefault();selected=next.id;reveal=true;rerender();
 }
@@ -480,15 +655,15 @@ const showField=f=>v=>!Array.isArray(v)?(f==='column'?colName(v):v)
   :f==='labels'?v.map(id=>label(id)?.name||'a label').join(', '):f==='assignees'?v.map(a=>`${nodeById(a.node)?.name||'someone'} (${a.role})`).join(', ')
   :v.map(x=>x.text??x.url).join(', ');
 const clash=(c,f)=>clashHtml(c,f,{show:showField(f)});
-function cardDetailHtml(c){
+function cardDetailHtml(c,{labelForm,host,openItem,openAgent}){
   // A linked card (docs/sharing.md): view and comment lock every field; edit unlocks the ones its owner allows.
   const l=linkOf(c),ed=canEdit(c),ro=ed?'':' disabled',mine=l?' disabled':'';
-  const ppl=peopleFor(c),items=[...db().timeline].filter(i=>!l||sameSource(i,c)).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
-  const projectOpts=db().projects.map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
+  const ppl=peopleFor(c),items=[...db().timeline].filter(i=>sameEnv(i,c)&&(!l||sameSource(i,c))).sort((a,b)=>Object.keys(ITEM_KINDS).indexOf(a.kind)-Object.keys(ITEM_KINDS).indexOf(b.kind)||a.title.localeCompare(b.title));
+  const projectOpts=db().projects.filter(p=>sameEnv(p,c)).map(p=>{const under=p.entity&&nodeById(p.entity)?.name;return opt(p.id,p.name+(under&&under!==p.name?` · ${under}`:''),c.project)}).join('');
   const done=c.checklist.filter(x=>x.done).length,total=c.checklist.length;
-  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span><span class="sp"></span>
+  return `<div class="ihead cd-h"><span class="k dv-k">${icon('branch')}</span><strong>#${c.number}</strong>${sharedChip(c)}<span class="cd-col">${esc(colName(c.column))}</span>${isSnoozed(c)?`<span class="cd-snz" data-tip="${esc(snoozeTip(c))}">${icon('clock',12)}Snoozed until ${esc(wakeText(c.snoozedUntil))}</span>`:''}<span class="sp"></span>
     ${c.column==='uat'&&ed?`<button type="button" class="txt approve" data-dc="approve" data-tip="Testing passed: approve and move to Done (completed)">${icon('check',13)}Approve</button>`:''}
-    ${chat.on()?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'data-dc="chat"'}):''}${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
+    ${ed?ib('clock',isSnoozed(c)?`${snoozeTip(c)}\nChange or unsnooze`:'Snooze\nHide this card until a later time',{attrs:'data-dc="snooze" aria-haspopup="menu"'}):''}${!host&&chat.on()?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'data-dc="chat"'}):''}${l?'':ib('trash','Delete card',{key:keyLabel('devops.delete'),cls:'danger',attrs:'data-dc="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-dc="close"'})}</div>
     <form id="dedit" class="cd-grid" autocomplete="off"><div class="cd-main ibody">${sharedNote(c)}
     <label for="dc-title">Title</label>${clash(c,'title')}<input id="dc-title" class="cd-title" maxlength="200" required value="${esc(c.title)}"${ro}>
     <label for="dc-desc">Description</label>${clash(c,'description')}<textarea id="dc-desc" rows="9" maxlength="8000" placeholder="${ed?'Why this card exists, what should be delivered':''}"${ro}>${esc(c.description)}</textarea>
@@ -496,7 +671,7 @@ function cardDetailHtml(c){
     ${clash(c,'checklist')}<ul class="dc-list" aria-label="Checklist">${c.checklist.map(x=>`<li><input type="checkbox" data-chk="${esc(x.id)}"${x.done?' checked':''} aria-label="Done"${ro}><span class="nm${x.done?' done':''}">${esc(x.text)}</span>${ed?ib('x','Remove',{attrs:`data-chkdel="${esc(x.id)}"`}):''}</li>`).join('')}</ul>
     ${ed?`<div class="dc-row"><input id="dc-chk" maxlength="300" placeholder="Add an item and press Enter" aria-label="New checklist item">${ib('plus','Add item',{attrs:'data-dc="chkAdd"'})}</div>`:''}
     <div class="cd-lab">Links ${hint('A pull request, a commit or any URL','Links')}</div>
-    ${clash(c,'links')}<ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ed?ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`}):''}</li>`).join('')}</ul>
+    ${clash(c,'links')}<ul class="dc-list" aria-label="Links">${c.links.map(l=>`<li><span class="dc-lk" data-tip="${LINK_KINDS[l.kind]}" tabindex="0" role="img" aria-label="${LINK_KINDS[l.kind]}">${icon(LINK_ICONS[l.kind],13)}</span>${/^https?:\/\//i.test(l.url)?host?`<button type="button" class="nm office-card-link" data-office-card-link="${esc(l.url)}">${esc(l.url)}</button>`:`<a class="nm" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a>`:`<span class="nm">${esc(l.url)}</span>`}${ed?ib('x','Remove',{attrs:`data-ldel="${esc(l.id)}"`}):''}</li>`).join('')}</ul>
     ${ed?`<div class="dc-row"><select id="dc-lkind" aria-label="Link type">${Object.entries(LINK_KINDS).map(([k,n])=>opt(k,n,'pr')).join('')}</select><input id="dc-lurl" maxlength="500" placeholder="https:// or a commit SHA" aria-label="Link">${ib('plus','Add link',{attrs:'data-dc="linkAdd"'})}</div>`:''}
     ${l?historyHtml(c,'card'):''}
     </div><aside class="cd-side ibody">
@@ -505,13 +680,13 @@ function cardDetailHtml(c){
       ${prop('Project',`<select id="dc-proj"${mine}>${opt('','No project',c.project)}${projectOpts}</select>`,{ic:'tag',for:'dc-proj'})}
       <div class="prop-pair pts">${prop('Points',`<input id="dc-pts" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.points??''}"${ro}>${clash(c,'points')}`,{ic:'target',for:'dc-pts'})}${prop('Actual points',`<input id="dc-act" type="number" min="0" max="1000" step="any" placeholder="–" value="${c.actual??''}"${ro}>${clash(c,'actual')}`,{ic:'check',for:'dc-act'})}</div>
       ${prop('Due',`<input id="dc-due" type="date" value="${c.due}"${ro}>${clash(c,'due')}`,{ic:'calendar',for:'dc-due'})}
-      ${prop('Timeline item',`<select id="dc-item"${mine}>${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item?ib('arrowR','Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
+      ${prop('Timeline item',`<select id="dc-item"${mine}>${opt('','None',c.item)}${items.map(i=>opt(i.id,`${ITEM_KINDS[i.kind]||i.kind}: ${i.title}`,c.item)).join('')}</select>${c.item&&openItem?ib('arrowR',host?'Open timeline item':'Open in the Timeline',{attrs:'data-dc="goItem"'}):''}`,{ic:'gantt',for:'dc-item'})}
     </div>
     <div class="rail-g" role="group" aria-label="People">
       ${ppl.length?ROLES.map(role=>{const ids=c.assignees.filter(a=>a.role===role).map(a=>a.node),name=role[0].toUpperCase()+role.slice(1),who=ids.map(id=>nodeById(id)?.name).filter(Boolean).join(', ');
         return prop(name,named(`${name}: ${who||'None'}`,pickerButton('dc-role-'+role,who||'None',personItems(c),ids,{cls:'mini wide',count:false,disabled:!ed})),{ic:ROLE_ICONS[role]})}).join('')+clash(c,'assignees')
         :`<div class="dc-hint">${l?'Nobody on this card\'s share can be assigned.':'Add people to a mind map to assign them.'}</div>`}
-      ${agentRow(c)}
+      ${agentRow(c,openAgent,host)}
     </div>
     <div class="rail-g" role="group" aria-label="Labels">
       ${prop('Labels',`<div class="dc-sel">${c.labels.map(label).filter(Boolean).map(pill).join('')}${ed?named(c.labels.length?'Edit labels':'Add labels',pickerButton('dc-labels',c.labels.length?'Edit':'Add',labelItems(c),[],{cls:'mini'})):''}${l?'':`<button type="button" class="txt dc-newbtn" id="dc-newbtn" data-dc="labelNew" data-tip="Create a new label" aria-label="New label" aria-expanded="${labelForm}" aria-controls="dc-newrow">${icon('plus',11)}New</button>`}</div>${clash(c,'labels')}`,{ic:'list'})}
@@ -521,77 +696,99 @@ function cardDetailHtml(c){
 }
 // AgentFlow agents working this card (the link is stored on the agent, agentflow-core.js).
 const agentItems=()=>[...(db().agentflow?.agents||[])].sort((a,b)=>a.name.localeCompare(b.name)).map(a=>{const [bg,fg]=memberColor(a.id);return {value:a.id,label:a.name,sub:a.title,avatar:{text:initials(a.name),bg,fg}}});
-function agentRow(c){
-  if(!db().agentflow?.agents.length)return '';
+function agentRow(c,openAgent,host){
+  // AgentFlow agents are this environment's: a combined environment's card is delegated there.
+  if(!db().agentflow?.agents.length||isForeign(c.id))return '';
   const on=agentsForCard(db().agentflow,c.id),names=on.map(a=>a.name).join(', ');
   return prop('Delegated to',named(`Delegated to: ${names||'None'}`,pickerButton('dc-agents',names||'None',agentItems(),on.map(a=>a.id),{cls:'mini wide',count:false}))+hint('AgentFlow agents working this card. It joins their work queue.','Delegated to'),{ic:'bot'})
-    +(on.length?`<div class="dc-agchips">${on.map(a=>`<button type="button" class="dc-agchip" id="dc-ag-${esc(a.id)}" data-dc-agent="${esc(a.id)}" data-tip="${esc(a.title?`Open in AgentFlow\n${a.title}`:'Open in AgentFlow')}" aria-label="Open ${esc(a.name)} in AgentFlow${a.title?`, ${esc(a.title)}`:''}">${icon('bot',12)}<span>${esc(a.name)}</span></button>`).join('')}</div>`:'');
+    +(on.length&&openAgent?`<div class="dc-agchips">${on.map(a=>`<button type="button" class="dc-agchip" id="dc-ag-${esc(a.id)}" data-dc-agent="${esc(a.id)}" data-tip="${esc(a.title?`${host?'Agent details':'Open in AgentFlow'}\n${a.title}`:host?'Agent details':'Open in AgentFlow')}" aria-label="Open ${esc(a.name)}${host?' details':' in AgentFlow'}${a.title?`, ${esc(a.title)}`:''}">${icon('bot',12)}<span>${esc(a.name)}</span></button>`).join('')}</div>`:'');
 }
 // Delegate a card to exactly these agents (ids). One undo step; nothing changes when an agent's queue is full.
-function setAgents(c,ids){
+function setAgents(c,ids,update=rerender){
+  if(isForeign(c.id)){toast(ownerMsg(c,'This card'),true);return}
+  // An opened shared environment's agents are its owner's: delegating needs an edit share (docs/sharing.md).
+  const o=store.db.opened;if(o&&o.permission!=='edit'){toast(`Shared with you by ${o.ownerName||o.ownerEmail} to ${o.permission==='comment'?'comment on':'view'}: ask them for edit access to delegate cards.`,true);rerender();return}
   // Check room before recording an undo step: delegate() changes nothing when an agent is full.
   const before=structuredClone(store.db),over=delegate(db().agentflow,c.id,ids);
-  if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);rerender();return}
-  touch(c);commit(before);rerender();
+  if(over){toast(`${over.name}'s queue is full (100 cards). Remove some first.`,true);update();return}
+  touch(c);commit(before);update();
 }
-function addLabel(){
-  const i=$('#dc-newlabel'),name=i?.value.trim(),c=card(selected);if(!name||!c)return;
-  const keys=['blue','green','purple','orange','teal','pink','indigo','amber','sky','rose','lime','brown'];
-  change(()=>{
-    let l=dv().labels.find(x=>x.name.toLowerCase()===name.toLowerCase());
-    if(!l){l={id:uid(),name:name.slice(0,40),section:$('#dc-newsec').value,color:keys[dv().labels.length%keys.length]};dv().labels.push(l)}
-    if(!c.labels.includes(l.id))c.labels.push(l.id);touch(c);
-  });
-  $('#dc-newlabel')?.focus();
+function createCardEditor(id,{host,from,onClose,openItem,openAgent,openLink}){
+  const editor={id,host,openItem,openAgent,openLink,labelForm:false,paint};
+  const m=editor.m=detailModal({host,from,scopeIds:!!host,cls:'card-modal',label:`Card #${card(id).number}`,onClose,
+    events:{click:inspectorClick,input:inspectorInput,change:inspectorChange,keydown(e){inspectorKey(e);if(!host)modalKey(e)}}});
+  const $=m.query;
+  const update=()=>host?paint():rerender();
+  const close=()=>host?m.close():select(null);
+  function paint(){
+    if(m.closing)return;
+    const c=card(editor.id);if(!c){m.close();return}
+    paintDetail(m,cardDetailHtml(c,editor),'#dc-title');
+    if(linkOf(c))loadHistory(m.body);
+  }
+  function addLabel(){
+    const i=$('#dc-newlabel'),name=i?.value.trim(),c=card(editor.id);if(!name||!c)return;
+    const keys=['blue','green','purple','orange','teal','pink','indigo','amber','sky','rose','lime','brown'];
+    change(()=>{
+      let l=dv().labels.find(x=>x.name.toLowerCase()===name.toLowerCase());
+      if(!l){l={id:uid(),name:name.slice(0,40),section:$('#dc-newsec').value,color:keys[dv().labels.length%keys.length]};dv().labels.push(l)}
+      if(!c.labels.includes(l.id))c.labels.push(l.id);touch(c);
+    });
+    $('#dc-newlabel')?.focus();
+  }
+  function addCheck(){const i=$('#dc-chk'),t=i?.value.trim(),c=card(editor.id);if(!t||!c)return;change(()=>{c.checklist.push({id:uid(),text:t.slice(0,300),done:false});touch(c)});$('#dc-chk')?.focus()}
+  function addLink(){const i=$('#dc-lurl'),u=i?.value.trim(),c=card(editor.id);if(!u||!c)return;const kind=$('#dc-lkind').value;change(()=>{c.links.push({id:uid(),kind,url:u.slice(0,500)});touch(c)});$('#dc-lurl')?.focus()}
+  function inspectorClick(e){
+    const b=e.target.closest('button');if(!b)return;
+    const c=card(editor.id);if(!c)return;
+    if(clashClick(b,c,(f,v)=>change(()=>{if(f==='column')moveCard(dv(),c.id,v);else c[f]=v;touch(c)}),update))return;
+    if(b.dataset.i==='shComment'){postComment(m.body,c).catch(err=>toast(err.message,true));return}
+    // Delegating to one's own agents is one's own data; every other button here changes the card.
+    const field=(b.dataset.picker&&b.dataset.picker!=='dc-agents')||b.dataset.chkdel||b.dataset.ldel||['approve','labelAdd','labelNew','chkAdd','linkAdd'].includes(b.dataset.dc);
+    if(field&&locked(c)){toast(lockedMsg(c),true);return}
+    if(b.dataset.picker==='dc-labels'){openPicker(b,{items:labelItems(c),selected:c.labels,label:'Labels',placeholder:'Search labels',onChange(v){change(()=>{const live=card(c.id);if(live&&!locked(live)){live.labels=v;touch(live)}})}});return}
+    if(b.dataset.picker?.startsWith('dc-role-')){const role=b.dataset.picker.slice(8);
+      openPicker(b,{items:personItems(c),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
+        onChange(v){change(()=>{const live=card(c.id);if(live&&!locked(live)){live.assignees=[...live.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(live)}})}});return}
+    if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
+      onChange(v){const live=card(c.id);if(live)setAgents(live,v,update)}});return}
+    if(b.dataset.officeCardLink){editor.openLink(b.dataset.officeCardLink);return}
+    if(b.dataset.dcAgent){editor.openAgent?.(b.dataset.dcAgent);return}
+    if(b.dataset.dc==='snooze'){openMenu(b,snoozeItems(c.id),{label:`Snooze #${c.number}`,align:'end'});return}
+    if(b.dataset.dc==='labelNew'){editor.labelForm=!editor.labelForm;$('#dc-newrow').hidden=!editor.labelForm;b.setAttribute('aria-expanded',editor.labelForm);if(editor.labelForm)$('#dc-newlabel')?.focus();return}
+    if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
+    if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
+    // The card closes first: the chat sits behind its modal otherwise.
+    ({approve:()=>approve(c.id),delete:()=>remove(c.id),close,chat:()=>{m.quiet=true;close();m.close().then(()=>chat.send(c.id))},labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>editor.openItem?.(c.item),
+    })[b.dataset.dc]?.();
+  }
+  // Text fields autosave as you type: one undo step per open form.
+  function inspectorInput(e){
+    const t=e.target,c=card(editor.id),form=$('#dedit');
+    if(!c||!form||!['dc-title','dc-pts','dc-act','dc-due','dc-desc'].includes(detailFieldId(t))||locked(c))return;
+    const title=$('#dc-title').value.trim(),num=v=>v===''||!Number.isFinite(+v)?null:Math.max(0,Math.min(1000,+v));if(!title)return;
+    if(!edited.has(form)){checkpoint();edited.add(form)}
+    Object.assign(c,{title,points:num($('#dc-pts').value),actual:num($('#dc-act').value),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
+    save();if(!host)render();
+  }
+  function inspectorChange(e){
+    const t=e.target,c=card(editor.id);if(!c)return;
+    // A linked card's project and timeline item are its owner's; locked cards take no field changes.
+    if(t.matches('[data-sh-comment]'))return;
+    if((linkOf(c)&&(detailFieldId(t)==='dc-proj'||detailFieldId(t)==='dc-item'))||(locked(c)&&(detailFieldId(t)==='dc-col'||t.dataset.chk))){update();return}
+    if(detailFieldId(t)==='dc-col')requestMove(c.id,t.value,Infinity,null,editor);
+    else if(detailFieldId(t)==='dc-proj')change(()=>{c.project=t.value;touch(c)});
+    else if(detailFieldId(t)==='dc-item')change(()=>{c.item=t.value;touch(c)});
+    else if(t.dataset.chk)change(()=>{const x=c.checklist.find(y=>y.id===t.dataset.chk);if(x)x.done=t.checked;touch(c)});
+  }
+  function inspectorKey(e){
+    if(e.key!=='Enter')return;
+    const f={'dc-chk':addCheck,'dc-lurl':addLink,'dc-newlabel':addLabel}[detailFieldId(e.target)];
+    if(f){e.preventDefault();f()}else if(e.target.tagName==='INPUT')e.preventDefault();
+  }
+  return editor;
 }
-function addCheck(){const i=$('#dc-chk'),t=i?.value.trim(),c=card(selected);if(!t||!c)return;change(()=>{c.checklist.push({id:uid(),text:t.slice(0,300),done:false});touch(c)});$('#dc-chk')?.focus()}
-function addLink(){const i=$('#dc-lurl'),u=i?.value.trim(),c=card(selected);if(!u||!c)return;const kind=$('#dc-lkind').value;change(()=>{c.links.push({id:uid(),kind,url:u.slice(0,500)});touch(c)});$('#dc-lurl')?.focus()}
-export function inspectorClick(e){
-  const b=e.target.closest('button');if(!b)return;
-  const c=card(selected);if(!c)return;
-  if(clashClick(b,c,(f,v)=>change(()=>{if(f==='column')moveCard(dv(),c.id,v);else c[f]=v;touch(c)}),rerender))return;
-  if(b.dataset.i==='shComment'){postComment(modal.body,c).catch(err=>toast(err.message,true));return}
-  // Delegating to one's own agents is one's own data; every other button here changes the card.
-  const field=(b.dataset.picker&&b.dataset.picker!=='dc-agents')||b.dataset.chkdel||b.dataset.ldel||['approve','labelAdd','labelNew','chkAdd','linkAdd'].includes(b.dataset.dc);
-  if(field&&locked(c)){toast(lockedMsg(c),true);return}
-  if(b.dataset.picker==='dc-labels'){openPicker(b,{items:labelItems(c),selected:c.labels,label:'Labels',placeholder:'Search labels',onChange(v){change(()=>{c.labels=v;touch(c)})}});return}
-  if(b.dataset.picker?.startsWith('dc-role-')){const role=b.dataset.picker.slice(8);
-    openPicker(b,{items:personItems(c),selected:c.assignees.filter(a=>a.role===role).map(a=>a.node),label:role,placeholder:'Search people',
-      onChange(v){change(()=>{c.assignees=[...c.assignees.filter(a=>a.role!==role),...v.map(node=>({node,role}))];touch(c)})}});return}
-  if(b.dataset.picker==='dc-agents'){openPicker(b,{items:agentItems(),selected:agentsForCard(db().agentflow,c.id).map(a=>a.id),label:'Agents',placeholder:'Search agents',
-    onChange(v){setAgents(c,v)}});return}
-  if(b.dataset.dcAgent){openAgent(b.dataset.dcAgent);return}
-  if(b.dataset.dc==='labelNew'){labelForm=!labelForm;$('#dc-newrow').hidden=!labelForm;b.setAttribute('aria-expanded',labelForm);if(labelForm)$('#dc-newlabel')?.focus();return}
-  if(b.dataset.chkdel){change(()=>{c.checklist=c.checklist.filter(x=>x.id!==b.dataset.chkdel);touch(c)});return}
-  if(b.dataset.ldel){change(()=>{c.links=c.links.filter(x=>x.id!==b.dataset.ldel);touch(c)});return}
-  // The card closes first: the chat sits behind its modal otherwise.
-  ({approve:()=>approve(c.id),delete:()=>remove(c.id),close:()=>select(null),chat:()=>{const id=c.id,m=modal;if(m)m.quiet=true;select(null);(m?m.close():Promise.resolve()).then(()=>chat.send(id))},labelAdd:addLabel,chkAdd:addCheck,linkAdd:addLink,goItem:()=>openItem(c.item),
-  })[b.dataset.dc]?.();
-}
-// Text fields autosave as you type: one undo step per open form.
-export function inspectorInput(e){
-  const t=e.target,c=card(selected),form=$('#dedit');
-  if(!c||!form||!['dc-title','dc-pts','dc-act','dc-due','dc-desc'].includes(t.id)||locked(c))return;
-  const title=$('#dc-title').value.trim(),num=v=>v===''||!Number.isFinite(+v)?null:Math.max(0,Math.min(1000,+v));if(!title)return;
-  if(!edited.has(form)){checkpoint();edited.add(form)}
-  Object.assign(c,{title,points:num($('#dc-pts').value),actual:num($('#dc-act').value),due:$('#dc-due').value,description:$('#dc-desc').value});touch(c);
-  save();render();
-}
-export function inspectorChange(e){
-  const t=e.target,c=card(selected);if(!c)return;
-  // A linked card's project and timeline item are its owner's; locked cards take no field changes.
-  if(t.matches('[data-sh-comment]'))return;
-  if((linkOf(c)&&(t.id==='dc-proj'||t.id==='dc-item'))||(locked(c)&&(t.id==='dc-col'||t.dataset.chk))){rerender();return}
-  if(t.id==='dc-col')requestMove(c.id,t.value);
-  else if(t.id==='dc-proj')change(()=>{c.project=t.value;touch(c)});
-  else if(t.id==='dc-item')change(()=>{c.item=t.value;touch(c)});
-  else if(t.dataset.chk)change(()=>{const x=c.checklist.find(y=>y.id===t.dataset.chk);if(x)x.done=t.checked;touch(c)});
-}
-export function inspectorKey(e){
-  if(e.key!=='Enter')return;
-  const f={'dc-chk':addCheck,'dc-lurl':addLink,'dc-newlabel':addLabel}[e.target.id];
-  if(f){e.preventDefault();f()}else if(e.target.tagName==='INPUT')e.preventDefault();
-}
+// Board card events live on the dialog; the shared inspector is empty on this tab.
 export function key(e){
   if(e.key==='Escape'){if(pop?.type==='pick')finishPick('');else if(selected)select(null);return}
   if(matches(e,'devops.delete')&&card(selected)){e.preventDefault();remove(selected);return}

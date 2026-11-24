@@ -1,8 +1,11 @@
+import {privateRecords,withoutPrivateRecords} from './lib/workspace-privacy.mjs';
+import {isDeepStrictEqual} from 'node:util';
 import http from 'node:http';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync,copyFileSync,readdirSync,unlinkSync,statSync} from 'node:fs';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {resolve,extname,sep,join} from 'node:path';
+import {readRaw} from './lib/body.mjs';
 const root=fileURLToPath(new URL('./public/',import.meta.url));
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.json':'application/json','.txt':'text/plain','.md':'text/markdown'};
 // Storage: BACKUP_DIR, SAVES_DIR and INBOX_DIR (e.g. a Railway volume at /data/backups, /data/saves,
@@ -17,9 +20,10 @@ const KEEP_LOCAL=200;
 const validDb=d=>Array.isArray(d?.charts)&&d.charts.length&&d.charts.some(c=>c.id===d.active)&&d.charts.every(c=>typeof c.name==='string'&&Array.isArray(c.nodes)&&Array.isArray(c.edges));
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(body))};
 function readBody(req,res,done){
-  let body='',bytes=0;
-  req.on('data',chunk=>{bytes+=chunk.length;if(bytes>5000000){res.writeHead(413);res.end();req.destroy();return;}body+=chunk;});
-  req.on('end',()=>{if(!res.writableEnded)done(body)});
+  readRaw(req,5000000).then(r=>{
+    if(r.tooLarge){if(!res.destroyed&&!res.headersSent){res.writeHead(413);res.end()}return}
+    if(!r.aborted&&!res.writableEnded)done(r.text);
+  });
 }
 // Sign-in (OneProfileID when OPID_* is set, otherwise local single-user mode) and environments.
 // Imported after .env is loaded so OPID_* values there are seen.
@@ -32,16 +36,22 @@ const {inviteStore,validEmail,SCHEMA:INVITE_SCHEMA}=await import('./lib/invites.
 // Guardrails (lib/limits.mjs): per-person caps, persistent rate windows; people who signed in (lib/users.mjs).
 const limitsMod=await import('./lib/limits.mjs');
 const {userStore,accessRequestStore,SCHEMA:USER_SCHEMA,REQUEST_SCHEMA}=await import('./lib/users.mjs');
+const {avatarStore,SCHEMA:AVATAR_SCHEMA}=await import('./lib/avatars.mjs');
+const {renderAvatarPortrait}=await import('./public/avatar.js');
 const {createMailer,inviteEmail}=await import('./lib/mailer.mjs');
 // Sharing (docs/sharing.md): the rules are pure (sharing-core), the store keeps shares, requests and placements.
 const {shareStore,SCHEMA:SHARE_SCHEMA}=await import('./lib/shares.mjs');
 const core=await import('./lib/sharing-core.mjs');
+// Combined view (docs/combined.md): other environments of the same user shown in the open one's board and timeline.
+const combined=await import('./public/combined-core.js');
 // OneProfileID photos on person cards a person linked to their account (docs/concepts/10-opid-photos.md).
 const opidPhotos=await import('./lib/opid-photos.mjs');
-const {validOpidUser}=await import('./lib/cleaners.mjs');
+const {validOpidUser,normalize:normalizeDb}=await import('./lib/cleaners.mjs');
 // Sign-in sessions survive deploys when Postgres is configured (memory otherwise).
-auth.useSessionStore(sessionStore({db:()=>cloud(),max:auth.SESSION_MAX}));
-const {shrinks,size,keepCounters}=await import('./public/sync-core.js');
+const flowSessions=sessionStore({db:()=>cloud(),max:auth.SESSION_MAX});auth.useSessionStore(flowSessions);
+// Removing people from Flow (lib/revocations.mjs): the owner's removals and OneProfileID's membership events.
+const {revocationStore,membershipControl,SCHEMA:REVOCATION_SCHEMA}=await import('./lib/revocations.mjs');
+const {shrinks,size,keepCounters,fieldBase,applyCardEdits,sameCard}=await import('./public/sync-core.js');
 const {carryRunners}=await import('./public/agentflow-core.js');
 const readJson=(req,res,done)=>{if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return}readBody(req,res,b=>{let v;try{v=JSON.parse(b)}catch{json(res,400,{error:'Invalid JSON'});return}done(v)})};
 const appHost=auth.appOrigin?new URL(auth.appOrigin).host:'';
@@ -73,6 +83,8 @@ async function backup(req,res){
   readBody(req,res,body=>{try{
     let data=JSON.parse(body);
     if(!validDb(data))throw Error('Invalid chart database');
+    // An opened shared environment is its owner's: never backed up as this user's.
+    if(core.parseOpenedEnv(data.environment?.id)){json(res,200,{saved:false,skipped:'A shared environment is saved by its owner.'});return}
     const e=envs.of(data);if(!canWrite(e,user)){denied(res,e,user);return}
     stamp(data,envs.claim(data,user));data=stripLinked(data);
     mkdirSync(backupRoot,{recursive:true});
@@ -101,7 +113,7 @@ async function cloud(){
     try{
       await p.query(`create table if not exists org_chart_studio_saves(id uuid primary key,saved_at timestamptz not null default now(),label text not null,charts int not null,items int not null,data jsonb not null)`);
       await p.query(`alter table org_chart_studio_saves add column if not exists env_id text, add column if not exists env_owner text, add column if not exists env_visibility text`);
-      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA])await p.query(q);
+      for(const q of [...WORKSPACE_SCHEMA,...SESSION_SCHEMA,...INVITE_SCHEMA,...USER_SCHEMA,...AVATAR_SCHEMA,...REQUEST_SCHEMA,...limitsMod.SCHEMA,...SHARE_SCHEMA,...APIKEY_SCHEMA,...opidPhotos.SCHEMA,...REVOCATION_SCHEMA])await p.query(q);
       await p.query(`create table if not exists flygon_flow_prefs(user_id text primary key,email text,data jsonb not null,updated_at timestamptz not null default now())`);
       await p.query(`create table if not exists flygon_flow_environments(id text primary key,name text not null,owner_email text not null,visibility text not null default 'private',members jsonb not null default '[]',created_at timestamptz not null default now())`);
     }catch(e){p.end().catch(()=>{});throw e}
@@ -138,9 +150,8 @@ async function saves(req,res){
   const user=await requireUser(req,res);if(!user)return true;
   try{
     if(req.method==='GET'&&url==='/api/saves'){
-      // Listed: environments the user owns or is a member of. Public ones of others open by id only;
-      // they are never listed or discoverable here.
-      const listable=e=>canRead(e,user)&&(sameEmail(e.ownerEmail,user.email)||e.members?.some(m=>sameEmail(m,user.email)));
+      // Historical snapshots can predate a record's privacy setting. Only the owner can access them.
+      const listable=e=>sameEmail(e?.ownerEmail,user.email);
       const local=localList().filter(s=>listable(s.env)),byId=new Map(local.map(s=>[s.id,{...s,env:envInfo(s.env),local:true,cloud:false}]));
       let status='off';
       try{const db=await cloud();if(db){status='ok';
@@ -155,6 +166,7 @@ async function saves(req,res){
       readBody(req,res,async body=>{
         let data;try{data=JSON.parse(body)}catch{}
         if(!validDb(data)){json(res,400,{error:'Invalid chart database'});return}
+        if(core.parseOpenedEnv(data.environment?.id)){json(res,400,{error:'This environment is shared with you: its owner keeps its saves.'});return}
         const e0=envs.of(data);if(!canWrite(e0,user)){denied(res,e0,user);return}
         const L=limitsOf(e0.unregistered?user.email:e0.ownerEmail),things=size(data),bytes=limitsMod.bytesOf(data);
         if(things>L.maxItems){json(res,413,{error:`This workspace holds ${things.toLocaleString('en-US')} cards, nodes and items; a workspace holds up to ${L.maxItems.toLocaleString('en-US')}. Nothing was saved.`,code:'too_many_items'});return}
@@ -175,9 +187,9 @@ async function saves(req,res){
     const m=/^\/api\/saves\/([0-9a-f-]{36})$/.exec(url);
     if(req.method==='GET'&&m){
       const f=existsSync(savesRoot)&&readdirSync(savesRoot).find(f=>f.endsWith(`_${m[1]}.json`));
-      if(f){const data=JSON.parse(readFileSync(savesRoot+'/'+f,'utf8')).data;if(!canRead(envs.of(data),user)){json(res,404,{error:'Save not found'});return true}json(res,200,{data});return true}
+      if(f){const data=JSON.parse(readFileSync(savesRoot+'/'+f,'utf8')).data;if(!sameEmail(envs.of(data)?.ownerEmail,user.email)){json(res,404,{error:'Save not found'});return true}json(res,200,{data});return true}
       const db=await cloud(),r=db&&(await db.query('select data,env_id,env_owner,env_visibility from org_chart_studio_saves where id=$1',[m[1]])).rows[0];
-      if(r&&canRead(rowEnv(r),user))json(res,200,{data:r.data});else json(res,404,{error:'Save not found'});
+      if(r&&sameEmail(rowEnv(r).ownerEmail,user.email))json(res,200,{data:r.data});else json(res,404,{error:'Save not found'});
       return true;
     }
     res.writeHead(404);res.end();return true;
@@ -217,12 +229,21 @@ async function inbox(req,res){
 
 // ---------- workspaces: the server is the source of truth (GET/PUT /api/workspace) ----------
 // GET  /api/workspace[?env=<id>][&since=<rev>]  -> {env, rev, data, updatedAt} (rev 0 / data null: nothing yet)
-// PUT  /api/workspace?env=<id>  {baseRev, data[, allowShrink]} -> {rev} | 409 {rev, data} | 422 shrink
+// PUT  /api/workspace?env=<id>  {baseRev, data[, allowShrink][, cardEdits]} -> {rev} | 409 {rev, data} | 422 shrink
+//      cardEdits (the board, sync-core cardEditsOf): only those cards and fields are written; a card edit
+//      over a value the browser never saw is 409 {code:'card_conflict', clashes}. A browser tab running
+//      older code (intent but no cardEdits) that changes cards is refused with 428: it must reload.
 // Auth: the signed-in user, or `Authorization: Bearer <FLOW_SYNC_TOKEN>` acting as the owner
 // (OWNER_EMAIL) for imports and for a local app syncing to production.
 // With FLOW_SYNC_URL + FLOW_SYNC_TOKEN set (e.g. Owner's local app), these calls are relayed to that
 // server; the local file copy is the offline fallback.
-const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null)});
+let officeHistory,appPush;
+const rawWorkspaces=workspaceStore({dir:fileURLToPath(backupRoot),db:()=>cloud().catch(()=>null),
+  onSaved:(env,before,after,meta)=>{
+    try{if(!isDeepStrictEqual(privateRecords(before),privateRecords(after)))shareRevoked()}
+    catch(e){console.error('Workspace privacy refresh failed:',cloudError(e))}
+    officeHistory?.cards(env,before,after);appPush?.saved(env,before,after,meta);
+  }});
 const CAPS=auth.CAPS,isOwnerEmail=e=>sameEmail(e,auth.OWNER_EMAIL),limitsOf=email=>limitsMod.limitsFor(CAPS,{owner:isOwnerEmail(email)});
 const users=userStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Someone with no row yet who already owns data used Flow before people were recorded: not new.
@@ -233,6 +254,28 @@ const rates=limitsMod.rateStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 const accessRequests=accessRequestStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});auth.useAccessRequests(accessRequests);
 const invites=inviteStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 auth.useInvites(invites);
+const revocations=revocationStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+auth.useRevocations(revocations,args=>memberships.revoke({...args,by:'flow'}));
+// Who in Flow holds a OneProfileID membership id: recorded at sign-in, else an open sign-up's own id, else an invite's.
+async function memberOf(localId){
+  if(localId==='owner')return {email:auth.OWNER_EMAIL,opidId:(await users.get(auth.OWNER_EMAIL))?.opidId||''};
+  const u=await users.byLocalId(localId)||(await users.list()).find(x=>x.opidId&&auth.selfLocalId(x.opidId)===localId);
+  if(u)return {email:u.email,opidId:u.opidId};
+  const i=await invites.byLocalId(localId);if(!i)return null;
+  const v=await users.get(i.email);return {email:i.email,opidId:v?.opidId||''};
+}
+// A removed person's access ends everywhere here: Flow sessions, API keys, and so MCP and the CLI.
+async function endAccess({email,opidId}){
+  await flowSessions.deleteUser({email,opidId});
+  if(email)await apiKeys.revokeAll(email);
+}
+const memberships=membershipControl({store:revocations,opid:auth.opidMembership,resolve:memberOf,endAccess});
+// The membership id to revoke for someone who uses Flow.
+async function localIdOf(u){
+  if(u.localId)return u.localId;
+  const i=await invites.find(u.email);if(i?.claimedAt)return i.localId;
+  return u.opidId?auth.selfLocalId(u.opidId):'';
+}
 const shares=shareStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
 // Who opened which workspace with their OneProfileID account (its owner, or a share's recipient).
 const opidMembers=opidPhotos.memberStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
@@ -247,6 +290,8 @@ const seenBy=(envId,user)=>{if(opidId(user))opidMembers.record(envId,user).catch
 const isLinked=id=>typeof id==='string'&&id.startsWith('sh.');
 function stripLinked(d){
   if(!d||typeof d!=='object')return d;
+  // Combined records (cx.*) and references to them never belong to the workspace that showed them.
+  if(combined.hasCombined(d))d=combined.stripCombined(d);
   const out={...d,charts:(d.charts||[]).map(c=>({...c,nodes:(c.nodes||[]).filter(n=>!isLinked(n.id)),edges:(c.edges||[]).filter(e=>!isLinked(e.id))}))};
   delete out.shares;delete out.shareMembers;
   if(Array.isArray(d.projects))out.projects=d.projects.filter(x=>!isLinked(x?.id));
@@ -274,6 +319,13 @@ async function attachedShares(envId,user){
 }
 // The members of a share (its owner and the recipients of the same records), who can be assigned to its cards.
 const membersOf=async s=>core.shareMembers(s,await shares.list({ownerEnv:s.ownerEnv}));
+// Placed shares with that member list, so a member's account photo can be looked up when their person
+// card is outside the share (lib/opid-photos.mjs photoTargets).
+async function sharesForPhotos(envId,user){
+  const list=await attachedShares(envId,user),out=[];
+  for(const x of list)out.push({...x,members:await membersOf(x.share)});
+  return out;
+}
 // Conflicts are shown to the person who lost them for a day (docs/sharing.md).
 const CONFLICT_MS=864e5;
 // The workspace as its owner sees it: their own data plus the linked copies of shares placed in it.
@@ -288,10 +340,15 @@ async function withShares(envId,user,data){
 async function project(envId,user,data){
   const own=stripLinked(data);let d=structuredClone(own);const sig=[],meta=[],conflicts=[],since=new Date(Date.now()-CONFLICT_MS).toISOString();
   for(const {share:s,home} of user.token?[]:await attachedShares(envId,user)){
-    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user)});
+    const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
+    const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),viewerName:user.name,pending});
     d=core.applyProjection(d,p);seenBy(s.ownerEnv,user);
-    sig.push(`${s.id}:${s.permission}:${home.rev}`);
-    meta.push({id:s.id,permission:s.permission,ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members});
+    // Decided in the last week (the browser tells the recipient once): approved, denied.
+    const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
+      .map(x=>({id:x.id,status:x.status,at:x.decidedAt,titles:core.proposalPreview(inScope(home.data,s),x).map(r=>r.title).slice(0,5)}));
+    sig.push(`${s.id}:${s.permission}:${core.addsOf(s)}:${home.rev}:${pending.map(x=>x.id+'@'+x.updatedAt).join('+')}:${decided.length}`);
+    meta.push({id:s.id,permission:s.permission,adds:core.addsOf(s),ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:home.name||home.data.environment?.name||'',name:s.name,members:p.share.members.map(m=>({...m,officeKey:officeHub.memberKey(m.email)})),
+      ...(p.share.pending.length?{pending:p.share.pending}:{}),...(decided.length?{decided}:{})});
     const sc=core.resolveScope(home.data,s);
     for(const e of await shares.history({envId:s.ownerEnv,over:user.email,since,limit:200}))
       if(sc[SCOPE_KEY[e.kind]]?.includes(e.recordId))conflicts.push(core.conflictView(e,{ownerDb:home.data,share:s,members}));
@@ -305,7 +362,7 @@ async function project(envId,user,data){
       const m=members.get(e)||members.set(e,{id:core.memberId(e),email:e,name:e,cards:new Set()}).get(e);
       for(const id of core.resolveScope(own,s).cardIds)m.cards.add(id);
     }
-    if(members.size)d.shareMembers=[...members.values()].map(m=>({...m,cards:[...m.cards]}));
+    if(members.size)d.shareMembers=[...members.values()].map(m=>({...m,officeKey:officeHub.memberKey(m.email),cards:[...m.cards]}));
     if(out.length)for(const e of await shares.history({envId,over:user.email,since,limit:200}))conflicts.push(core.conflictView(e));
   }
   for(const sid of core.linkedShareIds(d))if(!meta.some(m=>m.id===sid)){
@@ -317,19 +374,98 @@ async function project(envId,user,data){
   const seen=new Set();
   return {data:d,shared:sig.join(','),conflicts:conflicts.filter(c=>{const k=[c.kind,c.id,c.field,c.at].join('|');return !seen.has(k)&&seen.add(k)})};
 }
-const SCOPE_KEY={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
+// ---- opened shared environments (docs/sharing.md, "Opening a shared environment") ----
+// The recipient of an active whole-environment share opens the owner's environment as share-<shareId>: what the
+// owner has, through the share's projection (core.openedProjection), built from the owner's current data on every
+// read and never stored. Saves send back only the edits the share allows (applyRecipientSave) and the additions its
+// adds setting allows (planAdds). Anyone but the share's recipient gets 404; a revoked share answers 410.
+// -> {share, home} | {gone:true} | null
+async function openedShare(envId,user){
+  const sid=core.parseOpenedEnv(envId);if(!sid||!user?.email||user.token||user.key)return null;
+  const s=await shares.get(sid);if(!s||!sameEmail(s.recipientEmail,user.email)||s.scope?.kind!=='environment')return null;
+  if(s.revokedAt)return {gone:true};
+  const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)return {gone:true};
+  return {share:s,home};
+}
+const GONE={error:'This environment is no longer shared with you',code:'share_revoked'};
+// The share as it is right now, just before a write to the owner's data: null once revoked. A save in flight
+// re-reads it here, so a revoke or a lower permission between the save's first check and its write wins.
+const shareNow=async s=>{const cur=await shares.get(s.id).catch(()=>null);return cur&&!cur.revokedAt?cur:null};
+// What an opened environment serves: {data, shared (a signature, as for placed shares), conflicts, rev (the owner's)}.
+async function openedView(envId,user,{share:s,home}){
+  const members=await membersOf(s),mine=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:50}),pending=mine.filter(x=>x.status==='pending');
+  const p=core.openedProjection(home.data,s,await shares.placements(s.id,envId),{members,viewer:opidId(user),viewerName:user.name,pending});
+  const name=home.name||home.data.environment?.name||'',data=core.openedDb(p,{name});
+  const decided=mine.filter(x=>(x.status==='approved'||x.status==='denied')&&x.decidedAt>=new Date(Date.now()-7*CONFLICT_MS).toISOString())
+    .map(x=>({id:x.id,status:x.status,at:x.decidedAt,titles:core.proposalPreview(inScope(home.data,s),x).map(r=>r.title).slice(0,5)}));
+  const ownerName=await personName(s.ownerEmail);
+  data.shares=[{id:s.id,permission:s.permission,adds:core.addsOf(s),ownerEmail:s.ownerEmail,ownerEnv:s.ownerEnv,ownerEnvName:name,name:s.name,members:p.share.members,
+    ...(p.share.pending.length?{pending:p.share.pending}:{}),...(decided.length?{decided}:{})}];
+  data.opened={shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,ownerName,permission:s.permission,adds:core.addsOf(s)};
+  const since=new Date(Date.now()-CONFLICT_MS).toISOString(),sc=core.resolveScope(home.data,s),conflicts=[];
+  for(const e of await shares.history({envId:s.ownerEnv,over:user.email,since,limit:200}))
+    if(sc[SCOPE_KEY[e.kind]]?.includes(e.recordId))conflicts.push(core.conflictView(e,{ownerDb:home.data,share:s,members}));
+  seenBy(s.ownerEnv,user);
+  return {data,rev:home.rev,conflicts,shared:`open:${s.id}:${s.permission}:${core.addsOf(s)}:${home.rev}:${pending.map(x=>x.id+'@'+x.updatedAt).join('+')}:${decided.length}`};
+}
+// PUT /api/workspace?env=share-<shareId>. Nothing is stored for the recipient: layout becomes placements, edits go
+// to the owner (sharedEdits only, as for placed copies, with the same 20-record guard) and new records go through
+// the share's additions setting.
+async function putOpened(res,envId,user,body){
+  const o=await openedShare(envId,user);
+  if(!o){json(res,404,{error:'Not found'});return}
+  if(o.gone){json(res,410,GONE);return}
+  const adds=await planAdds(envId,user,body.data,{},{opened:o}).catch(e=>{console.error('share additions failed',e?.message);return null});
+  if(adds?.plans.length)await commitAdds(envId,user,adds.plans).catch(e=>console.error('share additions failed',e?.message));
+  const back=await applyRecipientSave(envId,user,body.data,fieldMap(body.sharedEdits)||{},{opened:o}).catch(e=>{console.error('share write-back failed',e?.message);return {}});
+  const now=await openedShare(envId,user);
+  if(!now||now.gone){json(res,410,GONE);return}
+  const v=await openedView(envId,user,now);
+  json(res,200,{env:envId,rev:v.rev,shared:v.shared,...(adds?.notAdded?{notAdded:adds.notAdded}:{}),...(back?.bulk?{bulkRefused:true}:{})});
+}
+// The board's own card edits (sync-core cardEditsOf) from a request body; null if not sent.
+function cardEditsBody(v){
+  if(!plain(v))return null;
+  const changed={},removed={};
+  if(plain(v.changed))for(const [id,f] of Object.entries(v.changed))if(plain(f))changed[id]=f;
+  if(plain(v.removed))for(const [id,c] of Object.entries(v.removed))if(plain(c))removed[id]=c;
+  return {changed,added:Array.isArray(v.added)?v.added.filter(x=>typeof x==='string').slice(0,5000):[],removed};
+}
+// Whether two workspaces hold the same own DevOps cards, in the same order.
+function sameCards(a,b){
+  const x=(a?.devops?.cards||[]).filter(c=>!isLinked(c?.id)),y=(b?.devops?.cards||[]).filter(c=>!isLinked(c?.id));
+  return x.length===y.length&&x.every((c,i)=>c?.id===y[i]?.id&&sameCard(c,y[i]));
+}
+const SCOPE_KEY={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds',agent:'agentIds',workflow:'workflowIds'};
+// {kind:{id:{field:value}}} from a request body (fieldBase, sharedEdits), keeping only that shape; null if none.
+const plain=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+function fieldMap(v){
+  if(!plain(v))return null;const out={};
+  for(const kind of Object.keys(SCOPE_KEY))if(plain(v[kind]))for(const [id,f] of Object.entries(v[kind]))if(plain(f))(out[kind]??={})[id]=f;
+  return out;
+}
 // A recipient saved their workspace: layout of linked cards becomes placements, and field edits their
 // share permits go to the owner's workspace (with history). Anything else is dropped (it comes back on
-// the next read). base: the browser's fieldBase (what its copy held before each change), so a stale copy
-// never overwrites the owner, and an edit that overwrote someone's unseen change records them as `over`.
-async function applyRecipientSave(envId,user,data,base){
-  for(const {share:s} of await attachedShares(envId,user)){
+// the next read). base: the fields the recipient changed, each with the value it had before (the browser's
+// sharedEdits, or for /api/v1 and /mcp a fieldBase from what the read served). Only those are written, so
+// a stale copy never overwrites the owner, and an edit that overwrote someone's unseen change records
+// them as `over`. A save that changes many records at once is refused (bulkWrite).
+// opened: {share} when envId is an opened shared environment (share-<shareId>, openedView): its one share, with
+// the opened projection (every chart, AgentFlow). -> {bulk: a save refused for changing too many records}
+async function applyRecipientSave(envId,user,data,base,{opened=null}={}){
+  const result={bulk:false};
+  for(let {share:s} of opened?[opened]:await attachedShares(envId,user)){
     const members=await membersOf(s);
     for(let attempt=0;attempt<3;attempt++){
-      const home=await workspaces.get(s.ownerEnv);if(!home?.data)break;
-      const p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
-      const {placements,edits}=core.extractRecipientChanges(p,data,base);
-      if(attempt===0)await shares.place(s.id,envId,placements);
+      const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)break;
+      const pending=await shares.proposals({shareId:s.id,proposedBy:user.email,status:'pending'}),place=await shares.placements(s.id,envId);
+      const p=opened?core.openedProjection(home.data,s,place,{members,pending}):core.projectForRecipient(home.data,s,place,{members,pending});
+      const {placements,edits,pending:pendingEdits}=core.extractRecipientChanges(p,data,base||{});
+      if(attempt===0){
+        await shares.place(s.id,envId,placements);
+        // Edits of the recipient's pending additions change their proposal.
+        for(const e of pendingEdits){const cur=pending.find(x=>x.id===e.proposal),next=core.applyPendingEdit(home.data,s,cur,e,user,{members});if(next){await shares.updateProposal(next);Object.assign(cur,next)}}
+      }
       const patch=[],hist=[];
       for(const e of edits){
         const r=core.applyRecipientEdit(home.data,s,e,user,{members});if(!r.ok)continue;
@@ -341,12 +477,144 @@ async function applyRecipientSave(envId,user,data,base){
         }
       }
       if(!patch.length)break;
+      if(bulkWrite(hist)){result.bulk=true;console.error('share write-back refused: too many records in one save',JSON.stringify({share:s.id,env:envId,records:new Set(hist.map(h=>h.recordId)).size,fields:hist.length}));break}
+      const fresh=await shareNow(s);if(!fresh)break;
+      if(fresh.permission!==s.permission){s=fresh;continue} // permission changed mid-save: redo the edits under the new one
       const out=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:core.applyOwnerPatch(home.data,patch),by:user.email,owner:home.owner,visibility:home.visibility,name:home.name});
       if(out.refused)break;
       if(out.conflict)continue;
       await shares.record(hist);break;
     }
   }
+  return result;
+}
+// A last guard against a copy that is only out of date: the browser sends the edits it saw its user make
+// (one card at a time on the board), so one save that changes shared fields on BULK_RECORDS or more
+// records is a client putting back an old copy (Nov 2026: 60 fields on 43 cards), not edits. Refused.
+const BULK_RECORDS=20;
+const bulkWrite=hist=>new Set(hist.filter(h=>h.field!=='comment').map(h=>h.kind+'|'+h.recordId)).size>=BULK_RECORDS;
+// ---- Additions (docs/sharing.md): records a recipient makes inside a share go to its owner, at once
+// (adds 'direct') or as a proposal the owner approves (adds 'approve'). planAdds runs before the recipient's own
+// data is saved (what it takes is not stored there), commitAdds after that save succeeded.
+// -> {data (submitted, without what the shares took), plans:[{share, mode, plan}], refusal?:{status, code, error}}
+// api: the caller is an API key or MCP: an addition the share does not allow is refused (403) instead of
+// staying the recipient's own, as it does in the app.
+// opened: {share, home} for an opened shared environment: a new record there is meant for the share, and one the
+// share cannot take is left out (notAdded counts them: nothing of the recipient's own is kept there).
+async function planAdds(envId,user,submitted,stored,{api=false,opened=null}={}){
+  let data=submitted;const plans=[];let notAdded=0;
+  if(user.token||!submitted)return {data,plans,notAdded};
+  for(const {share:s,home} of opened?[opened]:await attachedShares(envId,user)){
+    const mode=core.addsOf(s),members=await membersOf(s),known=await shares.proposals({shareId:s.id,proposedBy:user.email,limit:500});
+    const plan=core.planAdditions(home.data,s,data,stored,{pending:known.filter(x=>x.status==='pending'),known,members,promote:mode!=='off',opened:!!opened});
+    if(opened)notAdded+=plan.refused.length+(mode==='off'?core.proposalSize(plan):0);
+    const pendingNow=known.filter(x=>x.status==='pending').length,n=core.proposalSize(plan),what=['card','item','project','node','edge'].find(k=>plan.records[k].length||plan.refused.some(r=>r.kind===k));
+    const words={card:'DevOps cards',item:'timeline items',project:'projects',node:'mind map cards',edge:'connections'};
+    if(api&&mode==='off'&&(n||plan.refused.length))return {data,plans,refusal:{status:403,code:'share_adds_off',error:`This share does not let you add ${words[what]} to ${s.ownerEmail}'s environment. Ask them to allow additions (Settings › Sharing).`}};
+    if(n&&(n>MAX_ADD_RECORDS||(mode==='approve'&&!plan.joins.length&&pendingNow>=MAX_PENDING))){
+      if(opened&&mode!=='off')notAdded+=n;
+      if(api)return {data,plans,refusal:{status:429,code:'share_adds_full',error:n>MAX_ADD_RECORDS?`Add at most ${MAX_ADD_RECORDS} records at once to a share`:`${pendingNow} additions already wait for ${s.ownerEmail}'s approval. Wait until they decide.`}};
+      continue;
+    }
+    if(api&&plan.refused.length){const r=plan.refused[0];return {data,plans,refusal:r.reason==='out-of-scope'?{status:409,code:'share_add_out_of_scope',error:`That ${r.kind} cannot be added to this share: it would fall outside what is shared`}:{status:400,code:'share_add_refused',error:`That ${r.kind} cannot be added to this share (${r.reason})`}}}
+    if(mode==='off'){
+      // Additions stay the recipient's own, as before; only stale copies of records proposed earlier leave.
+      const stale=plan.taken.filter(t=>!Object.hasOwn(plan.map,t.id));
+      if(stale.length){data=core.takeAdditions(data,s.id,{taken:stale,map:{}});plans.push({share:s,mode,plan:{...plan,records:{node:[],edge:[],project:[],item:[],card:[]},map:{},joins:[]}})}
+      continue;
+    }
+    if(!plan.taken.length)continue;
+    data=core.takeAdditions(data,s.id,plan);plans.push({share:s,mode,plan});
+  }
+  return {data,plans,notAdded};
+}
+// Cards that left the recipient's data for a share's owner are not deletions (lib/workspaces.mjs source.moved).
+const movedCards=adds=>{const ids=(adds?.plans||[]).flatMap(p=>p.plan.taken.filter(t=>t.kind==='card').map(t=>t.id));return ids.length?{moved:ids}:{}};
+// The owner's mind map cards a share covers, for naming connections in what its recipient is shown.
+const inScope=(db,s)=>{const ids=new Set(core.resolveScope(db,s).nodeIds);return {charts:[{nodes:(db.charts||[]).flatMap(c=>c.nodes||[]).filter(n=>ids.has(n.id))}]}};
+// A recipient's pending proposals per share, and records per save: past these, additions wait (they stay theirs).
+const MAX_PENDING=200,MAX_ADD_RECORDS=500;
+// One decision at a time per proposal (a double click must not add its records twice).
+const proposalTurns=new Map();
+function proposalTurn(id,fn){const run=(proposalTurns.get(id)||Promise.resolve()).then(fn),tail=run.catch(()=>{});proposalTurns.set(id,tail);tail.then(()=>{if(proposalTurns.get(id)===tail)proposalTurns.delete(id)});return run}
+const addedHistory=(s,records,map,by,note)=>Object.entries(records).flatMap(([kind,list])=>(list||[]).map(r=>({shareId:s.id,envId:s.ownerEnv,kind,recordId:map?.[r.id]||r.id,field:'added',old:null,new:note||r.name||r.title||'',by,at:new Date().toISOString()})));
+// -> {<the id the caller used>: {id (linked id in the recipient's environment), pending}}
+async function commitAdds(envId,user,plans){
+  const out={};
+  for(const {share:s,mode,plan} of plans){
+    const members=await membersOf(s);
+    // A stale copy sent a pending record again: its fields update the proposal.
+    for(const r of plan.resent){
+      const cur=await shares.getProposal(r.proposal),home=await workspaces.get(s.ownerEnv);if(!cur||!home?.data)continue;
+      const next=core.applyPendingEdit(home.data,s,cur,{kind:r.kind,id:r.id,fields:r.rec},user,{members});if(next)await shares.updateProposal(next);
+    }
+    if(!core.proposalSize(plan))continue;
+    // A card the owner took at once has the owner's #number: the result carries it, not the recipient's local one.
+    const now=new Date().toISOString(),ids=(map,pending,db)=>{for(const [lid,oid] of Object.entries(plan.map)){const id=map?.[oid]||oid,n=db?.devops?.cards?.find(c=>c.id===id)?.number;
+      out[lid]={id:core.linkedId(s.id,id),pending,...(Number.isInteger(n)?{number:n}:{})}}};
+    const join=plan.joins.length?await shares.getProposal(plan.joins[0]):null;
+    if(mode==='direct'&&!(join?.status==='pending')){
+      let done=false;
+      for(let attempt=0;attempt<4&&!done;attempt++){
+        const home=await workspaces.get(s.ownerEnv);if(!home?.data||home.archivedAt)break;
+        const fresh=await shareNow(s);if(!fresh||core.addsOf(fresh)!=='direct')break; // revoked or additions turned down mid-save
+        const {db,map}=core.applyAdditions(home.data,plan.records);
+        const w=await workspaces.put(s.ownerEnv,{baseRev:home.rev,data:db,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'share'}});
+        if(w.refused)break;if(w.conflict)continue;
+        await shares.addProposal({id:randomUUID(),shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,proposedBy:user.email,envId,records:plan.records,status:'applied',createdAt:now,decidedAt:now,decidedBy:user.email,map});
+        await shares.record(addedHistory(s,plan.records,map,user.email));
+        ids(map,false,db);done=true;
+      }
+      if(done)continue;
+      // The owner's workspace could not take it (a limit, or it kept changing): it waits as a proposal instead.
+    }
+    {const cur=await shareNow(s);if(!cur||core.addsOf(cur)==='off')continue} // revoked, or additions off, mid-save: nothing waits
+    if(join?.status==='pending'){
+      const merged={...join,records:Object.fromEntries(Object.entries(join.records).map(([k,list])=>[k,[...list,...(plan.records[k]||[])]]))};
+      if(await shares.updateProposal(merged)){ids(null,true);continue}
+    }
+    await shares.addProposal({id:randomUUID(),shareId:s.id,ownerEnv:s.ownerEnv,ownerEmail:s.ownerEmail,proposedBy:user.email,envId,records:plan.records,status:'pending',createdAt:now});
+    ids(null,true);
+  }
+  return out;
+}
+// A proposal as its owner sees it in Settings › Sharing and through the API: what it adds, from whom.
+const proposalView=(p,home,s)=>({id:p.id,shareId:p.shareId,env:p.ownerEnv,proposedBy:p.proposedBy,recipientEmail:s?.recipientEmail||p.proposedBy,status:p.status,createdAt:p.createdAt,updatedAt:p.updatedAt||p.createdAt,decidedAt:p.decidedAt||null,decidedBy:p.decidedBy||null,
+  preview:core.proposalPreview(home?.data,p),records:p.records});
+// The owner approves (the records land in their data, owned by them) or denies (the recipient's pending copy goes).
+// -> {status, body}
+async function decideShareProposal(id,user,approve,env=null){
+  return proposalTurn(id,async()=>{
+    for(let attempt=0;attempt<4;attempt++){
+      const p=await shares.getProposal(id);if(!p||!sameEmail(p.ownerEmail,user.email)||(env&&p.ownerEnv!==env))return {status:404,body:{error:'No such proposal in this environment',code:'proposal_not_found'}};
+      if(p.status!=='pending')return {status:409,body:{error:'Already decided',code:'proposal_decided',proposal:p.status}};
+      const s=await shares.get(p.shareId),home=await workspaces.get(p.ownerEnv);
+      if(!s||!home?.data)return {status:404,body:{error:'Not found',code:'not_found'}};
+      const r=core.decideProposal(home.data,s,p,user,approve);
+      if(!r.ok){
+        if(r.error==='out-of-scope')return {status:409,body:{error:'Part of this no longer fits the share (what it was added to was removed or is no longer shared). Deny it, or share that part again.',code:'proposal_out_of_scope'}};
+        return {status:r.error==='revoked'?410:403,body:{error:r.error==='revoked'?'This share was revoked':'Only the owner can decide',code:'proposal_'+r.error}};
+      }
+      if(approve){
+        const w=await workspaces.put(p.ownerEnv,{baseRev:home.rev,data:r.db,by:user.email,owner:home.owner,visibility:home.visibility,name:home.name,source:{via:'share'}});
+        if(w.refused)return {status:w.refused.status||403,body:{error:w.refused.error,code:w.refused.code||'limit'}};
+        if(w.conflict)continue;
+        await shares.record(addedHistory(s,p.records,r.map,user.email,`Proposed by ${p.proposedBy}`));
+      }
+      const done=await shares.decideProposal(r.proposal);
+      return {status:200,body:{proposal:proposalView(done||r.proposal,approve?{data:r.db}:home,s)}};
+    }
+    return {status:409,body:{error:'The workspace kept changing; try again',code:'conflict'}};
+  });
+}
+// Proposals for an environment: to its owner (from its shares' recipients), and the caller's own made from it.
+async function proposalsFor(envId,user,{status}={}){
+  const w=await workspaces.get(envId);if(!w)return [];
+  const out=[];
+  if(sameEmail(w.owner,user.email)){const list=await shares.list({ownerEnv:envId});
+    for(const p of await shares.proposals({ownerEnv:envId,ownerEmail:user.email,status:status||undefined,limit:200}))if(p.status!=='applied'||status==='applied')out.push({...proposalView(p,w,list.find(s=>s.id===p.shareId)),role:'owner'})}
+  for(const p of await shares.proposals({proposedBy:user.email,status:status||undefined,limit:200}))if(p.envId===envId){const h=await workspaces.get(p.ownerEnv),s=await shares.get(p.shareId);out.push({...proposalView(p,h&&s?{data:inScope(h.data,s)}:null,null),records:undefined,role:'proposer'})}
+  return out;
 }
 // The owner saved an environment that has shares: changes to shared records become field history (so
 // recipients see who changed what), and one that overwrote a recipient's unseen change records them as
@@ -366,6 +634,57 @@ async function recordOwnerChanges(envId,user,before,after,base){
     if(found.get(k))e.over=found.get(k);
   }
   await shares.record(entries.map(({clash,...e})=>e));
+}
+// ---- combined view (docs/combined.md) ----
+// The other environments a request asks to combine (?combine=a,b) that this user owns: [{envId, w}].
+async function combinable(homeEnv,user,list){
+  if(!user||user.token)return [];
+  const out=[];
+  for(const id of combined.cleanCombine(list,homeEnv)){
+    const w=await workspaces.get(id).catch(()=>null);
+    if(w?.data&&!w.archivedAt&&sameEmail(w.owner,user.email))out.push({envId:id,w});
+  }
+  return out;
+}
+// The home workspace as served (v: withShares' result) with the combined environments' records in it.
+// shared gets each one's revision (and its shares' signature), so a client polling with ?since hears of
+// their changes too.
+async function withCombined(homeEnv,user,v,list){
+  if(!v?.data)return v;
+  const envList=await combinable(homeEnv,user,list);if(!envList.length)return v;
+  const projections=[],sig=[];
+  for(const {envId,w} of envList){
+    try{
+      const s=await withShares(envId,user,w.data);
+      projections.push(combined.projectEnv(normalizeDb(structuredClone(s.data)),{env:envId,name:w.name||s.data.environment?.name||'Workspace',rev:w.rev}));
+      sig.push(`cx:${envId}:${w.rev}${s.shared?':'+s.shared:''}`);
+    }catch(e){console.error('combined projection failed',e?.message)}
+  }
+  return {...v,data:combined.applyCombined(v.data,projections),shared:[v.shared,...sig].filter(Boolean).join(',')};
+}
+// A home save that changed combined records: each edit goes to the record's own environment (only the
+// fields shared records allow, only those this user changed: base is the browser's sharedEdits), through the same path as a save there,
+// so edits to shares placed in that environment go on to their owner. Never creates or deletes anything.
+async function applyCombinedSave(homeEnv,user,data,base){
+  for(const {envId} of await combinable(homeEnv,user,combined.combinedEnvs(data))){
+    for(let attempt=0;attempt<3;attempt++){
+      const w=await workspaces.get(envId);if(!w?.data||w.archivedAt)break;
+      const served=normalizeDb(structuredClone((await withShares(envId,user,w.data)).data));
+      const out=combined.combinedEdits(served,data,base,envId);if(!out.edits.length)break;
+      // The same last guard as for shares (bulkWrite): one save changing many records is an old copy, not edits.
+      if(bulkWrite(out.edits.map(e=>({kind:e.kind,recordId:e.id,field:e.field})))){console.error('combined write-back refused: too many records in one save',JSON.stringify({env:envId,records:new Set(out.edits.map(e=>e.kind+'|'+e.id)).size}));break}
+      const next=normalizeDb(out.data),stored=stripLinked(next),before=stripLinked(served);
+      let ok=true;
+      if(JSON.stringify(stored)!==JSON.stringify(before)){
+        const put=await workspaces.put(envId,{baseRev:w.rev,data:keepCounters(w.data,{...stored,environment:{...(stored.environment||{}),id:envId,ownerEmail:w.owner}}),by:user.email,owner:w.owner,visibility:w.visibility,name:w.name,source:{via:'save'},opidUser:opidId(user)});
+        if(put.conflict)continue;
+        ok=!put.refused;
+        if(ok)await recordOwnerChanges(envId,user,before,stored,out.base).catch(e=>console.error('share history failed',e?.message));
+      }
+      if(ok)await applyRecipientSave(envId,user,next,out.base).catch(e=>console.error('share write-back failed',e?.message));
+      break;
+    }
+  }
 }
 // A new, empty workspace (one blank chart) for an environment.
 const emptyWorkspace=(id,name,owner)=>({active:'chart-'+id,charts:[{id:'chart-'+id,name:'Untitled chart',nodes:[],edges:[]}],projects:[],timeline:[],environment:{id,name,ownerEmail:owner,visibility:'private',members:[]}});
@@ -408,13 +727,24 @@ async function workspace(req,res){
   if(req.method==='GET'){
     if(local){
       const r=await relay(req);
-      if(r&&r.status===200&&r.data?.env&&r.data.data){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:r.data.data,by:'relay',owner:user.email,mirror:true}).catch(()=>{})}
+      // The mirror is this environment's own data: never the records of environments combined with it.
+      if(r&&r.status===200&&r.data?.env&&r.data.data&&!core.parseOpenedEnv(r.data.env)){await workspaces.put(r.data.env,{baseRev:(await workspaces.get(r.data.env))?.rev||0,data:combined.stripCombined(r.data.data),by:'relay',owner:user.email,mirror:true}).catch(()=>{})}
       if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return true}
       const w=await workspaces.get(u.searchParams.get('env')||DEFAULT_ENV.id);
       json(res,200,{env:w?.envId||u.searchParams.get('env')||DEFAULT_ENV.id,rev:0,data:w?.data||null,offline:true});return true;
     }
     let envId=u.searchParams.get('env');
     if(envId&&!ENV_ID.test(envId)){json(res,400,{error:'Bad environment id'});return true}
+    // An opened shared environment (share-<shareId>): the owner's, through the share.
+    if(core.parseOpenedEnv(envId)){
+      const o=await openedShare(envId,user);
+      if(!o){json(res,404,{error:'Not found'});return true}
+      if(o.gone){json(res,410,GONE);return true}
+      const v=await openedView(envId,user,o),since=parseInt(u.searchParams.get('since'));
+      if(since===v.rev&&(u.searchParams.get('shared')||'')===v.shared){json(res,200,{env:envId,rev:v.rev,shared:v.shared,unchanged:true});return true}
+      json(res,200,{env:envId,rev:v.rev,data:v.data,shared:v.shared,conflicts:v.conflicts,updatedAt:o.home.updatedAt||null,owner:o.share.ownerEmail,opened:v.data.opened});
+      return true;
+    }
     let w=envId?await workspaces.get(envId):null;
     // No environment named: the owner's is Default workspace (even before it has data); others get their newest.
     if(!envId){const owner=sameEmail(user.email,auth.OWNER_EMAIL);w=owner?await workspaces.get(DEFAULT_ENV.id):null;w||=await workspaces.ownedBy(user.email);envId=w?.envId||(owner?DEFAULT_ENV.id:null)}
@@ -425,8 +755,10 @@ async function workspace(req,res){
     const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[],unregistered:!w}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
     if(!canRead(e,user)&&!(e.unregistered&&!w)){json(res,404,{error:'Not found'});return true}
     const since=parseInt(u.searchParams.get('since')),mine=sameEmail(ownerOf(w,envId),user.email);
-    // Linked copies are added for the environment's owner only; anyone else gets the stored data as is.
-    const v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(stripLinked(w.data)):null),shared:''};
+    // The owner also receives linked copies. Other readers get only the visible home records.
+    let v=mine?await withShares(envId,user,w?.data||null):{data:dropDangling(w?.data?structuredClone(withoutPrivateRecords(stripLinked(w.data))):null),shared:''};
+    // Other environments of this user combined into this one's board and timeline (?combine=a,b).
+    if(mine&&u.searchParams.get('combine'))v=await withCombined(envId,user,v,u.searchParams.get('combine'));
     // Only the owner sees whose account a card is linked to; other readers see their own link only.
     if(!mine&&v.data)opidPhotos.maskOpidLinks(v.data,opidId(user));
     if(mine&&w)seenBy(envId,user);
@@ -441,7 +773,7 @@ async function workspace(req,res){
         if(local){
           const r=await relay(req,raw);
           // Keep this computer's copy current too: it is the offline fallback.
-          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,b.data).data,by:'relay',owner:user.email,source:{via:'relay'},mirror:true})}}catch{}}
+          if(r?.status===200){try{const b=JSON.parse(raw),id=u.searchParams.get('env');if(ENV_ID.test(id||'')&&!core.parseOpenedEnv(id)){const cur=await workspaces.get(id);await workspaces.put(id,{baseRev:cur?.rev||0,data:carryRunners(cur?.data,combined.stripCombined(b.data)).data,by:'relay',owner:user.email,source:{via:'relay'},mirror:true})}}catch{}}
           if(r){json(res,r.status,{...r.data,relayed:true,via:SYNC_HOST});return}
           json(res,503,{error:'Offline: the server could not be reached',offline:true});return;
         }
@@ -449,12 +781,32 @@ async function workspace(req,res){
         if(!envId||!ENV_ID.test(envId)){json(res,400,{error:'Bad environment id'});return}
         let body;try{body=JSON.parse(raw)}catch{}
         if(!body||!Number.isInteger(body.baseRev)||!validDb(body.data)){json(res,400,{error:'Expected {baseRev, data}'});return}
+        if(core.parseOpenedEnv(envId)){await putOpened(res,envId,user,body);return}
         const w=await workspaces.get(envId),reg=envs.get(envId);
         if(w?.archivedAt){json(res,404,{error:'Not found'});return}
         const owner=w?.owner||reg?.ownerEmail||(envId===DEFAULT_ENV.id?auth.OWNER_EMAIL:user.email);
         if(!sameEmail(owner,user.email)){json(res,w&&(w.visibility==='public')?403:404,{error:w?.visibility==='public'?'This environment is read-only for you':'Not found'});return}
+        // Records made inside a share that lets its recipient add go to its owner (planAdds), not into this save.
+        const adds=user.token?null:await planAdds(envId,user,body.data,w?stripLinked(w.data):null).catch(e=>{console.error('share additions failed',e?.message);return null});
+        if(adds)body.data=adds.data;
         // Linked copies of shared records are not stored (they are re-projected on every read).
-        const incoming=stripLinked(body.data),stored=w?stripLinked(w.data):null;
+        let incoming=stripLinked(body.data);const stored=w?stripLinked(w.data):null;
+        // DevOps cards (card #447): a copy of the board can be out of date, and sending it whole put old
+        // descriptions and columns back on cards agents had just changed. The board says which cards and
+        // fields it changed (cardEdits); everything else stays as stored. A tab running older code sends
+        // the whole board as it holds it, so when that would change cards it is asked to reload instead.
+        const cardEdits=cardEditsBody(body.cardEdits);let cardsKept=false;
+        if(stored&&!cardEdits&&!user.token&&body.intent&&!sameCards(stored,incoming)){json(res,428,{error:'Flow was updated. Reload this page to keep saving (your last change was not saved).',code:'reload_required'});return}
+        if(stored&&cardEdits&&w.rev===body.baseRev){
+          const r=applyCardEdits(stored.devops?.cards,incoming.devops?.cards,cardEdits);
+          if(r.clashes.length){json(res,409,{error:'Someone else changed these cards meanwhile',code:'card_conflict',clashes:r.clashes,rev:w.rev,data:(await withCombined(envId,user,await withShares(envId,user,w.data),u.searchParams.get('combine')||'')).data});return}
+          // A card whose content changes gets a newer updated than the one stored, so an API client holding the
+          // old one (ifUpdated) is refused: a merged or undone copy can carry an updated that is not newer.
+          const was=new Map((stored.devops?.cards||[]).map(c=>[c?.id,c])),at=new Date().toISOString();let stamped=false;
+          const later=t=>{const x=Date.parse(t);return Number.isFinite(x)&&x>=Date.parse(at)?new Date(x+1).toISOString():at};
+          const cards=r.cards.map(c=>{const o=was.get(c?.id);if(!o||sameCard(o,c)||String(c.updated||'')>String(o.updated||''))return c;stamped=true;return {...c,updated:later(o.updated)}});
+          incoming={...incoming,devops:{...(incoming.devops||{}),cards}};cardsKept=r.ignored>0||stamped;
+        }
         if(w&&w.rev===body.baseRev&&shrinks(stored,incoming)&&!body.allowShrink){json(res,422,{error:`This save would remove most of the workspace (${size(stored)} → ${size(incoming)} things). Nothing was changed.`,shrink:true});return}
         // Runners are the server's (only runners.report changes them): a save never drops or rolls back
         // what a runner reported, e.g. a tab running older code that saves runners without their jobs.
@@ -465,22 +817,31 @@ async function workspace(req,res){
         // Why cards left (lib/workspaces.mjs records each one): deleted on the board, an undo, or else a
         // snapshot (a restored or merged whole workspace). Tabs running older code send no intent: 'save'.
         const it=body.intent&&typeof body.intent==='object'&&!Array.isArray(body.intent)?body.intent:null;
-        const source=it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'};
+        const source={...(it?{via:it.undo?'undo':'snapshot',board:Array.isArray(it.deleted)?it.deleted.filter(x=>typeof x==='string').slice(0,500):[]}:{via:'save'}),...movedCards(adds)};
         const out=await workspaces.put(envId,{baseRev:body.baseRev,data,by:user.email,owner,visibility:data.environment.visibility==='public'?'public':'private',name:String(data.environment.name||reg?.name||'').slice(0,80),source,opidUser:opidId(user)});
         if(out.refused){json(res,out.refused.status,{error:out.refused.error,code:out.refused.code,limit:true});return}
-        if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withShares(envId,user,out.current.data)).data:null});return}
+        if(out.conflict){json(res,409,{error:'The server has newer changes',rev:out.current?.rev||0,data:out.current?.data?(await withCombined(envId,user,await withShares(envId,user,out.current.data),u.searchParams.get('combine')||'')).data:null});return}
         envs.claim(data,{email:owner});
-        // What the browser's copy held before each change (sync-core fieldBase): tells edits from stale copies.
-        const base=body.fieldBase&&typeof body.fieldBase==='object'&&!Array.isArray(body.fieldBase)?body.fieldBase:null;
+        // What the browser's copy held before each change (sync-core fieldBase): tells the owner's edits from
+        // a merge that kept a value they never saw (conflict notices).
+        const base=fieldMap(body.fieldBase);
         await recordOwnerChanges(envId,user,stored,data,base).catch(e=>console.error('share history failed',e?.message));
-        // Placements and permitted edits of linked records (after the save, so a 409 changes nothing).
-        if(!user.token)await applyRecipientSave(envId,user,body.data,base).catch(e=>console.error('share write-back failed',e?.message));
-        const v=user.token?{shared:''}:await withShares(envId,user,data);
+        // Additions first (after the save, so a 409 changes nothing).
+        if(adds?.plans.length)await commitAdds(envId,user,adds.plans).catch(e=>console.error('share additions failed',e?.message));
+        // Placements, and the edits of linked records this user actually made (sync-core noteEdits; after the
+        // save, so a 409 changes nothing). Never the difference between the copy sent and the owner's: a
+        // copy can be out of date (an old tab, a browser that could not store its latest copy), and a tab
+        // running older code sends no sharedEdits, so its copy changes nothing on the owner's side.
+        if(!user.token)await applyRecipientSave(envId,user,body.data,fieldMap(body.sharedEdits)||{}).catch(e=>console.error('share write-back failed',e?.message));
+        // Edits this user made to combined records go to their own environments (never stored here:
+        // stripLinked above), from sharedEdits only, like shared records.
+        if(!user.token)await applyCombinedSave(envId,user,body.data,fieldMap(body.sharedEdits)||{}).catch(e=>console.error('combined write-back failed',e?.message));
+        const v=user.token?{shared:''}:await withCombined(envId,user,await withShares(envId,user,data),u.searchParams.get('combine')||'');
         // Cards removed other than by Delete: the browser says where to restore them (DevOps › Recently deleted).
         const removed=(out.deleted||[]).filter(e=>e.via!=='board').map(e=>({id:e.id,number:e.number,title:e.title}));
         // OneProfileID links this save tried to add for someone else were refused: the browser reads the workspace back.
         if(out.opidRefused?.length)photoCache.clear();
-        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.publicRefused?{publicRefused:out.publicRefused}:{}),...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
+        json(res,200,{env:envId,rev:out.rev,shared:v.shared,...(out.publicRefused?{publicRefused:out.publicRefused}:{}),...(out.opidRefused?.length?{opidRefused:out.opidRefused}:{}),...(kept.changed?{runnersKept:true}:{}),...(counted!==kept.data?{countersKept:true}:{}),...(cardsKept?{cardsKept:true}:{}),...(removed.length?{removedCards:removed}:{})});
       }catch(e){json(res,500,{error:'Could not save the workspace'})}
     });
     return true;
@@ -500,11 +861,15 @@ async function currentPeople(envId){
 }
 async function lookupPhotos(req,targets){
   const byEnv=new Map();for(const t of targets)(byEnv.get(t.env)||byEnv.set(t.env,new Set()).get(t.env)).add(t.opidUser);
-  const members=new Map();
-  for(const [env,ids] of byEnv){const now=await currentPeople(env);members.set(env,new Set((await opidMembers.list(env,[...ids])).filter(m=>now.has(m.email)).map(m=>m.opidUser)))}
+  const members=new Map(),emailOf=new Map();
+  for(const [env,ids] of byEnv){const now=await currentPeople(env),list=(await opidMembers.list(env,[...ids])).filter(m=>now.has(m.email));for(const m of list)emailOf.set(m.opidUser,m.email);members.set(env,new Set(list.map(m=>m.opidUser)))}
   const ok=opidPhotos.eligibleTargets(targets,members);if(!ok.length)return {};
-  const images=await auth.memberImages(req,ok.map(t=>t.opidUser)),out={};
-  for(const t of ok)if(images[t.opidUser])out[t.nodeId]=images[t.opidUser];
+  // People who chose to show their avatar instead of their photo (docs/concepts/13-avatars.md): its portrait, in
+  // exactly the places their photo would show.
+  const chosen=await avatars.many([...new Set(ok.map(t=>emailOf.get(t.opidUser)).filter(Boolean))]).catch(()=>new Map());
+  const portrait=t=>{const v=chosen.get(String(emailOf.get(t.opidUser)||'').toLowerCase());return v?.usePortrait?renderAvatarPortrait(v.avatar):''};
+  const want=ok.filter(t=>!portrait(t)),images=want.length?await auth.memberImages(req,want.map(t=>t.opidUser)):{},out={};
+  for(const t of ok){const p=portrait(t)||images[t.opidUser];if(p)out[t.nodeId]=p}
   return out;
 }
 const findNode=(d,id)=>(d?.charts||[]).flatMap(c=>c.nodes||[]).find(n=>n.id===id);
@@ -520,10 +885,15 @@ async function opidApi(req,res){
     if(hit&&Date.now()-hit.at<PHOTO_TTL){json(res,200,hit.photos);return true}
     let photos={};
     try{
-      const w=await workspaces.get(envId);
-      if(w?.data&&!w.archivedAt){
-        const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
-        if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:stripLinked(w.data),shared:mine?await attachedShares(envId,user):[]}));
+      if(core.parseOpenedEnv(envId)){
+        const opened=await openedShare(envId,user);
+        if(opened?.share)photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,shared:[opened]}));
+      }else{
+        const w=await workspaces.get(envId);
+        if(w?.data&&!w.archivedAt){
+          const mine=sameEmail(w.owner,user.email),e={...(envs.get(envId)||{id:envId,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
+          if(mine||canRead(e,user))photos=await lookupPhotos(req,opidPhotos.photoTargets({envId,own:mine?stripLinked(w.data):withoutPrivateRecords(stripLinked(w.data)),shared:mine?await sharesForPhotos(envId,user):[]}));
+        }
       }
     }catch(err){console.error('opid photos failed',err?.message);photos={}}
     photoCache.set(key,{at:Date.now(),photos});
@@ -535,17 +905,27 @@ async function opidApi(req,res){
       if(!me)return json(res,400,{error:'Sign in with OneProfileID to link a card to your account.'});
       const envId=b?.env,nodeId=b?.nodeId;
       if(!ENV_ID.test(String(envId||''))||typeof nodeId!=='string'||!nodeId||nodeId.length>300||typeof b.link!=='boolean')return json(res,400,{error:'Expected {env, nodeId, link}'});
-      const w=await workspaces.get(envId);
-      if(!w?.data||w.archivedAt||!sameEmail(w.owner,user.email))return json(res,404,{error:'Not found'});
-      // A shared card (sh.<share>.<id>) is linked in its owner's workspace, if the share is placed here.
-      const p=core.parseLinkedId(nodeId);let share=null,target={env:envId,id:nodeId};
-      if(p){
-        const a=(await attachedShares(envId,user)).find(x=>x.share.id===p.shareId);
-        if(!a||!core.resolveScope(a.home.data,a.share).nodeIds.includes(p.id))return json(res,404,{error:'Not found'});
-        share=a.share;target={env:share.ownerEnv,id:p.id};
+      const p=core.parseLinkedId(nodeId),virtual=core.parseOpenedEnv(envId);
+      let share=null;
+      if(virtual){
+        const opened=await openedShare(envId,user);
+        if(!opened?.share||p?.shareId!==virtual)return json(res,404,{error:'Not found'});
+        share=opened.share;
+      }else{
+        const w=await workspaces.get(envId);
+        if(!w?.data||w.archivedAt||!sameEmail(w.owner,user.email))return json(res,404,{error:'Not found'});
+        if(p){
+          share=(await attachedShares(envId,user)).find(x=>x.share.id===p.shareId)?.share;
+          if(!share)return json(res,404,{error:'Not found'});
+        }
       }
+      const target={env:share?.ownerEnv||envId,id:p?.id||nodeId};
       for(let attempt=0;attempt<3;attempt++){
         const home=await workspaces.get(target.env);if(!home?.data||home.archivedAt)return json(res,404,{error:'Not found'});
+        if(share){
+          share=await shareNow(share);
+          if(!share||!core.resolveScope(home.data,share).nodeIds.includes(target.id))return json(res,404,{error:'Not found'});
+        }
         const data=structuredClone(home.data),n=findNode(data,target.id);
         if(!n||n.type!=='person')return json(res,404,{error:'Not found'});
         const cur=validOpidUser(n.opidUser)?n.opidUser:'';
@@ -591,7 +971,8 @@ async function resolveCards(req,user,refs){
       if(!w?.data||w.archivedAt){out.push({access:false});continue}
       const e={...(envs.get(ref.env)||{id:ref.env,members:[]}),ownerEmail:w.owner,visibility:w.visibility};
       if(sameEmail(w.owner,user.email)||canRead(e,user)){
-        const card=chatCore.summarize(stripLinked(w.data),ref);
+        const data=stripLinked(w.data);
+        const card=chatCore.summarize(sameEmail(w.owner,user.email)?data:withoutPrivateRecords(data),ref);
         out.push(card?{access:true,card,open:{env:ref.env,id:ref.id}}:{access:false});continue;
       }
       let found=null;
@@ -612,7 +993,10 @@ async function resolveCards(req,user,refs){
   }
   return out;
 }
-const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards});
+// An office Direct recipient's OneProfileID account ID: the one stored at their sign-in (lib/users.mjs),
+// else their live session's. Server-side only; lib/chat.mjs matches it to a friend handle.
+const officeOpidId=async u=>{const stored=(await users.get(String(u?.email||'').toLowerCase()).catch(()=>null))?.opidId;return validOpidUser(stored)?stored:opidId(u)||''};
+const chatApi=chatRoutes({mode:auth.mode,userFor:auth.userFor,call:auth.opidMessages,out:auth.outCookies,trusted,readJson,resolveCards,officeDirect:sendOfficeDirect,opidIdFor:officeOpidId});
 
 // ---------- environments: a user's own workspaces (list, create, rename, archive) ----------
 //   GET /api/environments            -> [{id, name, visibility, rev, updatedAt}] the user owns
@@ -628,7 +1012,13 @@ async function environments(req,res){
   const user=tok||await requireUser(req,res);if(!user)return true;
   if(!id&&req.method==='GET'){
     const own=await workspaces.owned(user.email);
-    json(res,200,{environments:own.map(w=>({id:w.envId,name:w.name||w.data?.environment?.name||'Workspace',visibility:w.visibility,rev:w.rev,updatedAt:w.updatedAt}))});return true;
+    // Environments shared with this user as a whole (active whole-environment shares): they open as share-<shareId>.
+    const shared=[];
+    if(!user.token)for(const s of await shares.list({recipientEmail:user.email}).catch(()=>[])){
+      if(!core.canOpen(s))continue;const w=await workspaces.get(s.ownerEnv).catch(()=>null);if(!w?.data||w.archivedAt)continue;
+      shared.push({id:core.openedEnvId(s.id),shareId:s.id,name:w.name||w.data.environment?.name||'Workspace',ownerEmail:s.ownerEmail,ownerName:await personName(s.ownerEmail),permission:s.permission,adds:core.addsOf(s)});
+    }
+    json(res,200,{environments:own.map(w=>({id:w.envId,name:w.name||w.data?.environment?.name||'Workspace',visibility:w.visibility,rev:w.rev,updatedAt:w.updatedAt})),shared});return true;
   }
   if(!id&&req.method==='POST'){readJson(req,res,async b=>{
     try{json(res,200,{id:await createEnvironment(user,b?.name)})}
@@ -718,8 +1108,44 @@ async function invitesApi(req,res){
   });return true}
   if(req.method==='DELETE'){
     const i=await invites.find(u.searchParams.get('email'));
+    // Revoking an invite someone already used removes them from Flow: that is the owner's to do.
+    if(i?.claimedAt&&!i.revokedAt){
+      if(!isOwner){json(res,403,{error:'Only the owner can remove someone who joined.'});return true}
+      const r=await memberships.revoke({localId:i.localId,email:(await users.byLocalId(i.localId))?.email||i.email,by:user.email});
+      await invites.revoke(i.email);
+      json(res,200,{revoked:true,removed:true,opidRevoked:r.opidRevoked});return true;
+    }
     if(i&&(isOwner||sameEmail(i.invitedBy,user.email)))await invites.revoke(i.email);
     json(res,200,{revoked:true});return true;
+  }
+  res.writeHead(405);res.end();return true;
+}
+
+// ---------- people in Flow: the owner sees who joined and can remove someone ----------
+//   GET    /api/members                 owner: everyone who signed in, with removals
+//   DELETE /api/members?email=<address> owner: revoke their membership (here and on OneProfileID), end
+//                                        their sessions and disable their API keys. Their data stays.
+async function membersApi(req,res){
+  const u=new URL(req.url,'http://x');if(u.pathname!=='/api/members')return false;
+  const tok=tokenUser(req);
+  if(!tok&&req.headers.authorization){json(res,401,{error:'Invalid token'});return true}
+  if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
+  const user=tok||await requireUser(req,res);if(!user)return true;
+  if(!isOwnerEmail(user.email)){json(res,403,{error:'Only the owner manages who is in Flow'});return true}
+  if(req.method==='GET'){
+    const {list}=await revocations.active(),gone=new Map(list.filter(r=>r.email).map(r=>[r.email,r.revokedAt]));
+    const members=(await users.list()).map(m=>({email:m.email,name:m.name,firstSeen:m.firstSeen,lastSeen:m.lastSeen,owner:isOwnerEmail(m.email),removedAt:gone.get(m.email)||null}));
+    json(res,200,{members});return true;
+  }
+  if(req.method==='DELETE'){
+    const email=String(u.searchParams.get('email')||'').trim().toLowerCase();
+    if(isOwnerEmail(email)){json(res,400,{error:'The owner cannot be removed'});return true}
+    const m=await users.get(email);if(!m){json(res,404,{error:'Nobody with that email uses Flow'});return true}
+    const localId=await localIdOf(m);
+    if(!localId||localId==='owner'){json(res,409,{error:'Could not find their Flow membership'});return true}
+    const r=await memberships.revoke({localId,email:m.email,opidId:m.opidId,by:user.email});
+    const i=await invites.find(m.email);if(i&&!i.revokedAt)await invites.revoke(m.email);
+    json(res,200,{removed:true,email:m.email,opidRevoked:r.opidRevoked});return true;
   }
   res.writeHead(405);res.end();return true;
 }
@@ -728,49 +1154,28 @@ async function invitesApi(req,res){
 //   POST /api/shares/preview {env, scope}               owner: exactly what a share would show (before sharing)
 //   GET  /api/shares?env=<id>                           owner: shares of that environment + pending requests
 //   POST /api/shares {env, recipientEmail, scope, permission, name}       owner only (a recipient cannot re-share)
-//   PATCH /api/shares/<id> {permission}   DELETE /api/shares/<id> (revoke)          owner
+//   PATCH /api/shares/<id> {permission, adds}   DELETE /api/shares/<id> (revoke)    owner (adds: off|approve|direct)
 //   GET  /api/shares/<id>/preview                       owner or recipient
 //   GET  /api/shares/incoming                           recipient: shares with me, and where they are placed
 //   POST /api/shares/<id>/attach {env}   DELETE /api/shares/<id>/attach?env=<id>   recipient, own environment
 //   POST /api/shares/<id>/requests {toEmail, permission, note}   recipient asks the owner to share it on
 //   GET  /api/share-requests   POST /api/share-requests/<id> {approve, permission}   owner decides
+//   GET  /api/share-proposals                           owner: additions waiting for them; mine: the caller's own
+//   POST /api/share-proposals/<id> {approve}   owner decides   DELETE /api/share-proposals/<id>   recipient withdraws
 //   POST /api/shares/<id>/comments {kind, id, comment}  GET /api/shares/<id>/history?kind=&id=
 // Anything the user may not see answers 404. The owner token (tools/env.mjs) acts as the owner.
-function previewOf(db,share){
-  const sc=core.resolveScope(db,share),nodes=new Map((db.charts||[]).filter(c=>!share.scope?.chartId||c.id===share.scope.chartId).flatMap(c=>c.nodes||[]).map(n=>[n.id,n]));
-  const items=new Map((db.timeline||[]).map(i=>[i.id,i])),cards=new Map((db.devops?.cards||[]).map(c=>[c.id,c]));
-  const out={nodes:sc.nodeIds.map(id=>nodes.get(id)).filter(Boolean).map(n=>({id:n.id,name:n.name,type:n.type})),
-    stubs:sc.stubs.map(t=>({id:t.nodeId,name:t.name,type:t.nodeType,owns:nodes.get(t.ownsNodeId)?.name||'',edge:t.type,percent:t.percent})),
-    projects:(db.projects||[]).filter(p=>sc.projectIds.includes(p.id)).map(p=>({id:p.id,name:p.name,color:p.color})),
-    items:sc.itemIds.map(id=>items.get(id)).filter(Boolean).map(i=>({id:i.id,title:i.title,kind:i.kind,start:i.start})),
-    cards:sc.cardIds.map(id=>cards.get(id)).filter(Boolean).map(c=>({id:c.id,number:c.number,title:c.title,project:c.project}))};
-  // Counts for Settings › Sharing rows (and the Share dialog tip) without a second round-trip.
-  out.summary={nodes:out.nodes.length,stubs:out.stubs.length,projects:out.projects.length,items:out.items.length,cards:out.cards.length};
-  // Mind-map-only scopes often surprise people: co-owner stubs show on the chart, but DevOps cards
-  // only follow projects linked by entity id. Call that out so the owner can widen to the whole env.
-  const kind=share.scope?.kind;
-  out.tip=kind==='environment'?null
-    :!out.nodes.length&&!out.projects.length&&!out.cards.length?'Nothing matches this scope yet.'
-    :out.nodes.length&&!out.cards.length?'Mind map cards are in this share, but no DevOps cards. Board cards only come along when their project’s entity is one of those mind map cards. To share the whole board, pick “The whole environment”.'
-    :out.nodes.length&&out.stubs.length&&out.cards.length?'Co-owner stubs (name only) do not bring their own DevOps cards. Widen to the whole environment if they should see the full board.'
-    :null;
-  return out;
-}
-function shareSummary(db,share){
-  const p=previewOf(db,share);return {scopeLabel:scopeLabel(db,share.scope),summary:p.summary,tip:p.tip};
-}
-function scopeLabel(db,scope){
-  const n=id=>(db?.charts||[]).flatMap(c=>c.nodes||[]).find(x=>x.id===id)?.name||'a card';
-  if(scope?.kind==='environment')return 'The whole environment';
-  if(scope?.kind==='person')return `${n(scope.nodeId)} and everything below`;
-  if(scope?.kind==='nodes')return scope.nodeIds.length<=3?scope.nodeIds.map(n).join(', '):`${scope.nodeIds.slice(0,2).map(n).join(', ')} and ${scope.nodeIds.length-2} more cards`;
-  if(scope?.kind==='project')return `Project ${(db?.projects||[]).find(p=>p.id===scope.projectId)?.name||''}`.trim();
-  if(scope?.kind==='label')return `Label ${(db?.devops?.labels||[]).find(l=>l.id===scope.label)?.name||scope.label}`;
-  return 'Shared';
-}
+// previewOf, scopeLabel and shareSummary: what a scope holds (lib/share-service.mjs). saveShare and
+// shareView: the one rule set for creating shares, here and in /api/v1 and MCP (shareService).
+const shareSvc=(await import('./lib/share-service.mjs')).shareServices({shares,workspaces,onRevoke:()=>shareRevoked()});
+// A revoke takes effect at once: photos, the office's access cache, and open office streams (lib/office.mjs
+// recheck closes the ones that lost access, with a 'gone' event).
+function shareRevoked(){photoCache.clear();officeSeen.clear();historyRooms.clear();officeHub.recheck({portals:true}).catch(()=>{})}
+// A new share: its recipient's open offices get a door to the shared office.
+function shareMade(){officeSeen.clear();historyRooms.clear();officeHub.recheck({portals:true}).catch(()=>{})}
+const {previewOf,shareSummary,scopeLabel,saveShare,updateShare,shareView}=shareSvc;
 async function sharesApi(req,res){
   const u=new URL(req.url,'http://x'),path=u.pathname;
-  if(path!=='/api/shares'&&!path.startsWith('/api/shares/')&&path!=='/api/share-requests'&&!path.startsWith('/api/share-requests/'))return false;
+  if(path!=='/api/shares'&&!path.startsWith('/api/shares/')&&path!=='/api/share-requests'&&!path.startsWith('/api/share-requests/')&&path!=='/api/share-proposals'&&!path.startsWith('/api/share-proposals/'))return false;
   const tok=tokenUser(req);
   if(!tok&&req.headers.authorization){json(res,401,{error:'Invalid token'});return true}
   if(!tok&&!trusted(req)){res.writeHead(403);res.end();return true}
@@ -781,8 +1186,7 @@ async function sharesApi(req,res){
   // The user's own (not archived) environment, or null.
   const ownEnv=async id=>{if(!ENV_ID.test(id||''))return null;const w=await workspaces.get(id);return w&&!w.archivedAt&&sameEmail(w.owner,user.email)?w:null};
   const ownShare=async id=>{const s=await shares.get(id);return s&&sameEmail(s.ownerEmail,user.email)?s:null};
-  const view=async s=>{const home=await workspaces.get(s.ownerEnv);const sum=home?.data?shareSummary(home.data,s):{scopeLabel:scopeLabel(null,s.scope),summary:null,tip:null};
-    return {...s,ownerEnvName:home?.name||home?.data?.environment?.name||'',scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}};
+  const view=shareView;
   try{
     if(path==='/api/shares/preview'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
@@ -793,18 +1197,16 @@ async function sharesApi(req,res){
     if(path==='/api/shares'&&req.method==='GET'){
       const w=await ownEnv(u.searchParams.get('env'));if(!w)return nf(),true;
       const list=await shares.list({ownerEnv:w.envId});
-      json(res,200,{shares:list.map(s=>{const sum=shareSummary(w.data,s);return {...s,scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}}),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId))});return true;
+      json(res,200,{shares:list.map(s=>{const sum=shareSummary(w.data,s);return {...s,scopeLabel:sum.scopeLabel,summary:sum.summary,tip:sum.tip}}),requests:(await shares.requests({ownerEmail:user.email,status:'pending'})).filter(r=>list.some(s=>s.id===r.shareId)),
+        proposals:(await shares.proposals({ownerEnv:w.envId,ownerEmail:user.email,status:'pending'})).map(p=>proposalView(p,w,list.find(s=>s.id===p.shareId)))});return true;
     }
     if(path==='/api/shares'&&req.method==='POST'){readJson(req,res,async b=>{
       const w=await ownEnv(b?.env);if(!w)return nf();
-      // Linked copies are not the user's to share: they ask the owner instead (a share request).
-      if(/"sh\./.test(JSON.stringify(b.scope??null)))return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
-      const r=core.createShare({id:w.envId,ownerEmail:w.owner},user,{recipientEmail:b.recipientEmail,scope:b.scope,permission:b.permission||'view',name:b.name});
+      const r=await saveShare(w,user,b||{});
+      if(r.error==='linked')return json(res,400,{error:'Cards shared with you cannot be shared on. Ask the owner from Settings › Sharing.'});
       if(!r.ok)return fail(r);
-      // Sharing the same thing with the same person again updates the permission instead of duplicating it.
-      const dup=(await shares.list({ownerEnv:w.envId,recipientEmail:r.share.recipientEmail})).find(s=>JSON.stringify(s.scope)===JSON.stringify(r.share.scope));
-      const s=dup?(dup.permission===r.share.permission?dup:await shares.setPermission(dup.id,r.share.permission)):await shares.create(r.share);
-      json(res,200,{share:await view(s),existing:!!dup,preview:previewOf(w.data,s)});
+      if(!r.existing)shareMade();
+      json(res,200,{share:await view(r.share),existing:r.existing,preview:previewOf(w.data,r.share)});
     });return true}
     if(path==='/api/shares/incoming'&&req.method==='GET'){
       const own=new Set((await workspaces.owned(user.email)).map(w=>w.envId)),out=[];
@@ -822,6 +1224,22 @@ async function sharesApi(req,res){
       if(out.share)await shares.create(out.share);
       json(res,200,{request:await shares.decide(out.request),share:out.share||null});
     });return true}
+    // Additions waiting for the owner (docs/sharing.md): the owner's to decide, the recipient's own to follow.
+    if(path==='/api/share-proposals'&&req.method==='GET'){
+      const pend=await shares.proposals({ownerEmail:user.email,status:'pending'}),homes=new Map(),shareOf=new Map();
+      for(const p of pend){if(!homes.has(p.ownerEnv))homes.set(p.ownerEnv,await workspaces.get(p.ownerEnv));if(!shareOf.has(p.shareId))shareOf.set(p.shareId,await shares.get(p.shareId))}
+      const mine=await shares.proposals({proposedBy:user.email,limit:50});
+      json(res,200,{proposals:pend.map(p=>proposalView(p,homes.get(p.ownerEnv),shareOf.get(p.shareId))),mine:mine.filter(p=>p.status!=='applied').map(p=>({...proposalView(p,null,null),records:undefined,preview:core.proposalPreview({},p)}))});return true;
+    }
+    m=/^\/api\/share-proposals\/([A-Za-z0-9-]{1,64})$/.exec(path);
+    if(m&&req.method==='POST'){readJson(req,res,async b=>{const r=await decideShareProposal(m[1],user,!!b?.approve);json(res,r.status,r.body)});return true}
+    // The recipient takes back one of their pending proposals.
+    if(m&&req.method==='DELETE'){
+      const p=await shares.getProposal(m[1]);if(!p||!sameEmail(p.proposedBy,user.email))return nf(),true;
+      const done=await shares.decideProposal({...p,status:'withdrawn',decidedBy:user.email,decidedAt:new Date().toISOString()});
+      if(!done)return json(res,409,{error:'Already decided'}),true;
+      json(res,200,{proposal:{...proposalView(done,null,null),records:undefined}});return true;
+    }
     m=/^\/api\/shares\/([A-Za-z0-9-]{1,64})(?:\/(preview|attach|requests|comments|history))?$/.exec(path);
     if(!m)return nf(),true;
     const s=await shares.get(m[1]),isOwner=s&&sameEmail(s.ownerEmail,user.email),isRecipient=s&&!s.revokedAt&&sameEmail(s.recipientEmail,user.email)&&!user.token;
@@ -829,11 +1247,13 @@ async function sharesApi(req,res){
     const sub=m[2]||'';
     if(!sub&&req.method==='GET'){json(res,200,{share:await view(s)});return true}
     if(!sub&&req.method==='PATCH'){if(!isOwner)return nf(),true;readJson(req,res,async b=>{
-      if(!core.PERMISSIONS.includes(b?.permission))return json(res,400,{error:'Pick view, comment or edit'});
+      if(b?.permission===undefined&&b?.adds===undefined)return json(res,400,{error:'Send permission or adds'});
+      if(b.permission!==undefined&&!core.PERMISSIONS.includes(b.permission))return json(res,400,{error:'Pick view, comment or edit'});
+      if(b.adds!==undefined&&!core.ADDS.includes(b.adds))return json(res,400,{error:'Pick off, approve or direct'});
       if(s.revokedAt)return fail({error:'revoked'});
-      json(res,200,{share:await view(await shares.setPermission(s.id,b.permission))});
+      json(res,200,{share:await view(await updateShare(s,b))});
     });return true}
-    if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;const gone=await shares.revoke(s.id);photoCache.clear();json(res,200,{share:await view(gone),revoked:true});return true}
+    if(!sub&&req.method==='DELETE'){if(!isOwner)return nf(),true;const gone=await shares.revoke(s.id);shareRevoked();json(res,200,{share:await view(gone),revoked:true});return true}
     if(sub==='preview'&&req.method==='GET'){
       if(s.revokedAt)return fail({error:'revoked'}),true;
       const home=await workspaces.get(s.ownerEnv);if(!home?.data)return nf(),true;
@@ -865,7 +1285,7 @@ async function sharesApi(req,res){
       const kind=u.searchParams.get('kind')||undefined,id=core.parseLinkedId(u.searchParams.get('id'))?.id||u.searchParams.get('id')||undefined;
       let list=await shares.history({shareId:s.id,kind,recordId:id,limit:200});
       // A recipient only sees the history of records that are still shared with them.
-      if(!isOwner){const home=await workspaces.get(s.ownerEnv),sc=home?.data?core.resolveScope(home.data,s):null,k={node:'nodeIds',edge:'edgeIds',project:'projectIds',item:'itemIds',card:'cardIds'};
+      if(!isOwner){const home=await workspaces.get(s.ownerEnv),sc=home?.data?core.resolveScope(home.data,s):null,k=SCOPE_KEY;
         const members=sc?await membersOf(s):[];
         list=sc?list.filter(e=>sc[k[e.kind]]?.includes(e.recordId)).map(e=>{const {over,...x}=core.historyForRecipient(home.data,s,e,members);return x}):[]}
       json(res,200,{history:list});return true;
@@ -877,12 +1297,13 @@ async function sharesApi(req,res){
 // ---------- public API: /api/v1 (REST + OpenAPI), API keys (Settings › API keys) and MCP at /mcp ----------
 // docs/api.md, docs/api-keys.md, docs/mcp-cli.md. /api/v1 and /mcp take Authorization: Bearer flow_… keys
 // (or the owner token); they are not tied to the page origin. A key is limited to its environment and
-// scopes on top of the usual ownership rules. Linked copies of shares never appear here: the API sees
-// each environment's own stored data only.
+// scopes on top of the usual ownership rules. In the caller's own environments it sees the linked copies of
+// the shares placed there too (apiStore below), like the app.
 const {apiV1,envCheckFor,memoryRateLimit}=await import('./lib/api-v1.mjs');
 const registryMod=await import('./lib/registry.mjs');
 const {apiKeyStore,authenticateApiKey,bearerKey,allows:keyAllows,SCHEMA:APIKEY_SCHEMA}=await import('./lib/apikeys.mjs');
 const {apiKeyRoutes}=await import('./lib/apikeys-routes.mjs');
+const appDeviceMod=await import('./lib/app-device.mjs'),apnsMod=await import('./lib/apns.mjs');
 const {mcpHandler}=await import('./lib/mcp.mjs');
 // 'live' keys only on the public deploy; local mode and verify make flow_test_ keys. db without a catch:
 // a database error fails closed.
@@ -890,8 +1311,10 @@ const apiKeys=apiKeyStore({dir:fileURLToPath(backupRoot),db:()=>cloud(),mode:aut
 const keyEnvs=async u=>[...new Set([...(await workspaces.owned(u.email)).map(w=>w.envId),...(sameEmail(u.email,auth.OWNER_EMAIL)?[DEFAULT_ENV.id]:[])])];
 const keysApi=apiKeyRoutes({userFor:auth.userFor,store:apiKeys,readJson,trusted,envsFor:keyEnvs,maxKeys:u=>limitsOf(u.email).maxApiKeys});
 const apiLimit=memoryRateLimit({perMinute:120}),baseEnvCheck=envCheckFor(workspaces);
-// The store the API works on: each environment's own data (no linked copies; edges to them left out),
-// and for a key, only the environments it is for.
+// The store the API works on: each environment's own data (edges to linked copies it cannot see left
+// out), and for a key, only the environments it is for. In the caller's own environments it also holds
+// the linked copies of the shares placed there, as the app shows them, and a write sends their changes
+// back with the same rules as a browser save (applyRecipientSave). Never for the owner token.
 // Readers other than the owner (members, public environments) see only that a card is linked, as in the app.
 // Cards whose latest change came from a share recipient, not the environment's owner (agents.work holds them).
 async function heldCards(envId,ids){
@@ -901,30 +1324,332 @@ async function heldCards(envId,ids){
   for(const id of ids){const h=(await shares.history({envId,kind:'card',recordId:id,limit:1}))[0];if(h&&!sameEmail(h.by,w.owner))out.add(id)}
   return out;
 }
-const apiStore=(key,user)=>({...workspaces,
-  async get(id){const w=await workspaces.get(id);if(!w?.data)return w;const data=dropDangling(structuredClone(stripLinked(w.data)));
-    if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
-  async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
-});
+const SHARE_REFUSAL={permission:[403,'share_permission','This share does not let you change that'],stub:[403,'share_read_only','That record is read-only: it belongs to someone outside the share'],
+  forbidden:[403,'share_permission','This share does not let you change that'],revoked:[409,'share_revoked','That share was revoked'],
+  'out-of-scope':[409,'share_out_of_scope','That record is no longer shared with you'],'owner-only':[403,'share_owner_only','Only the owner can change that: it decides what runs on their machines'],'not-found':[409,'share_out_of_scope','That record is no longer shared with you'],invalid:[400,'invalid_shared_field','Invalid value for a shared record']};
+// What a write to linked records would be refused for, checked before anything is saved:
+// {status, code, error} | null. seen: the workspace as get() served it.
+async function sharedRefusal(envId,user,seen,data,base){
+  const locked=core.lockedChanges(seen,data)[0];
+  if(locked)return locked.field==='deleted'?{status:403,code:'share_delete',error:`${locked.id} is shared with you: only its owner can delete it`}
+    :locked.stub?{status:403,code:SHARE_REFUSAL.stub[1],error:SHARE_REFUSAL.stub[2]}
+    :{status:403,code:'share_read_only_field',error:`The ${locked.field} of a shared ${locked.kind} can only be changed by its owner`};
+  for(const {share:s,home} of await attachedShares(envId,user)){
+    const members=await membersOf(s),p=core.projectForRecipient(home.data,s,await shares.placements(s.id,envId),{members});
+    for(const e of core.extractRecipientChanges(p,data,base).edits){
+      const r=core.applyRecipientEdit(home.data,s,e,user,{members});if(r.ok)continue;
+      const [status,code,error]=SHARE_REFUSAL[r.error]||[403,'share_permission','This share does not let you change that'];
+      return {status,code,error:r.field&&r.error==='invalid'?`${error}: ${r.field}`:error};
+    }
+  }
+  return null;
+}
+const apiStore=(key,user,{includeLinked=true}={})=>{
+  // What get() served for each environment that holds linked copies, cleaned the way every operation cleans
+  // what it reads, so a write sends only the fields the caller changed (fieldBase), and a copy that is
+  // merely out of date never overwrites the owner.
+  const served=new Map(),withLinked=w=>includeLinked&&!!user?.email&&!user.token&&sameEmail(w.owner,user.email);
+  return {...workspaces,
+    async get(id){const w=await workspaces.get(id);if(!w?.data)return w;
+      if(withLinked(w)){const {data}=await withShares(id,user,w.data);if(core.linkedShareIds(data).length||data.shareMembers?.length){served.set(id,normalizeDb(structuredClone(data)));return {...w,data}}}
+      served.delete(id);
+      const raw=stripLinked(w.data);
+      const data=dropDangling(structuredClone(sameEmail(w.owner,user?.email)?raw:withoutPrivateRecords(raw)));
+      if(!user?.token&&!sameEmail(w.owner,user?.email))opidPhotos.maskOpidLinks(data,null);return {...w,data}},
+    async deletedCards(id,options){
+      // Historical deletions can predate the Only me flag or the removal of its project.
+      const w=await workspaces.get(id);
+      return w&&sameEmail(w.owner,user?.email)?workspaces.deletedCards(id,options):[];
+    },
+    async owned(email){return (await workspaces.owned(email)).filter(w=>!key||keyAllows(key,'read',w.envId))},
+    async put(id,opts){
+      const seen=served.get(id);if(!seen)return workspaces.put(id,opts);
+      const base=fieldBase(seen,opts.data),refused=await sharedRefusal(id,user,seen,opts.data,base);
+      if(refused)return {refused};
+      // A record made inside a share: added to its owner's data, proposed, or refused (planAdds).
+      const adds=await planAdds(id,user,opts.data,stripLinked(seen),{api:true});
+      if(adds.refusal)return {refused:adds.refusal};
+      const out=await workspaces.put(id,{...opts,data:stripLinked(adds.data),source:{...opts.source,...movedCards(adds)}});
+      if(!out.ok)return out;
+      const added=adds.plans.length?await commitAdds(id,user,adds.plans).catch(e=>{console.error('share additions failed',e?.message);return {}}):{};
+      await applyRecipientSave(id,user,adds.data,base).catch(e=>console.error('share write-back failed',e?.message));
+      return Object.keys(added).length?{...out,added}:out;
+    },
+  };
+};
 const keyEnvCheck=async(envId,user,mode)=>(!user?.key||keyAllows(user.key,mode==='write'?'write':'read',envId))&&baseEnvCheck(envId,user,mode);
 // Authorization: Bearer flow_… (an API key) or the owner token. -> {user, scopes} | null
 async function apiAuth(req){
   if(bearerKey(req)){const a=await authenticateApiKey(req,apiKeys).catch(()=>null);return a?.user?{user:{id:'key:'+a.keyId,email:a.user.email,key:a},scopes:a.scopes}:null}
   const t=tokenUser(req);return t?{user:t,scopes:['read','write','admin']}:null;
 }
+// ---------- 3D office (lib/office.mjs, docs/concepts/12-office.md) ----------
+// Streams and poses stay local. Postgres (or BACKUP_DIR) keeps the durable office state.
+// Members of an environment: its owner, its members, and everyone with an active share into it.
+const officeMod=await import('./lib/office.mjs'),afCore=await import('./public/agentflow-core.js');
+// Use the existing local key to seed the shared key during an upgrade.
+const officeSecretSeed=(()=>{const f=join(fileURLToPath(backupRoot),'_office-secret');try{const v=readFileSync(f,'utf8').trim();if(v.length>=32)return v}catch{}
+  const v=randomUUID()+randomUUID();try{mkdirSync(fileURLToPath(backupRoot),{recursive:true});writeFileSync(f,v,{mode:0o600})}catch{}return v})();
+const {officeStorage:openOfficeStorage}=await import('./lib/office-storage.mjs');
+const officeStorage=await openOfficeStorage({db:await cloud(),dir:fileURLToPath(backupRoot),secret:officeSecretSeed}).catch(e=>{
+  throw Error('Could not initialize office storage: '+cloudError(e));
+});
+const {createOfficeHistory,openOfficeHistoryStore}=await import('./lib/office-history.mjs');
+const officeHistoryStore=await openOfficeHistoryStore({db:await cloud(),dir:fileURLToPath(backupRoot)});
+const officeState=officeMod.officeState({storage:officeStorage});
+await officeState.refresh().catch(e=>{throw Error('Could not load office reports: '+cloudError(e))});
+const officeLimit=memoryRateLimit({perMinute:600});
+const personName=async email=>(await users.get(email).catch(()=>null))?.name||(auth.mode==='local'&&sameEmail(email,auth.localUser?.email)?auth.localUser.name:'')||String(email).split('@')[0];
+async function officeEnv(envId){
+  const w=await workspaces.get(envId).catch(()=>null),e=envs.get(envId),data=w?.data?normalizeDb(structuredClone(stripLinked(w.data))):null;
+  if(w?.archivedAt)return {id:envId,members:[],projects:[],agents:[],cards:[]};
+  const owner=String(w?.owner||e?.ownerEmail||'').toLowerCase();
+  const recipients=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt).map(s=>s.recipientEmail);
+  const emails=[...new Set([owner,...(e?.members||[]),...(data?.environment?.members||[]),...recipients].map(x=>String(x||'').toLowerCase()).filter(Boolean))];
+  const people=afCore.peopleOf(data||{});
+  const members=await Promise.all(emails.map(async email=>{const u=await users.get(email).catch(()=>null);return {email,name:u?.name||await personName(email),lastSeen:u?.lastSeen||'',personIds:people.filter(p=>sameEmail(p.email,email)).map(p=>p.id)}}));
+  return {id:envId,name:w?.name||data?.environment?.name||e?.name||'Workspace',ownerEmail:owner,members,
+    projects:(data?.projects||[]).map(p=>({id:p.id,name:p.name,repos:p.repos||[]})),
+    world:data?.agentflow?.office?.world||'classic',
+    agents:(data?.agentflow?.agents||[]).map(a=>({id:a.id,name:a.name,kind:a.kind,title:a.title||'',status:a.status,reportsTo:a.reportsTo||'',projects:a.projects||[],cards:a.cards||[],
+      ...(a.kind==='human'?{memberEmail:humanMember(a,data,members)}:{})})),
+    // For seats (lib/office-seats.mjs): which card a live session works on, and each agent's queue.
+    cards:(data?.devops?.cards||[]).map(c=>({id:c.id,number:c.number,title:c.title,column:c.column,moved:c.moved||'',project:c.project||'',due:c.due||'',snoozedUntil:c.snoozedUntil||''}))};
+}
+// The member a human AgentFlow agent is: the one member whose account has its name, else the email of the one
+// person card with its name, else its supervisor's person card's email. The name comes first because a human
+// agent's supervisor is often someone else (their manager), and a person card's email is not always the one
+// they sign in with. Each step only counts when it names a member.
+function humanMember(a,data,members){
+  const emails=new Set(members.map(m=>m.email)),people=afCore.peopleOf(data),mail=p=>{const e=String(p?.email||'').toLowerCase();return emails.has(e)?e:''};
+  const hits=members.filter(m=>afCore.sameName(m.name,a.name));if(hits.length===1)return hits[0].email;
+  const named=mail(afCore.personNamed(people,a.name));if(named)return named;
+  return mail(people.find(p=>p.id===a.supervisor));
+}
+// Who may enter an environment's office, and which of its projects they see: everyone who can read it
+// sees all of them; a share's recipient sees the projects in their shares' scopes (all for a whole-environment share).
+async function officeAccessNow(envId,user){
+  const w=await workspaces.get(envId).catch(()=>null);if(w?.archivedAt)return {ok:false};
+  const e={...(envs.get(envId)||{id:envId,ownerEmail:'',visibility:'private',members:[]}),...(w?{ownerEmail:w.owner,visibility:w.visibility}:{})};
+  const members=w?.data?.environment?.members;
+  const full=canRead(e,user)||(Array.isArray(members)&&members.some(m=>sameEmail(m,user.email)));
+  if(sameEmail(e.ownerEmail,user.email))return {ok:true,all:true,projectIds:new Set()};
+  const active=(await shares.list({ownerEnv:envId}).catch(()=>[])).filter(s=>!s.revokedAt);
+  const mine=active.filter(s=>sameEmail(s.recipientEmail,user.email));
+  if(!w?.data)return {ok:full,all:full,projectIds:new Set()};
+  const d=normalizeDb(structuredClone(stripLinked(w.data))),hidden=privateRecords(d);
+  if(!mine.length)return {ok:full,all:full,projectIds:new Set(),hidden};
+  const projectIds=new Set(),cardIds=new Set(),scopes=[];
+  let all=full;
+  for(const s of mine){
+    const scope=core.resolveScope(d,s);
+    if(s.scope?.kind==='environment')all=true;
+    for(const id of scope.projectIds)projectIds.add(id);
+    for(const id of scope.cardIds)cardIds.add(id);
+    scopes.push({id:s.id,nodeIds:new Set(scope.nodeIds),cardIds:new Set(scope.cardIds)});
+  }
+  return {ok:true,all,projectIds,cardIds,scopes,hidden};
+}
+const officeSeen=new Map();
+async function officeAccess(envId,user){
+  const k=envId+'\n'+String(user.email).toLowerCase(),hit=officeSeen.get(k);
+  if(hit&&Date.now()-hit.at<15000)return hit.access;
+  const access=await officeAccessNow(envId,user);if(officeSeen.size>5000)officeSeen.clear();officeSeen.set(k,{at:Date.now(),access});return access;
+}
+// Doors to the other offices this person can enter that sharing connects to them (docs/concepts/12-office.md):
+// the offices of environments shared with them ("<owner>'s office"), and their own environments that they share
+// (where their recipients meet them). When they are visiting someone else's office, also a door back to their own.
+// -> [{env, label, sub, own}]
+async function officePortals(envId,user){
+  const out=[],seen=new Set([envId]);if(!user?.email||user.token||user.key)return out;
+  const add=async(env,label,own)=>{if(seen.has(env)||out.length>=12)return;seen.add(env);const w=await workspaces.get(env).catch(()=>null);if(!w?.data||w.archivedAt)return;out.push({env,label,sub:w.name||w.data.environment?.name||'',own})};
+  // One door per environment: read each once.
+  const byEnv=list=>[...new Map(list.map(s=>[s.ownerEnv,s])).values()];
+  for(const s of byEnv(await shares.list({recipientEmail:user.email}).catch(()=>[])))if(!seen.has(s.ownerEnv))await add(s.ownerEnv,`${await personName(s.ownerEmail)}'s office`,false);
+  for(const s of byEnv(await shares.list({ownerEmail:user.email}).catch(()=>[])))if(!seen.has(s.ownerEnv)&&sameEmail((await workspaces.get(s.ownerEnv).catch(()=>null))?.owner,user.email))await add(s.ownerEnv,'Your office',true);
+  const here=await workspaces.get(envId).catch(()=>null);
+  if(!sameEmail(here?.owner,user.email)){const mine=await workspaces.ownedBy(user.email).catch(()=>null);if(mine?.envId)await add(mine.envId,'Your office',true)}
+  return out;
+}
+const historyError=e=>console.error('Office history:',cloudError(e));
+const historyRooms=new Map();
+async function historyEnvironments(email){
+  const hit=historyRooms.get(email);if(hit&&Date.now()-hit.at<5000)return hit.contexts;
+  const [ownedOrMember,shared]=await Promise.all([rawWorkspaces.memberEnvs(email),shares.list({recipientEmail:email})]);
+  const registered=envs.list().filter(e=>[e.ownerEmail,...e.members].some(m=>sameEmail(m,email))).map(e=>e.id);
+  const ids=new Set([...ownedOrMember,...shared.map(s=>s.ownerEnv),...registered]);
+  const contexts=await Promise.all([...ids].map(officeEnv));
+  const visible=contexts.filter(ctx=>ctx.members.some(m=>sameEmail(m.email,email)));
+  if(historyRooms.size>=2000)historyRooms.clear();
+  historyRooms.set(email,{at:Date.now(),contexts:visible});return visible;
+}
+// One avatar per account (lib/avatars.mjs, docs/concepts/13-avatars.md). Its default is seeded by the office
+// member key; looks saved before accounts had avatars are migrated on first read.
+const avatars=avatarStore({dir:fileURLToPath(backupRoot),db:()=>cloud(),seedOf:email=>officeHub.memberKey(email),
+  legacy:email=>officeStorage.legacyLooks?.(officeHub.memberKey(email))??[]});
+const officeHub=officeMod.officeHub({history:()=>officeHistory,state:officeState,context:{env:officeEnv,access:officeAccessNow,portals:officePortals},secret:officeStorage.secret,storage:officeStorage,avatars,onError:e=>console.error('Office storage or refresh failed:',cloudError(e))});
+officeHistory=createOfficeHistory({store:officeHistoryStore,state:officeState,environments:historyEnvironments,context:officeEnv,
+  memberKey:officeHub.memberKey,agentKey:officeHub.agentKey,onError:historyError});
+officeHistory.start();
+// Voice and screen sharing (lib/office-rtc.mjs): WebRTC signalling over the office stream, and ICE servers (TURN from env vars).
+const officeRtcMod=await import('./lib/office-rtc.mjs');
+const officeRtc=officeRtcMod.officeRtc({hub:officeHub}),officeIce=officeRtcMod.iceConfig();
+async function sendOfficeDirect(user,{env,target},text,deliver){
+  const unavailable=()=>Object.assign(Error('Office not found'),{status:404});
+  if(core.parseOpenedEnv(env)){
+    const opened=await openedShare(env,user);
+    if(!opened?.share)throw unavailable();
+    env=opened.share.ownerEnv;
+  }
+  if(!(await officeAccessNow(env,user)).ok)throw unavailable();
+  return officeHub.direct(env,user,target,text,deliver);
+}
+// /api/office/{env}/events (SSE), history, presence, status, look, knock, admit, enter, say, emote, decorate, answer and steer (an answer, a message or a stop: lib/office.mjs), rtc (GET: ICE servers;
+// POST: voice signalling, lib/office-rtc.mjs; never logged), and /api/office/alerts (SSE, per person):
+// the app's page only, signed in (local mode too).
+async function officeApi(req,res){
+  const u=new URL(req.url,'http://x');if(!u.pathname.startsWith('/api/office/'))return false;
+  // Your own agents' waits, for alerts while the office is closed (lib/office.mjs hub.alerts): the app's page only.
+  if(u.pathname==='/api/office/alerts'){
+    if(!trusted(req)){res.writeHead(403);res.end();return true}
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    const user=await requireUser(req,res);if(!user)return true;
+    try{await officeState.refresh([String(user.email).trim().toLowerCase()]);if(!res.destroyed)officeHub.alerts(user,req,res)}
+    catch(e){console.error('office alerts failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open office alerts'});else res.end()}
+    return true;
+  }
+  const m=/^\/api\/office\/([A-Za-z0-9-]{1,64})\/(events|presence|say|emote|answer|steer|status|look|history|rtc|knock|admit|enter|decorate)$/.exec(u.pathname);
+  if(!m){json(res,404,{error:'Not found'});return true}
+  // The events stream also takes an API key (read scope, for that environment), e.g. a dashboard watching the office.
+  const keyed=m[2]==='events'&&!!req.headers.authorization;
+  if(!keyed&&!trusted(req)){res.writeHead(403);res.end();return true}
+  let user;
+  if(keyed){const a=await apiAuth(req);if(!a||!a.scopes.some(x=>x==='read'||x==='write'||x==='admin')||(a.user.key&&!keyAllows(a.user.key,'read',m[1]))){json(res,401,{error:'Invalid or expired API key'});return true}user={...a.user,name:(await personName(a.user.email))}}
+  else{user=await requireUser(req,res);if(!user)return true}
+  let [,envId,what]=m;
+  if(what==='history'&&(user.token||user.key)){json(res,401,{error:'Sign in to continue'});return true}
+  // An opened shared environment's office (share-<shareId>) is its owner environment's office: one office for everyone.
+  const virtual=core.parseOpenedEnv(envId)?envId:null;
+  if(virtual){const o=keyed?null:await openedShare(virtual,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
+  const access=await (what==='history'||what==='events'?officeAccessNow:officeAccess)(envId,user);
+  if(!access.ok){json(res,404,{error:'Not found'});return true}
+  if(what==='history'){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    res.setHeader('Cache-Control','private, no-store');
+    try{
+      const data=await officeHistory.page(envId,user,access,u.searchParams.get('day'),u.searchParams.get('tz'),u.searchParams.get('cursor'));
+      const current=data&&await officeAccessNow(envId,user);
+      if(!current?.ok||(virtual&&!(await openedShare(virtual,user))?.share))json(res,404,{error:'Not found'});
+      else if(!isDeepStrictEqual(current,access))json(res,409,{error:'Office access changed. Reload the day.'});
+      else json(res,200,data);
+    }catch(e){
+      if(e instanceof RangeError)json(res,400,{error:e.message});
+      else{historyError(e);json(res,500,{error:'Could not load office history'})}
+    }
+    return true;
+  }
+  if(what==='events'){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    // Your name tag shows your avatar's portrait instead of your photo when you chose that (docs/concepts/13-avatars.md).
+    if(!keyed){const v=await avatars.get(user.email).catch(()=>null);if(v?.usePortrait)user={...user,image:renderAvatarPortrait(v.avatar)}}
+    try{await officeHub.connect(envId,user,access,req,res)}catch(e){console.error('office stream failed',cloudError(e));if(!res.headersSent)json(res,500,{error:'Could not open the office'});else res.end()}
+    return true;
+  }
+  if(what==='rtc'&&req.method==='GET'){res.setHeader('Cache-Control','no-store');json(res,200,await officeIce.get(user));return true}
+  if(req.method!=='POST'){res.writeHead(405,{Allow:what==='rtc'?'GET, POST':'POST'});res.end();return true}
+  readJson(req,res,async b=>{
+    try{
+      const out=await (what==='rtc'?officeRtc.signal(envId,user,b):what==='presence'?officeHub.move(envId,user,b||{}):what==='say'?officeHub.say(envId,user,b?.text,b||{}):what==='emote'?officeHub.emote(envId,user,b?.emote):what==='status'?officeHub.setStatus(envId,user,b||{}):what==='look'?officeHub.setLook(envId,user,b):what==='knock'?officeHub.knock(envId,user,b||{}):what==='admit'?officeHub.admit(envId,user,b||{}):what==='enter'?officeHub.enter(envId,user,b||{}):what==='decorate'?officeHub.decorate(envId,user,b||{}):officeHub.answer(envId,user,b));
+      json(res,200,out);
+    }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('office:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
+  });
+  return true;
+}
+// ---------- account avatars (lib/avatars.mjs, docs/concepts/13-avatars.md) ----------
+// GET /api/me/avatar                    -> {key, avatar, custom, usePortrait, updated, source}
+// PUT /api/me/avatar {avatar?, usePortrait?}   avatar: a spec (public/avatar-spec.js) or null for the default
+// GET /api/avatar/<member key or OneProfileID id>?env=<id>   -> {key, avatar, custom}: someone the viewer
+//     already sees in that environment (its office members: owner, members, share recipients). Never by email.
+// The page only, signed in (local mode too): no API keys, no owner token. Bodies are capped.
+const AVATAR_BODY_MAX=4096,MEMBER_KEY=/^m[A-Za-z0-9_-]{12}$/,avatarLimit=memoryRateLimit({perMinute:30});
+const myAvatar=(user,v)=>({key:officeHub.memberKey(user.email),avatar:v.avatar,custom:v.custom,usePortrait:v.usePortrait,updated:v.updated,source:v.source});
+async function avatarApi(req,res){
+  const u=new URL(req.url,'http://x'),mine=u.pathname==='/api/me/avatar',other=/^\/api\/avatar\/([^/]{1,300})$/.exec(u.pathname);
+  if(!mine&&!other)return false;
+  if(!trusted(req)||req.headers.authorization){res.writeHead(403);res.end();return true}
+  const user=await requireUser(req,res);if(!user)return true;
+  if(user.token||user.key){json(res,401,{error:'Sign in to continue'});return true}
+  res.setHeader('Cache-Control','private, no-store');
+  if(other){
+    if(req.method!=='GET'){res.writeHead(405,{Allow:'GET'});res.end();return true}
+    let id='';try{id=decodeURIComponent(other[1])}catch{}
+    if(id.includes('@')||!(MEMBER_KEY.test(id)||validOpidUser(id))){json(res,400,{error:'Ask for a person by their member key',code:'invalid_key'});return true}
+    let envId=u.searchParams.get('env')||'';
+    if(!ENV_ID.test(envId)){json(res,400,{error:'env is required',code:'invalid_input'});return true}
+    if(core.parseOpenedEnv(envId)){const o=await openedShare(envId,user);if(!o?.share){json(res,404,{error:'Not found'});return true}envId=o.share.ownerEnv}
+    const access=await officeAccessNow(envId,user);if(!access.ok){json(res,404,{error:'Not found'});return true}
+    const ctx=await officeEnv(envId);let who=ctx.members.find(m=>officeHub.memberKey(m.email)===id);
+    if(!who&&validOpidUser(id))for(const m of ctx.members)if((await users.get(m.email).catch(()=>null))?.opidId===id){who=m;break}
+    if(!who){json(res,404,{error:'Not found'});return true}
+    const v=await avatars.get(who.email);
+    json(res,200,{key:officeHub.memberKey(who.email),avatar:v.avatar,custom:v.custom});return true;
+  }
+  if(req.method==='GET'){json(res,200,myAvatar(user,await avatars.get(user.email)));return true}
+  if(req.method!=='PUT'){res.writeHead(405,{Allow:'GET, PUT'});res.end();return true}
+  if(!String(req.headers['content-type']||'').startsWith('application/json')){json(res,415,{error:'Expected JSON'});return true}
+  if(Number(req.headers['content-length']||0)>AVATAR_BODY_MAX){req.resume();json(res,413,{error:'An avatar is at most 2 KB',code:'avatar_too_large'});return true}
+  const body=await new Promise(done=>{let b='',n=0;req.on('data',c=>{n+=c.length;if(n>AVATAR_BODY_MAX){done(null);req.destroy();return}b+=c});req.on('end',()=>done(b));req.on('error',()=>done(null))});
+  if(body===null){if(!res.headersSent)json(res,413,{error:'An avatar is at most 2 KB',code:'avatar_too_large'});return true}
+  let b;try{b=JSON.parse(body)}catch{json(res,400,{error:'Invalid JSON'});return true}
+  try{
+    if(!b||typeof b!=='object'||Array.isArray(b)||!('avatar' in b||'usePortrait' in b)||Object.keys(b).some(k=>k!=='avatar'&&k!=='usePortrait'))
+      throw Object.assign(Error('Send {avatar} (a spec or null) and/or {usePortrait}'),{status:400,code:'invalid_input'});
+    if('usePortrait' in b&&typeof b.usePortrait!=='boolean')throw Object.assign(Error('usePortrait must be true or false'),{status:400,code:'invalid_input'});
+    if(!avatarLimit({user,operation:{scope:'write'}}).ok)throw Object.assign(Error('Slow down a little'),{status:429,code:'rate_limited'});
+    let v=null;
+    if('avatar' in b){v=await avatars.save(user.email,b.avatar);await officeHub.avatarChanged(user.email,v).catch(()=>{})}
+    if('usePortrait' in b)v=await avatars.setUsePortrait(user.email,b.usePortrait);
+    avatarsChanged(user.email);
+    json(res,200,myAvatar(user,v));
+  }catch(e){const status=Number.isInteger(e?.status)?e.status:500;if(status===500)console.error('avatar:',cloudError(e));json(res,status,{error:status===500?'Something went wrong':e.message,code:e.code||'internal'})}
+  return true;
+}
+// Someone's avatar or their portrait choice changed: cached photo lookups that may carry it are dropped.
+function avatarsChanged(){photoCache.clear()}
+const apiRateLimit=a=>a.operation?.tags?.includes('office')?officeLimit(a):apiLimit(a);
+// Share additions for the API and MCP (proposals.*): never for the owner token.
+const apiProposals={list:(envId,user,o)=>user.token?[]:proposalsFor(envId,user,o),decide:(id,user,approve,env)=>user.token?{status:404,body:{error:'Not found',code:'proposal_not_found'}}:decideShareProposal(id,user,approve,env)};
+// ---------- the Flow app on iPhone and iPad (lib/app-device.mjs, lib/apns.mjs, docs/ios-app.md) ----------
+// Device keys only (scope device). Pushes go out only when APNS_* is set; FLOW_PUSH_PREVIEWS=off leaves card
+// titles and prompt text out of them.
+const appDevices=appDeviceMod.pushDeviceStore({dir:fileURLToPath(backupRoot),db:()=>cloud()});
+const apnsCfg=apnsMod.apnsConfig(process.env);
+const appHub=appDeviceMod.pushHub({store:appDevices,sender:apnsCfg?apnsMod.apnsSender(apnsCfg):null,apiKeys,previews:process.env.FLOW_PUSH_PREVIEWS!=='off',
+  emailOf:async opid=>(await users.list()).find(u=>u.opidId===opid)?.email||null,isQuiet:email=>officeHub.isQuiet(email)});
+if(apnsCfg){
+  officeState.on(e=>{if(e.type==='waiting')return appHub.agentWaiting(e.email,e.agent).catch(()=>{})});
+  appPush={saved(env,before,after,meta){const ev=appDeviceMod.cardEvents(before,after,meta);if(ev.length)appHub.cards({id:env,name:after?.environment?.name||''},ev).catch(()=>{})}};
+}
+const appApi=appDeviceMod.appRoutes({authenticate:r=>authenticateApiKey(r,apiKeys),readJson,json,
+  async envsFor(user,a){
+    const st=apiStore(a,{id:'key:'+a.keyId,email:user.email,key:a}),out=[];
+    for(const w of (await st.owned(user.email)).slice(0,25)){const g=await st.get(w.envId).catch(()=>null);if(g?.data)out.push({id:w.envId,name:w.name||g.data.environment?.name||'Workspace',data:g.data})}
+    return out;
+  },
+  opidIdOf:async email=>(await users.get(email).catch(()=>null))?.opidId||'',
+  office:{waitingOf:email=>officeHub.waitingOf(email),answer:(user,b)=>officeHub.answer(null,user,b),refresh:emails=>officeState.refresh(emails)},
+  store:appDevices,hub:appHub});
+
 async function apiV1Route(req,res){
   if(!req.url.startsWith('/api/v1'))return false;
-  // One authentication per request (it also counts towards the key's rate limit).
-  let a;const authenticate=async r=>a!==undefined?a:(a=await apiAuth(r));
-  if(req.headers.authorization)await authenticate(req);
-  return apiV1(req,res,{authenticate,userFor:r=>trusted(r)?auth.userFor(r):null,store:apiStore(a?.user?.key,a?.user),envCheck:keyEnvCheck,rateLimit:apiLimit,heldCards});
+  return apiV1(req,res,{authenticate:apiAuth,userFor:r=>trusted(r)?auth.userFor(r):null,storeFor:user=>apiStore(user.key,user,{includeLinked:!!user.key}),envCheck:keyEnvCheck,rateLimit:apiRateLimit,heldCards,office:officeState,proposals:apiProposals,sharing:u=>shareSvc.forUser(u,keyAllows)});
 }
 async function mcpRoute(req,res){
   if(new URL(req.url,'http://x').pathname!=='/mcp')return false;
   return mcpHandler(req,res,{operations:registryMod.operations,invoke:registryMod.invoke,
     authenticate:async(token,r)=>(await apiAuth(r))?.user||null,
-    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards}),
-    origins:auth.appOrigin?[auth.appOrigin]:[]});
+    ctx:user=>({user,store:apiStore(user.key,user),envCheck:keyEnvCheck,via:'mcp',heldCards,office:officeState,proposals:apiProposals,sharing:shareSvc.forUser(user,keyAllows)}),
+    origins:auth.appOrigin?[auth.appOrigin]:[],rateLimit:apiRateLimit});
 }
 
 // ---------- DevLog: GET /api/devlog?page=N&q=text, one page (10) of releases ----------
@@ -990,6 +1715,8 @@ async function prefs(req,res){
 const FLYGON_STYLES_PATH='/flygon-styles.css',flygonStylesFile=fileURLToPath(import.meta.resolve('@flygon/styles/themes.css'));
 // Static files: any existing file under public/ (so new modules need no restart). The decoded path
 // is resolved and must stay inside public/; dotfiles and unknown types are refused.
+// Vendored libraries (public/vendor, e.g. Three.js for the 3D office) change only with a release: a day of caching.
+const vendorRoot=resolve(root,'vendor')+sep;
 function resolveStatic(url){
   const rel=url==='/'?'index.html':url.replace(/^[\\/]+/,'');
   if(!rel||/[\u0000-\u001f:]/.test(rel)||rel.split(/[\\/]/).some(p=>p.startsWith('.')))return null;
@@ -997,7 +1724,12 @@ function resolveStatic(url){
   if(!file.startsWith(resolve(root)+sep)||!types[extname(file)]||!existsSync(file)||!statSync(file).isFile())return null;
   return file;
 }
-const server=http.createServer(async(req,res)=>{
+let draining=false;
+async function handleRequest(req,res){
+  res.once('finish',()=>{if(draining)setImmediate(()=>server.closeIdleConnections())});
+  if(req.url.split('?')[0]==='/health'&&(req.method==='GET'||req.method==='HEAD')){
+    res.writeHead(draining?503:200,{'Cache-Control':'no-store'});res.end();return;
+  }
   // Who may frame Flow (lib/embed.mjs): this origin only, unless FLOW_FRAME_ANCESTORS adds others.
   // Decided once per request (lib/embed.mjs): the same answer sets the frame headers and the sign-in cookies.
   try{req.flowEmbed=await auth.embed.decide(req);for(const [k,v] of Object.entries(auth.embed.headers(req.flowEmbed)))res.setHeader(k,v)}catch{}
@@ -1008,9 +1740,9 @@ const server=http.createServer(async(req,res)=>{
     json(res,200,{name,accent,logo:/^\/(?!\/)[A-Za-z0-9/_-]+\.(?:svg|png|webp)$/.test(logo)&&!logo.includes('..')?logo:''});return;
   }
   // API clients (keys, CLI, MCP) have no page origin: these two authenticate with Bearer keys themselves.
-  if(await apiV1Route(req,res)||await mcpRoute(req,res))return;
+  if(await apiV1Route(req,res)||await mcpRoute(req,res)||await appApi(req,res))return;
   if(req.url.startsWith('/api/auth/')){if(!trusted(req)){res.writeHead(403);res.end();return}if(await auth.handle(req,res,readJson))return}
-  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await devlogPage(req,res))return;
+  if(await backup(req,res)||await saves(req,res)||await inbox(req,res)||await prefs(req,res)||await workspace(req,res)||await opidApi(req,res)||await chatApi(req,res)||await environments(req,res)||await invitesApi(req,res)||await membersApi(req,res)||await sharesApi(req,res)||await keysApi(req,res)||await officeApi(req,res)||await avatarApi(req,res)||await devlogPage(req,res))return;
   // Generated docs (tools/docs.mjs): /docs opens the index; /skill.md is the agent skill. Public, no workspace data.
   const bare=req.url?.split('?')[0];
   if(bare==='/docs'||bare==='/docs/'){res.writeHead(302,{Location:'/docs/index.html'});res.end();return}
@@ -1027,8 +1759,11 @@ const server=http.createServer(async(req,res)=>{
   }
   let file;try{file=resolveStatic(decodeURIComponent(req.url?.split('?')[0]||'/'))}catch{file=null}
   if(!file||(req.method!=='GET'&&req.method!=='HEAD')){res.writeHead(404);res.end('Not found');return;}
-  try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}
-});
+  try{const body=readFileSync(file);res.setHeader('Content-Type',types[extname(file)]+(/^(text|application\/json)/.test(types[extname(file)])?'; charset=utf-8':''));res.setHeader('Cache-Control',file.startsWith(vendorRoot)?'public, max-age=86400':'no-store');res.setHeader('X-Content-Type-Options','nosniff');res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Unable to load file');}
+}
+// One request that throws (a client gone mid-read, say) answers 500 and is logged: it never stops the server.
+const server=http.createServer((req,res)=>{handleRequest(req,res).catch(e=>{console.error('request failed:',req.method,req.url?.split('?')[0],e?.message||e);
+  if(!res.headersSent&&!res.destroyed){res.writeHead(500,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:'Something went wrong'}))}else res.destroy()})});
 // Local single-user mode only ever listens on loopback; a public deploy must run with OneProfileID.
 // With OPID_* set it listens on HOST (default 0.0.0.0) at PORT, as hosts like Railway expect.
 const LOOPBACK=['127.0.0.1','localhost','::1'];
@@ -1037,5 +1772,27 @@ if(auth.mode==='local'&&!LOOPBACK.includes(host)){console.error(`Refusing to lis
 let port=Number(process.env.PORT||4317);
 server.on('error',e=>{if(e.code==='EADDRINUSE'&&!process.env.PORT){port++;server.listen(port,host);}else{console.error(e);process.exit(1);}});
 server.once('listening',()=>{setImmediate(()=>recordDevlog().catch(()=>{}))});
+// Follow OneProfileID's membership events (revocations made elsewhere) every FLOW_MEMBERSHIP_POLL_SECONDS
+// (default 60; 0 or off: never). Off in local mode.
+server.once('listening',()=>{
+  const v=String(process.env.FLOW_MEMBERSHIP_POLL_SECONDS??'60').trim(),s=v==='off'?0:Number(v);
+  memberships.start(Number.isFinite(s)&&s>0?Math.max(1,s)*1000:0);
+});
 server.on('listening',()=>{const url=auth.mode==='opid'&&!LOOPBACK.includes(host)?`${auth.appOrigin} (listening on ${host}:${server.address().port})`:`http://${host==='::1'?'[::1]':host}:${server.address().port}`;if(!VERIFY&&auth.mode==='local')writeFileSync(new URL('./running.json',import.meta.url),JSON.stringify({url,pid:process.pid}));console.log(`Flygon Flow: ${url} (${auth.mode==='opid'?'OneProfileID sign-in':'local single-user mode'}${auth.mode==='local'&&SYNC_URL&&SYNC_TOKEN?`, syncing with ${SYNC_HOST}`:''})`);});
+process.on('SIGTERM',()=>{
+  if(draining)return;
+  draining=true;
+  memberships.stop();
+  const deadline=setTimeout(()=>{server.closeAllConnections();process.exit(1)},25000);
+  deadline.unref();
+  server.close(async error=>{
+    await officeHub.flush();
+    await officeHistory.close();
+    await pool?.end().catch(()=>{});
+    clearTimeout(deadline);
+    process.exit(error?1:0);
+  });
+  officeHub.close({restart:true});
+  officeState.close();
+});
 server.listen(port,host);

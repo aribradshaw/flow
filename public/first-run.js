@@ -12,9 +12,12 @@ const mark=id=>{try{localStorage.setItem(KEY+id,'1')}catch{}};
 // The workspace the server makes for a new person: one empty chart and nothing else.
 export const untouched=db=>!!db&&db.charts?.length===1&&!db.charts[0].nodes?.length&&!(db.timeline||[]).length&&!(db.projects||[]).length&&!(db.devops?.cards||[]).length&&!(db.agentflow?.agents||[]).length;
 
-let open=false;
+let open=false,shown=null;
 export function firstRun({store,replaceDb,envId,signedIn}){
-  if(open||!signedIn||!envId||envId!==store.db?.environment?.id||seen(envId)||!untouched(store.db))return;
+  // Another environment was opened meanwhile (one shared with you, say): the picker was for the one before.
+  if(open&&shown&&shown.env!==store.db?.environment?.id){shown.el.remove();open=false;shown=null}
+  // An environment shared with you (docs/sharing.md) is its owner's, empty or not.
+  if(open||store.db?.opened||!signedIn||!envId||envId!==store.db?.environment?.id||seen(envId)||!untouched(store.db))return;
   open=true;
   const o=document.createElement('div');
   o.className='first-run';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');o.setAttribute('aria-labelledby','firstRunT');o.dataset.firstrun='';
@@ -25,11 +28,14 @@ export function firstRun({store,replaceDb,envId,signedIn}){
       <button type="button" class="first-run-choice" data-firstrun-choice="example"><strong>Start with an example</strong><span>A made-up company with a mind map, a timeline and a task board, to look around and change.</span></button>
       <button type="button" class="first-run-choice" data-firstrun-choice="blank"><strong>Start blank</strong><span>An empty mind map. Add your first card with Add entity, or press E.</span></button>
     </div></div>`;
-  document.body.append(o);
+  document.body.append(o);shown={env:envId,el:o};
   o.querySelector('[data-firstrun-choice="blank"]').focus();
   o.addEventListener('click',e=>{
     const b=e.target.closest('[data-firstrun-choice]');if(!b)return;
-    mark(envId);o.remove();open=false;
+    o.remove();open=false;shown=null;
+    // Never into an environment it was not shown for (an example in someone else's shared environment).
+    if(store.db?.environment?.id!==envId)return;
+    mark(envId);
     if(b.dataset.firstrunChoice==='example'){
       const d=demoWorkspace();
       replaceDb({...d,environment:{...store.db.environment}});

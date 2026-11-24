@@ -105,7 +105,7 @@ export function initTooltips(){
 // account.js reports the session user through setSessionUser(); app.js gives the workspace through
 // setPeopleSource(). A data: URL session photo is decoded once into an object URL (sessionPhoto()),
 // so every avatar, the header one included, points at the same small URL instead of repeating it.
-let me=null,meUrl='',peopleSrc=()=>[],peopleCache=null;
+let me=null,meUrl='',portraitUrl='',peopleSrc=()=>[],peopleCache=null;
 function photoUrl(u){
   const m=/^data:(image\/[a-z0-9.+-]+)(;base64)?,(.*)$/is.exec(u);if(!m)return u;
   try{const bin=m[2]?atob(m[3]):decodeURIComponent(m[3]),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return URL.createObjectURL(new Blob([b],{type:m[1]}))}catch{return u}
@@ -114,8 +114,18 @@ export const setSessionUser=u=>{
   const image=typeof u?.image==='string'?u.image.trim():'';
   if(meUrl.startsWith('blob:')&&image!==me?.raw)URL.revokeObjectURL(meUrl);
   if(image!==me?.raw)meUrl=image?photoUrl(image):'';
-  me=u?{id:typeof u.id==='string'?u.id:'',email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:meUrl,raw:image}:null;
+  me=u?{id:typeof u.id==='string'?u.id:'',email:String(u.email||'').trim().toLowerCase(),name:String(u.name||''),image:portraitUrl||meUrl,raw:image}:null;
 };
+// "Use my avatar instead of my photo" (Settings › Account, docs/concepts/13-avatars.md): svg is the avatar's
+// portrait (avatar.js), or '' to show the photo again. It becomes the session photo everywhere above, as one
+// small object URL. -> true when it changed.
+export function setSessionPortrait(svg){
+  const next=svg?URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'})):'';
+  if(!svg&&!portraitUrl)return false;
+  if(portraitUrl)URL.revokeObjectURL(portraitUrl);
+  portraitUrl=next;if(me)me.image=portraitUrl||meUrl;
+  return true;
+}
 // OneProfileID links (docs/concepts/10-opid-photos.md): a person links a card to their own account
 // (node.opidUser; viewers who are not the workspace owner see only node.opidLinked for others' links).
 // opidLink(n): 'me' when the card is linked to the signed-in account, 'other' for anyone else, '' when not linked.
@@ -153,12 +163,29 @@ export function people(){if(!peopleCache){peopleCache=peopleSrc()||[];queueMicro
 export const isMe=n=>isSessionPerson(n,people(),me);
 // A linked card shows its account's current photo first (the signed-in user's own right away), then
 // any uploaded photo. An unlinked card shows its uploaded photo, or the signed-in user's when it is theirs.
-export function personPhoto(n){
-  if(!n)return '';
+function photoOf(n){
   const link=opidLink(n);
   if(link){const p=memberPhotos.get(n.id)||(link==='me'?me?.image:'');if(p)return p}
   if(typeof n.image==='string'&&n.image)return n.image;
   return !link&&me?.image&&isMe(n)?me.image:'';
+}
+// The viewer's own person card with this email (not a shared or combined copy, and not a @email member).
+function ownCardFor(n){
+  const email=String(n.email||(typeof n.id==='string'&&n.id.startsWith('@')?n.id.slice(1):'')).trim().toLowerCase();
+  if(!email)return null;
+  for(const p of people()){
+    if(!p||p===n||p.type!=='person'||typeof p.id!=='string')continue;
+    if(p.id.startsWith('@')||p.id.startsWith('sh.')||p.id.startsWith('cx.'))continue;
+    if(String(p.email||'').trim().toLowerCase()===email)return p;
+  }
+  return null;
+}
+// A share member (@email) shows the viewer's own person card's photo when that card has their email,
+// then the member's own uploaded photo or linked account photo.
+export function personPhoto(n){
+  if(!n)return '';
+  if(typeof n.id==='string'&&n.id.startsWith('@')){const card=ownCardFor(n);if(card){const p=photoOf(card);if(p)return p}}
+  return photoOf(n);
 }
 export const photoImg=src=>`<img class="pa-img" src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`;
 export function personAvatar(n,{size=0,cls='',tip=''}={}){
@@ -170,16 +197,19 @@ export function personAvatar(n,{size=0,cls='',tip=''}={}){
 document.addEventListener('error',e=>{const t=e.target;if(t?.classList?.contains('pa-img')){t.parentElement?.classList.remove('has-photo');t.remove()}},true);
 
 // ---------- picker: a popover listbox for multi-select (default) or single-select ----------
-// pickerButton(key, label, items, selected) renders the trigger ("Projects · 2" plus colour dots);
-// openPicker(trigger, {items, selected, onChange, multi, placeholder}) opens the list under it.
+// pickerButton(key, label, items, selected, {excluded}) renders the trigger ("Projects · 2", or
+// "Not: Joe Basrawi" when a value is excluded).
+// openPicker(trigger, {items, selected, excluded, cycle, onChange, multi, placeholder}) opens the list.
 // items: [{value, label, group?, sub?, color? | avatar:{text,bg,fg,img?} | icon | pill:{bg,fg}}].
 // avatar.img (an http(s) or data:image URL) shows a photo over the initials; icon names an icons.js icon.
-// onChange(values) fires on every change (live); the caller re-renders and the picker stays open,
-// re-anchoring to the element with the same data-picker key. Keyboard: arrows, Enter/Space,
-// Esc, Tab; typing filters. Click outside closes.
+// onChange(values, excluded) fires on every change (live). With cycle, a click includes, the next
+// excludes (struck through, with a minus), and the next clears. excluded is only passed when cycle is on.
+// The caller re-renders and the picker stays open, re-anchoring to the same data-picker key.
+// Keyboard: arrows, Enter/Space, Esc, Tab; typing filters. Click outside closes.
 let picker=null;
-// The session photo's and linked cards' object URLs (blob:) are the only non-http(s), non-data URLs allowed.
-export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl)||memberUrls.has(u))?u.trim():'';
+// The session photo's, the session portrait's and linked cards' object URLs (blob:) are the only non-http(s),
+// non-data URLs allowed.
+export const safeImg=u=>typeof u==='string'&&(/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|avif|svg\+xml)[;,])/i.test(u.trim())||(!!meUrl&&u===meUrl)||(!!portraitUrl&&u===portraitUrl)||memberUrls.has(u))?u.trim():'';
 const av=(a,cls)=>{const img=safeImg(a.img);return `<span class="bub ${cls}${img?' has-photo':''}" style="background:${a.bg};color:${a.fg}"><span class="pa-txt">${esc(a.text)}</span>${img?photoImg(img):''}</span>`};
 const swatch=it=>it.avatar?av(it.avatar,'pk-av')
   :it.icon?`<span class="pk-ic">${icon(it.icon,13)}</span>`
@@ -187,9 +217,14 @@ const swatch=it=>it.avatar?av(it.avatar,'pk-av')
 const dot=it=>it.avatar?av(it.avatar,'mini')
   :`<i class="pk-sw" style="background:${it.color||it.pill?.bg||'var(--line2)'}"></i>`;
 export const pickerOpen=key=>picker?.key===key;
-export function pickerButton(key,label,items,selected,{cls='',tip='',count=true,disabled=false}={}){
-  const sel=items.filter(i=>selected.includes(i.value)),n=sel.length;
-  return `<button type="button" class="pk-btn${n?' on':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${tip?` data-tip="${esc(tip)}"`:''}${disabled?' disabled':''}>${n?`<span class="pk-dots">${sel.slice(0,3).map(dot).join('')}</span>`:''}<span class="pk-t">${esc(label)}${n&&count?` · ${n}`:''}</span>${icon('chevD',12)}</button>`;
+export function pickerButton(key,label,items,selected,{cls='',tip='',count=true,disabled=false,excluded=[]}={}){
+  const sel=items.filter(i=>selected.includes(i.value)),ex=items.filter(i=>excluded.includes(i.value)),n=sel.length,xn=ex.length;
+  let text=label;
+  if(!n&&xn===1)text=`Not: ${ex[0].label}`;
+  else if(!n&&xn)text=`Not · ${xn}`;
+  else{if(n&&count)text+=` · ${n}`;if(xn===1)text+=` · Not: ${ex[0].label}`;else if(xn)text+=` · Not ${xn}`}
+  const dots=(n?sel:ex).slice(0,3),fullTip=[tip,xn?`Not: ${ex.map(i=>i.label).join(', ')}`:''].filter(Boolean).join('\n');
+  return `<button type="button" class="pk-btn${n||xn?' on':''}${xn?' not':''} ${cls}" data-picker="${esc(key)}" aria-haspopup="listbox" aria-expanded="${pickerOpen(key)}"${fullTip?` data-tip="${esc(fullTip)}"`:''}${disabled?' disabled':''}>${dots.length?`<span class="pk-dots">${dots.map(dot).join('')}</span>`:''}<span class="pk-t">${esc(text)}</span>${icon('chevD',12)}</button>`;
 }
 export function closePicker(refocus=false){
   if(!picker)return;const p=picker;picker=null;p.el.classList.remove('picker');p.el.classList.add('picker','leaving');popOut(p.el);document.removeEventListener('pointerdown',p.out,true);removeEventListener('resize',p.place);
@@ -201,31 +236,37 @@ export function openPicker(trigger,o){
   const key=trigger.dataset.picker;
   if(picker?.key===key){closePicker();return}
   closePicker();
-  const multi=o.multi!==false,sel=new Set(o.selected||[]),id='pk-'+uid().slice(0,8),anchor=()=>document.querySelector(`[data-picker="${CSS.escape(key)}"]`);
+  const multi=o.multi!==false,sel=new Set(o.selected||[]),ex=new Set(o.cycle?o.excluded||[]:[]),id='pk-'+uid().slice(0,8),host=trigger.closest('dialog[open]')||document.body,anchor=()=>host.querySelector(`[data-picker="${CSS.escape(key)}"]`);
   const el=document.createElement('div');el.className='picker';
   const search=o.search!==false;
   el.innerHTML=`<input class="pk-q" type="search" placeholder="${esc(o.placeholder||'Search')}" aria-label="Filter options" aria-controls="${id}" autocomplete="off" role="combobox" aria-expanded="true">
     <div class="pk-list" role="listbox" id="${id}" aria-multiselectable="${multi}" aria-label="${esc(o.label||'Options')}" tabindex="${search?-1:0}"></div>
+    ${o.cycle?'<div class="pk-hint">Click again to exclude</div>':''}
     ${multi?`<div class="pk-foot"><button type="button" class="txt" data-pk="all">Select all</button><button type="button" class="txt" data-pk="clear">Clear</button></div>`:''}`;
   // Inside a modal dialog the popover must live in it (the top layer covers everything else).
-  (trigger.closest('dialog[open]')||document.body).append(el);
+  host.append(el);
   const list=el.querySelector('.pk-list'),input=el.querySelector('.pk-q');if(!search)input.hidden=true;
   const focusEl=search?input:list;let typed='',typedAt=0;
-  let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value))),q='';
-  const vis=()=>o.items.filter(i=>!q||i.label.toLowerCase().includes(q)||String(i.sub||'').toLowerCase().includes(q));
+  let active=Math.max(0,o.items.findIndex(i=>sel.has(i.value)||ex.has(i.value))),q='';
+  const vis=()=>o.items.filter(i=>!q||[i.label,i.sub,o.searchGroups&&i.group].some(s=>String(s||'').toLowerCase().includes(q)));
   function draw(){
     const v=vis();active=Math.max(0,Math.min(active,v.length-1));let g;
-    list.innerHTML=v.length?v.map((it,k)=>{const on=sel.has(it.value),head=it.group&&it.group!==g?(g=it.group,`<div class="pk-group" role="presentation">${esc(it.group)}</div>`):'';
-      return head+`<div class="pk-opt${k===active?' active':''}" role="option" id="${id}-${k}" data-k="${k}" aria-selected="${on}">${multi?`<span class="pk-chk">${on?icon('check',11):''}</span>`:''}${swatch(it)}${it.pill?`<span class="pill" style="background:${it.pill.bg};color:${it.pill.fg}">${esc(it.label)}</span>`:`<span class="pk-l">${esc(it.label)}</span>`}${it.sub?`<small>${esc(it.sub)}</small>`:''}${!multi&&on?`<span class="pk-cur">${icon('check',13)}</span>`:''}</div>`}).join('')
+    list.innerHTML=v.length?v.map((it,k)=>{
+      const mode=ex.has(it.value)?'ex':sel.has(it.value)?'in':'',head=it.group&&it.group!==g?(g=it.group,`<div class="pk-group" role="presentation">${esc(it.group)}</div>`):'';
+      const mark=mode==='in'?icon('check',11):mode==='ex'?icon('minus',11):'';
+      return head+`<div class="pk-opt${k===active?' active':''}${mode==='ex'?' ex':''}" role="option" id="${id}-${k}" data-k="${k}" aria-selected="${mode==='in'}"${mode==='ex'?' title="Excluded"':''}>${multi?`<span class="pk-chk">${mark}</span>`:''}${swatch(it)}${it.pill?`<span class="pill" style="background:${it.pill.bg};color:${it.pill.fg}">${esc(it.label)}</span>`:`<span class="pk-l">${esc(it.label)}</span>`}${it.sub?`<small>${esc(it.sub)}</small>`:''}${!multi&&mode==='in'?`<span class="pk-cur">${icon('check',13)}</span>`:''}</div>`}).join('')
       :`<div class="pk-empty">${esc(o.empty||'No matches')}</div>`;
     focusEl.setAttribute('aria-activedescendant',v.length?`${id}-${active}`:'');
     list.querySelector('.active')?.scrollIntoView({block:'nearest'});
   }
-  const emit=()=>o.onChange?.(o.items.map(i=>i.value).filter(v=>sel.has(v)));
+  const chosen=set=>o.items.map(i=>i.value).filter(v=>set.has(v));
+  const emit=()=>o.onChange?.(chosen(sel),o.cycle?chosen(ex):undefined);
   function toggle(k){
     const it=vis()[k];if(!it)return;
     if(!multi){sel.clear();sel.add(it.value);emit();closePicker(true);return}
-    if(sel.has(it.value))sel.delete(it.value);else sel.add(it.value);active=k;draw();emit();place();
+    if(o.cycle){if(ex.has(it.value))ex.delete(it.value);else if(sel.has(it.value)){sel.delete(it.value);ex.add(it.value)}else sel.add(it.value)}
+    else if(sel.has(it.value))sel.delete(it.value);else sel.add(it.value);
+    active=k;draw();emit();place();
   }
   function place(){
     const a=anchor()||trigger,r=a.getBoundingClientRect();el.style.minWidth=Math.max(220,r.width)+'px';
@@ -250,7 +291,7 @@ export function openPicker(trigger,o){
   el.addEventListener('click',e=>{
     const opt=e.target.closest('.pk-opt');if(opt){toggle(+opt.dataset.k);if(picker)focusEl.focus();return}
     const b=e.target.closest('[data-pk]');if(!b)return;
-    if(b.dataset.pk==='all')for(const it of vis())sel.add(it.value);else sel.clear();
+    if(b.dataset.pk==='all'){for(const it of vis()){sel.add(it.value);ex.delete(it.value)}}else{sel.clear();ex.clear()}
     draw();emit();place();
   });
   const out=e=>{if(!el.contains(e.target)&&!e.target.closest?.(`[data-picker="${CSS.escape(key)}"]`))closePicker()};

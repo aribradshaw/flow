@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {cleanAgentflow,seedAgentflow,newAgent,newWorkflow,newStep,removeAgent,descendants,chainOf,canReportTo,workflowsFor,agentsForCard,
   workFor,openWork,full,LIMITS,treeLayout,positions,pin,unpin,placed,CARD,STEP,STACK,stacked,reportLines,pathOf,delegate,workQueue,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,duplicateWorkflow,cleanRunners,runnerOf,runLine,modelLabel,liveProblem,modelChoices,modelMaker,personNamed,isSessionPerson,sameName,normName,
-  setupSteps,cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS} from '../public/agentflow-core.js';
+  setupSteps,cleanJobs,cleanTriggers,cleanTz,reportRunner,JOBS_STALE,jobsOf,jobGroups,jobOf,promotedAgent,promoteJob,cardH,AGENT_KINDS,shownMember,memberAliasIds} from '../public/agentflow-core.js';
 import {normalize} from '../lib/cleaners.mjs';
 import {size,isSeed} from '../public/sync-core.js';
 import {starterChart} from '../public/demo-seed.js';
@@ -252,6 +252,19 @@ test('the work queue: open delegated cards, active work first, then due date and
   assert.deepEqual(workQueue(db,'ghost'),[]);
 });
 
+test('the work queue leaves snoozed cards out until they wake, still delegated',()=>{
+  const db=base(),now=Date.parse('2026-11-21T12:00:00Z'),later='2026-11-21T15:00:00.000Z';
+  db.devops.cards.push({id:'k4',number:4,title:'Snoozed',column:'requests',due:'',snoozedUntil:later},{id:'k5',number:5,title:'Woke up',column:'requests',due:'',snoozedUntil:'2026-11-21T09:00:00.000Z'});
+  db.agentflow=seedAgentflow();
+  const a=newAgent(db.agentflow,{cards:['k1','k4','k5']});
+  assert.deepEqual(workQueue(db,a.id,{now}).map(c=>c.number),[1,5],'a snooze still running is left out; an ended one is not');
+  assert.deepEqual(workQueue(db,a.id,{now,includeSnoozed:true}).map(c=>c.number),[1,4,5],'includeSnoozed keeps it');
+  assert.deepEqual(workQueue(db,a.id,{now:Date.parse(later)}).map(c=>c.number),[1,4,5],'back in the queue the moment the snooze ends');
+  assert.deepEqual(a.cards,['k1','k4','k5'],'the delegation is untouched');
+  db.devops.cards.find(c=>c.id==='k4').snoozedUntil=new Date(Date.now()+36e5).toISOString();
+  assert.match(agentBrief(db,a.id),/#4 Snoozed \([^)]*, snoozed until [^)]+\)/,'the brief marks the card snoozed');
+});
+
 test('the DevOps board filters cards by delegated agent',async()=>{
   const {filterCards}=await import('../public/devops-core.js');
   const db=base();db.agentflow=seedAgentflow();
@@ -259,6 +272,8 @@ test('the DevOps board filters cards by delegated agent',async()=>{
   assert.deepEqual(filterCards(db,{agents:[a.id]}).map(c=>c.id),['k3']);
   assert.deepEqual(filterCards(db,{agents:[a.id,b.id]}).map(c=>c.id),['k1','k3']);
   assert.equal(filterCards(db,{agents:[]}).length,3);
+  assert.deepEqual(filterCards(db,{notAgents:[a.id]}).map(c=>c.id),['k1','k2']);
+  assert.deepEqual(filterCards(db,{agents:[a.id,b.id],notAgent:a.id}).map(c=>c.id),['k1']);
 });
 
 test('duplicating a workflow: a copy right after it, with new ids for it and its steps',()=>{
@@ -347,7 +362,7 @@ test('model makers: the icon follows who made the model, not the harness that ru
   assert.equal(k('x:o3-mini'),'openai');assert.equal(k('codex:some-new-model'),'openai','a one-maker harness is the last hint');
   assert.equal(k('antigravity:gemini-3.8-flash-high'),'google');
   assert.equal(k('grok:grok-4.7'),'xai');assert.equal(k('cursor_cursor_pmd:grok-4.7'),'xai');
-  assert.equal(k('opencode:meta-llama/llama-4-scout'),'meta');assert.equal(k('x:qwen3-coder'),'qwen');
+  assert.equal(k('opencode:meta-llama/llama-4-scout'),'meta');assert.equal(k('opencode:vercel/meta/muse-spark-1.3'),'meta');assert.equal(k('cursor_personal:muse-wonder-1.0'),'meta','Muse is Meta');assert.equal(k('x:qwen3-coder'),'qwen');
   assert.equal(k('x:deepseek-v4'),'deepseek');assert.equal(k('x:mistralai/devstral-2'),'mistral');
   assert.equal(k('x:moonshotai/kimi-k3'),'moonshot');assert.equal(k('x:z-ai/glm-5'),'zhipu');
   assert.equal(k('opencode:abliteration/abliterated-model-large-v2'),'abliterated');
@@ -357,6 +372,25 @@ test('model makers: the icon follows who made the model, not the harness that ru
   assert.deepEqual(modelMaker('opencode:opencode/big-pickle'),{key:'other',name:'',letter:'B'},'unknown: a letter tile');
   assert.equal(modelMaker('opencode:opencode/big-pickle','Pickle').letter,'P','the label wins for the letter');
   assert.equal(modelMaker('','').letter,'?');assert.equal(modelMaker(null).key,'other');
+});
+
+test('a share member is shown under the viewer\'s own person card with the same email',()=>{
+  const member={id:'@joe@example.test',email:'Joe@Example.test',name:'Joseph Example',image:'https://cdn.example.test/owner.png',opidLinked:true,owner:true};
+  const joe={id:'joe',type:'person',name:'Joe Example',email:'joe@example.test',image:'data:image/png;base64,QQ'};
+  const shared={id:'sh.s1.joe',type:'person',name:'Joseph Example',email:'joe@example.test'};
+  const other={id:'cx.env.p',type:'person',name:'Joseph',email:'joe@example.test'};
+  const shown=shownMember(member,[shared,other,{id:'ann',type:'person',name:'Ann',email:'ann@example.test'},joe]);
+  assert.equal(shown.id,'@joe@example.test','the assignee stays the member');
+  assert.equal(shown.name,'Joe Example');
+  assert.equal(shown.image,member.image,'the photo is chosen separately');
+  assert.equal(shown.opidLinked,true);
+  assert.equal(shownMember(member,[shared,other]).name,'Joseph Example','a shared or combined card is not the viewer\'s own');
+  assert.equal(shownMember({id:'@ann@example.test',email:'ann@example.test',name:'ann@example.test'},[]).name,'ann@example.test');
+  assert.equal(shownMember(null,[]),null);
+  const people=[{id:'joe',type:'person',name:'Joe Example',email:'joe@example.test'},{id:'sh.s1.x',type:'person',email:'joe@example.test'}];
+  assert.deepEqual(memberAliasIds(['joe'],people,['@joe@example.test']),['@joe@example.test']);
+  assert.deepEqual(memberAliasIds(['sh.s1.x','missing'],people,['@joe@example.test']),[],'a shared card is not the filter');
+  assert.deepEqual(memberAliasIds(['joe'],people,[]),[]);
 });
 
 test('matching the signed-in user to a person card: email first, then a unique name',()=>{

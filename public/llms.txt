@@ -17,6 +17,9 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 - [AgentFlow](/docs/index.html#agentflow): AgentFlow is an org chart for agentic work.
 - [OneProfileID photos](/docs/index.html#oneprofileid-photos): When Flow runs with OneProfileID sign-in, a person card can show that person's current OneProfileID account photo, for everyone who can see the card.
 - [Chat](/docs/index.html#chat): With OneProfileID sign-in, a chat bubble in the bottom right corner of Flow lets you message your OneProfileID friends without leaving Flow, and send them Flow cards.
+- [Combined view](/docs/index.html#combined-view): The DevOps board and the Timeline can show several of your environments at once.
+- [3D office](/docs/index.html#3d-office): The 3D office is a small virtual office for one environment, where you can see your team and the coding agents they have running right now.
+- [Avatars](/docs/index.html#avatars): Your avatar is the character you build in the [3D office](#3d-office): one per account, the same in every office you are in, shared environments included.
 
 ## API: Environments
 
@@ -39,6 +42,7 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 
 - [edges.list](/docs/edges.html#op-edges-list): `GET /api/v1/envs/{env}/charts/{chart}/edges` (read). List edges
 - [edges.create](/docs/edges.html#op-edges-create): `POST /api/v1/envs/{env}/charts/{chart}/edges` (write). Create an edge
+- [edges.update](/docs/edges.html#op-edges-update): `PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}` (write). Update an edge
 - [edges.delete](/docs/edges.html#op-edges-delete): `DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` (write). Delete an edge
 
 ## API: Projects
@@ -90,6 +94,29 @@ Base URL: your Flow server. Auth: `Authorization: Bearer flow_…`. OpenAPI: /ap
 ## API: Search
 
 - [search](/docs/search.html#op-search): `GET /api/v1/envs/{env}/search` (read). Search an environment
+
+## API: Sharing
+
+- [shares.list](/docs/sharing.html#op-shares-list): `GET /api/v1/envs/{env}/shares` (read). List shares of an environment
+- [shares.preview](/docs/sharing.html#op-shares-preview): `POST /api/v1/envs/{env}/shares/preview` (read). Preview what a share would show
+- [shares.create](/docs/sharing.html#op-shares-create): `POST /api/v1/envs/{env}/shares` (write). Share part of an environment with someone
+- [shares.update](/docs/sharing.html#op-shares-update): `PATCH /api/v1/shares/{share}` (write). Change a share's permission
+- [shares.revoke](/docs/sharing.html#op-shares-revoke): `DELETE /api/v1/shares/{share}` (write). Revoke a share
+- [shares.incoming](/docs/sharing.html#op-shares-incoming): `GET /api/v1/shares/incoming` (read). List shares with you
+- [shares.requests.list](/docs/sharing.html#op-shares-requests-list): `GET /api/v1/share-requests` (read). List re-share requests
+- [shares.requests.create](/docs/sharing.html#op-shares-requests-create): `POST /api/v1/shares/{share}/requests` (write). Ask the owner to share it on
+- [shares.requests.decide](/docs/sharing.html#op-shares-requests-decide): `POST /api/v1/share-requests/{request}` (write). Approve or deny a re-share request
+- [proposals.list](/docs/sharing.html#op-proposals-list): `GET /api/v1/envs/{env}/proposals` (read). List share additions
+- [proposals.approve](/docs/sharing.html#op-proposals-approve): `POST /api/v1/envs/{env}/proposals/{proposal}/approve` (write). Approve a share addition
+- [proposals.deny](/docs/sharing.html#op-proposals-deny): `POST /api/v1/envs/{env}/proposals/{proposal}/deny` (write). Deny a share addition
+
+## API: 3D office
+
+- [office.agents.report](/docs/office.html#op-office-agents-report): `PUT /api/v1/office/agents` (write). Report your live coding agents
+- [office.agents.list](/docs/office.html#op-office-agents-list): `GET /api/v1/office/agents` (read). List your reported agents
+- [office.live.report](/docs/office.html#op-office-live-report): `POST /api/v1/office/live` (write). Stream what your agents are doing
+- [office.actions.wait](/docs/office.html#op-office-actions-wait): `GET /api/v1/office/actions` (write). Wait for answers to your agents' prompts
+- [office.actions.result](/docs/office.html#op-office-actions-result): `POST /api/v1/office/actions/{id}` (write). Say how an answer went
 
 ## Optional
 

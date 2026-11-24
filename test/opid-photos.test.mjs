@@ -134,6 +134,20 @@ test('photo targets: own cards, and shared cards within the share scope only',()
   assert.deepEqual(photoTargets({envId:'env-r',own:db([]),shared:[{share:{...share,scope:{kind:'person',nodeId:'bo',chartId:'other'}},home}]}),[]);
 });
 
+test('photo targets: a share member whose card is outside the share, as @email',()=>{
+  const home={data:db([
+    P('bo','Bo',{opidUser:'u-bo'}),P('own','Owner',{opidUser:'u-own',email:'own@example.test'}),
+    P('out','Outside',{opidUser:'u-out',email:'out@example.test'}),P('later','Later',{opidUser:'u-later',email:'own@example.test'}),
+    E('co','Co'),
+  ],[{id:'e1',from:'bo',to:'co',type:'ownership',percent:''}])};
+  const share={id:'s1',ownerEnv:'env-o',ownerEmail:'own@example.test',recipientEmail:'bo@example.test',permission:'view',scope:{kind:'person',nodeId:'bo'}};
+  const ids=list=>photoTargets({envId:'env-r',own:db([]),shared:[{share,home,...(list?{members:list}:{})}]}).map(t=>[t.nodeId,t.env,t.opidUser]);
+  assert.deepEqual(ids(['own@example.test','bo@example.test','kim@example.test']).sort(),[
+    [linkedId('s1','bo'),'env-o','u-bo'],['@own@example.test','env-o','u-own'],
+  ].sort(),'Bo stays his linked card; the owner is @email; Outside is not a member; the first card with the email wins');
+  assert.deepEqual(ids().sort(),[[linkedId('s1','bo'),'env-o','u-bo'],['@own@example.test','env-o','u-own']].sort(),'without a member list, the owner and recipient still count');
+});
+
 test('membership filter: only recorded members of the environment the link lives in',async()=>{
   const dir=tmp();
   try{

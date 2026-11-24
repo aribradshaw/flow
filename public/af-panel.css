@@ -208,3 +208,7 @@ dialog.af-instr-dlg{width:min(760px,calc(100vw - 32px));height:min(640px,calc(10
   .af-sr{min-height:40px}
   .af-setup-c{height:24px}
 }
+/* An opened shared environment's agent or workflow (docs/sharing.md): who it belongs to and what stays theirs. */
+.af-top>.af-shared{display:flex;gap:6px;align-items:flex-start;margin:8px 12px 2px;padding:5px 8px;border-radius:7px;background:var(--flygon-tint);color:var(--muted);font-size:11px;line-height:1.35}
+.af-top>.af-shared .i{flex:none;margin-top:1px;color:var(--flygon-dark)}
+.af-panel [disabled]{cursor:not-allowed}

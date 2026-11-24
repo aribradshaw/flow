@@ -1,0 +1,10 @@
+// The UI test bundle (FlowUITests): drives the app in the simulator to reproduce and record interactions.
+
+#include "Shared.xcconfig"
+
+PRODUCT_NAME = FlowUITests
+PRODUCT_BUNDLE_IDENTIFIER = $(APP_BUNDLE_ID).uitests
+TEST_TARGET_NAME = Flow
+GENERATE_INFOPLIST_FILE = YES
+SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @loader_path/Frameworks

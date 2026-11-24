@@ -2,7 +2,9 @@
 // can exercise them in Node. Label colours are designed to stay readable on white.
 // db.devops = {columns:[{id,name}], cards:[card], nextNumber, labels:[{id,name,section,color}]}
 // card = {id,number,title,description,column,project,labels[],points,actual,due,assignees[{node,role}],
-//         checklist[{id,text,done}],links[{id,kind,url}],item,created,updated,moved}  (moved: last column change)
+//         checklist[{id,text,done}],links[{id,kind,url}],item,created,updated,moved,snoozedUntil?}  (moved: last column change)
+// snoozedUntil: an ISO time; until then the board hides the card (shared by everyone on the board). Left out
+// when not snoozed. A past time means nothing: the card is awake again (no server job clears it).
 // Card order inside a column is the order of db.devops.cards.
 
 // Working columns first; the two backlogs sit after Done. 'requests' is the merged Requests / Sprinted inbox.
@@ -51,9 +53,12 @@ export function cleanDevops(d,db={}){
   const projects=new Set((db.projects||[]).map(p=>p.id)),items=new Set((db.timeline||[]).map(i=>i.id)),labelIds=new Set(labels.map(l=>l.id));
   const seen=new Set(),numbers=new Set(),now=new Date().toISOString();
   const raw=(Array.isArray(d.cards)?d.cards:[]).filter(c=>c&&typeof c.id==='string'&&typeof c.title==='string'&&!seen.has(c.id)&&seen.add(c.id));
-  let next=Math.max(1,Number.isInteger(d.nextNumber)?d.nextNumber:1,...raw.map(c=>Number.isInteger(c.number)?c.number+1:1));
+  // Cards of a combined environment (combined-core.js, ids cx.*) keep that environment's numbers: they may
+  // repeat the home's and never move its next number.
+  const cx=c=>c.id.startsWith('cx.'),own=raw.filter(c=>!cx(c));
+  let next=Math.max(1,Number.isInteger(d.nextNumber)?d.nextNumber:1,...own.map(c=>Number.isInteger(c.number)?c.number+1:1));
   const cards=raw.map(c=>{
-    let number=Number.isInteger(c.number)&&c.number>0&&!numbers.has(c.number)?c.number:next++;numbers.add(number);
+    let number=cx(c)?(Number.isInteger(c.number)&&c.number>0?c.number:0):Number.isInteger(c.number)&&c.number>0&&!numbers.has(c.number)?c.number:next++;if(!cx(c))numbers.add(number);
     const iso=v=>typeof v==='string'&&!Number.isNaN(Date.parse(v))?v:now;
     return {id:c.id,number,title:c.title.slice(0,200),description:str(c.description,8000),column:COLUMNS.some(([k])=>k===c.column)?c.column:MERGED[c.column]||NEW_COLUMN,
       project:projects.has(c.project)?c.project:'',labels:Array.isArray(c.labels)?[...new Set(c.labels)].filter(l=>labelIds.has(l)):[],
@@ -64,9 +69,40 @@ export function cleanDevops(d,db={}){
       links:(Array.isArray(c.links)?c.links:[]).filter(x=>x&&typeof x.url==='string'&&x.url.trim()).slice(0,50).map(x=>({id:typeof x.id==='string'?x.id:id(),kind:LINK_KINDS[x.kind]?x.kind:'url',url:x.url.slice(0,500)})),
       item:items.has(c.item)?c.item:'',created:iso(c.created),updated:iso(c.updated),moved:iso(c.moved||c.updated),
       // Set by the agent inbox: when it last wrote this card (see inbox-core.js).
-      inbox:typeof c.inbox?.at==='string'?{at:c.inbox.at}:undefined};
+      inbox:typeof c.inbox?.at==='string'?{at:c.inbox.at}:undefined,
+      snoozedUntil:snoozeIso(c.snoozedUntil)||undefined};
   });
-  return {columns,cards,nextNumber:Math.max(next,...cards.map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
+  return {columns,cards,nextNumber:Math.max(next,...cards.filter(c=>!cx(c)).map(c=>c.number+1)),labels,...(d.namesCustomized?{namesCustomized:true}:{})};
+}
+
+// Snooze: a card snoozed until a time stays off the board (unless its column shows snoozed cards) until then.
+// snoozeIso(v) is v as a canonical ISO time, or '' when it is not one (null, '', unparseable, out of range).
+export function snoozeIso(v){
+  if(typeof v!=='string'||!v||v.length>40)return '';
+  const t=Date.parse(v);return Number.isFinite(t)&&Math.abs(t)<=864e13?new Date(t).toISOString():'';
+}
+export const isSnoozed=(c,now=Date.now())=>!!c?.snoozedUntil&&Date.parse(c.snoozedUntil)>now;
+// The soonest time a snoozed card wakes (ms), or null: the board re-renders then.
+export function nextWake(cards,now=Date.now()){
+  let t=null;for(const c of cards){const w=c.snoozedUntil?Date.parse(c.snoozedUntil):NaN;if(w>now&&(t===null||w<t))t=w}
+  return t;
+}
+// The snooze menu's presets, resolved against `now` in local time: [key, label, Date].
+// Tomorrow and Next week are 9:00 AM; Next week is the coming Monday (a week on, when today is Monday).
+export function snoozePresets(now=new Date()){
+  const at=(days,h)=>{const d=new Date(now);d.setDate(d.getDate()+days);d.setHours(h,0,0,0);return d};
+  return [['hour','In 1 hour',new Date(+now+36e5)],['3hours','In 3 hours',new Date(+now+3*36e5)],['tomorrow','Tomorrow',at(1,9)],
+    ['week','Next week',at(((8-now.getDay())%7)||7,9)]];
+}
+
+// A wake time as the board shows it, in local time: "11:27 PM" today, "Mon 9:00 AM" within the week,
+// "Dec 2, 9:00 AM" later (with the year when it is not this one).
+export function wakeText(at,now=new Date()){
+  const d=new Date(at),time=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()),days=Math.round((day(d)-day(now))/864e5);
+  if(days===0)return time;
+  if(days>0&&days<7)return `${d.toLocaleDateString([],{weekday:'short'})} ${time}`;
+  return `${d.toLocaleDateString([],{month:'short',day:'numeric',...(d.getFullYear()!==now.getFullYear()?{year:'numeric'}:{})})}, ${time}`;
 }
 
 // A card's points as the tile shows them: the estimate, the actual, or "3 → 8 pts" when they differ.
@@ -108,20 +144,38 @@ export function entityProjects(db,nodeId){
 }
 export const isOpen=c=>c.column!=='done';
 
-// f = {projects:[ids|'none'], entity, assignees[], agents[], labels[], q, hideDone} (assignee / label: single-value forms).
-// agents: AgentFlow agent ids; matches cards delegated to any of them. q matches "#12"/"12" or the title.
+// f includes and excludes. Include is "any of these"; exclude is "none of these"; they combine.
+// projects / notProjects: ids or "none". entity / entities and notEntity / notEntities: chart cards.
+// assignee / assignees and notAssignee / notAssignees: person ids or "none" (no assignees).
+// agents / notAgent / notAgents: AgentFlow ids (a card delegated to any excluded agent is left out).
+// label / labels and notLabel / notLabels. snoozed: true keeps only cards snoozed now, false only
+// awake ones; left out, both. q matches "#12"/"12" or the title.
 export function filterCards(db,f={}){
   const q=(f.q||'').trim().toLowerCase(),num=/^#?\d+$/.test(q)?Number(q.replace('#','')):null;
-  const ent=f.entity?new Set(entityProjects(db,f.entity).map(p=>p.id)):null;
-  const delegated=f.agents?.length?new Set((db.agentflow?.agents||[]).filter(a=>f.agents.includes(a.id)).flatMap(a=>a.cards)):null;
+  const ids=(one,many)=>[...(one?[one]:[]),...(Array.isArray(many)?many:[])];
+  const projectSet=list=>{const s=new Set();for(const id of list)for(const p of entityProjects(db,id))s.add(p.id);return s};
+  const entIds=ids(f.entity,f.entities),notEntIds=ids(f.notEntity,f.notEntities);
+  const ent=entIds.length?projectSet(entIds):null,notEnt=notEntIds.length?projectSet(notEntIds):null;
+  const agentCards=list=>{const want=new Set(list);return new Set((db.agentflow?.agents||[]).filter(a=>want.has(a.id)).flatMap(a=>a.cards))};
+  const delegated=f.agents?.length?agentCards(f.agents):null,blocked=ids(f.notAgent,f.notAgents);
+  const notDelegated=blocked.length?agentCards(blocked):null;
+  const notProjects=ids(f.notProject,f.notProjects),notPeople=ids(f.notAssignee,f.notAssignees),notLabels=ids(f.notLabel,f.notLabels);
+  const onProject=(c,p)=>p==='none'?!c.project:c.project===p;
+  const onAssignee=(c,p)=>p==='none'?!c.assignees.length:c.assignees.some(a=>a.node===p);
   return db.devops.cards.filter(c=>(!f.hideDone||isOpen(c))
-    &&(!f.projects?.length||f.projects.some(p=>p==='none'?!c.project:c.project===p))
+    &&(!f.projects?.length||f.projects.some(p=>onProject(c,p)))
+    &&(!notProjects.length||!notProjects.some(p=>onProject(c,p)))
     &&(!ent||ent.has(c.project))
-    &&(!f.assignee||c.assignees.some(a=>a.node===f.assignee))
-    &&(!f.assignees?.length||c.assignees.some(a=>f.assignees.includes(a.node)))
+    &&(!notEnt||!notEnt.has(c.project))
+    &&(!f.assignee||onAssignee(c,f.assignee))
+    &&(!f.assignees?.length||f.assignees.some(p=>onAssignee(c,p)))
+    &&(!notPeople.length||!notPeople.some(p=>onAssignee(c,p)))
     &&(!delegated||delegated.has(c.id))
+    &&(!notDelegated||!notDelegated.has(c.id))
     &&(!f.label||c.labels.includes(f.label))
     &&(!f.labels?.length||f.labels.some(l=>c.labels.includes(l)))
+    &&(!notLabels.length||!notLabels.some(l=>c.labels.includes(l)))
+    &&(f.snoozed===undefined||isSnoozed(c)===f.snoozed)
     &&(!q||c.number===num||c.title.toLowerCase().includes(q)));
 }
 

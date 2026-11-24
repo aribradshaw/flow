@@ -13,9 +13,26 @@
 // One pass per call: run `tick` from a timer (cron, a systemd timer) every few minutes.
 // For each AgentFlow agent with `live` on whose `runtime` is this runner's name, it takes the first
 // card in the agent's queue (Doing, then Requests), starts a T3 thread with the agent's brief and the
-// card, and remembers it. When the thread finishes it moves the card to UAT for a person to approve.
-// A thread waiting on a question is left for you to answer in T3; one interrupted or cancelled in T3
-// is left alone (the card stays where it is).
+// card, moves the card into Doing as the thread starts, and remembers it. When the thread finishes it
+// moves the card to UAT for a person to approve. A thread waiting on a question is left for you to
+// answer in T3 (the card stays in Doing).
+//
+// Doing means an agent is working the card now. After starting work, every pass sends any card in a
+// live agent's queue that sits in Doing with no thread running for it (waiting behind maxRunning, no
+// T3 project, no model would start) back to the top of Requests. A thread interrupted or cancelled in
+// T3, a card that failed on every model, or a thread that cannot be read for LOST_AFTER passes in a row
+// (deleted in T3), moves to Blocked; `retry <number>` puts it back in Requests. A card whose run finished
+// and that comes back from UAT to Requests or Doing is worked again, told it is rework.
+//
+// Hand-offs. When a thread finishes, the runner looks for an active AgentFlow workflow with a step for
+// the agent (one that lists the card first, then one for the card's project, then one for every project).
+// If the next step is another live AI agent, the card is delegated to it and goes back to the top of
+// Requests instead of UAT, so agents pass work along without a person in between. A step for a person
+// (or no workflow) sends it to UAT as before. The agent can choose with a last line in its reply:
+// "Handoff: stop" sends it to UAT now, "Handoff: <agent name>" sends it to that agent if the workflow
+// has a step for it (a Reviewer can send a card back to its Builder, say), and no line means the next
+// step. "maxHandoffs" (default 6) caps the hand-offs in a row, so a review loop always ends in UAT. A
+// card a person sends back starts a fresh chain.
 //
 // Models. An agent lists `models` in order: the primary first, then fallbacks. If `t3 thread start`
 // fails on a model, the runner tries the next one. If a started thread fails (T3 status failed or
@@ -40,6 +57,7 @@
 //     "project": "/path/to/repo",        T3 project (id or a path inside it) for cards without a match
 //     "projects": {"Lantern": "/path/to/lantern"},   Flow project (name or id) -> T3 project
 //     "worktree": "main",                optional: run each thread in a new worktree off this ref
+//     "maxHandoffs": 6,                  agent-to-agent hand-offs in a row before a card goes to UAT anyway
 //     "developer": "Cleo Park",          optional: person set as developer when a card enters Doing
 //     "t3": "t3", "t3Home": "~/.t3",     the T3 binary and data directory
 //     "opencode": "opencode", "grok": "grok",   CLIs asked for their model lists ("" to skip)
@@ -146,6 +164,9 @@ const log=(...a)=>console.log(new Date().toISOString(),...a);
 
 // Set by main(), so importing this file (the tests do) reads no settings and exits nowhere.
 let args=[],cmd='tick',cfgPath='',cfg={},FLOW={url:'',key:''},DRY=true,T3='t3',T3HOME=tilde('~/.t3');
+// Ticks in a row a running thread may fail to be read before its run counts as lost (about 30 minutes at
+// the usual 5-minute tick).
+const LOST_AFTER=6;
 const splitModel=m=>{const i=m.indexOf(':');return i>0?[m.slice(0,i),m.slice(i+1)]:[null,m]};
 const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
 
@@ -1594,15 +1615,61 @@ function startOn(order,argvFor,text,label){
   return {thread:null,model:null,tried};
 }
 const attemptsOf=(tried,thread,at)=>tried.map(t=>({model:t.model,started:at,...(t.ok?{thread}:{result:'not started',why:t.error})}));
-function prompt(agent,brief,card,retry){
+// ---------- hand-offs ----------
+// The last "Handoff: …" line of a reply: {stop:true}, {to:'<agent name>'}, {next:true}, or null for none.
+export function handoffOf(text){
+  const lines=String(text||'').split('\n').reverse();
+  for(const l of lines){
+    const m=/^[\s>*_`#-]*hand-?off[\s*_`]*:\s*(.+?)\s*$/i.exec(l);if(!m)continue;
+    const v=m[1].replace(/[*_`"'.]/g,'').trim();
+    if(!v)return null;
+    if(/^(stop|none|uat|person|human|me)$/i.test(v))return {stop:true};
+    if(/^next$/i.test(v))return {next:true};
+    return {to:v};
+  }
+  return null;
+}
+// Where a finished card goes: {agent, workflow, why} for an AI agent to hand it to, or {why} for UAT.
+// agents are every AgentFlow agent (any status), workflows every workflow.
+export function nextStep({workflows=[],agents=[],agentId,card={},said=null}){
+  const has=w=>w.status!=='paused'&&w.status!=='draft'&&(w.steps||[]).some(s=>s.agent===agentId);
+  const ws=workflows.filter(has);
+  const wf=ws.find(w=>(w.cards||[]).includes(card.id))||ws.find(w=>card.project&&(w.projects||[]).includes(card.project))||ws.find(w=>!(w.projects||[]).length&&!(w.cards||[]).length);
+  if(!wf)return {why:'no workflow has a step for this agent'};
+  if(said?.stop)return {why:'the agent asked for a person (Handoff: stop)'};
+  const byId=new Map(agents.map(a=>[a.id,a])),inWf=new Set(wf.steps.map(s=>s.agent));
+  const ok=a=>a.kind==='agent'&&a.live;
+  if(said?.to){
+    const a=agents.find(x=>inWf.has(x.id)&&(x.id===said.to||same(x.name,said.to)));
+    if(!a)return {why:`the agent named "${said.to}", which has no step in "${wf.name}"`};
+    if(a.kind!=='agent')return {why:`the agent handed it to ${a.name}, a person`};
+    if(!ok(a))return {why:`${a.name} is not live`};
+    return {agent:a,workflow:wf,why:`the agent handed it to ${a.name}`};
+  }
+  const i=wf.steps.findIndex(s=>s.agent===agentId),step=wf.steps[i+1];
+  if(!step)return {why:`the last step of "${wf.name}"`};
+  const a=byId.get(step.agent);
+  if(!a)return {why:`the next step of "${wf.name}" has no agent`};
+  if(a.kind!=='agent')return {why:`the next step of "${wf.name}" is ${a.name}'s`};
+  if(!ok(a))return {why:`the next step's agent, ${a.name}, is not live`};
+  return {agent:a,workflow:wf,why:`next step of "${wf.name}": ${step.action||a.name}`};
+}
+const lastReply=messages=>[...(messages||[])].reverse().find(m=>m.role==='assistant')?.text||'';
+function prompt(agent,brief,card,retry,rework,handed){
   const checklist=(card.checklist||[]).map(x=>`- [${x.done?'x':' '}] ${x.text}`).join('\n');
   return `You are working as the AgentFlow agent "${agent.name}". Your brief follows, then the card to work on.\n\n${brief}\n\n---\n\n`
     +`# Card #${card.number}: ${card.title}\n\n${card.description||'(no description)'}\n\n${checklist?`## Checklist\n\n${checklist}\n\n`:''}${card.due?`Due: ${card.due}\n\n`:''}`
     +`Do the work for this card. When you finish, reply with a short summary of what you did, anything left undone, and links to any pull requests or commits. `
-    +`The runner moves the card to UAT for a person to review when this thread finishes, so do not move it yourself.`
-    +(retry?`\n\nAn earlier attempt on ${retry} did not finish. Check the project for partial work from it before you start.`:'');
+    +`When this thread finishes the runner moves the card on, to the next step of its AgentFlow workflow or to UAT for a person, so do not move it yourself. `
+    +`To choose, end your reply with one line: "Handoff: stop" when a person should look now, or "Handoff: <agent name>" to send it to that agent in the workflow. With no such line it goes to the next step.`
+    +(retry?`\n\nAn earlier attempt on ${retry} did not finish. Check the project for partial work from it before you start.`:'')
+    +(rework?`\n\nThis card was worked before (thread ${rework.thread}, finished ${rework.finished||'earlier'}) and came back from review. Check the card and that thread for what is still wanted before you start.`:'')
+    +(handed?`\n\n${handed.from} handed this card to you (thread ${handed.thread}). Read the whole card first, including anything earlier agents added to it, such as a Review section.`
+      +(handed.again?` You worked this card earlier in the same chain (thread ${handed.again}); it came back to you, so fix what ${handed.from} raised.`:''):'');
 }
-const titleOf=(a,card)=>`[Flow] ${a.name}: #${card.number} ${card.title}`.slice(0,120);
+// "[Flow] <Agent>: #<n> <card title>": the 3D office seats the thread at the agent's desk from it (lib/office-seats.mjs),
+// so the agent and the number always fit in the 120 characters: a long name is cut, then the card's title.
+const titleOf=(a,card)=>{const name=String(a.name).replace(/\s+/g,' ').trim().slice(0,80).replace(/:$/,'');return `[Flow] ${name}: #${card.number} ${card.title}`.slice(0,120)};
 const startArgv=(title,project)=>(provider,model)=>['thread','start','--provider',provider,'--model',model,'--title',title,...(cfg.worktree?['--worktree',cfg.worktree]:[]),project,'-'];
 
 // ---------- one pass ----------
@@ -1613,17 +1680,25 @@ async function tick(){
 }
 async function tickLocal(){
   const state=readJson(stateFile)||{runs:{}};const save=()=>DRY||writeJson(stateFile,state);
+  let flowIndex=null;
   const catalogue=await report().catch(e=>{log('report failed:',e.message);return catalog()});
   // Threads started earlier: done ones send their card to UAT, failed ones go on to the next model.
   for(const r of Object.values(state.runs).filter(r=>r.status==='running')){
-    let shown;try{shown=t3(['thread','show',r.thread,'--messages','3'])}catch(e){log(`#${r.number}: cannot read thread ${r.thread}: ${e.message}`);continue}
+    // A thread that cannot be read (deleted in T3, say) would hold a running slot forever: after LOST_AFTER
+    // ticks in a row it counts as stopped, so its card goes to Blocked and the queue moves on.
+    let shown;try{shown=t3(['thread','show',r.thread,'--messages','3'])}catch(e){
+      r.readFails=(r.readFails||0)+1;log(`#${r.number}: cannot read thread ${r.thread} (${r.readFails}/${LOST_AFTER}): ${e.message}`);
+      if(r.readFails>=LOST_AFTER){const now=new Date().toISOString(),cur=(r.attempts||[]).find(x=>x.thread===r.thread);if(cur){cur.result='lost';cur.why='thread could not be read';cur.ended=now}
+        log(`#${r.number} (${r.agent}): thread ${r.thread} is gone; run "retry ${r.number}" to start it over`);await block(r.number);r.status='lost';r.finished=now}
+      save();continue}
+    if(r.readFails){delete r.readFails;save()} // only failures in a row count
     const th=shown.thread||{};
     if(th.activeRunId||['running','preparing','queued','starting'].includes(th.status)){log(`#${r.number} (${r.agent}) still running on ${r.model||'its model'}`);continue}
     if(th.pendingRequestCount>0||th.status==='waiting'){log(`#${r.number} (${r.agent}) is waiting for an answer in T3: ${th.title}`);continue}
     const end=outcome(th,shown.messages),attempts=r.attempts||(r.attempts=[]),now=new Date().toISOString();
     const cur=attempts.find(x=>x.thread===r.thread);
     if(cur){cur.result=end.failed?'failed':end.stopped?'stopped':'done';cur.why=end.why||'';cur.ended=now}
-    if(end.stopped){log(`#${r.number} (${r.agent}): ${end.why}; leaving the card where it is`);r.status='stopped';r.finished=now;save();continue}
+    if(end.stopped){log(`#${r.number} (${r.agent}): ${end.why}`);await block(r.number);r.status='stopped';r.finished=now;save();continue}
     if(end.failed){
       const order=r.order||[],rest=order.slice(order.indexOf(r.model)+1);
       log(`#${r.number} (${r.agent}) failed on ${r.model}: ${end.why}`);
@@ -1631,10 +1706,24 @@ async function tickLocal(){
       const again=rest.length&&r.card?startOn(rest,startArgv(r.title,r.project),prompt(r.card.agent,r.card.brief,r.card,r.model),`#${r.number}`):{thread:null,tried:[]};
       attempts.push(...attemptsOf(again.tried,again.thread,now));
       if(again.thread){Object.assign(r,{thread:again.thread,model:again.model});log(`#${r.number} restarted on ${again.model}: thread ${again.thread}`)}
-      else{r.status='failed';r.finished=now;log(`#${r.number} (${r.agent}): every model failed (${attempts.map(x=>x.model).join(', ')}); left where it is. Run "retry ${r.number}" to start it over.`)}
+      else{r.status='failed';r.finished=now;log(`#${r.number} (${r.agent}): every model failed (${attempts.map(x=>x.model).join(', ')}). Run "retry ${r.number}" to start it over.`);await block(r.number)}
       save();continue;
     }
-    log(`#${r.number} (${r.agent}) finished on ${r.model||'its model'}; moving it to UAT`);
+    const chain=r.chain||(r.chain=[]);chain.push({agent:r.agent,agentId:r.agentId,thread:r.thread,finished:now});
+    const said=handoffOf(lastReply(shown.messages));
+    let next={why:'hand-offs are off'};
+    try{flowIndex||=await flowAgentsAndWorkflows();const {card}=await flow('GET',`/cards/${encodeURIComponent(r.number)}`);
+      next=card.column!=='doing'?{why:`a person moved it to ${card.column}`}:nextStep({...flowIndex,agentId:r.agentId,card,said})}
+    catch(e){next={why:`could not read the workflow (${e.message})`}}
+    const cap=cfg.maxHandoffs??6;
+    if(next.agent&&chain.length>cap)next={why:`${chain.length-1} hand-offs in a row (maxHandoffs ${cap})`};
+    if(next.agent){
+      log(`#${r.number} (${r.agent}) finished on ${r.model||'its model'}; handing it to ${next.agent.name} (${next.why})`);
+      if(!DRY){try{await flow('PATCH',`/cards/${encodeURIComponent(r.number)}`,{agents:[next.agent.id]});await flow('POST',`/cards/${encodeURIComponent(r.number)}/move`,{column:'requests',index:0})}
+        catch(e){log(`#${r.number}: could not hand it to ${next.agent.name} (${e.message}); moving it to UAT`);next={why:'the hand-off failed'}}}
+      if(next.agent){r.status='handed';r.handedTo=next.agent.name;r.finished=now;save();continue}
+    }
+    log(`#${r.number} (${r.agent}) finished on ${r.model||'its model'}; moving it to UAT (${next.why})`);
     if(!DRY){try{await flow('POST',`/cards/${encodeURIComponent(r.number)}/move`,{column:'uat'})}catch(e){log(`#${r.number}: could not move to UAT: ${e.message}`)}}
     r.status='done';r.finished=now;save();
   }
@@ -1642,19 +1731,29 @@ async function tickLocal(){
   const agents=(await all('/agents?live=true')).filter(a=>a.kind==='agent'&&same(a.runtime,cfg.name));
   if(!agents.length){log(`no live agents run on "${cfg.name}"`);return}
   const projects=await all('/projects').catch(()=>[]);
+  // Every card in these agents' queues, so Doing can be checked once the starts are done; dry-run starts count as started.
+  const queued=[],wouldStart=new Set();let full=false;
   for(const a of agents){
-    if(running()>=(cfg.maxRunning??1)){log(`at maxRunning (${cfg.maxRunning??1}); the rest wait for the next pass`);break}
-    if(Object.values(state.runs).some(r=>r.status==='running'&&r.agentId===a.id))continue;
-    if(!modelsOf(a).some(m=>splitModel(m)[0])){log(`${a.name}: live but no model of the form provider:model; skipped`);continue}
     const work=await flow('GET',`/agents/${encodeURIComponent(a.id)}/work?columns=doing,requests&limit=20`);
-    const card=work.items.find(c=>!state.runs[c.id]);
+    queued.push(...work.items);
+    if(!modelsOf(a).some(m=>splitModel(m)[0])){log(`${a.name}: live but no model of the form provider:model; skipped`);continue}
+    if(running()+wouldStart.size>=(cfg.maxRunning??1)){if(!full)log(`at maxRunning (${cfg.maxRunning??1}); the rest wait for the next pass`);full=true;continue}
+    if(Object.values(state.runs).some(r=>r.status==='running'&&r.agentId===a.id))continue;
+    // A card whose last run finished (it went to UAT) and came back to Requests or Doing is worked again;
+    // a stopped, failed or lost one waits for "retry".
+    // A card handed on by another agent (status handed) is picked up the same way.
+    const card=work.items.find(c=>(!state.runs[c.id]||['done','handed'].includes(state.runs[c.id].status))&&!wouldStart.has(c.id));
     if(!card){log(`${a.name}: nothing to do`);continue}
     const project=projectFor(card,projects);
     if(!project){log(`${a.name}: #${card.number} has no T3 project (set "project" or "projects"); skipped`);continue}
     const title=titleOf(a,card),{order,why}=await plan(a,card,project,catalogue);
     log(`${a.name}: #${card.number} on ${order[0]} (${why})${order.length>1?`; then ${order.slice(1).join(', ')}`:''}`);
-    if(DRY){log(`dry run: would start "${title}" on ${order[0]} in ${project}`);continue}
-    const st=startOn(order,startArgv(title,project),prompt(a,work.brief,card),a.name);
+    if(DRY){log(`dry run: would start "${title}" on ${order[0]} in ${project}`);wouldStart.add(card.id);continue}
+    const prev=state.runs[card.id],again=prev?.status==='done'?prev:null;
+    // A hand-off keeps its chain (so maxHandoffs can end a loop); a card a person sent back starts a new one.
+    const chain=prev?.status==='handed'?prev.chain||[]:[];
+    const handed=prev?.status==='handed'?{from:prev.agent,thread:prev.thread,again:[...chain].reverse().find(x=>x.agentId===a.id)?.thread}:null;
+    const st=startOn(order,startArgv(title,project),prompt(a,work.brief,card,null,again,handed),a.name);
     if(!st.thread){log(`${a.name}: #${card.number} could not start on any model; left for the next pass`);continue}
     if(card.column==='requests'){
       try{await flow('POST',`/cards/${encodeURIComponent(card.number)}/move`,{column:'doing',...(cfg.developer?{developer:cfg.developer}:{})})}
@@ -1664,10 +1763,30 @@ async function tickLocal(){
     // The card and brief are kept so a fallback can start it again without asking Flow.
     state.runs[card.id]={agent:a.name,agentId:a.id,number:card.number,thread:st.thread,model:st.model,order,why,status:'running',started:now,title,project,
       card:{number:card.number,title:card.title,description:card.description||'',checklist:card.checklist||[],due:card.due||'',brief:work.brief,agent:{name:a.name}},
-      attempts:attemptsOf(st.tried,st.thread,now)};
+      attempts:attemptsOf(st.tried,st.thread,now),chain};
     save();
     log(`started ${title} on ${st.model}: thread ${st.thread}`);
   }
+  // Doing means working now: a queued card in Doing with no thread running for it goes back to the top of
+  // Requests. Last first, each to index 0, so they keep their order.
+  const seen=new Set(),idle=queued.filter(c=>c.column==='doing'&&!seen.has(c.id)&&seen.add(c.id)&&state.runs[c.id]?.status!=='running'&&!wouldStart.has(c.id));
+  for(const c of idle.reverse()){
+    const last=state.runs[c.id],why=!last?'no thread is running for it':['done','handed'].includes(last.status)?'it waits for a free slot':`its last run ${last.status}; "retry ${c.number}" starts it again`;
+    if(DRY){log(`dry run: would move #${c.number} from Doing back to Requests (${why})`);continue}
+    try{await flow('POST',`/cards/${encodeURIComponent(c.number)}/move`,{column:'requests',index:0});log(`#${c.number} back to Requests: ${why}`)}
+    catch(e){log(`#${c.number}: could not move back to Requests: ${e.message}`)}
+  }
+}
+// Every AgentFlow agent and workflow, for hand-offs. Read once per pass, and only when a thread finished.
+async function flowAgentsAndWorkflows(){return {agents:await all('/agents'),workflows:await all('/workflows')}}
+// A card whose run stopped or failed: to Blocked, if it is still in Doing (a person may have moved it meanwhile).
+async function block(number){
+  if(DRY){log(`dry run: would move #${number} to Blocked`);return}
+  try{
+    const {card}=await flow('GET',`/cards/${encodeURIComponent(number)}`);
+    if(card.column!=='doing')return;
+    await flow('POST',`/cards/${encodeURIComponent(number)}/move`,{column:'blocked'});log(`#${number} moved to Blocked`);
+  }catch(e){log(`#${number}: could not move to Blocked: ${e.message}`)}
 }
 async function status(){
   const state=readJson(stateFile)||{runs:{}};
@@ -1676,13 +1795,18 @@ async function status(){
   for(const a of agents){const ms=modelsOf(a);console.log(`  ${a.name}: ${ms.length?`${a.auto?'auto from ':''}${ms.join(', ')}`:'(no model)'}`)}
   for(const r of Object.values(state.runs).filter(r=>r.status==='running'))console.log(`  running: #${r.number} for ${r.agent} on ${r.model||'?'}, thread ${r.thread}`);
   for(const r of Object.values(state.runs).filter(r=>r.status==='failed'))console.log(`  failed: #${r.number} for ${r.agent} on every model (${(r.attempts||[]).map(x=>x.model).join(', ')})`);
+  for(const r of Object.values(state.runs).filter(r=>r.status==='lost'))console.log(`  lost: #${r.number} for ${r.agent}: thread ${r.thread} could not be read; "retry ${r.number}" starts it over`);
 }
 async function retry(){
-  const n=String(args.filter(a=>!a.startsWith('-'))[1]||'').replace(/^#/,''),state=readJson(stateFile)||{runs:{}};
+  const n=String(positional()[1]||'').replace(/^#/,''),state=readJson(stateFile)||{runs:{}};
   const hit=Object.entries(state.runs).find(([,r])=>String(r.number)===n);
   if(!hit){console.error(`No card #${n} in ${stateFile}`);process.exit(1)}
   if(hit[1].status==='running'){console.error(`#${n} is running (thread ${hit[1].thread})`);process.exit(1)}
-  delete state.runs[hit[0]];writeJson(stateFile,state);log(`#${n} forgotten; the next tick may start it again`);
+  delete state.runs[hit[0]];writeJson(stateFile,state);
+  // A card the runner blocked goes back to the queue (Requests) so the next tick can take it.
+  if(!DRY)try{const {card}=await flow('GET',`/cards/${encodeURIComponent(n)}`);if(card.column==='blocked')await flow('POST',`/cards/${encodeURIComponent(n)}/move`,{column:'requests',index:0})}
+  catch(e){log(`#${n}: could not move back to Requests: ${e.message}`)}
+  log(`#${n} forgotten; the next tick may start it again`);
 }
 
 // `jobs` prints this machine's jobs; `jobs --remote <name>` a remote's; `jobs --all` both.
@@ -1706,8 +1830,11 @@ async function jobsCmd(){
 }
 async function reportCmd(){await report();await reportRemotes({force:true})}
 
+// The command and its arguments: everything that is not a flag or the value of --config / --remote,
+// so `--config <file> status` works as well as `status --config <file>`.
+const positional=()=>args.filter((a,i)=>!a.startsWith('-')&&!['--config','--remote'].includes(args[i-1]));
 async function main(argv){
-  args=argv;cmd=args.find(a=>!a.startsWith('-'))||'tick';
+  args=argv;cmd=positional()[0]||'tick';
   cfgPath=args.includes('--config')?args[args.indexOf('--config')+1]:join(cfgDir,'runner.json');
   cfg=readJson(cfgPath)||{};
   const cmds={report:reportCmd,tick,status,retry,jobs:jobsCmd};

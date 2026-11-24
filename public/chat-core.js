@@ -8,6 +8,7 @@
 // Mind map cards use node=<id> instead of card=<id>. Flow shows such a message as a card bubble with
 // details looked up for the person reading it; anywhere else it stays readable as text and a link.
 import {COLUMNS,colorOf} from './devops-core.js';
+import {shownMember} from './agentflow-core.js';
 
 export const USERNAME=/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 export const MESSAGE_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -166,7 +167,8 @@ export function summarize(db,{kind,id},{photo=n=>n.image}={}){
     const dv=db?.devops,c=(dv?.cards||[]).find(x=>x?.id===id);if(!c)return null;
     const labels=new Map((dv.labels||[]).map(l=>[l.id,l])),p=(db.projects||[]).find(x=>x.id===c.project&&c.project),nodes=nodesOf(db);
     const members=new Map([...(db.shares||[]).flatMap(s=>s?.members||[]),...(db.shareMembers||[])].filter(m=>m?.id).map(m=>[m.id,m]));
-    const people=[...new Set((c.assignees||[]).map(a=>a?.node).filter(Boolean))].map(pid=>{const n=nodes.get(pid)||members.get(pid);if(!n)return null;const img=photo(n);return {id:pid,name:short(n.name||n.email,80),...(okImage(img)?{image:img}:{})}}).filter(Boolean);
+    const own=[...nodes.values()];
+    const people=[...new Set((c.assignees||[]).map(a=>a?.node).filter(Boolean))].map(pid=>{const raw=nodes.get(pid)||members.get(pid);const n=raw&&members.has(pid)?shownMember(raw,own):raw;if(!n)return null;const img=photo(n);return {id:pid,name:short(n.name||n.email,80),...(okImage(img)?{image:img}:{})}}).filter(Boolean);
     const col=(dv.columns||[]).find(x=>x.id===c.column)?.name||COLUMNS.find(([k])=>k===c.column)?.[1]||'';
     return {kind:'card',title:short(c.title,200),number:Number.isInteger(c.number)?c.number:null,column:{id:short(c.column,20),name:short(col,80)},
       labels:(c.labels||[]).map(l=>labels.get(l)).filter(Boolean).slice(0,4).map(l=>({name:short(l.name,40),color:colorOf(l.color)})),
@@ -184,11 +186,19 @@ export function localTarget(db,envId,ref){
   const has=id=>ref.kind==='card'?(db?.devops?.cards||[]).some(c=>c.id===id):[...nodesOf(db).values()].some(n=>n.id===id&&!n.linked?.stub);
   if(ref.env===envId&&has(ref.id))return ref.id;
   for(const s of db?.shares||[])if(s?.ownerEnv===ref.env&&has(`sh.${s.id}.${ref.id}`))return `sh.${s.id}.${ref.id}`;
+  // An environment combined with this one (combined-core.js): its record, or a share placed there.
+  for(const m of db?.combined||[]){
+    if(m?.env===ref.env&&has(`cx.${m.env}.${ref.id}`))return `cx.${m.env}.${ref.id}`;
+    for(const s of m?.shares||[])if(s?.ownerEnv===ref.env&&has(`cx.${m.env}.sh.${s.id}.${ref.id}`))return `cx.${m.env}.sh.${s.id}.${ref.id}`;
+  }
   return null;
 }
 // The link for a record the browser shows: a linked copy points at the owner's record, so everyone
 // it reaches resolves it with their own access.
 export function refFor(db,envId,kind,id){
+  // A combined environment's record points at that environment (or, for a share placed there, its owner's).
+  const cx=/^cx\.([A-Za-z0-9-]{1,64})\.(.+)$/.exec(String(id||''));
+  if(cx){const meta=(db?.combined||[]).find(x=>x?.env===cx[1]);return refFor(meta?{shares:meta.shares}:{},cx[1],kind,cx[2])}
   const m=/^sh\.([A-Za-z0-9_-]+)\.(.+)$/.exec(String(id||''));
   if(m){const s=(db?.shares||[]).find(x=>x.id===m[1]);const r={env:s?.ownerEnv||'',kind,id:m[2]};return validRef(r)?r:null}
   const r={env:envId||'',kind,id};return validRef(r)?r:null;

@@ -83,6 +83,15 @@ function suite(label,makeStore){
       assert.ok(log.some(e=>e.op==='revoke'&&e.ip==='10.0.0.9')&&log.some(e=>e.op==='denied-revoked'));
     });
 
+    test('refused requests are audited at most once a minute per key, so a flood cannot push out other history (card #677)',async()=>{
+      const {key,apiKey}=await store.create({owner:OWNER,name:'flood',env:'*',scopes:['read']});
+      await store.revoke(apiKey.id,OWNER);
+      for(let i=0;i<20;i++)assert.equal(await authenticateApiKey(reqWith(key),store),null);
+      assert.equal((await store.auditLog(apiKey.id)).filter(e=>e.op==='denied-revoked').length,1);
+      clock.t+=61e3;await authenticateApiKey(reqWith(key),store);
+      assert.equal((await store.auditLog(apiKey.id)).filter(e=>e.op==='denied-revoked').length,2,'and again after a minute');
+    });
+
     test('last use is recorded, at most once a minute',async()=>{
       const {key,apiKey}=await store.create({owner:OWNER,name:'t',env:'*',scopes:['read']});
       await authenticateApiKey(reqWith(key,'192.0.2.1'),store);
@@ -163,7 +172,7 @@ describe('routes',()=>{
   };
   before(async()=>{
     dir=tmp();store=apiKeyStore({dir});useRateLimiter(null);configureRateLimit({capacity:60,refill:2,now:()=>Date.now()});
-    const handle=apiKeyRoutes({userFor,store,readJson,envsFor:async u=>u.email===OWNER?['default-workspace','work']:['cleo-env']});
+    const handle=apiKeyRoutes({userFor,store,readJson,envsFor:async u=>u.email===OWNER?['default-workspace','work']:['cleo-env'],maxKeys:u=>u.email===CLEO?2:store.MAX_KEYS});
     srv=http.createServer(async(req,res)=>{if(!(await handle(req,res))){res.writeHead(404);res.end()}});
     await new Promise(r=>srv.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${srv.address().port}`;
   });
@@ -198,6 +207,29 @@ describe('routes',()=>{
     assert.equal((await call('POST','/api/keys',{body:{name:'x',env:'*',scopes:['read'],expiresInDays:null}})).status,201,'never expires');
     const r=await fetch(base+'/api/keys',{method:'POST',headers:{'x-user':OWNER,'content-type':'text/plain'},body:'{}'});
     assert.equal(r.status,415);
+  });
+  test('office bridge key requires a session, fixes its scope and honors the shared cap',async()=>{
+    const path='/api/office/cleo-env/bridge-key',opts={user:CLEO,body:{name:'wrong',env:'*',scopes:['admin'],expiresInDays:90}};
+    assert.equal((await call('POST',path,{...opts,user:null})).status,401);
+    assert.equal((await call('POST',path,{...opts,headers:{origin:'https://evil.example'}})).status,403);
+    assert.equal((await call('POST','/api/office/work/bridge-key',opts)).status,404);
+    assert.equal((await call('POST','/api/office/*/bridge-key',opts)).status,404);
+    assert.equal((await call('GET',path,{user:CLEO})).status,405);
+    const settings=await call('POST','/api/keys',{user:CLEO,body:{name:'Existing key',env:'cleo-env',scopes:['read']}});
+    assert.equal(settings.status,201);
+    assert.equal((await call('POST',path,{...opts,user:null,headers:{authorization:'Bearer '+settings.data.key}})).status,401);
+    const [first,second]=await Promise.all([call('POST',path,opts),call('POST',path,opts)]);
+    const [made,capped]=[first,second].sort((a,b)=>a.status-b.status);
+    assert.equal(made.status,201);
+    assert.equal(made.headers.get('cache-control'),'no-store');
+    const {key,apiKey,warning}=made.data;
+    assert.match(key,/^flow_test_/);assert.match(warning,/not see it again/);
+    assert.equal(apiKey.name,'3D office bridge');assert.equal(apiKey.env,'cleo-env');
+    assert.deepEqual(apiKey.scopes,['read','write']);assert.equal(apiKey.expiresAt,null);
+    assert.equal(capped.status,400);assert.equal(capped.data.code,'too_many_keys');
+    const listed=await call('GET','/api/keys',{user:CLEO});
+    assert.equal(listed.data.keys.length,2);
+    assert.ok(!JSON.stringify(listed.data).includes(key));
   });
   test('same-origin and sign-in rules',async()=>{
     assert.equal((await call('GET','/api/keys',{user:null})).status,401);
@@ -243,4 +275,12 @@ describe('postgres',{skip:!EmbeddedPostgres&&'embedded-postgres is not installed
     assert.ok(await authenticateApiKey(reqWith(key),store));
     assert.throws(()=>readdirSync(join(dir,'files')),'no JSON files when Postgres is in use');
   });
+});
+
+// Card #677: the client address is the last X-Forwarded-For hop (the proxy's), never the client's own claim.
+test('clientIp takes the last X-Forwarded-For hop',async()=>{
+  const {clientIp}=await import('../lib/apikeys.mjs');
+  assert.equal(clientIp({headers:{'x-forwarded-for':'1.2.3.4, 203.0.113.9'},socket:{remoteAddress:'10.0.0.1'}}),'203.0.113.9');
+  assert.equal(clientIp({headers:{'x-forwarded-for':'spoofed'},socket:{}}),'spoofed');
+  assert.equal(clientIp({headers:{},socket:{remoteAddress:'10.0.0.1'}}),'10.0.0.1');
 });

@@ -31,12 +31,14 @@ function mockOpid(){
 }
 function agent(){
   const jar=new Map();
-  return async(method,path,body)=>{
+  const f=async(method,path,body)=>{
     const r=await fetch(BASE+path,{method,headers:{'content-type':'application/json',cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; ')},body:body===undefined?undefined:JSON.stringify(body)});
     for(const c of r.headers.getSetCookie()){const [pair]=c.split(';'),i=pair.indexOf('=');jar.set(pair.slice(0,i).trim(),pair.slice(i+1))}
     let data=null;try{data=await r.json()}catch{}
     return {status:r.status,data};
   };
+  f.cookie=async()=>[...jar].map(([k,v])=>`${k}=${v}`).join('; ');
+  return f;
 }
 const cli=args=>new Promise(res=>execFile(process.execPath,['tools/env.mjs',...args,'--to',BASE],{cwd:ROOT,env:{...process.env,FLOW_SYNC_TOKEN:TOKEN}},(e,out,err)=>res({code:e?e.code||1:0,out:out+err})));
 
@@ -118,6 +120,32 @@ test('the recipient sees it under Shared with you and adds it to their own envir
   assert.deepEqual((await bo('GET','/api/shares/incoming')).data.shares[0].envs,[boEnv]);
 });
 
+// The 3D office (docs/concepts/12-office.md): a share's recipient is a member of the owner's office and sees a
+// live agent's details only when its repo belongs to a project in their share's scope; Kim, with no share, cannot enter.
+test("3D office: Bo enters the owner's office; agents in Bo's shared project show in full, others as Private project",async()=>{
+  const k=await owner('POST','/api/keys',{name:'office',env:'*',scopes:['read','write']});assert.equal(k.status,201);
+  assert.equal((await owner('PATCH','/api/v1/envs/default-workspace/projects/Studio%20launch',{repos:['acme/studio']})).status,200);
+  assert.equal((await owner('PATCH','/api/v1/envs/default-workspace/projects/Service%20retainer',{repos:['acme/retainer']})).status,200);
+  const put=await fetch(BASE+'/api/v1/office/agents',{method:'PUT',headers:{'content-type':'application/json',authorization:'Bearer '+k.data.key},body:JSON.stringify({source:'bridge:t',agents:[
+    {id:'a1',title:'Studio fix',vendor:'claude',status:'running',repo:{name:'studio',remote:'git@github.com:acme/studio.git'}},
+    {id:'a2',title:'Retainer invoice script',vendor:'codex',status:'waiting',repo:{name:'retainer',remote:'https://github.com/acme/retainer'},pending:{requestId:'r',summary:'Run: send invoices',can:['allow']}}]})});
+  assert.equal(put.status,200);
+  const snapshot=async who=>{
+    const r=await fetch(BASE+'/api/office/default-workspace/events',{headers:{cookie:await who.cookie()}});
+    if(r.status!==200)return {status:r.status};
+    const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+    try{for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value);const m=/event: snapshot\ndata: (.+)\n\n/.exec(buf);if(m)return {status:200,data:JSON.parse(m[1])}}}finally{rd.cancel().catch(()=>{})}
+  };
+  const b=await snapshot(bo),mine=b.data.live[b.data.members.find(m=>m.owner).key];
+  assert.equal(b.status,200);assert.equal(b.data.members.length,2,'the owner and Bo have rooms');
+  assert.deepEqual(mine.map(a=>a.private?'private':a.title),['Studio fix','private']);
+  const text=JSON.stringify(b.data);for(const s of ['Retainer','retainer','send invoices','Service retainer'])assert.ok(!text.includes(s),s+' must not reach Bo');
+  assert.equal((await snapshot(kim)).status,404,'no share, no office');
+  const o=await snapshot(owner);assert.deepEqual(o.data.live[o.data.me.key].map(a=>a.title),['Studio fix','Retainer invoice script']);
+  for(const p of ['Studio%20launch','Service%20retainer'])await owner('PATCH','/api/v1/envs/default-workspace/projects/'+p,{repos:[]});
+  await fetch(BASE+'/api/v1/office/agents',{method:'PUT',headers:{'content-type':'application/json',authorization:'Bearer '+k.data.key},body:JSON.stringify({source:'bridge:t',agents:[]})});
+});
+
 test("Bo's workspace: Marsh and Campfire Studio linked, Kestrel Group and Quill as read-only stubs, never anything else",async()=>{
   const r=await bo('GET','/api/workspace?env='+boEnv),d=r.data.data,nodes=linked(d);
   assert.deepEqual(nodes.filter(n=>!n.linked.stub).map(n=>n.name).sort(),['Bo Marsh','Campfire Studio','Campfire Studio Ads','Marsh Holdings LLC']);
@@ -134,12 +162,14 @@ test("Bo's workspace: Marsh and Campfire Studio linked, Kestrel Group and Quill 
 });
 
 test('edits sync both ways per permission; stubs and layout stay with their owner',async()=>{
-  let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data,rev=r.data.rev;
+  const {fieldBase}=await import('../public/sync-core.js');
+  let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data,rev=r.data.rev,served=structuredClone(d);
   const marsh=linked(d).find(n=>n.name==='Marsh Holdings LLC'),stub=linked(d).find(n=>n.name==='Kestrel Group');
   marsh.name='Marsh Holdings';marsh.x=2000;stub.name='Hacked';
   // Bo's own card and a private edge to the linked Marsh.
   const mine=d.charts.find(c=>c.nodes.includes(marsh));mine.nodes.push(N('bo-own','Bo Side LLC','entity',0,0));mine.edges.push({id:'bo-edge',from:'bo-own',to:marsh.id,type:'ownership',percent:'10'});
-  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:rev,data:d});assert.equal(r.status,200,JSON.stringify(r.data));
+  // The browser sends the edits its user made (sync-core noteEdits), here the same as fieldBase of what was served.
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:rev,data:d,sharedEdits:fieldBase(served,d)});assert.equal(r.status,200,JSON.stringify(r.data));
   const home=(await owner('GET','/api/workspace?env=default-workspace')).data.data,hn=home.charts[0].nodes;
   assert.equal(hn.find(n=>n.id==='marsh').name,'Marsh Holdings','an edit-permission rename reaches the owner');
   assert.equal(hn.find(n=>n.id==='marsh').x,656,"Bo's layout is his own");
@@ -164,8 +194,8 @@ test('view permission: Bo edits are dropped; comments need comment permission',a
   assert.equal((await bo('PATCH',`/api/shares/${shareId}`,{permission:'view'})).status,404,'Bo cannot change his own permission');
   assert.equal((await owner('PATCH',`/api/shares/${shareId}`,{permission:'view'})).data.share.permission,'view');
   let r=await bo('GET','/api/workspace?env='+boEnv);const d=r.data.data;
-  linked(d).find(n=>n.name==='Campfire Studio').name='Renamed by Bo';
-  assert.equal((await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d})).status,200);
+  const n=linked(d).find(n=>n.name==='Campfire Studio');n.name='Renamed by Bo';
+  assert.equal((await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{node:{[n.id]:{name:'Campfire Studio'}}}})).status,200);
   assert.ok((await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].nodes.some(n=>n.name==='Campfire Studio'));
   assert.equal((await bo('POST',`/api/shares/${shareId}/comments`,{kind:'node',id:'campaign',comment:'hi'})).status,403);
   await owner('PATCH',`/api/shares/${shareId}`,{permission:'comment'});
@@ -226,7 +256,7 @@ test("hand-picked share for Bo: exactly Marsh and Campfire Studio, stubs Kestrel
 });
 
 // API keys, /api/v1 and /mcp mounted on the real server (docs/api.md, docs/api-keys.md, docs/mcp-cli.md).
-test('API keys: /api/v1 and /mcp work with a key, within its environment and scopes; shared copies never appear',async()=>{
+test('API keys: /api/v1 and /mcp work with a key, within its environment and scopes, and see the shares placed there',async()=>{
   const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json'});
   let r=await owner('POST','/api/keys',{name:'ci',env:'default-workspace',scopes:['read']});
   assert.equal(r.status,201,JSON.stringify(r.data));const ro=r.data.key;assert.match(ro,/^flow_test_/);
@@ -241,14 +271,59 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   assert.equal((await v1(ro,'GET',`/envs/${boEnv}`)).status,404,"Owner's key cannot see Bo's environment");
   assert.equal((await v1('flow_test_'+'x'.repeat(40),'GET','/envs')).status,401);
   r=await fetch(BASE+'/api/v1/openapi.json');assert.equal(r.status,200);assert.equal((await r.json()).openapi,'3.1.0');
-  // Bo's key over his own environment: his data only, never the linked copies of a share.
-  const s=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['marsh']},permission:'edit'});
-  await bo('POST',`/api/shares/${s.data.share.id}/attach`,{env:boEnv});
+  // Bo's key over his own environment: his data plus the linked copies of the share placed there, as the app shows them.
+  const s=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['marsh','campaign']},permission:'edit'});
+  const sid=s.data.share.id,M=`sh.${sid}.marsh`,SC=`sh.${sid}.chart`;
+  await bo('POST',`/api/shares/${sid}/attach`,{env:boEnv});
   assert.ok(linked((await bo('GET','/api/workspace?env='+boEnv)).data.data).length>0);
   const jk=(await bo('POST','/api/keys',{name:'bo',env:boEnv,scopes:['read']})).data.key;
+  const jw=(await bo('POST','/api/keys',{name:'bo-rw',env:boEnv,scopes:['read','write']})).data.key;
   r=await v1(jk,'GET','/envs');assert.deepEqual(r.data.items.map(e=>e.id),[boEnv]);
-  r=await v1(jk,'GET',`/envs/${boEnv}/search?q=Marsh`);assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.items.length,0,'no linked copies through the API');
+  r=await v1(jk,'GET',`/envs/${boEnv}/search?q=Marsh`);assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.ok(r.data.items.some(x=>x.id===M),'the linked copy is found through the API');
+  r=await v1(jk,'GET',`/envs/${boEnv}/charts`);assert.ok(r.data.items.some(c=>c.id===SC),"the share's chart is listed");
+  r=await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`);
+  const body=JSON.stringify(r.data);assert.ok(body.includes('Marsh Holdings'));
+  for(const x of PRIVATE)assert.ok(!body.includes(x),x+' must never reach Bo through the API');
   assert.equal((await v1(jk,'GET','/envs/default-workspace')).status,404);
+  assert.equal((await v1(jk,'PATCH',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes/${encodeURIComponent(M)}`,{name:'Nope'})).status,403,'a read key cannot write');
+  // Edits the share allows reach the owner, with history; layout stays Bo's.
+  const node=`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes/`;
+  r=await v1(jw,'PATCH',node+encodeURIComponent(M),{notes:'Set by Bo via API'});assert.equal(r.status,200,JSON.stringify(r.data));
+  r=await v1(jw,'POST',node+encodeURIComponent(M)+'/move',{x:3000,y:40});assert.equal(r.status,200,JSON.stringify(r.data));
+  let home=(await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].nodes.find(n=>n.id==='marsh');
+  assert.equal(home.notes,'Set by Bo via API','an allowed edit reaches the owner');assert.notEqual(home.x,3000,"Bo's layout is his own");
+  assert.ok((await owner('GET',`/api/shares/${sid}/history?kind=node&id=marsh`)).data.history.some(e=>e.field==='notes'&&e.by===BO));
+  r=await v1(jk,'GET',node+encodeURIComponent(M));assert.equal(r.data.node.x,3000,'placement kept');assert.equal(r.data.node.notes,'Set by Bo via API');
+  // Bo's own card in the share's chart, with a private edge to the linked one: his, never the owner's.
+  r=await v1(jw,'POST',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`,{name:'Bo API Side',type:'entity'});assert.equal(r.status,201,JSON.stringify(r.data));
+  r=await v1(jw,'POST',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`,{from:r.data.node.id,to:M,type:'ownership',percent:'5'});assert.equal(r.status,201,JSON.stringify(r.data));
+  assert.ok(!JSON.stringify((await owner('GET','/api/workspace?env=default-workspace')).data).includes('Bo API Side'));
+  // Refused: nothing is saved, and the reason is in the error.
+  const stub=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/nodes`)).data.items.find(n=>n.linked?.stub);
+  assert.ok(stub,'a stub is listed');
+  const refused=async(method,path,b,code,why)=>{const before=(await bo('GET','/api/workspace?env='+boEnv)).data.rev,x=await v1(jw,method,path,b);
+    assert.equal(x.status,403,why+': '+JSON.stringify(x.data));assert.equal(x.data.error?.code||x.data.code,code,JSON.stringify(x.data));
+    assert.equal((await bo('GET','/api/workspace?env='+boEnv)).data.rev,before,why+': nothing saved')};
+  await refused('PATCH',node+encodeURIComponent(stub.id),{name:'Hacked'},'share_read_only','a stub');
+  await refused('PATCH',node+encodeURIComponent(M),{type:'area'},'share_read_only_field','a field the share does not carry');
+  const ledge=(await v1(jk,'GET',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges`)).data.items.find(e=>e.id.startsWith('sh.')&&!e.linked?.stub);
+  assert.ok(ledge,'a linked edge inside the share is listed');
+  {const edge=`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges/${encodeURIComponent(ledge.id)}`;
+    r=await v1(jw,'PATCH',edge,{percent:'100'});assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.edge.percent,'100');
+    const theirs=(await owner('GET','/api/workspace?env=default-workspace')).data.data.charts[0].edges.find(e=>e.id===ledge.id.split('.').pop());
+    assert.equal(theirs.percent,'100','an edge percent edit reaches the owner');
+    await refused('PATCH',edge,{type:ledge.type==='group'?'ownership':'group'},'share_read_only_field','an edge type the share does not carry');
+    assert.equal((await v1(jw,'PATCH',edge,{percent:ledge.percent})).status,200,'put it back')}
+  await refused('DELETE',`/envs/${boEnv}/charts/${encodeURIComponent(SC)}/edges/${encodeURIComponent(ledge.id)}`,undefined,'share_delete','deleting a linked edge');
+  assert.equal((await owner('PATCH',`/api/shares/${sid}`,{permission:'view'})).status,200);
+  await refused('PATCH',node+encodeURIComponent(M),{name:'Not allowed'},'share_permission','a view share');
+  home=(await owner('GET','/api/workspace?env=default-workspace')).data.data;
+  assert.notEqual(home.charts[0].nodes.find(n=>n.id==='marsh').name,'Not allowed');assert.equal(home.charts[0].nodes.find(n=>n.id===stub.id.split('.').pop()).name,stub.name);
+  assert.equal((await owner('PATCH',`/api/shares/${sid}`,{permission:'edit'})).status,200);
+  // MCP sees the same.
+  {const m=await fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(jw),accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:9,method:'tools/call',params:{name:'search',arguments:{env:boEnv,q:'Marsh'}}})}).then(x=>x.json());
+    assert.ok(!m.result.isError&&JSON.stringify(m.result).includes(M),JSON.stringify(m).slice(0,300))}
   // MCP over HTTP with the same keys.
   const mcp=(k,body)=>fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(k),accept:'application/json, text/event-stream'},body:JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
   r=await mcp(ro,{jsonrpc:'2.0',id:1,method:'tools/list'});assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.data.result.tools.some(t=>t.name==='nodes_list'));
@@ -260,6 +335,65 @@ test('API keys: /api/v1 and /mcp work with a key, within its environment and sco
   assert.ok(r.data.result?.isError&&!JSON.stringify(r.data).includes('Kestrel Services'),"Bo's key cannot read Owner's environment through MCP");
   assert.equal((await mcp('flow_test_'+'y'.repeat(40),{jsonrpc:'2.0',id:5,method:'tools/list'})).status,401);
   await owner('DELETE',`/api/shares/${s.data.share.id}`);
+});
+
+// Sharing by API key and MCP (shares.* in lib/registry.mjs): the same rules as the app, a preview before
+// anything is shared, read-only keys refused, and the key's name on the share.
+test('API keys and MCP share: preview first, then confirm; read-only refused; recipients ask instead; approve and revoke by key',async()=>{
+  const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json',accept:'application/json, text/event-stream'});
+  const v1=(k,method,path,body)=>fetch(BASE+'/api/v1'+path,{method,headers:bearer(k),body:body&&JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  let n=100;const tool=(k,name,args)=>fetch(BASE+'/mcp',{method:'POST',headers:bearer(k),body:JSON.stringify({jsonrpc:'2.0',id:n++,method:'tools/call',params:{name,arguments:args}})}).then(x=>x.json()).then(m=>m.result);
+  const key=async(who,name,env,scopes)=>{const r=await who('POST','/api/keys',{name,env,scopes});assert.equal(r.status,201,JSON.stringify(r.data));return r.data.key};
+  const rw=await key(owner,'Laptop agent','default-workspace',['read','write']),ro=await key(owner,'Read-only agent','default-workspace',['read']);
+  const list=await fetch(BASE+'/mcp',{method:'POST',headers:bearer(ro),body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}).then(x=>x.json());
+  const names=list.result.tools.map(t=>t.name);
+  for(const t of ['shares_list','shares_preview','shares_create','shares_update','shares_revoke','shares_incoming','shares_requests_list','shares_requests_create','shares_requests_decide'])assert.ok(names.includes(t),t+' is listed');
+  assert.match(list.result.tools.find(t=>t.name==='shares_create').description,/confirm: true/);
+  const mine=async()=>(await owner('GET','/api/shares?env=default-workspace')).data.shares;
+  const before=(await mine()).length;
+  // Preview first: nothing is shared.
+  const args={env:'default-workspace',recipientEmail:BO,scope:{kind:'project',project:'studio launch'},permission:'edit'};
+  let r=await tool(rw,'shares_create',args);
+  assert.ok(!r.isError,JSON.stringify(r));assert.deepEqual([r.structuredContent.created,r.structuredContent.confirmed],[false,false]);
+  assert.deepEqual(r.structuredContent.preview.projects.map(p=>p.name),['Studio launch']);
+  for(const p of PRIVATE)assert.ok(!JSON.stringify(r).includes(p),p+' must not be in the preview');
+  assert.equal((await mine()).length,before,'a preview shares nothing');
+  // A read-only key cannot share, through MCP or REST.
+  r=await tool(ro,'shares_create',{...args,confirm:true});assert.ok(r.isError&&/insufficient_scope/.test(r.content[0].text),JSON.stringify(r));
+  assert.equal((await v1(ro,'POST','/envs/default-workspace/shares',{...args,confirm:true})).status,403);
+  assert.equal((await mine()).length,before);
+  // confirm: true shares it, under the key's name.
+  r=await tool(rw,'shares_create',{...args,confirm:true});
+  assert.ok(!r.isError&&r.structuredContent.created,JSON.stringify(r));
+  const s=r.structuredContent.share;assert.deepEqual([s.actor,s.createdBy,s.permission,s.scope],['Laptop agent',OWNER,'edit',{kind:'project',projectId:'p-cb'}]);
+  assert.equal((await mine()).find(x=>x.id===s.id)?.actor,'Laptop agent','Settings › Sharing gets the key name');
+  r=await tool(ro,'shares_revoke',{share:s.id});assert.ok(r.isError,'a read-only key cannot revoke');
+  r=await tool(ro,'shares_update',{share:s.id,permission:'view'});assert.ok(r.isError,'or change it');
+  r=await tool(ro,'shares_list',{env:'default-workspace'});assert.ok(!r.isError&&r.structuredContent.shares.some(x=>x.id===s.id),'but can list it');
+  // Bo adds it to his environment. His key cannot share the linked project on; it asks the owner instead.
+  assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
+  const bw=await key(bo,'Bo agent',boEnv,['read','write']),br=await key(bo,'Bo reader',boEnv,['read']);
+  r=await v1(bw,'POST',`/envs/${boEnv}/shares`,{recipientEmail:KIM,scope:{kind:'project',project:'Studio launch'},permission:'view',confirm:true});
+  assert.deepEqual([r.status,r.data.code],[400,'share_linked'],JSON.stringify(r.data));
+  r=await tool(bw,'shares_create',{env:boEnv,recipientEmail:KIM,scope:{kind:'nodes',nodes:[`sh.${s.id}.campaign`]}});
+  assert.ok(r.isError&&/share_linked/.test(r.content[0].text),JSON.stringify(r));
+  assert.equal((await v1(bw,'GET','/envs/default-workspace/shares')).status,404,"Bo's key cannot list the owner's shares");
+  r=await v1(bw,'GET','/shares/incoming');assert.deepEqual(r.data.shares.find(x=>x.id===s.id)?.envs,[boEnv]);
+  assert.equal((await v1(br,'POST',`/shares/${s.id}/requests`,{toEmail:KIM})).status,403,'a read-only key cannot ask');
+  r=await tool(bw,'shares_requests_create',{share:s.id,toEmail:KIM,permission:'comment',note:'Kim helps with the launch'});
+  assert.ok(!r.isError,JSON.stringify(r));const rid=r.structuredContent.request.id;
+  // The owner approves by key, at view.
+  r=await tool(rw,'shares_requests_list',{});assert.ok(r.structuredContent.requests.some(x=>x.id===rid));
+  assert.ok((await tool(ro,'shares_requests_decide',{request:rid,approve:true})).isError,'a read-only key cannot approve');
+  r=await tool(rw,'shares_requests_decide',{request:rid,approve:true,permission:'view'});
+  assert.ok(!r.isError,JSON.stringify(r));const k=r.structuredContent.share;
+  assert.deepEqual([k.recipientEmail,k.permission,k.via,k.actor],[KIM,'view',rid,'Laptop agent']);
+  assert.ok((await kim('GET','/api/shares/incoming')).data.shares.some(x=>x.id===k.id),'Kim has it');
+  // Revoke both by key: Bo's linked copies go.
+  assert.equal((await v1(rw,'DELETE',`/shares/${k.id}`)).status,200);
+  r=await tool(rw,'shares_revoke',{share:s.id});assert.ok(!r.isError&&r.structuredContent.revoked,JSON.stringify(r));
+  assert.ok(!JSON.stringify((await bo('GET','/api/workspace?env='+boEnv)).data.data).includes(`sh.${s.id}.`),"nothing of the share is left in Bo's environment");
+  assert.equal((await mine()).length,before);
 });
 
 // Cards #61 and #63 on the real server: members as assignees, stale copies, and conflicts both ways.
@@ -274,7 +408,7 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'nodes',nodeIds:['bo','campaign']},permission:'edit'})).data.share;
   assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
   const L=id=>`sh.${s.id}.${id}`,card=d=>d.devops.cards.find(c=>c.id===L('k-ad')),home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data;
-  const save=async(r,d)=>{const x=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,fieldBase:fieldBase(r.data.data,d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
+  const save=async(r,d)=>{const x=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:fieldBase(r.data.data,d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
 
   // Bo sees in-scope people and the share's members; Cleo (outside the scope) stays hidden.
   let r=await bo('GET','/api/workspace?env='+boEnv);
@@ -323,5 +457,243 @@ test('shared cards: members can be assigned, stale copies never overwrite, and t
   const hist=(await bo('GET',`/api/shares/${s.id}/history?kind=card&id=k-ad`)).data.history;
   assert.ok(hist.some(e=>e.field==='description'&&e.by===OWNER&&e.new==='Owner notes'),"the owner's edits are in the share's history too");
   assert.ok(hist.every(e=>e.over===undefined),'who lost is not part of the history a recipient reads');
+
+  // The same card through Bo's API key: allowed fields reach the owner; a card he may only see is not deleted.
+  const key=(await bo('POST','/api/keys',{name:'bo-cards',env:boEnv,scopes:['read','write']})).data.key;
+  const v1=(method,path,b)=>fetch(BASE+'/api/v1/envs/'+boEnv+path,{method,headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:b&&JSON.stringify(b)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  let x=await v1('GET','/cards?q=Ad%20copy');assert.ok(x.data.items.some(c=>c.id===L('k-ad')),JSON.stringify(x.data));
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{title:'Ad copy v2',points:3});assert.equal(x.status,200,JSON.stringify(x.data));
+  x=await v1('POST','/cards/'+encodeURIComponent(L('k-ad'))+'/move',{column:'doing'});assert.equal(x.status,200,JSON.stringify(x.data));
+  h=await home();const k=h.data.devops.cards.find(c=>c.id==='k-ad');
+  assert.deepEqual([k.title,k.points,k.column],['Ad copy v2',3,'doing'],'API edits to a shared card reach the owner');
+  assert.ok(k.assignees.some(a=>a.node==='cleo'),"the owner's hidden assignee stays");
+  // Members by email through the API: the owner (a member, whose person card is outside the scope) is stored as their card.
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{assignees:[{node:L('bo'),role:'developer'},{node:OWNER,role:'tester'}]});
+  assert.equal(x.status,200,JSON.stringify(x.data));
+  assert.deepEqual(x.data.card.assignees,[{node:L('bo'),role:'developer'},{node:'@'+OWNER,role:'tester'}]);
+  h=await home();assert.deepEqual(h.data.devops.cards.find(c=>c.id==='k-ad').assignees.map(a=>a.node).sort(),['bo','cleo','me']);
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{assignees:[{node:KIM,role:'tester'}]});
+  assert.equal(x.status,400,'someone who is not a member: '+JSON.stringify(x.data));
+  assert.equal((await v1('POST','/cards',{title:'Bo private',assignees:[{node:OWNER}]})).status,400,"a member is not assignable on Bo's own cards");
+  // The owner's key: a recipient without a person card is assignable on the cards shared with them only.
+  {const ok=(await owner('POST','/api/keys',{name:'own-cards',env:'default-workspace',scopes:['read','write']})).data.key;
+    const o1=(method,path,b)=>fetch(BASE+'/api/v1/envs/default-workspace'+path,{method,headers:{authorization:'Bearer '+ok,'content-type':'application/json'},body:b&&JSON.stringify(b)}).then(async y=>({status:y.status,data:await y.json().catch(()=>null)}));
+    let y=await o1('PATCH','/cards/k-ad',{assignees:[{node:'cleo',role:'developer'},{node:BO,role:'tester'}]});
+    assert.equal(y.status,200,JSON.stringify(y.data));assert.ok(y.data.card.assignees.some(a=>a.node==='@'+BO),JSON.stringify(y.data.card.assignees));
+    y=await o1('POST','/cards',{title:'Not shared',assignees:[{node:BO}]});assert.equal(y.status,400,'not on a card that is not shared with them');
+    y=await o1('GET','/cards?assignee='+encodeURIComponent(BO));assert.deepEqual(y.data.items.map(c=>c.id),['k-ad'],JSON.stringify(y.data));}
+  assert.equal((await v1('POST','/projects',{name:'Bo own project'})).status,201);
+  x=await v1('PATCH','/cards/'+encodeURIComponent(L('k-ad')),{project:'Bo own project'});
+  assert.equal(x.status,403,'a shared card keeps its project: '+JSON.stringify(x.data));
   await owner('DELETE',`/api/shares/${s.id}`);
+});
+
+// Nov 2026: a recipient's browser held a copy of a whole-environment share that was older than what it
+// had read, and its save put old columns, points, due dates and descriptions back on 43 of the owner's
+// cards. Only the fields the recipient changed (sharedEdits) may reach the owner.
+test('a stale copy of shared cards never reverts the owner; real edits and conflicts still go through',async()=>{
+  const {fieldBase}=await import('../public/sync-core.js');
+  const now=new Date().toISOString(),K=n=>`k-st${n}`;
+  const blank=n=>({id:K(n),number:200+n,title:'Stale test '+n,description:'',column:'requests',project:'',labels:[],points:null,actual:null,due:'',assignees:[],checklist:[],links:[],item:'',created:now,updated:now,moved:now});
+  let a=(await owner('GET','/api/workspace?env=default-workspace')).data;
+  a.data.devops={...a.data.devops,cards:[...a.data.devops.cards,...Array.from({length:24},(_,i)=>blank(i))]};
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:a.rev,data:a.data})).status,200);
+  const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:BO,scope:{kind:'environment'},permission:'edit'})).data.share;
+  assert.equal((await bo('POST',`/api/shares/${s.id}/attach`,{env:boEnv})).status,200);
+  const L=id=>`sh.${s.id}.${id}`,home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data;
+  const own=async n=>(await home()).data.devops.cards.find(c=>c.id===K(n));
+
+  // Bo's browser reads the cards at rev N.
+  const old=(await bo('GET','/api/workspace?env='+boEnv)).data;
+  // The owner (or an agent) moves them on: done, points, a due date, a new description.
+  a=await home();
+  for(const c of a.data.devops.cards)if(c.id.startsWith('k-st')){c.column='done';c.points=3;c.actual=2;c.due='2026-12-01';c.description='Agent notes'}
+  assert.equal((await owner('PUT','/api/workspace?env=default-workspace',{baseRev:a.rev,data:a.data})).status,200);
+  // Bo's browser reads again, but its stored copy is still the old one and it saves that (what a tab
+  // running the older sync sent: the stale copy, with a fieldBase taken against the newer read).
+  const fresh=(await bo('GET','/api/workspace?env='+boEnv)).data;
+  let r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:fresh.rev,data:old.data,fieldBase:fieldBase(fresh.data,old.data)});
+  assert.equal(r.status,200,JSON.stringify(r.data));
+  let k=await own(3);
+  assert.deepEqual([k.column,k.points,k.actual,k.due,k.description],['done',3,2,'2026-12-01','Agent notes'],'an untouched stale copy changes nothing on the owner');
+  // Nor when the stale copy comes with sharedEdits that list nothing.
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:old.data,sharedEdits:{},fieldBase:fieldBase(fresh.data,old.data)});
+  assert.equal(r.status,200);k=await own(3);assert.equal(k.column,'done');
+  assert.ok(!(await bo('GET',`/api/shares/${s.id}/history?kind=card&id=${K(3)}`)).data.history.some(e=>e.by===BO),'and writes no history');
+
+  // A real edit from that same stale copy: only the field Bo changed is written; the rest stays.
+  let d=structuredClone(old.data);d.devops.cards.find(c=>c.id===L(K(5))).title='Bo renamed';
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:{[L(K(5))]:{title:'Stale test 5'}}}});
+  assert.equal(r.status,200);k=await own(5);
+  assert.deepEqual([k.title,k.column,k.points,k.due,k.description],['Bo renamed','done',3,'2026-12-01','Agent notes']);
+  // Bo changes a field the owner changed since he read it: last write wins, and the owner is told.
+  d=structuredClone(old.data);d.devops.cards.find(c=>c.id===L(K(6))).column='doing';
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:{[L(K(6))]:{column:'requests'}}}});
+  assert.equal(r.status,200);assert.equal((await own(6)).column,'doing');
+  const lost=(await home()).conflicts.find(c=>c.id===K(6)&&c.field==='column');
+  assert.deepEqual(lost&&[lost.by,lost.previous,lost.value],[BO,'done','doing'],'the conflict is recorded for the owner');
+
+  // A save claiming edits on 20 or more shared cards at once is refused (no client edits like that).
+  d=structuredClone(old.data);const many={};
+  for(let i=0;i<24;i++){const c=d.devops.cards.find(x=>x.id===L(K(i)));c.column='blocked';many[c.id]={column:'requests'}}
+  r=await bo('PUT','/api/workspace?env='+boEnv,{baseRev:r.data.rev,data:d,sharedEdits:{card:many}});
+  assert.equal(r.status,200);
+  assert.deepEqual([(await own(10)).column,(await own(6)).column],['done','doing'],'a bulk rewrite of shared cards is refused');
+  await owner('DELETE',`/api/shares/${s.id}`);
+});
+
+// Additions (share.adds): a recipient adds records inside a share; the owner approves them, or they land at once.
+test('additions: off, needs approval, allowed; app saves, the API and MCP; scope limits; approve and deny',async()=>{
+  const {fieldBase,noteEdits,linkedFields}=await import('../public/sync-core.js');
+  const bearer=k=>({authorization:'Bearer '+k,'content-type':'application/json'});
+  const v1=(k,method,path,body)=>fetch(BASE+'/api/v1'+path,{method,headers:bearer(k),body:body&&JSON.stringify(body)}).then(async x=>({status:x.status,data:await x.json().catch(()=>null)}));
+  const mcp=(k,name,args)=>fetch(BASE+'/mcp',{method:'POST',headers:{...bearer(k),accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}).then(x=>x.json());
+  const kimEnv=(await kim('GET','/api/workspace')).data.env;assert.ok(kimEnv&&kimEnv!=='default-workspace'&&kimEnv!==boEnv);
+  const home=async()=>(await owner('GET','/api/workspace?env=default-workspace')).data.data;
+  const mine=async()=>(await kim('GET','/api/workspace?env='+kimEnv)).data;
+  const s=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'edit',adds:'approve'})).data.share;
+  assert.equal(s.adds,'approve');
+  assert.equal((await kim('POST',`/api/shares/${s.id}/attach`,{env:kimEnv})).status,200);
+  const L=id=>`sh.${s.id}.${id}`,SC=L('chart');
+  const card=(id,title,extra={})=>({id,number:50,title,description:'',column:'requests',project:L('p-cb'),labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',created:new Date().toISOString(),updated:new Date().toISOString(),moved:new Date().toISOString(),...extra});
+  const appAdd=async f=>{const r=await kim('GET','/api/workspace?env='+kimEnv),d=structuredClone(r.data.data);f(d);
+    // As the browser saves: with the edits of linked (and pending) records its user made.
+    const x=await kim('PUT','/api/workspace?env='+kimEnv,{baseRev:r.data.rev,data:d,fieldBase:fieldBase(r.data.data,d),sharedEdits:noteEdits({},linkedFields(r.data.data),d)});assert.equal(x.status,200,JSON.stringify(x.data));return x};
+  const kimCard=(d,id)=>d.devops.cards.find(c=>c.id===id);
+
+  // Needs approval, from the app: a card in a shared project and a mind map card on the share's chart.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim1','Kim idea'));d.charts.find(c=>c.id===SC).nodes.push({id:'n-kim1',name:'Kim Node',type:'entity',x:40,y:40})});
+  let h=await home();
+  assert.ok(!h.devops?.cards?.some(c=>c.title==='Kim idea')&&!h.charts[0].nodes.some(n=>n.name==='Kim Node'),'nothing reaches the owner before approval');
+  let k=await mine();
+  assert.ok(kimCard(k.data,L('k-kim1')),'Kim sees her card as a linked copy');assert.ok(!kimCard(k.data,'k-kim1'),'and not as her own');
+  const meta=k.data.shares.find(x=>x.id===s.id);assert.equal(meta.adds,'approve');assert.ok(meta.pending.includes(L('k-kim1'))&&meta.pending.includes(L('n-kim1')),'both are marked pending');
+  let list=(await owner('GET','/api/shares?env=default-workspace')).data;
+  const prop=list.proposals.find(p=>p.proposedBy===KIM);assert.ok(prop,'the owner sees the proposal next to share requests');
+  assert.deepEqual(prop.preview.map(r=>r.title).sort(),['Kim Node','Kim idea']);
+  // Kim renames the pending card: the proposal changes, the owner still has nothing.
+  await appAdd(d=>{kimCard(d,L('k-kim1')).title='Kim better idea'});
+  assert.equal((await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.id===prop.id).records.card[0].title,'Kim better idea');
+  assert.equal((await kim('POST',`/api/share-proposals/${prop.id}`,{approve:true})).status,404,'only the owner decides');
+  let r=await owner('POST',`/api/share-proposals/${prop.id}`,{approve:true});assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal((await owner('POST',`/api/share-proposals/${prop.id}`,{approve:true})).status,409,'decided once');
+  h=await home();
+  const added=h.devops.cards.find(c=>c.id==='k-kim1');assert.equal(added?.title,'Kim better idea');assert.equal(added.project,'p-cb');
+  assert.ok(h.charts[0].nodes.some(n=>n.id==='n-kim1'),"the node is the owner's now");
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim1')),'it flows back as a normal linked copy');assert.ok(!(k.data.shares.find(x=>x.id===s.id).pending||[]).length);
+  assert.ok(k.data.shares.find(x=>x.id===s.id).decided.some(x=>x.id===prop.id&&x.status==='approved'));
+
+  // Deny: the pending copy goes, and Kim is told.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim2','Kim maybe'))});
+  const p2=(await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.proposedBy===KIM);
+  assert.equal((await owner('POST',`/api/share-proposals/${p2.id}`,{approve:false})).data.proposal.status,'denied');
+  k=await mine();assert.ok(!kimCard(k.data,L('k-kim2'))&&!kimCard(k.data,'k-kim2'),'gone from Kim');
+  assert.ok(k.data.shares.find(x=>x.id===s.id).decided.some(x=>x.id===p2.id&&x.status==='denied'&&x.titles.includes('Kim maybe')));
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='Kim maybe'));
+  // A stale copy that still holds the denied card does not propose it again.
+  const stale=structuredClone(k.data);stale.devops.cards.push(card('k-kim2','Kim maybe'));
+  assert.equal((await kim('PUT','/api/workspace?env='+kimEnv,{baseRev:k.rev,data:stale})).status,200);
+  assert.ok(!(await owner('GET','/api/share-proposals')).data.proposals.some(p=>p.proposedBy===KIM),'no new proposal');
+
+  // A card Kim made on her board first and put in the shared project after: proposed then, not recorded as deleted.
+  await appAdd(d=>{d.devops.cards.push(card('k-kim5','Kim later',{project:''}))});
+  assert.ok(kimCard((await mine()).data,'k-kim5'),'her own card first');
+  const moved=await appAdd(d=>{kimCard(d,'k-kim5').project=L('p-cb')});assert.equal(moved.data.removedCards,undefined,'not a deletion');
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim5'))&&k.data.shares.find(x=>x.id===s.id).pending.includes(L('k-kim5')));
+  const p5=(await owner('GET','/api/share-proposals')).data.proposals.find(p=>p.records.card.some(c=>c.id==='k-kim5'));
+  assert.equal((await kim('DELETE',`/api/share-proposals/${p5.id}`)).data.proposal.status,'withdrawn','Kim can take it back');
+  assert.ok(!kimCard((await mine()).data,L('k-kim5')));
+  // Allowed: it lands at once, with history.
+  assert.equal((await owner('PATCH',`/api/shares/${s.id}`,{adds:'direct'})).data.share.adds,'direct');
+  assert.equal((await kim('PATCH',`/api/shares/${s.id}`,{adds:'direct'})).status,404,'the recipient cannot change it');
+  await appAdd(d=>{d.devops.cards.push(card('k-kim3','Kim direct'))});
+  assert.ok((await home()).devops.cards.some(c=>c.id==='k-kim3'),'in the owner data at once');
+  assert.ok((await owner('GET',`/api/shares/${s.id}/history?kind=card&id=k-kim3`)).data.history.some(e=>e.field==='added'&&e.by===KIM));
+  k=await mine();assert.ok(kimCard(k.data,L('k-kim3'))&&!(k.data.shares.find(x=>x.id===s.id).pending||[]).includes(L('k-kim3')));
+
+  // Off: from the app it stays Kim's own card, as before.
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'off'});
+  await appAdd(d=>{d.devops.cards.push(card('k-kim4','Kim private'))});
+  k=await mine();assert.ok(kimCard(k.data,'k-kim4'),'stays her own');assert.ok(!(await home()).devops.cards.some(c=>c.id==='k-kim4'));
+
+  // The API and MCP: 403 under off, 201 pending under approve, 201 plain under direct.
+  const kw=(await kim('POST','/api/keys',{name:'kim-rw',env:kimEnv,scopes:['read','write']})).data.key;
+  const ow=(await owner('POST','/api/keys',{name:'owner-rw',env:'default-workspace',scopes:['read','write']})).data.key;
+  assert.ok(!(await v1(kw,'GET',`/envs/${kimEnv}/deleted-cards`)).data.items.some(e=>e.cardId==='k-kim5'),'a card moved to the owner is not in Recently deleted');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API off',project:'Studio launch'});
+  assert.equal(r.status,403,JSON.stringify(r.data));assert.equal(r.data.code,'share_adds_off');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(SC)}/nodes`,{name:'API off node',type:'entity'});assert.equal(r.status,403);
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'approve'});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API pending',project:L('p-cb')});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,true);assert.ok(r.data.card.id.startsWith(`sh.${s.id}.`),r.data.card.id);
+  const pendingId=r.data.card.id;
+  r=await v1(kw,'PATCH',`/envs/${kimEnv}/cards/${encodeURIComponent(pendingId)}`,{description:'More detail'});assert.equal(r.status,200,JSON.stringify(r.data));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API explicit',share:s.id});assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,true);
+  r=await v1(ow,'GET','/envs/default-workspace/proposals');assert.equal(r.status,200,JSON.stringify(r.data));
+  const apiProps=r.data.items.filter(p=>p.role==='owner'&&p.proposedBy===KIM);assert.equal(apiProps.length,2);
+  const pend=apiProps.find(p=>p.preview.some(x=>x.title==='API pending'));assert.equal(pend.records.card[0].description,'More detail');
+  assert.equal((await v1(kw,'GET',`/envs/${kimEnv}/proposals`)).data.items.filter(p=>p.role==='proposer').length,2,'Kim follows her own');
+  assert.equal((await v1(kw,'POST',`/envs/${kimEnv}/proposals/${pend.id}/approve`)).status,404,'Kim cannot approve');
+  let m=await mcp(ow,'proposals_approve',{env:'default-workspace',proposal:pend.id});assert.ok(!m.result.isError,JSON.stringify(m).slice(0,400));
+  assert.ok((await home()).devops.cards.some(c=>c.title==='API pending'&&c.description==='More detail'));
+  m=await mcp(ow,'proposals_deny',{env:'default-workspace',proposal:apiProps.find(p=>p!==pend).id});assert.ok(!m.result.isError,JSON.stringify(m).slice(0,400));
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='API explicit'));
+  m=await mcp(kw,'cards_create',{env:kimEnv,title:'MCP pending',project:L('p-cb')});
+  assert.ok(!m.result.isError&&JSON.stringify(m.result).includes('"pending":true'),JSON.stringify(m).slice(0,400));
+  await owner('PATCH',`/api/shares/${s.id}`,{adds:'direct'});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API direct',project:L('p-cb')});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.pending,undefined);assert.ok(r.data.card.id.startsWith(`sh.${s.id}.`));
+  const direct=(await home()).devops.cards.find(c=>c.title==='API direct');assert.ok(direct);
+  assert.equal(r.data.card.number,direct.number,"the result carries the owner's #number, not a provisional local one");
+  r=await v1(kw,'PATCH',`/envs/${kimEnv}/cards/${r.data.card.number}`,{description:'By number'});assert.equal(r.status,200,'and the card is found by that number');
+  // Kim's own person card cannot be assigned to a shared card: its owner would never see it (it used to be dropped on sync).
+  const kimChart=(await v1(kw,'GET',`/envs/${kimEnv}/charts`)).data.items.find(c=>!c.id.startsWith('sh.'));
+  const own=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(kimChart.id)}/nodes`,{name:'Kim Own Person',type:'person'});assert.equal(own.status,201,JSON.stringify(own.data));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API own assignee',project:L('p-cb'),assignees:[{node:own.data.node.id}]});
+  assert.equal(r.status,400,JSON.stringify(r.data));assert.equal(r.data.code,'person_not_in_share');
+  assert.ok(!(await home()).devops.cards.some(c=>c.title==='API own assignee'),'nothing is created');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API share assignee',project:L('p-cb'),assignees:[{node:L('bo')}]});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.deepEqual(r.data.card.assignees.map(a=>a.node),[L('bo')]);
+  assert.deepEqual((await home()).devops.cards.find(c=>c.title==='API share assignee').assignees.map(a=>a.node),['bo'],'and it reaches the owner');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'API own card',assignees:[{node:own.data.node.id}]});assert.equal(r.status,201,'her own cards still take her own people');
+  r=await v1(kw,'POST',`/envs/${kimEnv}/charts/${encodeURIComponent(SC)}/edges`,{from:L('marsh'),to:L('labs'),type:'group'});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.ok((await home()).charts[0].edges.some(e=>e.from==='marsh'&&e.to==='labs'),'an edge between shared cards');
+  await owner('DELETE',`/api/shares/${s.id}`);
+
+  // Scope limits: a project share holds cards and items of that project, nothing else.
+  const ps=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'project',projectId:'p-cb'},permission:'edit',adds:'direct'})).data.share;
+  await kim('POST',`/api/shares/${ps.id}/attach`,{env:kimEnv});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/items`,{title:'Project date',projects:[`sh.${ps.id}.p-cb`],start:'2026-12-09'});
+  assert.equal(r.status,201,JSON.stringify(r.data));assert.ok((await home()).timeline.some(i=>i.title==='Project date'&&i.projects.includes('p-cb')));
+  r=await v1(kw,'POST',`/envs/${kimEnv}/projects`,{name:'Not in this share',share:ps.id});
+  assert.equal(r.status,409,JSON.stringify(r.data));assert.equal(r.data.code,'share_add_out_of_scope');
+  await owner('DELETE',`/api/shares/${ps.id}`);
+  // View and comment shares never add, whatever was asked.
+  const vs=(await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'comment',adds:'direct'})).data.share;
+  assert.equal(vs.adds,'off');
+  await kim('POST',`/api/shares/${vs.id}/attach`,{env:kimEnv});
+  r=await v1(kw,'POST',`/envs/${kimEnv}/cards`,{title:'Comment only',project:`sh.${vs.id}.p-cb`});assert.equal(r.status,403);
+  await owner('DELETE',`/api/shares/${vs.id}`);
+  // A recipient still cannot share what is shared with them.
+  assert.equal((await kim('POST','/api/shares',{env:kimEnv,recipientEmail:BO,scope:{kind:'nodes',nodeIds:[L('marsh')]}})).status,400);
+});
+
+test('only office members can read history, including the active recipient of an opened environment',async()=>{
+  const today=new Date().toISOString().slice(0,10),suffix='/history?day='+today+'&tz=UTC';
+  const canonical='/api/office/default-workspace'+suffix;
+  assert.equal((await agent()('GET',canonical)).status,401);
+  assert.equal((await owner('GET',canonical)).status,200);
+  assert.equal((await kim('GET',canonical)).status,404);
+  const r=await owner('POST','/api/shares',{env:'default-workspace',recipientEmail:KIM,scope:{kind:'environment'},permission:'view'});
+  assert.equal(r.status,200,JSON.stringify(r.data));
+  const id=r.data.share.id,virtual='/api/office/share-'+id+suffix;
+  try{
+    const direct=await kim('GET',canonical),opened=await kim('GET',virtual);
+    assert.equal(direct.status,200);assert.equal(opened.status,200);assert.deepEqual(opened.data.events,direct.data.events);
+    assert.equal((await bo('GET',virtual)).status,404);
+  }finally{
+    assert.equal((await owner('DELETE','/api/shares/'+id)).status,200);
+  }
+  assert.equal((await kim('GET',virtual)).status,404);
+  assert.equal((await kim('GET',canonical)).status,404);
 });

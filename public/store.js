@@ -41,10 +41,14 @@ export function cleanNode(n){
   if(email)n.email=email;else delete n.email;
   if(person&&validOpidUser(n.opidUser))n.opidUser=n.opidUser;else delete n.opidUser;
   if(person&&n.opidLinked===true)n.opidLinked=true;else delete n.opidLinked;
+  if(n.onlyMe!==true)delete n.onlyMe;
   return n;
 }
 // A project may sit under a chart card (entity or area) via its node id.
-export function cleanProject(p,i=0){return p&&typeof p.id==='string'&&typeof p.name==='string'?{id:p.id,name:p.name.slice(0,80),color:COLOR.test(p.color)?p.color:PALETTE[i%PALETTE.length],entity:typeof p.entity==='string'?p.entity:''}:null}
+// repos: the code repositories that belong to a project (names, owner/name or git remotes; the 3D office).
+export const REPOS_MAX=20,REPO_MAX=300;
+export const cleanRepos=r=>Array.isArray(r)?[...new Set(r.filter(x=>typeof x==='string').map(x=>x.trim().slice(0,REPO_MAX)).filter(Boolean))].slice(0,REPOS_MAX):[];
+export function cleanProject(p,i=0){if(!p||typeof p.id!=='string'||typeof p.name!=='string')return null;const repos=cleanRepos(p.repos);return {id:p.id,name:p.name.slice(0,80),color:COLOR.test(p.color)?p.color:PALETTE[i%PALETTE.length],entity:typeof p.entity==='string'?p.entity:'',...(repos.length?{repos}:{}),...(p.onlyMe===true?{onlyMe:true}:{})}}
 export function cleanItem(i,projects){
   // start may be empty: an unscheduled (backlog) item that only shows on the Board and List.
   if(!i||typeof i.id!=='string'||typeof i.title!=='string'||!(DATE.test(i.start)||i.start===''))return null;
@@ -76,7 +80,11 @@ function normalize(db){
 
 // fresh: this browser had no saved workspace (sync then takes the server's copy).
 // onSaved: called after every local change (sync.js uploads it); adoptRemote() does not call it.
-export const store={db:null,undo:[],redo:[],fresh:true,onChange(){},onStatus(){},onSaved(){}};
+// lost: this browser could not store its last copy (too big), so it started without one.
+const listeners=new Set();
+export function subscribeWorkspace(listener){listeners.add(listener);return ()=>listeners.delete(listener)}
+export const store={db:null,undo:[],redo:[],fresh:true,lost:false,onChange(){},onStatus(){},onSaved(){}};
+try{store.lost=localStorage.getItem(KEY+'-lost')==='1'}catch{}
 {
   // A fresh browser starts its own private workspace; the server assigns the owner on first save.
   const s=seed();store.db={active:s.id,charts:[s],environment:{id:uid(),name:'My workspace',ownerEmail:'',visibility:'private',members:[]}};
@@ -104,12 +112,28 @@ async function flushBackup(){
   catch{if(!backupPending)backupPending=body;store.onStatus('warn','Saved in browser · disk backup failed, retrying');clearTimeout(backupTimer);backupTimer=setTimeout(flushBackup,5000);backupBusy=false;return}
   backupBusy=false;if(backupPending)flushBackup();
 }
-export function save(opts){saveLocal();store.onSaved(opts)}
+let saveSequence=0;
+export function save(opts){saveSequence++;saveLocal();store.onSaved(opts)}
+// A contextual Undo is valid while its change is still the latest local save.
+export function latestUndo(){
+  const sequence=saveSequence,env=store.db.environment?.id;
+  return ()=>{
+    if(saveSequence!==sequence||store.db.environment?.id!==env||!store.undo.length)return false;
+    step(-1);return true;
+  };
+}
 // Browser storage + disk backup only (no server upload): used when adopting the server's copy.
 function saveLocal(){
   const body=JSON.stringify(store.db);
-  try{localStorage.setItem(KEY,body);store.onStatus('saving','Saved in browser · backing up to disk…')}catch{store.onStatus('warn','Browser save failed · backing up to disk…')}
+  try{localStorage.setItem(KEY,body);localStorage.removeItem(KEY+'-lost');store.onStatus('saving','Saved in browser · backing up to disk…')}
+  catch{
+    // Too big for this browser's storage: the older copy there goes too, or the next start would take it
+    // for this browser's workspace (sync then reads the server's copy instead).
+    try{localStorage.removeItem(KEY);localStorage.setItem(KEY+'-lost','1')}catch{}
+    store.onStatus('warn','Browser save failed · backing up to disk…');
+  }
   backupPending=body;clearTimeout(backupTimer);backupTimer=setTimeout(flushBackup,400);
+  for(const listener of listeners)listener();
 }
 window.addEventListener('pagehide',()=>{if(backupPending)fetch('/api/backups/'+backupId,{method:'PUT',headers:{'Content-Type':'application/json'},body:backupPending,keepalive:true}).catch(()=>{})});
 

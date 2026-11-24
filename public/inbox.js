@@ -1,6 +1,7 @@
 import {store,applyDb,step,PALETTE} from './store.js';
-import {esc,clone} from './ui.js';
+import {esc} from './ui.js';
 import {applyPatch} from './inbox-core.js';
+import {stripCombined,carryCombined} from './combined-core.js';
 import {popIn} from './motion.js';
 
 // Agent inbox (client): on load and every 20 s while the tab is visible, fetch pending patches for this
@@ -22,7 +23,9 @@ export async function poll(){
       if((p.env||'default-workspace')!==env)continue;
       const claim=await fetch(`/api/inbox/${encodeURIComponent(p.id)}/ack`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
       if(!claim.ok)continue;
-      const next=clone(store.db),res=applyPatch(next,p,{palette:PALETTE});
+      // A patch is for this environment's own records: environments combined with it (combined-core.js) are
+      // left out while it applies (their card numbers may repeat this one's) and kept as they were.
+      const own=stripCombined(store.db),res=applyPatch(own,p,{palette:PALETTE}),next=carryCombined(own,store.db);
       if(res.notes.length)console.info(`Inbox ${p.id} (${p.source}):\n`+res.notes.join('\n'));
       if(!res.changed){if(res.notes.length)notify(`${p.source}: nothing new · kept ${res.notes.length} of your edit${res.notes.length===1?'':'s'}`);continue}
       applyDb(next);

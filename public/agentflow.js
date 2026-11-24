@@ -1,16 +1,20 @@
 import {icon,makerIcon} from './icons.js';
-import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed} from './ui.js';
+import {$,esc,ib,hint,prop,choice,pickerButton,openPicker,pickerOpen,safeImg,personPhoto,personAvatar,photoImg,sessionPhotoNamed,sessionPhoto} from './ui.js';
+import {currentEnv,isOpenedEnv,listEnvironments,listSharedEnvironments,switchEnvironment} from './sync.js';
+import {linkOf,canEdit} from './share.js';
+import {sessionUser} from './account.js';
 import {panel,flipList,popIn,popOut} from './motion.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {ask,detailModal} from './modal.js';
+import {ask,detailModal,paintDetail} from './modal.js';
 import {openMenu,menuOpen} from './menu.js';
-import {store,change,checkpoint,commit,save} from './store.js';
+import {store,change,checkpoint,commit,save,subscribeWorkspace} from './store.js';
 import {clone} from './ui.js';
 import {AGENT_KINDS,AGENT_STATUS,WORKFLOW_STATUS,TRIGGERS,TRIGGER_HINT,newAgent,newWorkflow,newStep,agentOf,reportsOf,rootsOf,setupSteps,JOBS_STALE,descendants,chainOf,
   removeAgent,full,LIMITS,workflowsFor,workFor,openWork,filterAgents,filterWorkflows,agentBrief,workflowBrief,starterAgentflow,peopleOf,personNamed,sameName,
   canReportTo,CARD,STACK,stacked,reportLines,pathOf,positions,placed,pin,unpin,workQueue,duplicateWorkflow,runnerOf,runLine,liveProblem,modelChoices,modelMaker,
   jobGroups,jobOf,promotedAgent,promoteJob,JOB_STATUS,JOB_SOURCES,JOB_ORIGINS,JOB_TRIGGERS,cardH} from './agentflow-core.js';
 import {colorOf,initials,memberColor} from './devops-core.js';
+import {badgeHtml} from './office-alerts.js';
 
 // AgentFlow tab: an org chart of agents (AI agents, humans, teams) and the workflows they run,
 // tied to Flow projects, DevOps cards and timeline items. Data rules live in agentflow-core.js;
@@ -40,7 +44,9 @@ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(l
 const statusPill=(s,names)=>{const [bg,fg]=colorOf(STATUS_TONE[s]||'slate');return `<span class="pill" style="background:${bg};color:${fg}">${esc(names[s]||s)}</span>`};
 const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 
+let officeOverlays,officeModule,paintLinkPrompt;
 export function mount(opts){
+  officeOverlays=opts.officeOverlays;paintLinkPrompt=opts.paintLinkPrompt;
   rerender=opts.rerender;openCard=opts.openCard||openCard;openItem=opts.openItem||openItem;openQueue=opts.openQueue||openQueue;toast=opts.toast||toast;
   const el=$('#agentflowView');
   el.addEventListener('click',e=>{
@@ -103,6 +109,7 @@ function toolbar(){
     <input id="af-q" type="search" placeholder="Search agents and workflows" value="${esc(ui.q)}" aria-label="Search agents and workflows">
     ${ui.q?`<button type="button" class="txt" data-af="clear">Clear</button>`:''}
     <button type="button" class="txt" data-af="addWorkflow" data-tip="New workflow" data-key="${esc(keyLabel('agentflow.addWorkflow'))}">${icon('plus',13)}Workflow</button>
+    <button type="button" class="txt af-office" data-af="office" data-tip="3D office" aria-label="3D office">${icon('cube3d',14)}3D${badgeHtml()}</button>
     ${ib('plus','New agent',{key:keyLabel('agentflow.addAgent'),cls:'primary',attrs:'data-af="addAgent"'})}</div>`;
 }
 // A person's photo: their own, or the signed-in account's when the card is theirs (ui.js personPhoto).
@@ -536,17 +543,62 @@ function action(name,b){
     goAgent(){const id=b.dataset.id;if(agent(id)){if(b.closest('.af-jpop'))jobPop=null;centerOn=id;select('agent',id)}},
     addAgent:()=>addAgent(),
     addWorkflow:()=>addWorkflow(),
-    starter(){if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
+    office:()=>openOffice(),
+    starter(){if(sharedEnv()){toast(NO_ADD,true);return}if(af().agents.length+4>LIMITS.agents||af().workflows.length+1>LIMITS.workflows){toast('This workspace is at its AgentFlow limit.',true);return}fitted=false;change(()=>{const lead=starterAgentflow(af());selected={type:'agent',id:lead.id}})},
   })[name]?.();
 }
+// The 3D office (office.js, loaded on first use with Three.js): this environment's, or the office of an
+// environment whose share is placed here. link: {focus} when it opens from the #office hash (app.js):
+// focus is the agent to show, and closing it takes the address back to #agentflow.
+export const openOfficeLink=({focus='',cardId}={})=>openOffice({focus,cardId,link:true});
+export const officeHistory=state=>officeModule?.officeHistory(state);
+export const officeOpen=()=>officeModule?.officeOpen();
+export const closeOffice=()=>officeModule?.closeOffice();
+async function openOffice(link={}){
+  if(!document.querySelector('link[data-office]')){const l=document.createElement('link');l.rel='stylesheet';l.href='/office.css';l.dataset.office='';document.head.append(l)}
+  let m;try{m=officeModule=await import('./office.js')}catch{toast('Could not load the 3D office. Try again.',true);return}
+  // An environment shared with you (docs/sharing.md): its office is the owner environment's office, the one
+  // everyone it is shared with meets in. Its agents there carry the owner's ids; here they are linked (sh.<share>.<id>).
+  const o=db().opened,L=id=>o&&id?`sh.${o.shareId}.${id}`:id,unL=id=>o&&typeof id==='string'&&id.startsWith(`sh.${o.shareId}.`)?id.slice(`sh.${o.shareId}.`.length):id;
+  const env=o?.ownerEnv||currentEnv()||db().environment?.id||'default-workspace',seen=new Set([env]);
+  const offices=[{id:env,name:o?`${o.ownerName||o.ownerEmail}'s office`:db().environment?.name||'This environment'},...(db().shares||[]).filter(s=>s.ownerEnv&&!seen.has(s.ownerEnv)&&seen.add(s.ownerEnv)).map(s=>({id:s.ownerEnv,name:`${s.ownerEnvName||'Shared'} (shared)`}))];
+  // Connecting your agents makes a key for one of your own environments, also from a shared one.
+  const mine=o?(await listEnvironments())[0]:null;
+  // The office you last picked opens; otherwise this environment's own office, unless it has no AgentFlow
+  // agents and a shared office is placed here (a share recipient most likely means the team's office).
+  const KEY='flygon-flow-office:'+env;let pick='';try{pick=localStorage.getItem(KEY)||''}catch{}
+  const first=offices.some(o=>o.id===pick)?pick:af().agents.length?env:offices[1]?.id||env;
+  const u=sessionUser();
+  m.openOffice({env:link.cardId?env:first,current:env,remember:id=>{try{localStorage.setItem(KEY,id)}catch{}},offices,me:{name:u?.name||'',image:sessionPhoto()||u?.image||''},toast,
+    agentflow:()=>o?af().agents.map(a=>({...a,id:unL(a.id),reportsTo:unL(a.reportsTo)})):af().agents,
+    ...(o&&mine?{keyEnv:mine.id,keyEnvName:mine.name}:{}),
+    overlays:officeOverlays,agentRecordId:L,cardId:link.cardId,openEnv:openSharedBoard,paintLinkPrompt,
+    // The office's world (Office or Yacht) is this environment's to choose; a shared one shows its owner's choice.
+    ...(o?{}:{world:()=>af().office?.world,setWorld:world=>change(()=>{if(world==='classic')delete af().office;else af().office={world}})}),
+    ...link.link?{focus:link.focus,onClose:()=>{if(/^#office(\/|$)/.test(location.hash))history.replaceState(null,'','#agentflow')}}:{}});
+}
+// The office's main board is the DevOps board of the environment you have open (office-devops.js). Visiting a
+// shared office, its own board is that environment opened as shared with you (share-<id>, docs/sharing.md):
+// the app switches to it as the environment menu does, and the office opens again there.
+async function openSharedBoard(ownerEnv){
+  const shares=(db().shares||[]).filter(s=>s.ownerEnv===ownerEnv),opened=(await listSharedEnvironments()).find(x=>shares.some(s=>s.id===x.shareId));
+  if(!opened){toast('That environment is not shared with you as a whole, so its board opens only for its people. Its cards shared with you are on your board.',true);return}
+  officeModule?.closeOffice();
+  try{await switchEnvironment(opened.id)}catch(e){toast(e.message,true);return}
+  toast('Opened '+(db().environment?.name||opened.name||'that environment'));
+  openOffice();
+}
 // A new agent goes under the selected one (if an agent is selected), or where it was dropped (at).
+const NO_ADD='Agents and workflows in a shared environment are added by its owner.';
 function addAgent(reportsTo=selected?.type==='agent'?selected.id:'',at=null){
+  if(sharedEnv()){toast(NO_ADD,true);return}
   const no=full(af(),'agents');if(no){toast(no,true);return}
   if(ui.view!=='org'){ui.view='org';keepUi()}
   change(()=>{if(at)pin(af());const a=newAgent(af(),{reportsTo,...(at||{})});selected={type:'agent',id:a.id}});
   focusName();
 }
 function addWorkflow(first=selected?.type==='agent'?selected.id:''){
+  if(sharedEnv()){toast(NO_ADD,true);return}
   const no=full(af(),'workflows');if(no){toast(no,true);return}
   ui.view='workflows';keepUi();
   change(()=>{const w=newWorkflow(af(),{steps:[newStep({agent:first})]});selected={type:'workflow',id:w.id}});
@@ -555,6 +607,7 @@ function addWorkflow(first=selected?.type==='agent'?selected.id:''){
 const focusName=()=>requestAnimationFrame(()=>{const i=$('#af-name');i?.focus();i?.select()});
 async function removeSelected(){
   const x=sel();if(!x)return;
+  if(linkOf(x)&&!linkOf(x).foreign){toast(`Only ${linkOf(x).ownerEmail||'its owner'} can delete it.`,true);return}
   if(selected.type==='agent'){
     const reps=reportsOf(af(),x.id).length,flows=workflowsFor(af(),x.id).length;
     const more=[reps&&`Its ${plural(reps,'direct report')} will report to ${agent(x.reportsTo)?.name||'nobody'}.`,flows&&`Its steps in ${plural(flows,'workflow')} become unassigned.`].filter(Boolean);
@@ -710,17 +763,56 @@ function toolsHtml(a){
   return `<div class="af-ph af-ph-tools"><label for="af-new-tools">${icon('wrench',12)}Tools</label>${hint(they?'What they may use':'What it may use','Tools')}</div>
     <div class="af-chips">${a.tools.map((v,i)=>chipHtml('tools','tool',v,i)).join('')}${newChip('tools','tool',a.tools.length?'Add…':'Add tool, then Enter')}</div>`;
 }
-const projectItems=()=>db().projects.map(p=>({value:p.id,label:p.name,color:p.color}));
-const cardItems=()=>db().devops.cards.map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
-const itemItems=()=>[...db().timeline].sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
+// AgentFlow is this environment's own: records of a combined environment (ids cx.*, combined-core.js) are not offered.
+const own=x=>!x.id.startsWith('cx.');
+const projectItems=()=>db().projects.filter(own).map(p=>({value:p.id,label:p.name,color:p.color}));
+const cardItems=()=>db().devops.cards.filter(own).map(c=>({value:c.id,label:`#${c.number} ${c.title}`,sub:db().devops.columns.find(x=>x.id===c.column)?.name||c.column,color:project(c.project)?.color}));
+const itemItems=()=>db().timeline.filter(own).sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(i=>({value:i.id,label:i.title,sub:`${i.kind}${i.start?' · '+i.start:''}`,color:project(i.projects[0])?.color}));
 const PICKERS={'af-projects':['projects',projectItems,'Projects'],'af-cards':['cards',cardItems,'Cards'],'af-items':['items',itemItems,'Timeline items']};
 const linkCount=x=>x.projects.length+x.cards.length+x.items.length;
-function linksHtml(x){
+function linksHtml(x,{readOnly=false}={}){
   const w=workFor(db(),x);
   const cards=w.cards.map(c=>`<li><button type="button" data-af-card="${esc(c.id)}" data-tip="${x.cards.includes(c.id)?'Linked card':'Open card in a linked project'}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(db().devops.columns.find(k=>k.id===c.column)?.name||c.column)}${c.due?' · '+esc(c.due):''}</em></button></li>`).join('');
-  const items=w.items.map(i=>`<li><button type="button" data-af-item="${esc(i.id)}" data-tip="Open in the Timeline">${icon(i.kind==='deadline'?'flag':'gantt',12)}<span>${esc(i.title)}</span><em>${esc(i.start||'unscheduled')}</em></button></li>`).join('');
-  return `<div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>
+  const items=w.items.map(i=>`<li><button type="button" data-af-item="${esc(i.id)}" data-tip="${readOnly?'Open timeline item':'Open in the Timeline'}">${icon(i.kind==='deadline'?'flag':'gantt',12)}<span>${esc(i.title)}</span><em>${esc(i.start||'unscheduled')}</em></button></li>`).join('');
+  return `${readOnly?'':`<div class="af-pk">${pickerButton('af-projects','Projects',projectItems(),x.projects,{cls:'mini wide'})}${pickerButton('af-cards','Cards',cardItems(),x.cards,{cls:'mini wide'})}${pickerButton('af-items','Timeline',itemItems(),x.items,{cls:'mini wide'})}</div>`}
     ${cards||items?`<ul class="links af-links">${cards}${items}</ul>`:`<div class="dc-hint">Nothing linked yet: projects, cards and deadlines.</div>`}`;
+}
+// The office uses the same agent identity and work links, with a read-only summary of the editor tabs.
+export function openAgentModal(id,opts){return agent(id)?openAgentOverlay(id,opts,false):undefined}
+export function openQueueModal(id,opts){return agent(id)?openAgentOverlay(id,opts,true):undefined}
+function openAgentOverlay(id,{host,from,onClose,openCard,openItem,openQueue,leaveForAgent},queue){
+  const m=detailModal({host,from,cls:'office-record-modal',label:queue?'Work queue':'Agent details',
+    onClose(){unsubscribe();onClose?.()},events:{click(e){
+      const b=e.target.closest('button');if(!b)return;
+      if(b.matches('[data-office-close]'))m.close();
+      else if(b.dataset.afCard)openCard(b.dataset.afCard);
+      else if(b.dataset.afItem)openItem(b.dataset.afItem);
+      else if(b.matches('[data-office-queue]'))openQueue(id);
+      else if(b.matches('[data-office-agent-tab]'))leaveForAgent(id);
+    }}});
+  const unsubscribe=subscribeWorkspace(paint);
+  paint();return m;
+  function paint(){
+    if(m.closing)return;
+    const a=agent(id);if(!a){m.close();return}
+    const header=`<div class="ihead cd-h"><span class="k">${icon(queue?'branch':KIND_ICON[a.kind])}</span><strong>${queue?'Work queue':'Agent details'}</strong><span class="sp"></span>${ib('x','Close',{attrs:'data-office-close'})}</div>`;
+    const info=(name,value)=>value?`<div><dt>${name}</dt><dd>${esc(value)}</dd></div>`:'';
+    const list=queue?workQueue(db(),id,{includeSnoozed:true}):[];
+    paintDetail(m,header+`<div class="ibody office-record-body">
+      <div class="af-hero">${avatarHtml(a)}<div><h2>${esc(a.name)}</h2>${a.title?`<p>${esc(a.title)}</p>`:''}</div></div>
+      ${queue?(list.length?`<ul class="links">${list.map(c=>`<li><button type="button" data-af-card="${esc(c.id)}">${icon('branch',12)}<span>#${c.number} ${esc(c.title)}</span><em>${esc(db().devops.columns.find(col=>col.id===c.column)?.name||c.column)}${c.due?' · '+esc(c.due):''}</em></button></li>`).join('')}</ul>`:'<p class="dc-hint">No open cards are delegated to this agent.</p>')
+        :`<dl class="office-agent-fields">
+          ${info('Kind',AGENT_KINDS[a.kind])}${info('Status',AGENT_STATUS[a.status])}${info('Purpose',a.purpose)}${info('Instructions',a.instructions)}
+          ${info('Reports to',agent(a.reportsTo)?.name)}${info('Supervisor',person(a.supervisor)?.name)}
+          ${info('Runner',a.runtime)}${info('Models',modelsOf(a).join(', '))}${info('Schedule',a.schedule)}
+          ${info('Inputs',a.inputs.join(', '))}${info('Outputs',a.outputs.join(', '))}${info('Tools',a.tools.join(', '))}
+          ${info('Projects',a.projects.map(id=>project(id)?.name).filter(Boolean).join(', '))}
+        </dl>
+        <h3>Linked work</h3>${linksHtml(a,{readOnly:true})}
+        <div class="office-record-actions">${a.kind==='agent'?'<button type="button" class="txt" data-office-queue>Open work queue</button>':''}
+          <button type="button" class="txt office-leave-link" data-office-agent-tab>Open in AgentFlow ↗</button></div>`}
+      </div>`,'[data-office-close]');
+  }
 }
 // The candidates for Reports to: not itself and not one of its own reports.
 const managersFor=a=>af().agents.filter(x=>x.id!==a.id&&!descendants(af(),a.id).has(x.id)).sort(byName);
@@ -997,11 +1089,29 @@ function openInstructions(btn){
 }
 // Autosaves like the panel's own fields: same undo step, and the short field and its count follow.
 function setInstructions(a,v){
-  if(!a)return;autosave(a,()=>{a.instructions=v});
+  if(!a||sharedLock(a))return;autosave(a,()=>{a.instructions=v});
   const t=$('#af-instr');if(t&&t.value!==v)t.value=v;
   countInstructions(v);
 }
 const countInstructions=v=>{const c=$('#af-instr-n'),n=lineCount(v);if(c)c.textContent=n?plural(n,'line'):'Empty'};
+// An opened shared environment's agents and workflows (docs/sharing.md, linked ids sh.<share>.<id>): what the share
+// does not let this user change is locked here, and the server refuses it anyway. An edit share changes the design;
+// what runs on the owner's machines (Live, runner, models, Auto, schedule, instructions, tools, kind) stays theirs.
+const OWNER_ONLY_SEL='#af-live,#af-auto,#af-runtime,#af-schedule,#af-instr,#af-new-tools,[data-af-del="tools"],[data-picker="af-runner"],[data-af-models],[data-af-mup],[data-af-mdn],[data-af-mdel],[data-af-kind],[data-afi="delete"],[data-afi="addReport"]';
+const EDIT_SEL='input,textarea,select,[data-picker],[data-af-status],[data-af-trigger],[data-af-add],[data-af-del],[data-step-del],[data-step-up],[data-step-down],[data-afi="addStep"]';
+const OWNER_TEXT=new Set(['schedule','runtime','instructions']);
+function sharedLock(x){
+  const l=x?linkOf(x):null;if(!l||l.foreign)return null;
+  const all=!canEdit(x),who=l.ownerEmail||'its owner';
+  return {all,sel:all?`${EDIT_SEL},${OWNER_ONLY_SEL}`:OWNER_ONLY_SEL,
+    msg:all?`Shared with you by ${who} to ${l.permission==='comment'?'comment on':'view'}: ask them for edit access.`:`Only ${who} can change that: it decides what runs on their machines.`};
+}
+function lockShared(pane,x){
+  const lock=sharedLock(x);if(!lock)return;
+  for(const el of pane.querySelectorAll(lock.sel)){if(el.matches('input,textarea'))el.readOnly=true;el.disabled=true}
+  pane.querySelector('.af-top')?.insertAdjacentHTML('afterbegin',`<p class="af-shared" role="note">${icon('link',12)}<span>${esc(lock.all?lock.msg:`Shared by ${linkOf(x).ownerEmail||'its owner'}. You can change its design and delegate cards; Live, runner, models, schedule, instructions and tools stay theirs.`)}</span></p>`);
+}
+const sharedEnv=()=>isOpenedEnv(currentEnv());
 export function renderInspector(pane){
   const x=sel();
   if(mp&&(!x||x.id!==mp.id))closeModels();
@@ -1009,7 +1119,7 @@ export function renderInspector(pane){
   if(!x)return;
   // Keep focus and caret when the panel is redrawn after a change.
   const a=document.activeElement,had=pane.contains(a),keep=had&&a.id?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null,top=pane.scrollTop;
-  pane.innerHTML=selected.type==='agent'?agentHtml(x):workflowHtml(x);
+  pane.innerHTML=selected.type==='agent'?agentHtml(x):workflowHtml(x);lockShared(pane,x);
   pane.scrollTop=top;
   const f=keep&&document.getElementById(keep.id);
   if(f){f.focus({preventScroll:true});try{if(keep.s!=null)f.setSelectionRange(keep.s,keep.e)}catch{}}
@@ -1036,6 +1146,7 @@ export function inspectorClick(e){
   const box=e.target.closest('.af-chips');if(box&&e.target===box){box.querySelector('input')?.focus();return}
   const b=e.target.closest('button');if(!b)return;
   const x=sel();if(!x)return;
+  const lock=sharedLock(x);if(lock&&b.matches(lock.sel)){toast(lock.msg,true);return}
   if(b.dataset.afTab){showTab(b.dataset.afTab);return}
   if(b.dataset.afSetup){goSetup(b.dataset.afSetup);return}
   if(b.dataset.afJobMore!==undefined){jobOpen=!jobOpen;const box=$('#af-job-more-b');if(box)box.hidden=!jobOpen;b.setAttribute('aria-expanded',jobOpen);return}
@@ -1090,6 +1201,7 @@ export function inspectorInput(e){
   const t=e.target,x=sel(),form=$('#afedit');if(!x||!form)return;
   const key=TEXT[t.id],sa=t.dataset.stepAction,so=t.dataset.stepOutput;
   if(!key&&!sa&&!so)return;
+  const lock=sharedLock(x);if(lock&&(lock.all||OWNER_TEXT.has(key)&&selected.type==='agent'))return;
   if(key==='name'&&!t.value.trim())return;
   autosave(x,()=>{
     if(key)x[key]=key==='name'?t.value.trim():t.value;
@@ -1101,6 +1213,7 @@ export function inspectorInput(e){
 }
 export function inspectorChange(e){
   const t=e.target,x=sel();if(!x)return;
+  const lock=sharedLock(x);if(lock&&(lock.all||t.matches(lock.sel))){rerender();return}
   const set=(k,v)=>change(()=>{x[k]=v;touch(x)});
   if(t.id==='af-live')set('live',t.checked);
   else if(t.id==='af-auto')set('auto',t.checked);

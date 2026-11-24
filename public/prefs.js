@@ -8,12 +8,16 @@ try{Object.assign(prefs,JSON.parse(localStorage.getItem(KEY))||{})}catch{}
 if(!prefs.shortcuts||typeof prefs.shortcuts!=='object')prefs.shortcuts={};
 const cache=()=>{try{localStorage.setItem(KEY,JSON.stringify(prefs))}catch{}};
 let timer=0;
-function push(){
+function writePrefs(){
+  const body=JSON.stringify(prefs);
+  if(body.length<=MAX)fetch('/api/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body,keepalive:true}).catch(()=>{});
+}
+function push(immediate=false){
   clearTimeout(timer);
-  timer=setTimeout(()=>{const body=JSON.stringify(prefs);if(body.length<=MAX)fetch('/api/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body}).catch(()=>{})},300);
+  if(immediate)writePrefs();else timer=setTimeout(writePrefs,300);
 }
 export const getPref=k=>prefs[k];
-export function setPref(k,v){prefs={...prefs,[k]:v};cache();push();for(const f of listeners)f(prefs,k)}
+export function setPref(k,v,{immediate=false}={}){prefs={...prefs,[k]:v};cache();push(immediate);for(const f of listeners)f(prefs,k)}
 export const onPrefs=f=>{listeners.add(f);return ()=>listeners.delete(f)};
 export async function syncPrefs(){
   try{

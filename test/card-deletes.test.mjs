@@ -13,6 +13,9 @@ import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {workspaceStore,droppedCards,deleteEntries,RETAIN_DAYS,SCHEMA} from '../lib/workspaces.mjs';
 import {invoke} from '../lib/registry.mjs';
+import {cardSnapshot,noteCardEdits,cardEditsOf} from '../public/sync-core.js';
+// The card edits a browser sends with a save (public/sync.js): what changed from the copy it read to the one it sends.
+const edits=(from,to)=>cardEditsOf(noteCardEdits(null,cardSnapshot(from),to),to);
 
 const OWNER='owner@example.test',ENV='del-env';
 const card=(id,number,extra={})=>({id,number,title:`Card ${number}`,description:'',column:'requests',project:'',labels:[],points:null,due:'',assignees:[],checklist:[],links:[],item:'',...extra});
@@ -143,10 +146,10 @@ describe('browser saves on a real server',()=>{
     const made=await agentApi('POST',`/api/v1/envs/${E}/cards`,{title:'From an agent',description:'Agent payload'});
     assert.equal(made.status,201);const num=made.data.card.number;
     // The browser pulled the card (so its revision is current), then undo sends the old snapshot.
-    const rev=(await current()).rev;
-    const stale=await browser('PUT','/api/workspace?env='+E,{baseRev:rev-1,data:snap,intent:{deleted:[],undo:true}});
+    const now=await current(),rev=now.rev;
+    const stale=await browser('PUT','/api/workspace?env='+E,{baseRev:rev-1,data:snap,intent:{deleted:[],undo:true},cardEdits:edits(now.data,snap)});
     assert.equal(stale.status,409,'from an older revision: refused and merged in the browser, nothing dropped');
-    const r=await browser('PUT','/api/workspace?env='+E,{baseRev:rev,data:snap,intent:{deleted:[],undo:true}});
+    const r=await browser('PUT','/api/workspace?env='+E,{baseRev:rev,data:snap,intent:{deleted:[],undo:true},cardEdits:edits(now.data,snap)});
     assert.equal(r.status,200);
     assert.deepEqual(r.data.removedCards.map(c=>[c.number,c.title]),[[num,'From an agent']],'the browser is told, to point at Recently deleted');
     // The browser's own session reads the list and restores (the DevOps Recently deleted view).
@@ -166,11 +169,11 @@ describe('browser saves on a real server',()=>{
     let w=await current();
     const d=structuredClone(w.data),gone=d.devops.cards.find(c=>c.title==='Mine');
     d.devops.cards=d.devops.cards.filter(c=>c.id!==gone.id);
-    const r=await browser('PUT','/api/workspace?env='+E,{baseRev:w.rev,data:d,intent:{deleted:[gone.id],undo:false}});
+    const r=await browser('PUT','/api/workspace?env='+E,{baseRev:w.rev,data:d,intent:{deleted:[gone.id],undo:false},cardEdits:edits(w.data,d)});
     assert.equal(r.status,200);assert.equal(r.data.removedCards,undefined,'a deliberate Delete needs no notice');
     w=await current();
     const d2=structuredClone(w.data),agentCard=d2.devops.cards[0];d2.devops.cards=[];
-    assert.equal((await browser('PUT','/api/workspace?env='+E,{baseRev:w.rev,data:d2,intent:{deleted:[],undo:false}})).status,200);
+    assert.equal((await browser('PUT','/api/workspace?env='+E,{baseRev:w.rev,data:d2,intent:{deleted:[],undo:false},cardEdits:edits(w.data,d2)})).status,200);
     // Restored, then dropped by a tab running older code (no intent).
     const again=await browser('POST',`/api/v1/envs/${E}/deleted-cards/${encodeURIComponent(agentCard.id)}/restore`,{});
     assert.equal(again.status,200,JSON.stringify(again.data));

@@ -73,10 +73,10 @@ dialog.card-modal,dialog.item-modal{overflow:hidden}
 .tag button::after{content:'';position:absolute;inset:-7px}
 
 /* Projects panel */
-#pedit .prow{margin:3px 0;gap:4px 6px}
-#pedit .prow:has(.under){padding-bottom:3px;border-bottom:1px solid var(--line)}
-#pedit .prow .sel-btn{margin:-2px 0 0 28px}
-#pedit .prow em{color:var(--muted)}
+.projects-editor .prow{margin:3px 0;gap:4px 6px}
+.projects-editor .prow:has(.under){padding-bottom:3px;border-bottom:1px solid var(--line)}
+.projects-editor .prow .sel-btn{margin:-2px 0 0 28px}
+.projects-editor .prow em{color:var(--muted)}
 
 /* MindMap inspector */
 #edit .prop{margin-top:6px}
@@ -87,3 +87,6 @@ dialog.card-modal,dialog.item-modal{overflow:hidden}
 .pp-prop .pp-acts .ib{width:26px;height:26px}
 #edit .pct{flex:1}
 #edit .pct input{width:100%;height:26px}
+.ibody .privacy-toggle{display:flex;align-items:center;gap:6px}
+.ibody .privacy-toggle input[type=checkbox]{flex:none;width:auto;height:auto}
+.projects-editor .privacy-toggle{flex-basis:100%;margin:0 0 4px 28px}

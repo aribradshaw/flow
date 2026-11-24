@@ -8,7 +8,7 @@ import {popIn,popOut} from './motion.js';
 //         Shift+F10, opens under the focused element), an Element (opens under it) or {x, y}.
 //     align: 'end' lines a menu opened under an Element up with its right edge; onClose() runs when it closes.
 //     items: [{label, icon, key, danger, disabled, checked, run(), items:[…]}] and '-' for a separator.
-//       key: a shortcut label to show (keyLabel(id)); checked: true/false adds a check column;
+//       key: a shortcut label to show (keyLabel(id)); note: quiet text on the right (e.g. a resolved time); checked: true/false adds a check column;
 //       items: a submenu (one level), opened by hover, click, Enter or →.
 //   closeMenu(); menuOpen()
 // Keys: ↑/↓ (skipping disabled items), Home/End, Enter/Space, → opens a submenu, ← or Esc closes it,
@@ -24,7 +24,7 @@ function panelHtml(items,label){
   const icons=items.some(it=>it!=='-'&&it.icon);
   return `<div class="cm-panel" role="menu" aria-label="${esc(label||'Menu')}">${items.map((it,i)=>it==='-'?'<div class="cm-sep" role="separator"></div>'
     :`<div class="cm-item${it.danger?' danger':''}" role="${checks&&typeof it.checked==='boolean'?'menuitemcheckbox':'menuitem'}" data-i="${i}" tabindex="-1"${it.disabled?' aria-disabled="true"':''}${it.items?' aria-haspopup="menu" aria-expanded="false"':''}${typeof it.checked==='boolean'?` aria-checked="${it.checked}"`:''}>
-      ${checks?`<span class="cm-chk">${it.checked?icon('check',12):''}</span>`:''}${icons?`<span class="cm-ic">${it.icon?icon(it.icon,14):''}</span>`:''}<span class="cm-l">${esc(it.label)}</span>${it.key?`<kbd>${esc(it.key)}</kbd>`:''}${it.items?`<span class="cm-sub">${icon('chevR',12)}</span>`:''}</div>`).join('')}</div>`;
+      ${checks?`<span class="cm-chk">${it.checked?icon('check',12):''}</span>`:''}${icons?`<span class="cm-ic">${it.icon?icon(it.icon,14):''}</span>`:''}<span class="cm-l">${esc(it.label)}</span>${it.note?`<span class="cm-note">${esc(it.note)}</span>`:''}${it.key?`<kbd>${esc(it.key)}</kbd>`:''}${it.items?`<span class="cm-sub">${icon('chevR',12)}</span>`:''}</div>`).join('')}</div>`;
 }
 function place(el,x,y,flipFrom){
   const W=el.offsetWidth,H=el.offsetHeight;
@@ -51,7 +51,7 @@ export function openMenu(at,items,{label='Menu',align='',onClose=null}={}){
   }else if(at?.type){x=at.clientX;y=at.clientY}else{x=at.x;y=at.y}
   at?.preventDefault?.();
   const el=document.createElement('div');el.className='cm';el.innerHTML=panelHtml(items,label);
-  (document.querySelector('dialog[open]')||document.body).append(el);
+  (at.closest?.('dialog[open]')||document.body).append(el);
   if(align==='end'&&at instanceof Element)x=at.getBoundingClientRect().right-el.offsetWidth;
   place(el,x,y);popIn(el);
   const m={el,items,back,sub:null,active:-1,onClose};

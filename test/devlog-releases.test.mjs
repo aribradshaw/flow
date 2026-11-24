@@ -8,6 +8,7 @@ import {spawn} from 'node:child_process';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import net from 'node:net';
 import {fileURLToPath} from 'node:url';
 import {createMemoryReleaseStore} from '@aribradshaw/devlog/automation';
 import {TABLE,deployToRecord,readHistory,baselineOf,recordRelease,releaseStore,devlogResponse,describeResult} from '../lib/devlog-releases.mjs';
@@ -138,8 +139,9 @@ describe('server without a database',()=>{
 let EmbeddedPostgres=null;try{({default:EmbeddedPostgres}=await import('embedded-postgres'))}catch{}
 describe('postgres',{skip:!EmbeddedPostgres&&'embedded-postgres is not installed'},()=>{
   let pg,pool,dir;
-  const port=55900+Math.floor(Math.random()*400);
   before(async()=>{
+    // A port the OS says is free right now, so the test never collides with a local service.
+    const port=await new Promise((ok,no)=>{const s=net.createServer().once('error',no);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>ok(p))})});
     dir=mkdtempSync(join(tmpdir(),'ff-devlog-pg-'));
     pg=new EmbeddedPostgres({databaseDir:join(dir,'pg'),user:'flow',password:'flow-test',port,persistent:false,onLog:()=>{},onError:()=>{}});
     await pg.initialise();await pg.start();await pg.createDatabase('flow');

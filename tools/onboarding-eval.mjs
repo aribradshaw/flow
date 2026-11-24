@@ -19,6 +19,8 @@
 //   deadEnds    error screens with no control that changes the outcome; an identical-result retry counts
 //   falseDoors  sign-in options on screen that cannot work for this persona's account
 //               (phone needs a passkey, the password form needs a password)
+//   (removed-other-account: the browser is signed in to OneProfileID as someone the owner removed; they
+//    take "Use a different account" and sign in with their other account)
 //   copy        firstScreen: the first screen names the product and who can use it
 //               errors: every error names the signed-in email and a next step (passes if none shown)
 //               firstRun: the first run shows a starter or a canvas hint
@@ -50,7 +52,7 @@ let clockOffset=0;const now=()=>Date.now()+clockOffset;
 // ---------- mock OneProfileID ----------
 // Accounts by primary email: {id, name, email, aliases, password, passkey, members:{localId}}.
 function mockOpid(){
-  const users=new Map(),sessions=new Map(),hosted=new Map(),requests=new Map(),codes=new Map(),tokens=new Map(),invites=new Map();
+  const users=new Map(),sessions=new Map(),hosted=new Map(),requests=new Map(),codes=new Map(),tokens=new Map(),invites=new Map(),revoked=new Set(),events=[];
   const stats={claims:0,invites:0};let n=0;
   const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   const jwk={...publicKey.export({format:'jwk'}),kid:'k1',alg:'RS256',use:'sig'};
@@ -85,6 +87,8 @@ function mockOpid(){
     if(path==='/api/auth/oauth2/authorize'){
       const r=Object.fromEntries(u.searchParams),id='r-'+randomUUID();requests.set(id,r);
       const h=hosted.get(cookieOf(req,'opid_hosted'));
+      // prompt=select_account: "Continue as …" or "Use a different account" (which signs out here).
+      if(h&&r.prompt==='select_account')return page(res,'Choose an account',`<a href="/select/continue?req=${id}" data-link="continue">Continue as ${h.name}</a> <a href="/select/different?req=${id}" data-link="different">Not you? Use a different account</a>`);
       // An existing OneProfileID browser session returns straight to the app, with no prompt.
       if(h)return backToApp(res,id,h);
       return go(res,`/sign-in?req=${id}`);
@@ -100,7 +104,13 @@ function mockOpid(){
     // Hosted pages (like auth.oneprofileid.com): Welcome Back, Make an account, emailed code.
     const reqId=u.searchParams.get('req')||form.req||'';
     const hid=`<input type="hidden" name="req" value="${reqId}">`;
-    if(path==='/sign-in'&&req.method==='GET')return page(res,'Welcome Back',`<form method="post" action="/sign-in" data-form="email">${hid}<label>Email <input name="email" type="email"></label><button type="submit">Continue</button></form>
+    if(path==='/select/continue'){const h=hosted.get(cookieOf(req,'opid_hosted'));return h?backToApp(res,reqId,h):go(res,`/sign-in?req=${reqId}`)}
+    if(path==='/select/different'){hosted.delete(cookieOf(req,'opid_hosted'));return go(res,`/sign-in?req=${reqId}`,['opid_hosted=; Path=/; Max-Age=0'])}
+    // Eval only: a browser that is already signed in to OneProfileID as someone (then on to ?next).
+    if(path==='/eval/signed-in-as'){const acct=users.get(String(u.searchParams.get('email')||''));const t='h-'+randomUUID();if(acct)hosted.set(t,acct);return go(res,u.searchParams.get('next')||'/',acct?[`opid_hosted=${t}; Path=/; HttpOnly; SameSite=Lax`]:[])}
+    // login_hint pre-fills the email (editable).
+    const hint=String(requests.get(reqId)?.login_hint||'').replace(/[^A-Za-z0-9@._+-]/g,'');
+    if(path==='/sign-in'&&req.method==='GET')return page(res,'Welcome Back',`<form method="post" action="/sign-in" data-form="email">${hid}<label>Email <input name="email" type="email" value="${hint}"></label><button type="submit">Continue</button></form>
       <p>New to OneProfileID? <a href="/create-account?req=${reqId}" data-link="create">Make an account</a></p>`);
     if(path==='/sign-in'&&req.method==='POST'){
       const acct=resolveEmail(form.email);
@@ -136,9 +146,11 @@ function mockOpid(){
       if(!me)return send(401,{error:'Complete sign-in first'});
       if(!/^[A-Za-z0-9_-]{1,128}$/.test(b.localId||''))return send(400,{error:'Invalid membership'});
       if(!FLAGS.selfEnroll&&typeof b.inviteToken!=='string')return send(403,{error:'Invitation required'});
+      // A revoked membership comes back only with a new invitation.
+      if(revoked.has(b.localId)&&typeof b.inviteToken!=='string')return send(409,{error:'Membership already belongs to another identity'});
       if('claimedEmail' in b&&resolveEmail(b.claimedEmail)!==me)return send(403,{error:'Sign in with the email used for this registration'});
       for(const x of users.values())if(x!==me&&x.member===b.localId)return send(409,{error:'Membership already belongs to another identity'});
-      if(b.inviteToken){const i=invites.get(b.inviteToken);if(!i||i.localId!==b.localId||i.used||(i.used&&i.used!==me)||resolveEmail(i.email)!==me)return send(409,{error:'Membership already belongs to another identity'});i.used=me}
+      if(b.inviteToken){const i=invites.get(b.inviteToken);if(!i||i.localId!==b.localId||i.used||(i.used&&i.used!==me)||resolveEmail(i.email)!==me)return send(409,{error:'Membership already belongs to another identity'});i.used=me;revoked.delete(b.localId)}
       me.member=b.localId;return send(200,{membership:{localId:b.localId}});
     }
     if(route==='/membership/invite'){
@@ -152,6 +164,12 @@ function mockOpid(){
       const token=randomUUID().replace(/-/g,'')+randomUUID().replace(/-/g,'');invites.set(token,{localId:b.localId,email:b.email.toLowerCase(),used:null});
       return send(200,{token,expiresAt:new Date(Date.now()+72*3600e3).toISOString()});
     }
+    // Revoking with the app secret alone (no cookie: Flow's server is the authority), and the events feed.
+    if(route==='/membership/revoke'){stats.revokes=(stats.revokes||0)+1;if(req.headers.cookie)return send(403,{error:'Only an admin of this app can revoke a membership'});
+      let was=false;for(const x of users.values())if(x.member===b.localId){x.member=null;was=true}
+      if(was){revoked.add(b.localId);events.push({id:String(events.length+1),localId:b.localId,kind:'revoked',createdAt:new Date().toISOString()})}
+      return send(200,{localId:b.localId,revoked:was,invitationsRevoked:0})}
+    if(route==='/membership/events'){const l=events.filter(e=>Number(e.id)>Number(b.after||0));return send(200,{events:l,cursor:l.at(-1)?.id||String(b.after||'0'),more:false})}
     if(route==='/profile/member-images')return send(200,{images:{}});
     send(404,{error:'Not found'});
   })});
@@ -242,12 +260,13 @@ async function walk(page,persona,ctx){
       if(snap.errors.length){
         const e=snap.errors.join(' ');
         if(e!==lastError||lastWhere!=='gate-error'){out.errors.push(e);if(out.errors.length===1)await page.shot(persona.key+'-2-error')}
-        if(!errorOk(snap.text,persona.loginEmail||persona.email||''))out.copy.errors=false;
+        if(!errorOk(snap.text,persona.shownEmail||persona.loginEmail||persona.email||''))out.copy.errors=false;
         if(e===lastError){out.deadEnds++;out.trail.push('same error again');if(out.deadEnds>=2)break}
         lastError=e;lastWhere='gate-error';
         // An error screen: take the first control that offers a way forward other than the same retry,
         // if the persona can use it; otherwise retry once with the primary button.
-        const fwd=snap.buttons.find(b=>b.sel&&b.sel.startsWith('[data-gate-action="retry'));
+        // Someone signed in to OneProfileID with an account Flow refuses uses another account they have.
+        const fwd=snap.buttons.find(b=>b.sel&&(b.sel.startsWith('[data-gate-action="retry')||(persona.otherAccount&&b.sel==='[data-gate-action="switch"]')));
         if(!(await click(fwd?.sel||'[data-sso]',true)))break;
         await sleep(400);continue;
       }
@@ -258,6 +277,7 @@ async function walk(page,persona,ctx){
     lastWhere=snap.where;
     if(snap.where==='join'){if(!(await click('[data-join] [data-sso], [data-join] [data-join-continue]',true))){out.trail.push('join without continue');break}await sleep(500);continue}
     if(snap.where==='opid'){
+      if(snap.page==='Choose an account'){await click(persona.otherAccount?'[data-link=different]':'[data-link=continue]',true);continue}
       if(snap.page==='Welcome Back'&&snap.forms.includes('email')){
         if(persona.password){await submit('email',{email:persona.loginEmail});continue}
         await click('[data-link=create]',true);continue;
@@ -352,12 +372,19 @@ async function main(){
       alias:{key:'invited-alias',name:'Alex Alias',loginEmail:'alex@example.test',password:'synthetic-alex-pw',aliases:['alex.alias@example.test'],invite:'alex.alias@example.test'},
       other:{key:'invited-other-email',name:'Dana Diff',loginEmail:'dana@example.test',password:'synthetic-dana-pw',invite:'dana.work@example.test'},
       slow:{key:'slow-signup',name:'Sam Slow',loginEmail:'sam@example.test',invite:'sam@example.test',slow:true},
+      // Signed in to OneProfileID (in this browser) as an account the owner removed from Flow; has a second account.
+      removed:{key:'removed-other-account',name:'Rhea Second',loginEmail:'rhea@example.test',password:'synthetic-rhea-pw',shownEmail:'ron@example.test',otherAccount:true,
+        start:`${HOSTED}/eval/signed-in-as?email=ron%40example.test&next=${encodeURIComponent(BASE+'/')}`},
       member:{key:'member-invites-friend',name:'Mia Member',loginEmail:'mia@example.test',password:'synthetic-mia-pw',member:'u-mia',start:BASE+'/',inviteFriend:true,
         friend:{key:'friend',name:'Finn Friend',loginEmail:'finn@example.test'}},
     };
     for(const p of Object.values(P))if(p.password)m.add({email:p.loginEmail,name:p.name,password:p.password,aliases:p.aliases||[],member:p.member||null});
     const mails=()=>{try{return readFileSync(mailLog,'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l))}catch{return []}};
     const mailLink=to=>{const msg=mails().filter(x=>x.to===to).at(-1);if(!msg)return '';const urls=String(msg.text).match(/https?:\/\/[^\s)"]+/g)||[];return urls.find(x=>x.startsWith(BASE+'/join'))||urls.find(x=>x.startsWith(BASE))||''};
+    // Ron joined once (open sign-up) and the owner removed him: OneProfileID revokes his membership.
+    m.add({email:'ron@example.test',name:'Ron Removed',password:'synthetic-ron-pw'});
+    await fetch(BASE+'/api/auth/sign-in',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'ron@example.test',password:'synthetic-ron-pw'})});
+    const gone=await owner('DELETE','/api/members?email=ron%40example.test');if(gone.status!==200)console.error('eval: could not remove the removed persona',gone.status,gone.data);
     for(const p of Object.values(P))if(p.invite){const r=await owner('POST','/api/invites',{email:p.invite});p.start=mailLink(p.invite)||BASE+'/';p.inviteStatus=r.status}
     b=await browser(join(scratch,'profile'));
     const ctx={app,mailLink,newPage:()=>newPage(b)};

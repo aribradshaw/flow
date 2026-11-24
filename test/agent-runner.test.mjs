@@ -14,7 +14,7 @@ import {humaniseOnCalendar,humaniseMonotonic,humaniseDuration,humaniseCron,nextC
   workflowCrons,workflowJobs,crontabJobs,isDistroTimer,filterJobs,matches,redact,aiCommand,commandName,parseShow,parseTimerList,
   systemdJob,t3Schedule,dayPhrase,jobsTable,discoverJobs,parseRRule,rruleNext,humaniseRRule,isoDuration,humaniseWinTrigger,humaniseWinTriggers,
   isVendorTask,winStatus,windowsJobs,asideJobs,claudeTasks,claudeJobs,skillSummary,parseToml,codexJobs,remotePlan,remoteJobs,repoFileJobs,
-  psScript,pyScript,wallOf,wallToMs,calendarZone,systemdTriggers,winTrigger,rruleTrigger,noteFrom,applyNotes,entryScript,t3Trigger,sameCron,scheduleDrift,
+  handoffOf,nextStep,psScript,pyScript,wallOf,wallToMs,calendarZone,systemdTriggers,winTrigger,rruleTrigger,noteFrom,applyNotes,entryScript,t3Trigger,sameCron,scheduleDrift,
   mergePlatform,railwayServices,vercelCrons,platformJobs,legacyJobs} from '../tools/agent-runner.mjs';
 import {spawnSync} from 'node:child_process';
 
@@ -707,4 +707,161 @@ test('the jobs table shows TZ and ORIGIN; older servers get the older fields',as
   assert.ok(r.bodies[0].timezone&&r.bodies[0].jobs[0].triggers);
   assert.deepEqual([r.bodies[1].timezone,r.bodies[1].jobs[0].triggers,r.bodies[1].jobs[0].id],[undefined,undefined,'vercel:repo:/api/x'],'sent again without the newer fields');
   assert.match(r.stdout,/server does not accept schedule details yet/);
+});
+
+// ---------- tick: Doing means working now ----------
+// A stub Flow server and a fake `t3` (threads.json in its folder says each thread's status).
+async function tickAgainst({queues,cards={},runs={},threads={},dry=false,maxRunning=1,argv=['tick'],workflows=[],agents=null,extra={}}){
+  const moves=[],patches=[],srv=createServer((req,res)=>{let s='';req.on('data',d=>s+=d).on('end',()=>{
+    const send=(body,code=200)=>{res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body))};
+    if(req.headers.authorization!=='Bearer k')return send({error:'no'},401);
+    const p=new URL(req.url,'http://x').pathname.replace('/api/v1/envs/e','');
+    if(req.method==='POST'&&p.startsWith('/runners/'))return send({changed:false});
+    const listed=agents||Object.keys(queues).map(id=>({id,name:id,kind:'agent',runtime:'box',live:true,models:['claudeAgent:claude-sonnet-5-5']}));
+    if(p==='/agents')return send({items:new URL(req.url,'http://x').searchParams.get('live')==='true'?listed.filter(a=>a.live):listed,nextCursor:null});
+    if(p==='/workflows')return send({items:workflows,nextCursor:null});
+    if(p==='/projects')return send({items:[],nextCursor:null});
+    let m=/^\/agents\/([^/]+)\/work$/.exec(p);if(m)return send({brief:'Brief',items:queues[m[1]]});
+    m=/^\/cards\/(\d+)\/move$/.exec(p);if(m&&req.method==='POST'){moves.push({card:Number(m[1]),...JSON.parse(s)});return send({card:{}})}
+    m=/^\/cards\/(\d+)$/.exec(p);if(m&&req.method==='PATCH'){patches.push({card:Number(m[1]),...JSON.parse(s)});return send({card:{}})}
+    if(m)return send({card:cards[m[1]]||{number:Number(m[1]),column:'doing'}});
+    send({error:'not found'},404);
+  })});
+  await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+  const home=mkdtempSync(join(tmpdir(),'runner-tick-'));
+  try{
+    const bin=join(home,'bin');mkdirSync(bin);mkdirSync(join(home,'.config','flygon-flow'),{recursive:true});mkdirSync(join(home,'.state','flygon-flow'),{recursive:true});
+    writeFileSync(join(bin,'threads.json'),JSON.stringify(threads));
+    writeFileSync(join(bin,'t3'),`#!${process.execPath}
+const fs=require('fs'),path=require('path'),f=path.join(__dirname,'threads.json'),a=process.argv.slice(2),t=JSON.parse(fs.readFileSync(f,'utf8'));
+if(a[0]==='thread'&&a[1]==='start'){const id='t-new-'+Object.keys(t).length;t[id]='running';fs.writeFileSync(f,JSON.stringify(t));console.log(JSON.stringify({threadId:id}))}
+else if(a[0]==='thread'&&a[1]==='show'&&t[a[2]]==='gone')process.exit(1);
+else if(a[0]==='thread'&&a[1]==='show'){const v=t[a[2]],o=typeof v==='object'&&v?v:{status:v};console.log(JSON.stringify({thread:{status:o.status||'completed',title:a[2]},messages:o.reply?[{role:'assistant',text:o.reply}]:[]}))}
+else process.exit(1);
+`,{mode:0o755});
+    writeFileSync(join(home,'.state','flygon-flow','runner-state.json'),JSON.stringify({runs}));
+    writeFileSync(join(home,'.config','flygon-flow','runner.json'),JSON.stringify({name:'box',env:'e',url:`http://127.0.0.1:${srv.address().port}`,key:'k',
+      t3:join(bin,'t3'),t3Home:join(home,'t3'),opencode:'',grok:'',jobs:false,project:home,maxRunning,dryRun:dry,...extra}));
+    const env={...process.env,HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.state')};
+    for(const k of Object.keys(env))if(k.startsWith('FLOW_'))delete env[k];
+    const out=await new Promise(r=>execFile(process.execPath,[RUNNER,...argv.map(a=>a==='$CONFIG'?join(home,'.config','flygon-flow','runner.json'):a)],{env,timeout:30000},(err,stdout,stderr)=>r({code:err?err.code??1:0,stdout,stderr})));
+    const state=JSON.parse(readFileSync(join(home,'.state','flygon-flow','runner-state.json'),'utf8'));
+    return {...out,moves,patches,state};
+  }finally{srv.close();rmSync(home,{recursive:true,force:true})}
+}
+const card=(n,column)=>({id:'c'+n,number:n,title:'Card '+n,column,project:''});
+
+test('tick: a card is in Doing only while its thread runs; idle Doing cards go back to Requests',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(2,'doing'),card(3,'requests')],Reviewer:[card(4,'doing'),card(5,'doing')]}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c2.status,'running','the first Doing card starts');
+  // Reviewer waits behind maxRunning, so its cards leave Doing, keeping their order at the top of Requests.
+  assert.deepEqual(r.moves,[{card:5,column:'requests',index:0},{card:4,column:'requests',index:0}]);
+});
+test('tick: a Requests card moves into Doing when its thread starts',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(3,'requests')]}});
+  assert.equal(r.code,0,r.stderr);
+  assert.deepEqual(r.moves,[{card:3,column:'doing'}]);assert.equal(r.state.runs.c3.status,'running');
+});
+test('tick: a thread stopped in T3 sends its card to Blocked; a waiting thread keeps it in Doing',async()=>{
+  const run=(n,thread)=>({agent:'Builder',agentId:'Builder',number:n,thread,model:'claudeAgent:claude-sonnet-5-5',order:['claudeAgent:claude-sonnet-5-5'],status:'running',attempts:[]});
+  // The queue is read after the stop is handled, so Flow no longer lists #1 (now Blocked) in it.
+  const r=await tickAgainst({queues:{Builder:[card(6,'doing')]},runs:{c1:run(1,'t1'),c6:run(6,'t6')},threads:{t1:'interrupted',t6:'waiting'},
+    cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c1.status,'stopped');assert.equal(r.state.runs.c6.status,'running');
+  assert.deepEqual(r.moves,[{card:1,column:'blocked'}]);
+});
+test('tick: a dry run only says what it would move',async()=>{
+  const r=await tickAgainst({dry:true,queues:{Builder:[card(2,'doing')],Reviewer:[card(4,'doing')]}});
+  assert.equal(r.code,0,r.stderr);assert.deepEqual(r.moves,[]);
+  assert.match(r.stdout,/dry run: would start "\[Flow\] Builder: #2 Card 2"/);
+  assert.match(r.stdout,/dry run: would move #4 from Doing back to Requests/);
+  assert.doesNotMatch(r.stdout,/would move #2 /);
+});
+
+// Card #673.
+const runOf=(n,thread,extra={})=>({agent:'Builder',agentId:'Builder',number:n,thread,model:'claudeAgent:claude-sonnet-5-5',order:['claudeAgent:claude-sonnet-5-5'],status:'running',attempts:[{model:'claudeAgent:claude-sonnet-5-5',thread}],...extra});
+test('tick: a thread that cannot be read frees its slot after LOST_AFTER passes, and its card goes to Blocked',async()=>{
+  let r=await tickAgainst({queues:{Builder:[card(1,'doing'),card(2,'requests')]},runs:{c1:runOf(1,'t1')},threads:{t1:'gone'},cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);assert.equal(r.state.runs.c1.status,'running','one failed read is not enough');assert.equal(r.state.runs.c1.readFails,1);
+  assert.deepEqual(r.moves,[],'and nothing else starts while it holds the slot');
+  r=await tickAgainst({queues:{Builder:[card(2,'requests')]},runs:{c1:runOf(1,'t1',{readFails:5})},threads:{t1:'gone'},cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c1.status,'lost');assert.equal(r.state.runs.c1.attempts[0].result,'lost');
+  assert.deepEqual(r.moves,[{card:1,column:'blocked'},{card:2,column:'doing'}],'blocked, and the next card starts');
+  r=await tickAgainst({queues:{Builder:[]},runs:{c1:runOf(1,'t1',{readFails:3})},threads:{t1:'running'}});
+  assert.equal(r.state.runs.c1.readFails,undefined,'a good read resets the count');
+});
+test('tick: a card that went to UAT and came back is worked again; a failed one still waits for retry',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(7,'requests')],Reviewer:[card(8,'requests')]},maxRunning:2,
+    runs:{c7:runOf(7,'t7',{status:'done',finished:'2026-11-20T00:00:00Z'}),c8:runOf(8,'t8',{agent:'Reviewer',agentId:'Reviewer',status:'failed'})}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c7.status,'running');assert.notEqual(r.state.runs.c7.thread,'t7');
+  assert.equal(r.state.runs.c8.status,'failed');assert.deepEqual(r.moves,[{card:7,column:'doing'}]);
+});
+test('--config works before the command too',async()=>{
+  const r=await tickAgainst({queues:{Builder:[card(3,'requests')]},argv:['--config','$CONFIG','tick']});
+  assert.equal(r.code,0,r.stderr);assert.deepEqual(r.moves,[{card:3,column:'doing'}]);
+});
+
+// ---------- hand-offs along a workflow ----------
+test('handoffOf reads the last Handoff line',()=>{
+  assert.equal(handoffOf('Done.'),null);
+  assert.deepEqual(handoffOf('Fixed it.\nHandoff: stop'),{stop:true});
+  assert.deepEqual(handoffOf('**Handoff:** Builder\n'),{to:'Builder'});
+  assert.deepEqual(handoffOf('Handoff: Builder\nmore\nHandoff: next'),{next:true});
+  assert.deepEqual(handoffOf('- Hand-off: `Security Reviewer`.'),{to:'Security Reviewer'});
+});
+const AG=(id,extra={})=>({id,name:id,kind:'agent',runtime:'box',live:true,models:['claudeAgent:claude-sonnet-5-5'],...extra});
+const SHIP={id:'w',name:'Ship',status:'active',projects:[],cards:[],steps:[{agent:'Builder'},{agent:'Verifier'},{agent:'Reviewer'},{agent:'Joe'}]};
+const PEOPLE=[AG('Builder'),AG('Verifier'),AG('Reviewer'),{id:'Joe',name:'Joe',kind:'human'}];
+test('nextStep: the next AI step, a person, a named agent, stop, and no workflow',()=>{
+  const go=(agentId,said,extra={})=>nextStep({workflows:[SHIP],agents:PEOPLE,agentId,card:{id:'c1',project:'p'},said,...extra});
+  assert.equal(go('Builder').agent.id,'Verifier');
+  assert.equal(go('Reviewer').agent,undefined,'a person is next: UAT');
+  assert.equal(go('Reviewer',{to:'builder'}).agent.id,'Builder','named back to an earlier step');
+  assert.equal(go('Builder',{stop:true}).agent,undefined);
+  assert.equal(go('Builder',{to:'Nobody'}).agent,undefined);
+  assert.equal(go('Builder',null,{workflows:[]}).agent,undefined);
+  assert.equal(go('Builder',null,{agents:[AG('Builder'),AG('Verifier',{live:false})]}).agent,undefined,'not live');
+  // A workflow for the card's project wins over a general one; a paused one never applies.
+  const proj={...SHIP,id:'w2',projects:['p'],steps:[{agent:'Builder'},{agent:'Reviewer'}]};
+  assert.equal(go('Builder',null,{workflows:[SHIP,proj]}).agent.id,'Reviewer');
+  assert.equal(go('Builder',null,{workflows:[SHIP,{...proj,status:'paused'}]}).agent.id,'Verifier');
+});
+test('tick: a finished card is handed to the next agent in its workflow instead of UAT',async()=>{
+  const r=await tickAgainst({queues:{Builder:[],Verifier:[],Reviewer:[]},agents:PEOPLE,workflows:[SHIP],
+    runs:{c1:runOf(1,'t1')},threads:{t1:{status:'completed',reply:'Built and tested.'}},cards:{1:card(1,'doing')}});
+  assert.equal(r.code,0,r.stderr);
+  assert.deepEqual(r.patches,[{card:1,agents:['Verifier']}]);
+  assert.deepEqual(r.moves,[{card:1,column:'requests',index:0}]);
+  assert.equal(r.state.runs.c1.status,'handed');assert.equal(r.state.runs.c1.chain.length,1);
+});
+test('tick: a handed card starts for its new agent and keeps the chain; a reviewer can send it back',async()=>{
+  const handed=runOf(1,'t1',{status:'handed',chain:[{agent:'Builder',agentId:'Builder',thread:'t1'}]});
+  let r=await tickAgainst({queues:{Builder:[],Verifier:[card(1,'requests')],Reviewer:[]},agents:PEOPLE,workflows:[SHIP],runs:{c1:handed}});
+  assert.equal(r.code,0,r.stderr);
+  assert.equal(r.state.runs.c1.status,'running');assert.equal(r.state.runs.c1.agent,'Verifier');assert.equal(r.state.runs.c1.chain.length,1);
+  // The Reviewer asks for changes: back to the Builder, not UAT.
+  const rev=runOf(1,'t3',{agent:'Reviewer',agentId:'Reviewer',chain:[{agentId:'Builder',thread:'t1'},{agentId:'Verifier',thread:'t2'}]});
+  r=await tickAgainst({queues:{Builder:[],Verifier:[],Reviewer:[]},agents:PEOPLE,workflows:[SHIP],runs:{c1:rev},
+    threads:{t3:{status:'completed',reply:'Verdict: Changes needed\nHandoff: Builder'}},cards:{1:card(1,'doing')}});
+  assert.deepEqual(r.patches,[{card:1,agents:['Builder']}]);assert.equal(r.state.runs.c1.chain.length,3);
+});
+test('tick: the last AI step, Handoff: stop, and maxHandoffs all end in UAT',async()=>{
+  const go=(run,reply,extra)=>tickAgainst({queues:{Builder:[],Verifier:[],Reviewer:[]},agents:PEOPLE,workflows:[SHIP],runs:{c1:run},
+    threads:{[run.thread]:{status:'completed',reply}},cards:{1:card(1,'doing')},extra});
+  let r=await go(runOf(1,'t1',{agent:'Reviewer',agentId:'Reviewer'}),'Verdict: Approve');
+  assert.deepEqual(r.moves,[{card:1,column:'uat'}]);assert.deepEqual(r.patches,[]);assert.equal(r.state.runs.c1.status,'done');
+  assert.match(r.stdout,/moving it to UAT \(the next step of "Ship" is Joe's\)/);
+  r=await go(runOf(1,'t1'),'Stuck on a question.\nHandoff: stop');
+  assert.deepEqual(r.moves,[{card:1,column:'uat'}]);
+  r=await go(runOf(1,'t1',{chain:[1,2].map(i=>({agentId:'Builder',thread:'x'+i}))}),'done',{maxHandoffs:2});
+  assert.deepEqual(r.moves,[{card:1,column:'uat'}]);assert.match(r.stdout,/maxHandoffs 2/);
+});
+test('tick: a card a person moved out of Doing is not handed on',async()=>{
+  const r=await tickAgainst({queues:{Builder:[],Verifier:[],Reviewer:[]},agents:PEOPLE,workflows:[SHIP],
+    runs:{c1:runOf(1,'t1')},threads:{t1:'completed'},cards:{1:card(1,'blocked')}});
+  assert.deepEqual(r.patches,[]);assert.match(r.stdout,/a person moved it to blocked/);
 });

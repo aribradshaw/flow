@@ -1,0 +1,15 @@
+// Settings both targets share. Config/Local.xcconfig (ignored by git) may override any of them:
+// copy Local.xcconfig.example.
+
+APP_BUNDLE_ID = com.flygonlc.flow
+MARKETING_VERSION = 0.8.0
+CURRENT_PROJECT_VERSION = 8
+TARGETED_DEVICE_FAMILY = 1,2
+SWIFT_VERSION = 5.0
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
+SWIFT_APPROACHABLE_CONCURRENCY = YES
+SWIFT_EMIT_LOC_STRINGS = YES
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"

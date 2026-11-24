@@ -18,6 +18,7 @@ before(async()=>{srv=await start();home=mkdtempSync(join(tmpdir(),'flow-cli-'))}
 after(async()=>{await srv.close();rmSync(home,{recursive:true,force:true})});
 
 test('login writes a private config and caches the API',async()=>{
+  const eq=await flow('login',`--url=${srv.url}/`,`--key=${KEY}`);assert.equal(eq.code,0,'--url=X and --key=X work too: '+eq.stderr);
   const r=await flow('login','--url',srv.url+'/','--key',KEY);
   assert.equal(r.code,0,r.stderr);assert.match(r.stdout,/Signed in to http:\/\/127\.0\.0\.1:\d+ \(6 commands\)/);
   assert.doesNotMatch(r.stdout+r.stderr,new RegExp(KEY));

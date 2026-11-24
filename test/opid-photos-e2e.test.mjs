@@ -113,6 +113,8 @@ test('a share recipient links their card in the owner workspace; the owner sees 
   const lid=`sh.${shareId}.bo`;
   let mine=(await bo('GET','/api/workspace?env='+boEnv)).data;
   assert.ok(node(mine.data,lid),'the shared card is in his workspace');
+  assert.equal(node(mine.data,lid).linked.opidEmail,'match');
+  assert.equal(node(mine.data,lid).email,undefined);
   // Only cards in the share's scope can be linked through it.
   assert.equal((await bo('POST','/api/opid/link',{env:boEnv,nodeId:`sh.${shareId}.kim`,link:true})).status,404);
   assert.equal((await bo('POST','/api/opid/link',{env:boEnv,nodeId:lid,link:true})).status,200);
@@ -121,7 +123,7 @@ test('a share recipient links their card in the owner workspace; the owner sees 
   mine=(await bo('GET','/api/workspace?env='+boEnv)).data;
   assert.equal(node(mine.data,lid).opidUser,'u-bo','Bo sees his own link');
   assert.deepEqual((await owner('GET','/api/opid/photos?env='+ENV)).data,{me:photo('u-owner'),bo:photo('u-bo')});
-  assert.deepEqual((await bo('GET','/api/opid/photos?env='+boEnv)).data,{[lid]:photo('u-bo')});
+  assert.deepEqual((await bo('GET','/api/opid/photos?env='+boEnv)).data,{[lid]:photo('u-bo'),['@'+OWNER]:photo('u-owner')},'Bo\'s card, and the owner\'s linked card outside the share on the member label');
   // Kim cannot claim Bo's card through the owner's workspace or anything else.
   assert.equal((await kim('POST','/api/opid/link',{env:boEnv,nodeId:lid,link:true})).status,404);
   // The photos are never stored with the workspace.
@@ -142,7 +144,7 @@ test("a view recipient cannot unlink someone else's link, but can unlink their o
   assert.ok(!JSON.stringify(kd).includes('u-bo'),"Bo's account id never reaches Kim");
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:false})).status,403);
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:true})).status,409,'linked to someone else');
-  assert.deepEqual((await kim('GET','/api/opid/photos?env='+kimEnv)).data,{[kl]:photo('u-bo')},'anyone who sees the card sees the photo');
+  assert.deepEqual((await kim('GET','/api/opid/photos?env='+kimEnv)).data,{[kl]:photo('u-bo'),['@'+OWNER]:photo('u-owner')},'anyone who sees the card sees the photo, including a member whose card is outside the share');
   // An edit share can unlink it.
   assert.equal((await owner('PATCH','/api/shares/'+k.data.share.id,{permission:'edit'})).status,200);
   assert.equal((await kim('POST','/api/opid/link',{env:kimEnv,nodeId:kl,link:false})).status,200);
@@ -165,4 +167,23 @@ test('revoking access removes the photo; OneProfileID refusing means no photos, 
   assert.ok(asked.every(ids=>!ids.includes('u-kim')),'Kim never linked anything, so she is never looked up');
   assert.equal((await agent()('GET','/api/opid/photos?env='+ENV)).status,401);
   assert.equal((await owner('GET','/api/opid/photos?env='+ENV,undefined,{origin:'https://evil.example.test'})).status,403);
+});
+
+test('a view recipient can link and see their photo in an opened shared environment',async()=>{
+  const {data,status}=await owner('POST','/api/shares',{env:ENV,recipientEmail:BO,scope:{kind:'environment'},permission:'view'});
+  assert.equal(status,200);
+  const env=`share-${data.share.id}`,id=`sh.${data.share.id}.bo`;
+  const opened=(await bo('GET','/api/workspace?env='+env)).data;
+  assert.equal(node(opened.data,id).linked.opidEmail,'match');
+  assert.equal(node(opened.data,id).email,undefined);
+  assert.equal(node(opened.data,`sh.${data.share.id}.kim`).linked.opidEmail,undefined);
+  assert.equal((await kim('POST','/api/opid/link',{env,nodeId:id,link:true})).status,404);
+  assert.equal((await bo('POST','/api/opid/link',{env,nodeId:'bo',link:true})).status,404);
+  assert.equal((await bo('POST','/api/opid/link',{env,nodeId:`sh.${data.share.id}.kim`,link:true})).status,403);
+  assert.equal((await bo('POST','/api/opid/link',{env,nodeId:id,link:true})).status,200);
+  assert.deepEqual((await bo('GET','/api/opid/photos?env='+env)).data,{[id]:photo('u-bo'),[`sh.${data.share.id}.me`]:photo('u-owner')});
+  assert.deepEqual((await kim('GET','/api/opid/photos?env='+env)).data,{});
+  assert.equal((await owner('DELETE','/api/shares/'+data.share.id)).status,200);
+  assert.equal((await bo('POST','/api/opid/link',{env,nodeId:id,link:false})).status,404);
+  assert.deepEqual((await bo('GET','/api/opid/photos?env='+env)).data,{});
 });

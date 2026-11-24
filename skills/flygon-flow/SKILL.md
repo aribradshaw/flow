@@ -25,7 +25,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 5. **On a conflict** (`409`), read again and reapply your change. Never overwrite a human's newer edit.
 6. Errors carry `status`, `code` and `message`. Report the `message` to the user rather than guessing.
 
-## Operations (40)
+## Operations (58)
 
 ### Environments
 
@@ -56,6 +56,7 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | --- | --- | --- | --- | --- |
 | `edges.list` | `edges_list` | `GET /api/v1/envs/{env}/charts/{chart}/edges` | read | List edges |
 | `edges.create` | `edges_create` | `POST /api/v1/envs/{env}/charts/{chart}/edges` | write | Create an edge |
+| `edges.update` | `edges_update` | `PATCH /api/v1/envs/{env}/charts/{chart}/edges/{edge}` | write | Update an edge |
 | `edges.delete` | `edges_delete` | `DELETE /api/v1/envs/{env}/charts/{chart}/edges/{edge}` | write | Delete an edge |
 
 ### Projects
@@ -121,6 +122,33 @@ You need a Flow server URL, an environment id and a personal API key (`flow_…`
 | Operation | MCP tool | REST | Scope | What it does |
 | --- | --- | --- | --- | --- |
 | `search` | `search` | `GET /api/v1/envs/{env}/search` | read | Search an environment |
+
+### Sharing
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `shares.list` | `shares_list` | `GET /api/v1/envs/{env}/shares` | read | List shares of an environment |
+| `shares.preview` | `shares_preview` | `POST /api/v1/envs/{env}/shares/preview` | read | Preview what a share would show |
+| `shares.create` | `shares_create` | `POST /api/v1/envs/{env}/shares` | write | Share part of an environment with someone |
+| `shares.update` | `shares_update` | `PATCH /api/v1/shares/{share}` | write | Change a share's permission |
+| `shares.revoke` | `shares_revoke` | `DELETE /api/v1/shares/{share}` | write | Revoke a share |
+| `shares.incoming` | `shares_incoming` | `GET /api/v1/shares/incoming` | read | List shares with you |
+| `shares.requests.list` | `shares_requests_list` | `GET /api/v1/share-requests` | read | List re-share requests |
+| `shares.requests.create` | `shares_requests_create` | `POST /api/v1/shares/{share}/requests` | write | Ask the owner to share it on |
+| `shares.requests.decide` | `shares_requests_decide` | `POST /api/v1/share-requests/{request}` | write | Approve or deny a re-share request |
+| `proposals.list` | `proposals_list` | `GET /api/v1/envs/{env}/proposals` | read | List share additions |
+| `proposals.approve` | `proposals_approve` | `POST /api/v1/envs/{env}/proposals/{proposal}/approve` | write | Approve a share addition |
+| `proposals.deny` | `proposals_deny` | `POST /api/v1/envs/{env}/proposals/{proposal}/deny` | write | Deny a share addition |
+
+### 3D office
+
+| Operation | MCP tool | REST | Scope | What it does |
+| --- | --- | --- | --- | --- |
+| `office.agents.report` | `office_agents_report` | `PUT /api/v1/office/agents` | write | Report your live coding agents |
+| `office.agents.list` | `office_agents_list` | `GET /api/v1/office/agents` | read | List your reported agents |
+| `office.live.report` | `office_live_report` | `POST /api/v1/office/live` | write | Stream what your agents are doing |
+| `office.actions.wait` | `office_actions_wait` | `GET /api/v1/office/actions` | write | Wait for answers to your agents' prompts |
+| `office.actions.result` | `office_actions_result` | `POST /api/v1/office/actions/{id}` | write | Say how an answer went |
 
 ## Examples
 
@@ -240,6 +268,19 @@ curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges" \
   -H "Authorization: Bearer $FLOW_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"from":"cleo","to":"quill","percent":"50"}'
+```
+
+### Full ownership
+
+MCP: call `edges_update` with `{"env":"default-workspace","chart":"active","edge":"o1","percent":"100"}`
+
+```sh
+flow edges update --input '{"env":"default-workspace","chart":"active","edge":"o1","percent":"100"}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/envs/default-workspace/charts/active/edges/o1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"percent":"100"}'
 ```
 
 ### Delete
@@ -595,6 +636,209 @@ MCP: call `search` with `{"env":"default-workspace","q":"sign-up"}`
 flow search --input '{"env":"default-workspace","q":"sign-up"}'
 
 curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/search?q=sign-up" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Shares of the default workspace
+
+MCP: call `shares_list` with `{"env":"default-workspace"}`
+
+```sh
+flow shares list --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Project Lantern by name
+
+MCP: call `shares_preview` with `{"env":"default-workspace","scope":{"kind":"project","project":"Lantern"}}`
+
+```sh
+flow shares preview --input '{"env":"default-workspace","scope":{"kind":"project","project":"Lantern"}}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares/preview" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":{"kind":"project","project":"Lantern"}}'
+```
+
+### Preview first: project Lantern with edit access
+
+MCP: call `shares_create` with `{"env":"default-workspace","recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}`
+
+```sh
+flow shares create --input '{"env":"default-workspace","recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/shares" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"recipientEmail":"bo@example.com","scope":{"kind":"project","project":"Lantern"},"permission":"edit"}'
+```
+
+### Down to view
+
+MCP: call `shares_update` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","permission":"view"}`
+
+```sh
+flow shares update --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","permission":"view"}'
+
+curl -sS -X PATCH "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"permission":"view"}'
+```
+
+### Revoke
+
+MCP: call `shares_revoke` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11"}`
+
+```sh
+flow shares revoke --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11"}'
+
+curl -sS -X DELETE "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Shared with you
+
+MCP: call `shares_incoming` with `{}`
+
+```sh
+flow shares incoming
+
+curl -sS -X GET "$FLOW_URL/api/v1/shares/incoming" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Waiting for you
+
+MCP: call `shares_requests_list` with `{}`
+
+```sh
+flow shares requests list
+
+curl -sS -X GET "$FLOW_URL/api/v1/share-requests" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Ask to share with Kim
+
+MCP: call `shares_requests_create` with `{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}`
+
+```sh
+flow shares requests create --input '{"share":"6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11","toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/shares/6f1c2a4e-0b7d-4c55-9a3e-2d8f1b0c9e11/requests" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"toEmail":"kim@example.com","permission":"view","note":"Kim helps with the launch"}'
+```
+
+### Approve at view
+
+MCP: call `shares_requests_decide` with `{"request":"0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77","approve":true,"permission":"view"}`
+
+```sh
+flow shares requests decide --input '{"request":"0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77","approve":true,"permission":"view"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/share-requests/0c7e9a52-3b1d-4f0e-8a6c-5d2b9e4f1a77" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"approve":true,"permission":"view"}'
+```
+
+### One agent waiting on a prompt
+
+MCP: call `office_agents_report` with `{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"can":["message","stop"],"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}`
+
+```sh
+flow office agents report --input '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"can":["message","stop"],"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
+
+curl -sS -X PUT "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","at":"2026-10-29T17:00:00.000Z","agents":[{"id":"laptop:t3:thread-abc","title":"Fix login bug","vendor":"claude","model":"Opus 5.5","status":"waiting","activity":"Waiting for approval","activityKind":"test","host":"laptop","hostLabel":"laptop · T3","repo":{"name":"flow","remote":"https://github.com/acme/flow.git"},"children":[],"pending":{"requestId":"req-1","kind":"approval","summary":"Run: npm test","can":["allow","deny"]},"agentflow":{"agent":"Builder","card":12},"can":["message","stop"],"transcript":[{"role":"user","text":"Fix the login redirect loop.","at":"2026-10-29T17:00:00.000Z"},{"role":"assistant","text":"The callback keeps ?next=/login. Running the tests next.","at":"2026-10-29T17:00:00.000Z"},{"role":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}]}'
+```
+
+### Yours
+
+MCP: call `office_agents_list` with `{}`
+
+```sh
+flow office agents list
+
+curl -sS -X GET "$FLOW_URL/api/v1/office/agents" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Thinking
+
+MCP: call `office_live_report` with `{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}`
+
+```sh
+flow office live report --input '{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/office/live" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"bridge:laptop","agents":[{"id":"laptop:t3:thread-abc","live":{"phase":"tool","text":"Run: npm test","steps":[{"kind":"thinking","text":"Checking the redirect","at":"2026-10-29T17:00:00.000Z"},{"kind":"tool","text":"Run: npm test","at":"2026-10-29T17:00:00.000Z"}]}}]}'
+```
+
+### An answer
+
+MCP: call `office_actions_wait` with `{"source":"bridge:laptop","wait":25}`
+
+```sh
+flow office actions wait --input '{"source":"bridge:laptop","wait":25}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/office/actions?source=bridge%3Alaptop&wait=25" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Done
+
+MCP: call `office_actions_result` with `{"id":"act_1","ok":true,"message":"Approved in T3"}`
+
+```sh
+flow office actions result --input '{"id":"act_1","ok":true,"message":"Approved in T3"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/office/actions/act_1" \
+  -H "Authorization: Bearer $FLOW_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"ok":true,"message":"Approved in T3"}'
+```
+
+### Waiting for you
+
+MCP: call `proposals_list` with `{"env":"default-workspace"}`
+
+```sh
+flow proposals list --input '{"env":"default-workspace"}'
+
+curl -sS -X GET "$FLOW_URL/api/v1/envs/default-workspace/proposals" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Approve
+
+MCP: call `proposals_approve` with `{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}`
+
+```sh
+flow proposals approve --input '{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/approve" \
+  -H "Authorization: Bearer $FLOW_API_KEY"
+```
+
+### Deny
+
+MCP: call `proposals_deny` with `{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}`
+
+```sh
+flow proposals deny --input '{"env":"default-workspace","proposal":"5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a"}'
+
+curl -sS -X POST "$FLOW_URL/api/v1/envs/default-workspace/proposals/5b0c7f2e-61d4-4e0f-9c8a-3f1e2d4c5b6a/deny" \
   -H "Authorization: Bearer $FLOW_API_KEY"
 ```
 

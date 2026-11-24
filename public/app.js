@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice,isMe,opidLink} from './ui.js';
+import {$,esc,ib,uid,clone,initTooltips,initSelects,hideTip,personAvatar,personPhoto,setPeopleSource,prop,choice,opidLink} from './ui.js';
 import {store,chart,change,checkpoint,commit,snapshot,step,save,validChart,validDb,replaceDb,validPersonImage,cleanPersonEmail} from './store.js';
 import * as tl from './timeline.js';
 import * as dv from './devops.js';
@@ -9,20 +9,22 @@ import {peopleOf} from './agentflow-core.js';
 import {swap,busy,unskeletonize,panel,panelReset,popOut,fadeIn} from './motion.js';
 import {TABS,parseHash,hashFor,clampRatio,openSplit,closePane,clickTab,revealTab,cleanSplit,NARROW,DIVIDER} from './split-core.js';
 import {logoMark} from './logo-mark.js';
-import {accountHtml,sessionUser,signInMode,sessionKnown} from './account.js';
+import {accountHtml,sessionUser,signInMode,sessionKnown,canUseCustomPortrait,setAvatarPortrait} from './account.js';
 import {startOpidPhotos,photosMaybe,linkCard} from './opid-photos.js';
+import {findLinkPrompt,matchesLinkEmail} from './opid-prompt-core.js';
 import {startInbox} from './inbox.js';
 import {startSync,synced,currentEnv,switchEnvironment} from './sync.js';
 import {startChat,sendRecord,chatAvailable,chatRendered} from './chat.js';
 import {localTarget,refFromSearch,validRef} from './chat-core.js';
 import {loadDevlog} from './devlog.js';
 import {matches,keyLabel} from './shortcuts.js';
-import {onPrefs,syncPrefs} from './prefs.js';
+import {getPref,setPref,onPrefs,syncPrefs} from './prefs.js';
+import {startOfficeAlerts} from './office-alerts.js';
 import {ask} from './modal.js';
 import {openMenu} from './menu.js';
 import {edgeGeometry,tidyLayout} from './mindmap-layout.js';
 import {firstRun,canvasHint} from './first-run.js';
-import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick} from './share.js';
+import {linkOf,canEdit,sharedTip,historyHtml,loadHistory,postComment,openShareDialog,clashHtml,clashClick,decisionNotice} from './share.js';
 
 let instanceName='Flow',instanceLogo='';
 fetch('/api/instance').then(r=>r.ok?r.json():null).then(v=>{
@@ -109,10 +111,12 @@ function setTab(t){
 const mainEl=$('main'),inspectorEl=$('#inspector'),SCROLLERS='.tl-scroll,.dv-scroll,.af-scroll,.dcol-b';
 let panes=null;
 function leaveTab(t){if(t==='chart'){selected=null;connecting=false;source=null}else ({timeline:tl,devops:dv,agentflow:af})[t].leave()}
-// Moving a section keeps its scroll positions.
+// Moving a section keeps its scroll positions. While the 3D office holds the DevOps board, its place
+// (a placeholder) moves instead, so it comes back to the right pane.
 function moveView(sec,parent,before=null){
+  sec=dv.boardStandIn(sec);
   if(sec.parentNode===parent&&(before?sec.nextSibling===before:true))return;
-  const keep=[...sec.querySelectorAll(SCROLLERS)].map(el=>[el,el.scrollLeft,el.scrollTop]);
+  const keep=sec.querySelectorAll?[...sec.querySelectorAll(SCROLLERS)].map(el=>[el,el.scrollLeft,el.scrollTop]):[];
   parent.insertBefore(sec,before);
   for(const [el,l,t] of keep){el.scrollLeft=l;el.scrollTop=t}
 }
@@ -212,7 +216,8 @@ new ResizeObserver(()=>{if(isOpen('agentflow'))af.resized()}).observe($('#agentf
 
 // Back / Forward: a split hash restores that split; a deep link (#devops/card/4) into a shown pane
 // focuses it; any other single-tab hash leaves the split.
-window.addEventListener('popstate',()=>{
+window.addEventListener('popstate',e=>{
+  if(af.officeHistory(e.state))return;
   const h=parseHash(location.hash);
   if(h.tabs){if(h.tabs.join()!==split.tabs?.join())setLayout(h.tabs,h.tabs.includes(tab)?tab:h.tabs.find(t=>!split.tabs?.includes(t))||h.tabs[0])}
   else if(split.tabs&&location.hash.includes('/')&&split.tabs.includes(h.tab))focusPane(split.tabs.indexOf(h.tab));
@@ -318,9 +323,9 @@ ${group?'Grouping only · no ownership implied':e.percent===''?'Ownership · per
 function nodeHtml(n){
   const [w,h]=size(n),k=KINDS[n.type],notes=(n.notes||'').trim();
   const l=linkOf(n);
-  const cls=`node ${n.type}${selected===n.id?' selected':''}${source===n.id?' source':''}${drag?.mode==='link'&&drag.over===n.id?' drop':''}${l?' linked':''}${l?.stub?' stub':''}`;
+  const cls=`node ${n.type}${selected===n.id?' selected':''}${source===n.id?' source':''}${drag?.mode==='link'&&drag.over===n.id?' drop':''}${l?' linked':''}${l?.stub?' stub':''}${l?.pending?' pending':''}`;
   const tip=(notes?`${n.name}\n${notes.length>280?notes.slice(0,280)+'…':notes}`:'')+(l?(notes?'\n\n':`${n.name}\n`)+sharedTip(l):'');
-  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}">${n.type==='person'&&personPhoto(n)?personAvatar(n,{size:22,cls:'k-av'}):`<span class="k">${icon(k.icon,14)}</span>`}<span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge" aria-label="${l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
+  return `<div class="${cls}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(k.label+': '+n.name)}"${tip?` data-tip="${esc(tip)}" data-tip-delay="700"`:''} style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px;--lines:${Math.max(1,Math.floor((h-10)/16))}">${n.type==='person'&&personPhoto(n)?personAvatar(n,{size:22,cls:'k-av'}):`<span class="k">${icon(k.icon,14)}</span>`}<span class="nm">${esc(n.name)}</span>${notes?`<span class="has-notes">${icon('text',12)}</span>`:''}${l?`<span class="sh-badge${l.pending?' pending':''}" aria-label="${l.pending?'Pending approval':l.stub?'Co-owner stub, read-only':'Shared with you'}">${icon(l.pending?'clock':l.stub?'ban':'link',11)}</span>`:''}<span class="port" data-port></span><span class="grip" data-grip></span></div>`;
 }
 function renderCanvas(){
   const c=chart(),cv=$('#canvas');
@@ -517,15 +522,86 @@ function opidHtml(n,l){
   const link=opidLink(n);
   if(link==='me')return `<p class="pp-note opid-note">Linked to your OneProfileID. This card shows your current account photo from OneProfileID.</p>${reach?`<div class="opid-acts">${btn('opidUnlink','Unlink from my OneProfileID')}</div>`:''}`;
   if(link==='other')return `<p class="pp-note opid-note">Linked to this person's OneProfileID. The photo comes from their account and updates when they change it.</p>${edit?`<div class="opid-acts">${btn('opidUnlink','Unlink')}</div>`:''}`;
-  return reach&&isMe(n)&&n.email&&!l?.stub?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
+  return reach&&matchesLinkEmail(n,sessionUser()?.email)&&!l?.stub&&!l?.pending?`<div class="opid-acts">${btn('opidLink','Link to my OneProfileID')}</div>`:'';
 }
 async function setOpidLink(id,link){
   if(linking)return;linking=true;renderInspector();
+  paintLinkPrompts();
   const r=await linkCard(id,link);
   linking=false;renderInspector();
+  paintLinkPrompts();
   if(!r.ok){toast(r.error,true);return}
   fadeIn([...$('#inspector').querySelectorAll('.opid-note,.opid-acts')]);
   toast(link?'Linked to your OneProfileID':'Unlinked from OneProfileID');
+}
+
+const LINK_DISMISS_PREF='photoLinkDismissed',LINK_DISMISS_MS=7*864e5;
+let linkPromptReady=false,savingPortrait=false;
+const promptMarkup=new WeakMap();
+function linkPromptContext(){
+  const user=sessionUser(),db=store.db,env=db.environment?.id;
+  if(!linkPromptReady||signInMode()!=='opid'||!user?.id||!env)return null;
+  if(!db.opened&&db.environment.ownerEmail?.toLowerCase()!==user.email?.toLowerCase())return null;
+  const key=JSON.stringify([user.id,env]);
+  if(Number(getPref(LINK_DISMISS_PREF)?.[key])+LINK_DISMISS_MS>Date.now())return null;
+  const prompt=findLinkPrompt(db,user);
+  return prompt&&{...prompt,key};
+}
+function paintLinkPrompt(host){
+  if(!host)return;
+  const p=linkPromptContext();
+  let html='';
+  if(p){
+    const card=p.cards[0],mismatch=p.kind==='mismatch',multiple=p.cards.length>1,link=p.kind==='link';
+    const title=mismatch?`Is ${esc(card.name)} you?`:'Show your photo on boards?';
+    const detail=mismatch?`The email on ${multiple?'these cards is':'this card is'} different from your sign-in. Ask the owner to update it${p.cards.some(c=>!c.shared)?', or update it yourself if you can edit the card':''}.`
+      :link?`Your card <b>${esc(card.name)}</b> isn’t linked to your account.`:'Several person cards match your email. Choose which card to open.';
+    const avatar=canUseCustomPortrait(),disabled=linking||savingPortrait?' disabled':'';
+    html=`<div class="opid-prompt-copy"><strong>${title}</strong> <span>${detail}</span>${link&&avatar?'<span class="opid-prompt-avatar-note">Linking with your avatar also changes your account portrait.</span>':''}</div>
+      <div class="opid-prompt-actions">
+        ${multiple?`<select data-native aria-label="Choose a person card"><option value="">Choose a card…</option>${p.cards.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} · ${esc(c.chart)}</option>`).join('')}</select>`:''}
+        <button type="button" class="txt${link?' primary':''}" data-link-prompt="${link?'link':'open'}"${multiple?' disabled':disabled}>${link?'Link my card':mismatch?'Open card':'Open my card'}</button>
+        ${avatar?`<button type="button" class="txt opid-prompt-avatar" data-link-prompt="avatar"${disabled}>Use my avatar instead</button>`:''}
+        <button type="button" class="txt" data-link-prompt="dismiss"${disabled}>Not now</button>
+      </div>`;
+  }
+  const prev=promptMarkup.get(host),sameContext=prev?.key===p?.key;
+  if(sameContext&&prev?.html===html)return;
+  const selection=sameContext?host.querySelector('select')?.value:'';
+  promptMarkup.set(host,{key:p?.key,html});host.innerHTML=html;
+  const picker=host.querySelector('select');
+  if(picker){
+    const open=host.querySelector('[data-link-prompt="open"]');
+    picker.value=p.cards.some(c=>c.id===selection)?selection:'';
+    picker.onchange=()=>{open.disabled=!picker.value};
+    open.disabled=!picker.value;
+  }
+  host.onclick=async e=>{
+    const action=e.target.closest('[data-link-prompt]')?.dataset.linkPrompt;
+    if(!action||!p||linkPromptContext()?.key!==p.key)return;
+    const card=picker?p.cards.find(c=>c.id===picker.value):p.cards[0];
+    if(action==='dismiss'){
+      const now=Date.now(),all=Object.fromEntries(Object.entries(getPref(LINK_DISMISS_PREF)||{}).filter(([,at])=>Number(at)+LINK_DISMISS_MS>now));
+      setPref(LINK_DISMISS_PREF,{...all,[p.key]:now},{immediate:true});
+    }else if(action==='open'&&card){
+      af.closeOffice();openNode(card.id);
+    }else if(action==='link'){
+      await setOpidLink(card.id,true);
+    }else if(action==='avatar'){
+      if(p.kind!=='link'){af.closeOffice();window.flowSettings.open('account');return}
+      savingPortrait=true;paintLinkPrompts();
+      try{
+        await setAvatarPortrait(true);
+        const next=linkPromptContext();
+        if(next?.key===p.key&&next.cards.some(c=>c.id===card.id)&&next.kind!=='mismatch')await setOpidLink(card.id,true);
+      }catch(err){toast(err.message,true)}
+      finally{savingPortrait=false;paintLinkPrompts()}
+    }
+  };
+}
+function paintLinkPrompts(){
+  if(isOpen('devops')||dv.boardLent())paintLinkPrompt($('#devopsView .opid-prompt'));
+  paintLinkPrompt($('.of-stage > .opid-prompt'));
 }
 function photoHtml(n,shared){
   const src=personPhoto(n),link=opidLink(n),mine=!link&&!n.image&&!!src,me=sessionUser();
@@ -580,11 +656,12 @@ function renderInspector(strip=true){
   if(n){
     const k=KINDS[n.type],links=chart().edges.filter(x=>x.from===n.id||x.to===n.id),l=linkOf(n),ro=!canEdit(n)?' disabled':'';
     pane.innerHTML=`<div class="ihead"><span class="k ${n.type}">${icon(k.icon)}</span><strong>${k.label}</strong>${l?`<span class="sh-chip${l.stub?' stub':''}" data-tip="${esc(sharedTip(l))}">${icon(l.stub?'ban':'link',11)}${l.stub?'Co-owner':'Shared'}</span>`:''}<span class="sp"></span>
-      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l?'':ib('link','Share…',{attrs:'data-i="share"'})}${chatAvailable()&&!l?.stub?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'id="i-chat" data-i="chat"'}):''}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
+      ${!l&&(n.type==='entity'||n.type==='area')?ib('gantt',stripOff?'Show project timeline':'Hide project timeline',{cls:stripOff?'':'on',attrs:'id="i-strip" data-i="strip"'}):''}${l||n.onlyMe?'':ib('link','Share…',{attrs:'data-i="share"'})}${chatAvailable()&&!l?.stub?ib('send','Send in chat\nTo a OneProfileID friend, as a link to this card',{attrs:'id="i-chat" data-i="chat"'}):''}${ib('connect','Connect from here',{attrs:'data-i="from"'})}${l?'':ib('copy','Duplicate',{key:keyLabel('chart.duplicate'),attrs:'data-i="dup"'})}${n.w||n.h?ib('shrink','Reset size',{attrs:'data-i="resetSize"'}):''}
       ${l?'':ib('trash','Delete card',{key:keyLabel('chart.delete'),cls:'danger',attrs:'data-i="delete"'})}${ib('x','Close',{key:keyLabel('global.escape'),attrs:'data-i="close"'})}</div>
       <form id="edit" class="ibody" autocomplete="off">${l?`<p class="sh-note">${esc(sharedTip(l))}</p>`:''}<label for="name">Name</label>${clashHtml(n,'name')}<input id="name" maxlength="160" required value="${esc(n.name)}"${ro}>
       ${l?'':prop('Kind',choice('kind',Object.entries(KINDS).map(([t,x])=>({value:t,label:x.label,icon:x.icon})),n.type,{label:'Kind',idp:'kind'}),{cls:'kind-prop'})}
       ${l?.stub?'':`<label for="notes">Notes</label>${clashHtml(n,'notes')}<textarea id="notes" maxlength="2000" rows="4"${ro}>${esc(n.notes||'')}</textarea>`}
+      ${l?'':`<label class="privacy-toggle"><input type="checkbox" id="node-only-me"${n.onlyMe?' checked':''}${ro}> Only me</label>`}
       ${n.type==='person'?photoHtml(n,!!l):''}
       ${l?historyHtml(n,'node'):''}
       ${n.type==='note'||l?'':(c=>`<label>DevOps</label><button type="button" class="txt dv-open" data-i="devops" data-tip="${n.type==='person'?'Open cards assigned to this person':'Open cards in the projects under this card'}">${icon('branch',13)}<span>${c} open card${c===1?'':'s'}</span>${icon('arrowR',13)}</button>`)(openCardsFor(store.db,n.type==='person'?{person:n.id}:{entity:n.id}).length)}
@@ -649,7 +726,6 @@ const pane=$('#inspector');
 pane.addEventListener('submit',e=>e.preventDefault());
 pane.addEventListener('click',e=>{
   if(tab==='timeline')return tl.inspectorClick(e);
-  if(tab==='devops')return dv.inspectorClick(e);
   if(tab==='agentflow')return af.inspectorClick(e);
   const b=e.target.closest('button');if(!b)return;
   const n=node(selected),ed=edge(selected);
@@ -665,10 +741,9 @@ pane.addEventListener('click',e=>{
 // Inspector fields autosave as you type: one undo step per open form.
 pane.addEventListener('input',e=>{
   if(tab==='timeline')return tl.inspectorInput(e);
-  if(tab==='devops')return dv.inspectorInput(e);
   if(tab==='agentflow')return af.inspectorInput(e);
   const form=$('#edit'),n=node(selected),ed=edge(selected);
-  if(!form||e.target.type==='file'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
+  if(!form||e.target.type==='file'||e.target.id==='node-only-me'||!form.checkValidity()||e.target.matches?.('[data-sh-comment]')||!canEdit(n||ed))return;
   if(n&&!$('#name').value.trim())return;
   if(ed&&$('#fromNode').value===$('#toNode').value)return;
   if(!edited.has(form)){checkpoint();edited.add(form)}
@@ -680,8 +755,8 @@ pane.addEventListener('input',e=>{
   if(ed){if(!linkOf(ed))Object.assign(ed,{from:$('#fromNode').value,to:$('#toNode').value});if($('#percent'))ed.percent=$('#percent').value}
   save();renderCanvas();renderTools();renderStrip();
 });
-pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='devops')dv.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
-pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='devops')dv.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
+pane.addEventListener('change',e=>{if(tab==='chart'&&e.target.id==='node-only-me'){const n=node(selected);if(n&&!linkOf(n)&&canEdit(n))change(()=>{if(e.target.checked)n.onlyMe=true;else delete n.onlyMe});return}if(tab==='chart'&&e.target.id==='photoFile'){uploadPhoto(e.target.files?.[0]);return}if(tab==='timeline')tl.inspectorChange(e);if(tab==='agentflow')af.inspectorChange(e)});
+pane.addEventListener('keydown',e=>{if(tab==='timeline')tl.inspectorKey(e);if(tab==='agentflow')af.inspectorKey(e)});
 
 // ---------- keyboard ----------
 // Every key comes from the shortcut registry (shortcuts.js), so rebinding in Settings applies here.
@@ -718,26 +793,44 @@ function render(){
   document.body.dataset.tab=tab;unskeletonize($('main'));
   hideTip();renderTop();
   for(const t of openTabs()){if(t==='chart'){renderCanvas();renderTools();if(tab!=='chart')renderStrip()}else if(t==='timeline')tl.render();else if(t==='devops')dv.render();else af.render()}
-  renderInspector();photosMaybe();chatRendered();
+  // The 3D office's main whiteboard is the DevOps board itself (devops.js lendBoard): it stays live there.
+  if(dv.boardLent()&&!openTabs().includes('devops'))dv.render();
+  renderInspector();dv.renderHostedCards();tl.renderHostedEditors();photosMaybe();chatRendered();
+  paintLinkPrompt($('.of-stage > .opid-prompt'));
   // First run: an empty chart says how to add a card; a brand-new workspace offers an example (first-run.js).
   const hintEl=$('#canvasHint');if(hintEl){const h=signInMode()==='opid'&&!sessionUser()?'':canvasHint(chart());if(hintEl.innerHTML!==h)hintEl.innerHTML=h}
   firstRun({store,replaceDb,envId:currentEnv(),signedIn:!!sessionUser()});
   // A DevOps card deep link (#devops/card/4) may stand in for the split hash while its card is open.
-  if(isSplit()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
+  if(isSplit()&&!af.officeOpen()&&!location.hash.startsWith('#devops/card/')){const h=hashFor(tab,split.tabs);if(location.hash!==h)history.replaceState(null,'',h)}
 }
-store.onChange=render;
+// The owner approved or denied additions this user made inside a share: say so once (share.js).
+store.onChange=()=>{render();const m=decisionNotice();if(m)toast(m,m.includes('denied'))};
 // A save removed cards other than by Delete (an undo, a restored snapshot): they can be restored.
 store.onRemoved=list=>toast(`${list.length===1?`Card ${list[0].number!=null?'#'+list[0].number+' ':''}“${list[0].title}” was`:`${list.length} cards were`} removed by this change. DevOps › Recently deleted can restore ${list.length===1?'it':'them'}.`);
 store.onLimit=msg=>{if(msg)toast(msg)};
+// An opened shared environment (share-<shareId>, docs/sharing.md): a save the share could not take all of, and the
+// share being revoked (the app then opens the user's own workspace).
+store.onShareNotice=msg=>{if(msg)toast(msg,true)};
+store.onShareGone=({name,owner})=>toast(`${name||'That environment'} is no longer shared with you${owner?` by ${owner}`:''}. Opened your own workspace.`,true);
+// Your edit of a card replaced a change made elsewhere (an agent, another tab) that this browser had not shown yet.
+store.onCardClash=list=>{
+  const name=c=>`Card ${c.number!=null?'#'+c.number+' ':''}“${c.title}”`,kept=list.filter(c=>c.fields.includes('removed')),edited=list.filter(c=>!c.fields.includes('removed'));
+  if(kept.length)toast(`${kept.length===1?name(kept[0]):`${kept.length} cards`} changed elsewhere, so ${kept.length===1?'it was':'they were'} not deleted.`);
+  if(edited.length)toast(`${edited.length===1?name(edited[0]):`${edited.length} cards`} changed elsewhere while you were editing; your change was kept over theirs (${[...new Set(edited.flatMap(c=>c.fields))].slice(0,4).join(', ')}). The earlier version is in the workspace history.`);
+};
 setPeopleSource(()=>peopleOf(store.db||{}));
 startOpidPhotos({db:()=>store.db,render:()=>render()});
 // Signing in (or changing the account photo) changes which cards show the user's photo.
 window.addEventListener('flow:session',()=>render());
+window.addEventListener('flow:portrait-option',paintLinkPrompts);
 // Cross-links: timeline items open linked DevOps cards; cards open their timeline item and agents.
 tl.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id}))});
-dv.mount({rerender:render,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
+dv.mount({rerender:render,paintLinkPrompt,openItem:id=>toTimeline(()=>tl.focus({itemId:id})),openAgent:id=>toAgentflow(()=>af.focus({agentId:id})),toast,chat:{on:chatAvailable,send:id=>sendRecord('card',id)}});
 // AgentFlow agents and workflows link to cards and timeline items.
-af.mount({rerender:render,toast,openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
+af.mount({rerender:render,toast,paintLinkPrompt,officeOverlays:{
+  card:dv.openCardModal,item:tl.openItemModal,projects:tl.openProjectsModal,agent:af.openAgentModal,queue:af.openQueueModal,
+  leaveForAgent:id=>toAgentflow(()=>af.focus({agentId:id})),
+},openCard:id=>toDevops(()=>dv.focus({cardId:id})),openQueue:id=>toDevops(()=>dv.focus({agent:id})),openItem:id=>toTimeline(()=>tl.focus({itemId:id}))});
 
 // Extension point: add palette tools without changing the canvas engine.
 // window.orgChartStudio stays as an alias from before the rename to Flygon Flow.
@@ -765,8 +858,11 @@ async function openRef(ref,open=null){
   }
   if(!id){toast(NOT_HERE,true);return}
   if(ref.kind==='card'){toDevops(()=>dv.focus({cardId:id}));return}
+  openNode(id);
+}
+function openNode(id){
   const c=store.db.charts.find(x=>x.nodes.some(n=>n.id===id));if(!c){toast(NOT_HERE,true);return}
-  if(isSplit()&&!isOpen('chart'))reveal('chart');else if(!isOpen('chart')){history.pushState(null,'',location.pathname);setTab('chart')}
+  if(isSplit())reveal('chart');else if(!isOpen('chart')){history.pushState(null,'',location.pathname);setTab('chart')}
   if(store.db.active!==c.id){store.db.active=c.id;save()}
   selected=id;connecting=false;source=null;render();
   // Centre the card once the MindMap is laid out (a tab change may still be animating).
@@ -789,11 +885,36 @@ async function openPending(){
   }finally{opening=false}
 }
 window.addEventListener('flow:session',()=>openPending());
+// #office and #office/<agentId> (split-core.js parseHash): AgentFlow, then its 3D office once the
+// session is known (signed in, where sign-in is required) and the workspace has synced.
+let officeLinking=false;
+async function openOfficeLink(){
+  if(officeLinking||af.officeOpen()||!parseHash(location.hash).office)return;officeLinking=true;
+  try{
+    await sessionKnown;
+    if(signInMode()==='opid'&&!sessionUser())return;
+    await synced();
+    const h=parseHash(location.hash);if(!h.office)return;
+    if(!isOpen('agentflow'))setTab('agentflow');
+    const cardId=h.cardNumber==null?undefined:dv.officeCardId(h.cardNumber);
+    if(h.cardNumber!=null){
+      history.replaceState(null,'','#office');
+      if(!cardId)toast('This card is unavailable.',true);
+    }
+    await af.openOfficeLink({focus:h.agent||'',cardId});
+  }finally{officeLinking=false}
+}
+window.addEventListener('flow:session',()=>openOfficeLink());
+window.addEventListener('popstate',()=>openOfficeLink());
+// Notifications when your own agents wait, while the 3D office is closed (office-alerts.js; off until turned
+// on in the office). Clicking one opens the office on that agent, as #office/<id> does.
+startOfficeAlerts({open:({id})=>{history.replaceState(null,'','#office/'+encodeURIComponent(id));openOfficeLink()}});
 // Chat with OneProfileID friends (chat.js): the launcher shows only when it is available.
 window.addEventListener('flow:chat',()=>render());
 startChat({openLink:openRef,toast});
 
-initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();
+initTooltips();initSelects();layout();render();if(isOpen('chart'))fit();save();startSync();startInbox();if(isOpen('devops'))dv.syncHash();loadDevlog().then(()=>renderTop());openPending();openOfficeLink();
 // Rebinding a shortcut re-renders, so tooltips show the new keys.
-onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}});syncPrefs();
+onPrefs((p,k)=>{if(k==='shortcuts'||k==='*'){renderZoom();render()}else if(k===LINK_DISMISS_PREF)paintLinkPrompts()});
+Promise.all([synced(),syncPrefs()]).then(()=>{linkPromptReady=true;paintLinkPrompts()});
 document.body.removeAttribute('aria-busy');
